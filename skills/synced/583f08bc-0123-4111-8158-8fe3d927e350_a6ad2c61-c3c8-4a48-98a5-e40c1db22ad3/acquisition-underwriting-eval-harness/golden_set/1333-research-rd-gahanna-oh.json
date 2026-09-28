@@ -1,0 +1,92 @@
+{
+  "deal_id": "1333-research-rd-gahanna-oh",
+  "deal_name": "1333 Research Rd, Gahanna OH 43230 (Columbus)",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-09",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), queried 2026-08-14",
+  "confidence": "LOW",
+  "known_gaps": [
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only.",
+    "REBASELINED 2026-08-15 (n=1 -> n=4, first-ever repeatability check for this deal, Gabriel-directed): the 2026-08-14 golden was a single unreplicated run (Combined 9.0). The 2026-08-15 forced-repeatability run added 3 independent replays (9.0/14.0/15.0 -- one of which coincidentally also scored Combined 9.0, a different category makeup, not a re-run of the same result) under the same doctrine SHA and same frozen inputs -- no leakage risk identified on this deal. Golden Combined moved 9.0 -> 11.75 (mean of 4). This deal's own range (6.0 pts, stdev 3.20) EXCEEDS the harness's 5.0-pt harness-wide tolerance on internal dispersion alone -- consistent with, and reinforcing, its LOW-confidence/informational-only status; the input-packet nulls that drive that classification (see below) plausibly also drive the higher judgment variance across replays.",
+    "Nulls vary by run: run 1 has 3 of 7 categories null (Product & Physical, Seller & Motivation, Value-Add), run 2 has 2 (Product & Physical, Value-Add), runs 3-4 have zero -- driven by input-packet incompleteness that individual replays resolved to differing degrees, not a consistent per-run gap. Quality is a partial lower bound in runs 1-2; robust PASS-band verdict holds regardless (max attainable Combined at the walk price stays well under 60 across all 4 runs).",
+    "Pre-v03 archived record ALSO carried its own internal inconsistency independent of the v03 boundary: archived Quality(39)+Economics(2.7)=41.7 != archived Combined(48), and the archived Verdict tier 'T1 PURSUE' directly contradicts VERDICT BANDS applied to Combined=48 (<60 = PASS-band). This was the most internally inconsistent row in the original (pre-rebaseline) golden set -- preserved here for context, not used for diffing."
+  ],
+  "inputs": {
+    "address": "1333 Research Rd, Gahanna, OH 43230",
+    "market": "Columbus OH",
+    "asking_price": 1550000,
+    "price_used_for_scoring": 1550000,
+    "building_sf_om": 19018,
+    "building_sf_footprint": 14000,
+    "building_sf_effective": 17500,
+    "year_built": 1970,
+    "occupancy_pct": 100,
+    "asset_type": "Single-tenant industrial, NNN",
+    "noi_annual": 102999.96,
+    "noi_basis": "Disclosed NNN tenant rent -- Buckeye Elm Contracting, 3% escalation, term 8/12/2025-8/31/2042 + 2x5yr options.",
+    "physical": {
+      "construction_type": null,
+      "mezzanine": "4,800 SF load-restricted mezzanine, 150 psf",
+      "site_note": "Built into hillside"
+    },
+    "environmental_notes": "1990 MEK release, OEPA DERR-listed; adjacent Columbus Steel Drum and US Metal Processing.",
+    "other_facts": null
+  },
+  "repeatability": {
+    "runs": [
+      {"combined": 9.0, "quality": 9.0, "economics": 0.0, "expected_score": 2.25, "p_exec_pct": 25.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": null, "market_location": 8.0, "seller_motivation": null, "tenancy_lease": 1.0, "value_add": null}, "note": "run 1 (2026-08-14 baseline, unreplicated at the time) -- as originally recorded in this file before the 2026-08-15 rebaseline"},
+      {"combined": 9.0, "quality": 9.0, "economics": 0.0, "expected_score": 2.7, "p_exec_pct": 30.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": null, "market_location": 8.0, "seller_motivation": 0.0, "tenancy_lease": 1.0, "value_add": null}, "note": "run 2 (2026-08-15 forced-repeatability run, replay A) -- shares Combined 9.0 with run 1 by coincidence, not a duplicate: different category makeup (seller_motivation resolved to 0.0 here vs null in run 1)"},
+      {"combined": 14.0, "quality": 14.0, "economics": 0.0, "expected_score": 2.8, "p_exec_pct": 20.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 4.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 1.0, "value_add": 0.0}, "note": "run 3 (2026-08-15 forced-repeatability run, replay B)"},
+      {"combined": 15.0, "quality": 15.0, "economics": 0.0, "expected_score": 4.5, "p_exec_pct": 30.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 5.0, "market_location": 8.0, "seller_motivation": 0.0, "tenancy_lease": 1.0, "value_add": 1.0}, "note": "run 4 (2026-08-15 forced-repeatability run, replay C)"}
+    ],
+    "combined_mean": 11.75,
+    "combined_stdev": 3.2,
+    "combined_sem": 1.6,
+    "combined_range": 6.0,
+    "n": 4,
+    "sampling_note": "First-ever repeatability check for this deal (run 1 was a lone 2026-08-14 baseline; runs 2-4 added by the 2026-08-15 forced-repeatability run, Gabriel-directed). Range 6.0 pts EXCEEDS the harness's 5.0-pt tolerance on its own -- flagged, not hidden; this deal is informational_only regardless so it does not gate, but the dispersion is worth knowing before trusting any future delta on this row."
+  },
+  "golden": {
+    "baselined_date": "2026-08-15",
+    "baselined_against_skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+    "baselined_method": "mean of 4 independent replays (see repeatability block); REBASELINED 2026-08-15 from the single-run value 9.0 (no repeatability data existed before this pass)",
+    "quality": 11.75,
+    "quality_note": "Partial lower bound in every run -- Product & Physical null in 2 of 4 runs, Seller & Motivation null in 1 of 4, Value-Add null in 2 of 4, on the frozen input packet.",
+    "economics": 0.0,
+    "combined": 11.75,
+    "combined_note": "Robust despite the nulls in individual runs: max attainable Combined at the walk price stays well under 60 in every run, so PASS-band holds under any resolution.",
+    "category_breakdown": {
+      "basis": 0.0,
+      "yield": 0.0,
+      "product_physical": 2.25,
+      "market_location": 8.25,
+      "seller_motivation": 0.0,
+      "tenancy_lease": 1.0,
+      "value_add": 0.25
+    },
+    "category_breakdown_sum_check": "0+0+2.25+8.25+0+1.0+0.25 = 11.75, matches Combined exactly. product_physical, seller_motivation, and value_add means treat their respective nulls as 0 points, consistent with lib/aggregate_replays.py.",
+    "expected_score": 3.06,
+    "p_exec_pct": 26.25,
+    "p_exec_pct_caveat": "Mean of 4 discrete band placements (25%/30%/20%/30%), not a real band value itself -- see the analogous caveat on other golden files (e.g. E Fulton REFUTE finding F7). Directional only.",
+    "verdict_tier": "PASS-band (<60) -- FLOOR-FLAGGED (Basis+Yield) / ENV-WATCH / DENOMINATOR-SENSITIVE / INVERTED-SPREAD / OBSOLESCENCE-WATCH; T2 ceilings non-binding at this score",
+    "floor_result": "FLOOR-FLAGGED in all 4 runs -- Basis ~60.7-64.1% discount vs 65% vintage-ramp floor (1970, RCT v03 Columbus LOW $229.65) and YoC ~6.5% vs 8.0% floor both breach; DSCR passes ~1.36x (LTV-bound refi) wherever computed; IRR directionally breached (inverted spread, negative leverage)",
+    "replay_notes": "Environmental: subject's own 1990 MEK release + adjacent contamination sources -> ENV-WATCH (Phase II HIGH probability escalators) in every run. Columbus deal near ramp floor -> OBSOLESCENCE-WATCH in every run. Bear-mode UNKNOWN -> OFF, T2 ceiling (moot below 60) in every run. P(exec) placements varied 20-30% across runs -- no documented band exactly covers a 10-25% gap with zero motivation signals, so this is a judgment placement in every run, not a mechanical read."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-09, before the 2026-07-14 RCT v03 recalibration, AND internally inconsistent independent of that boundary (see known_gaps). NOT the diff target.",
+    "quality": 39,
+    "economics": 2.7,
+    "combined": 48,
+    "quality_plus_economics_check": "39 + 2.7 = 41.7, vs archived Combined 48 -- 6.3pt unexplained discrepancy.",
+    "expected_score": 27.1,
+    "p_exec_pct": 65,
+    "archived_verdict_tier": "T1 PURSUE (directly contradicts VERDICT BANDS applied to Combined=48, which predicts PASS-band)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tolerance_rationale": "Widened harness-wide from an initial arbitrary 3.0 after a repeatability check on the 2 HIGH-confidence deals showed a 3-run range as large as 4.5 pts on identical inputs/doctrine. Moot for this LOW-confidence row's pass/fail (excluded from strict scoring regardless) but kept consistent across all 6 files.",
+    "tier_check": "informational_only",
+    "reason": "LOW confidence: baseline replay has 3 of 7 categories null, and the pre-v03 archive was separately internally inconsistent. Runs and reports; excluded from strict pass/fail."
+  }
+}

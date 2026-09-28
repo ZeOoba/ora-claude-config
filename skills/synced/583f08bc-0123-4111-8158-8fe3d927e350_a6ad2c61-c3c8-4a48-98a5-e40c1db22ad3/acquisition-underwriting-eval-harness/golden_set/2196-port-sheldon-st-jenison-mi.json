@@ -1,0 +1,102 @@
+{
+  "deal_id": "2196-port-sheldon-st-jenison-mi",
+  "deal_name": "2196 Port Sheldon St, Jenison MI 49428/49429",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-20",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), queried 2026-08-14",
+  "confidence": "HIGH",
+  "known_gaps": [
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-20 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference (Combined 36) is historical only.",
+    "REBASELINED 2026-08-14 (n=3 -> n=6, Gabriel-directed): the scheduled-poll run added 3 further replays (25.0 / 28.5 / 27.0) under the SAME doctrine SHA and SAME frozen inputs. Golden Combined moved 29.33 -> 28.08. Precision improvement, not detected doctrine change.",
+    "REBASELINED AGAIN 2026-08-15 (n=6 -> n=8, leakage fix, Gabriel-directed): 3 more replays added (25.0 / 26.0 / 27.0) under the fixed replay prompt (see SKILL.md's 'Fourth pass' Limitations entry and the SKILL.md-citation-leakage finding below). This is n=9 raw, but run 1 (32.0, the SKILL.md-citation-leaked sample from the very first baseline) is now EXCLUDED from the golden mean -- see the leakage finding below for why. Golden Combined moved 28.08 -> 26.81 on 8 clean samples (25.0/25.0/26.0/27.0/27.0/27.5/28.5/28.5), stdev 1.39, range 3.5 -- both materially tighter than the n=6 contaminated figures (2.31 / 7.0). Doctrine SHA unchanged throughout (83547a76) -- this is a measurement-process correction, not drift.",
+    "REPEATABILITY FINDING (2026-08-14, measured at n=6, now superseded by the leakage-excluded n=8 figures above): 6 independent frozen replays of this exact deal, identical inputs, identical doctrine, produced Combined 32.0 / 27.5 / 28.5 / 25.0 / 28.5 / 27.0 -- a 7.0-point range (stdev 2.31), which EXCEEDED the harness's 5.0-pt tolerance on its own. The response was NOT to widen the tolerance further but to gate on the mean of 3 replays per run (SKILL.md Steps 1-3). The 2026-08-15 leakage fix (below) removed most of that dispersion at its source rather than just averaging over it: excluding the one contaminated run drops the range to 3.5 and the stdev to 1.39.",
+    "SKILL.md-CITATION LEAKAGE -- FIXED 2026-08-15 (was: documented standing risk). This exact address is named in SKILL.md's own text as the worked validation example for the price-watch re-engage trigger ('Validation: 2196 Port Sheldon'). The first replay ever run (Combined 32.0) awarded 5 Seller & Motivation points, apparently drawing on that citation's owner-user-vacating characterization -- a fact NOT present in this file's frozen `inputs`. Every one of the 8 subsequent independent replays (across two dated runs) declined to award those points. Leakage rate measured at 1-in-9 samples total (1-in-6 at the original n=6 checkpoint). FIXED 2026-08-15: the harness's replay prompt template now explicitly instructs every replay to disregard SKILL.md's own narrative discussion of the exact frozen address (see SKILL.md 'Prompt template' and the 'Fourth pass' Limitations entry). The 3 replays run under the fixed prompt (2026-08-15) showed zero leakage (Seller & Motivation = 0.0 in all three).",
+    "WHY THE CONTAMINATED RUN 1 IS NOW EXCLUDED (reversing the 2026-08-14 REFUTE-pass reasoning, which had kept it in): run 1 (32.0) was originally kept in the golden mean on the theory that every future replay reads the same SKILL.md and would leak at roughly the same ~1/6 rate, so the golden should reflect the contaminated steady-state, not a hypothetically clean one. That reasoning no longer applies: the 2026-08-15 fix changes the replay prompt itself, so future replays are drawn from a DIFFERENT population that (as far as measured, 0-for-3) does not produce this leak. A golden meant to predict future replay output should reflect the process future replays will actually run under, not the pre-fix one. Run 1 stays recorded in `repeatability.runs` (tagged `excluded_from_golden: true`, with the reason) for audit trail -- it is not deleted, just no longer averaged into `golden`.",
+    "The 2026-08-14/15 replays are otherwise the cleanest of the six deals -- all 7 scorecard categories resolved in 8 of 9 runs (run 6 returned seller_motivation as null rather than 0, a reporting difference worth 0 points either way, not a genuine input-packet gap).",
+    "Building SF has a minor OM-vs-assessor variance (19,777 OM vs 19,471 assessor, ~1.6%) -- below the skill's 2% no-flag threshold, normal noise, not a data-quality issue.",
+    "NOI is pro-forma/modeled ($137,027 at $7.50/SF NNN, property 100% vacant) -- expected and consistent with the Lease-Up Assumption Block, not an archive gap."
+  ],
+  "inputs": {
+    "address": "2196 Port Sheldon St, Jenison, MI 49428/49429",
+    "market": "Grand Rapids MI (Jenison submarket)",
+    "asking_price": 1995000,
+    "price_used_for_scoring": 1995000,
+    "building_sf_om": 19777,
+    "building_sf_assessor": 19471,
+    "price_per_sf_at_asking": 100.87,
+    "asking_cap_rate_pct": 6.87,
+    "year_built": 1987,
+    "occupancy_pct": 0,
+    "asset_type": "Shallow Bay Flex",
+    "noi_annual": 137027,
+    "noi_basis": "Pro-forma/modeled: base-case $7.50/SF NNN stabilized assumption (100% vacant) -- see SKILL.md Lease-Up Assumption Block.",
+    "physical": {
+      "construction_type": "Precast concrete, 4-unit condo",
+      "docks_drive_ins": "4 docks + 4 drive-ins + leveler",
+      "power": "480V 3-phase, full A/C"
+    },
+    "environmental_notes": null,
+    "flood_status": "RESOLVED, Zone X",
+    "other_facts": "MI deal -- Proposal A uncapped-SEV tax reassessment applies."
+  },
+  "repeatability": {
+    "runs": [
+      {"combined": 32.0, "quality": 32.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 12.0, "market_location": 6.0, "seller_motivation": 5.0, "tenancy_lease": 0.0, "value_add": 9.0}, "note": "run 1 (original baseline) -- SKILL.md-citation-leaked (5-pt Seller score not in frozen inputs)", "excluded_from_golden": true, "exclusion_reason": "SKILL.md-citation leakage (fixed 2026-08-15, see known_gaps); kept for audit trail, not averaged into golden"},
+      {"combined": 27.5, "quality": 27.5, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 13.5, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 8.0}, "note": "run 2"},
+      {"combined": 28.5, "quality": 28.5, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 13.5, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 9.0}, "note": "run 3"},
+      {"combined": 25.0, "quality": 25.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 11.0, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 8.0}, "note": "run 4 (2026-08-14 scheduled-poll, replay A) -- declined the SKILL.md-citation Seller points"},
+      {"combined": 28.5, "quality": 28.5, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 14.5, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 8.0}, "note": "run 5 (2026-08-14 scheduled-poll, replay B)"},
+      {"combined": 27.0, "quality": 27.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 12.0, "market_location": 6.0, "seller_motivation": null, "tenancy_lease": 0.0, "value_add": 9.0}, "note": "run 6 (2026-08-14 scheduled-poll, replay C) -- returned seller_motivation as null (unsupportable) rather than 0; contributes 0 points either way"},
+      {"combined": 25.0, "quality": 25.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 11.0, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 8.0}, "note": "run 7 (2026-08-15 forced-repeatability run, replay A) -- first sample under the fixed leakage-guard prompt; no leakage"},
+      {"combined": 26.0, "quality": 26.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 12.0, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 8.0}, "note": "run 8 (2026-08-15 forced-repeatability run, replay B)"},
+      {"combined": 27.0, "quality": 27.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 13.0, "market_location": 6.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 8.0}, "note": "run 9 (2026-08-15 forced-repeatability run, replay C)"}
+    ],
+    "combined_mean": 26.81,
+    "combined_stdev": 1.39,
+    "combined_sem": 0.49,
+    "combined_range": 3.5,
+    "n": 8,
+    "n_raw_including_excluded": 9,
+    "sampling_note": "Runs 1-3: 2026-08-14 original repeatability check. Runs 4-6: 2026-08-14 scheduled-poll (Gabriel-directed). Runs 7-9: 2026-08-15 forced-repeatability run (Gabriel-directed), first samples drawn under the fixed leakage-guard prompt. Doctrine SHA unchanged at 83547a76 across all 9 draws -- all are same-inputs, same-doctrine samples. `n`/`combined_mean`/etc. above EXCLUDE run 1 (the SKILL.md-citation leak); `n_raw_including_excluded` is the full draw count. At n=8 clean the range is 3.5 pts (down from the n=6-with-leak 7.0 pts) and stdev is 1.39 (down from 2.31) -- both now comfortably inside the 5.0-pt harness-wide tolerance without needing to widen it. See known_gaps for the exclusion rationale."
+  },
+  "golden": {
+    "baselined_date": "2026-08-15",
+    "baselined_against_skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+    "baselined_method": "mean of 8 independent replays, EXCLUDING the SKILL.md-citation-leaked run 1 (see repeatability block); REBASELINED 2026-08-15 from the n=6-with-leak value 28.08 (previously rebaselined 2026-08-14 from an n=3 value of 29.33)",
+    "quality": 26.81,
+    "economics": 0.0,
+    "combined": 26.81,
+    "category_breakdown": {
+      "basis": 0.0,
+      "yield": 0.0,
+      "product_physical": 12.56,
+      "market_location": 6.0,
+      "seller_motivation": 0.0,
+      "tenancy_lease": 0.0,
+      "value_add": 8.25
+    },
+    "category_breakdown_sum_check": "0+0+12.5625+6.0+0+0+8.25 = 26.8125, rounds to 26.81, matches Combined. Category means treat a null as 0 points (run 6's seller_motivation), consistent with how that run's own Combined total excluded them -- see lib/aggregate_replays.py. seller_motivation is now a clean 0.0 (was 0.83, entirely an artifact of the excluded leaked run) -- this is the leakage fix's most visible effect on the golden.",
+    "expected_score": null,
+    "expected_score_note": "P(exec) varied by run scenario alongside the score -- not meaningfully averageable without re-deriving from the mean Combined; left null rather than averaged.",
+    "p_exec_pct": null,
+    "verdict_tier": "PASS-band (FLOOR-FLAGGED; price-watch re-engage per SKILL.md's own validation example for this deal)",
+    "floor_result": "FLOOR-FLAGGED across all 8 clean runs -- Basis breached (~54-56% discount to RCT v03 GR LOW $253.11 vs 65% floor at 1987 vintage) + Yield breached (~6.0-6.9% YoC vs 8.0% floor); DSCR clears (~1.42-1.45x, LTV-bound refi) wherever computed; DENOMINATOR-SENSITIVE in every run",
+    "replay_notes": "Bear-mode UNKNOWN (market-monitor unavailable) -> scored OFF, T2 ceiling, non-binding in all 8 clean runs. Remaining run-to-run variance is genuine judgment spread on Product & Physical (11.0-14.5 across runs, driven by how much partial credit each run gave for unknown clear height / site function) -- the SKILL.md-citation leakage that previously also drove Seller & Motivation variance is fixed as of 2026-08-15 (zero leaked draws in the 3 post-fix samples). See known_gaps."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-20, before the 2026-07-14 RCT v03 recalibration. The pre-v03 Basis score cleared comfortably at the old (lower) floor/denominator; under RCT v03 the same price/SF now breaches. This is the expected, ratified effect of the recalibration, not a regression. NOT the diff target.",
+    "quality": 36,
+    "economics": 0,
+    "combined": 36,
+    "expected_score": 7,
+    "p_exec_pct": 20,
+    "archived_verdict_tier": "PASS (consistent with pre-v03 VERDICT BANDS applied to Combined=36)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tolerance_rationale": "Held at 5.0 pts. The harness diffs the MEAN of 3 replays against this golden, not a single replay (SKILL.md Steps 1-3, lib/aggregate_replays.py). History: tolerance went 3.0 -> 5.0 after an n=3 range of 4.5 pts; at n=6 (contaminated by one SKILL.md-citation leak) the range was 7.0 pts (stdev 2.31), which motivated gating on a 3-replay mean rather than widening the tolerance further. As of the 2026-08-15 leakage fix and rebaseline, the leaked run is excluded and the clean n=8 figures are materially tighter: range 3.5 pts, stdev 1.39. Against THIS golden (26.81) a 3-replay mean's dispersion is now sqrt(1.39^2/3 + 1.39^2/8) = ~0.90 (combining the 3-replay mean's error with this golden's own SEM of 0.49), so a +/-2 sigma band is ~1.8 pts -- well inside 5.0. The 5.0-pt tolerance is being held at its current value rather than tightened, since the leakage fix is new (3 post-fix samples) and a premature tightening risks false-FLAGging on normal noise before the fix's effect is well-established across more runs.",
+    "tier_check": "informational_only",
+    "reason": "HIGH confidence: fully resolved across all 9 replays (one null in run 6, worth 0 points either way), internally consistent (category sums match Combined in every run). Was the single noisiest deal in the golden set by raw score variance; as of the 2026-08-15 leakage fix, most of that variance is understood to have had an identified, now-corrected cause (SKILL.md-citation leakage) rather than being irreducible replay noise -- remaining dispersion (stdev 1.39 on 8 clean samples) is comparable to Liberty's (0.82) and E Fulton's (1.41), no longer an outlier."
+  }
+}

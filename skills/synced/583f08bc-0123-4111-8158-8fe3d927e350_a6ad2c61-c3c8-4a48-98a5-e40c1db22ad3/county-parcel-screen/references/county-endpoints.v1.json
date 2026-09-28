@@ -1,0 +1,354 @@
+{
+  "schema_version": "1.0",
+  "registry_purpose": "Machine-readable index of the PARCEL GEOMETRY / CAMA ArcGIS REST layer for each ORA-validated county-parcel-screen target county. Built for cross-skill consumption (ora-flood-zoning-dd Step 1 uses this to pull the parcel polygon for pad/yard flood testing without re-discovering the endpoint). This is a derived, narrower index of references/county-endpoints.md (the human-readable source of truth, which also carries value/sales/delinquency/owner fields, calibration factors, and per-county quirks) — on any conflict, county-endpoints.md wins and this file should be regenerated from it.",
+  "companion_registry_do_not_merge": "parcel-data-recovery/references/endpoints.md is a SEPARATE, COMPLEMENTARY registry — building-footprint / CAMA-detail / bulk-export endpoints (FEMA USA Structures, county building outlines, Beacon/Schneider, auditor exports) plus match rates and value-basis calibration. Measured 2026-09-06: of its 17 URLs, only 3 appear in county-endpoints.md's 46, and 14 are unique to it. The counties overlap; the endpoints do not. An audit pass (ORA Automation Audit R23-8) read the shared county names as a dual-write pair and came within one step of merging them, which would have deleted those 14. Diff URLs, never county names, before proposing any consolidation.",
+  "derived_index_drift_2026-09-06": "⛔⛔ WITHDRAWN 2026-09-07 — THIS ENTIRE NOTE WAS WRONG. DO NOT ACT ON IT. All 7 endpoints it names as absent from county-endpoints.md are in fact ALREADY DOCUMENTED there; back-porting them would add duplicates to the sourcing source of truth. The error: the check compared URL STRINGS, and county-endpoints.md deliberately does not write endpoints as contiguous URLs. It uses at least three human forms a string diff cannot see — (a) split root+relative, e.g. kent_mi as '**REST root:** https://gis.kentcountymi.gov/agisprod/rest/services' plus '**Layer:** ... mirrored at OpenData/Parcel_Related_Layers/MapServer/0' (same for ottawa_mi, richmond_city_va, dallas_ia — 4 of the 7); (b) an ELIDED path, e.g. baltimore_md as 'https://bcgis.baltimorecountymd.gov/.../Property/MapServer/1'; (c) pure prose, e.g. platte_mo as 'Platte_City_MO_Property_view (services2.arcgis.com/ji2hJlB9RmHn0um4) layer 1' and jackson_mo, which documents FeatureServer/2 as THE source and describes layer 1 inline as 'layer 1 = parcel geometry w/ TIFproject/TIFdistrict/CID/TDD'. Verified county-by-county 2026-09-07 by matching HOST + LAYER-PATH FRAGMENT and then reading each section by hand, not by matching URLs. THE STANDING LESSON, now proven five times in two days across R23-6, R23-8 and this note: a text/regex comparison over a human-written document is not a content comparison — it over-reports absence when the document expresses the same fact in another form, and under-reports when a shallow field walk misses nested structure. Read the sections; do not diff the strings. The ONE residual — CLOSED 2026-09-07, Gabriel-directed: baltimore_md's supplemental layer and jackson_mo's layer 1 were documented only via an elided path and inline prose respectively, so they were human-readable but not machine-extractable. Explicit absolute URL lines have now been added for both in county-endpoints.md, each labelled with why it was added, its layer id/name/type/geometry, its VERIFIED date, and a pointer back to this file. Verified: those two are now URL-string extractable; the other five (platte_mo, kent_mi, ottawa_mi, richmond_city_va, dallas_ia) were deliberately left in their split root+relative / prose form, which is correct and not a defect — do not 'fix' them. Original (WRONG) note follows for the record: THIS FILE IS NO LONGER A STRICT SUBSET OF ITS OWN STATED SOURCE — DO NOT REGENERATE BEFORE RECONCILING. registry_purpose above declares this a derived, narrower index of county-endpoints.md, says that file wins on conflict, and instructs regeneration from it. Following that instruction today would SILENTLY DROP 7 endpoints covering 6 counties, because they exist only here. Verified 2026-09-06 by walking counties[*].arcgis.service_url and counties[*].supplemental_arcgis.service_url (20 primary + 1 supplemental) against every URL in county-endpoints.md. The 7 absent from the .md: jackson_mo (jcgis.jacksongov.org ParcelViewer/ParcelsAscendRelate/FeatureServer/1), platte_mo (services2.arcgis.com Platte_City_MO_Property_view), kent_mi (gis.kentcountymi.gov OpenData/Parcel_Related_Layers/MapServer/0), ottawa_mi (gis.miottawa.org HostedServices/ParcelsPublic/FeatureServer/0), richmond_city_va (services1.arcgis.com Parcels/FeatureServer/0), dallas_ia (gis.dallascountyiowa.gov Public/Parcels/FeatureServer/0) — all six PRIMARY arcgis blocks, mostly the 'next 5 markets' expansion counties — plus baltimore_md's SUPPLEMENTAL block (bcgis.baltimorecountymd.gov Property/Property/MapServer/1, the county's own true-polygon owner-bearing layer, as distinct from the scrubbed state extract that IS in the .md). Back-port these 7 into county-endpoints.md first, then regenerate. METHOD WARNING for whoever checks this next: a bare URL regex over the whole file gives a wrong answer in BOTH directions — it sweeps up prose in registry_purpose/verification_method/notes, and a shallow field walk misses these entirely because service_url nests one level down inside the arcgis / supplemental_arcgis objects. Walk the structure, not the text.",
+  "generated": "2026-07-19",
+  "generated_by": "county-parcel-screen skill maintenance pass (next5-sourcing-data orchestration), cross-referencing ora-flood-zoning-dd v1.2",
+  "verification_method": "Live HTTPS GET to '<service_url>?f=json' performed 2026-07-19 (curl, no auth). VERIFIED = returned a valid ArcGIS layer/table descriptor (name/type/geometryType, no error envelope). VERIFIED-PARTIAL = layer is live but is geometry-only or attribute-thin per county-endpoints.md (still usable for a polygon pull). NOT-FOUND = no live public ArcGIS REST parcel/CAMA layer exists for this county as of this pass (documented data-hostile in county-endpoints.md); do not guess a URL. Re-run this verification pass at least quarterly — two endpoints already drifted between the 2026-06-05/09/11 source-doc runs and this 2026-07-19 check (see notes on dane_wi and kent_mi).",
+  "field_definitions": {
+    "market": "ORA target-market cluster name",
+    "state": "2-letter state code",
+    "county_name": "County (or independent city) name",
+    "status": "VERIFIED | VERIFIED-PARTIAL | NOT-FOUND",
+    "verified_date": "Date of the live request that produced this entry's status",
+    "arcgis.service_url": "Full REST URL of the specific layer (…/MapServer/{id} or …/FeatureServer/{id})",
+    "arcgis.layer_id": "Integer layer/table id within the service",
+    "arcgis.layer_name": "The 'name' field returned live by the service today — may differ from any name printed in county-endpoints.md if the county has since relabeled it",
+    "arcgis.type": "'Feature Layer' (has geometry) or 'Table' (attributes only, no geometry — not usable alone for a polygon pull)",
+    "arcgis.geometry_type": "esriGeometryPolygon / esriGeometryPoint / null for Table",
+    "jurscode": "4-character Maryland MdProperty/CAMA jurisdiction filter code (MD counties only — all MD counties below share ONE statewide service and are distinguished solely by this field)",
+    "notes": "County-specific caveats relevant to a geometry/CAMA pull; full detail always in county-endpoints.md"
+  },
+  "counties": {
+    "franklin_oh": {
+      "market": "Columbus OH",
+      "state": "OH",
+      "county_name": "Franklin",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://gis.franklincountyohio.gov/hosting/rest/services/ParcelFeatures/Parcel_Features/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Tax Parcel",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Full-stack layer (owner, value, sale, BLDGAREA). PARCELID format '010-104049'. Best-in-class county per county-endpoints.md."
+    },
+    "hamilton_oh": {
+      "market": "Cincinnati OH",
+      "state": "OH",
+      "county_name": "Hamilton",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services.arcgis.com/JyZag7oO4NteHGiq/arcgis/rest/services/Open_Data/FeatureServer/51",
+        "layer_id": 51,
+        "layer_name": "Hamilton_County_Parcel_Polygons",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Mirror also live at cagisonline.hamilton-co.org/arcgis/rest/services/Countywide_Layers/QueryLayers/MapServer/1 (not re-tested this pass). In-layer delinquency (DELQ_TAXES); no building SF anywhere in REST."
+    },
+    "butler_oh": {
+      "market": "Cincinnati OH",
+      "state": "OH",
+      "county_name": "Butler",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://maps.butlercountyauditor.org/arcgis/rest/services/PARCELSEARCH/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "CURRENTPARCELS",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "PIN format 'A0700005000027'. VALUE20 null for all industrial — use bulk Owners CSV for value, this layer for geometry only."
+    },
+    "clermont_oh": {
+      "market": "Cincinnati OH",
+      "state": "OH",
+      "county_name": "Clermont",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://maps.clermontauditor.org/arcgis/rest/services/Parcels/ParcelsWM/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "PARINFO_WGS",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Thin layer — no values/SF/sales in-layer (sales join at .../Sales/ParSales/MapServer/12). Fine for geometry-only pad/yard pull."
+    },
+    "warren_oh": {
+      "market": "Cincinnati OH",
+      "state": "OH",
+      "county_name": "Warren",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://maps.co.warren.oh.us/arcgis/rest/services/Dynamic/ParcelLabelsAddr/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcel Street Address",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Thinnest OH county — no values/SF/sales public. SDWLL_NBR 10-digit id."
+    },
+    "anne_arundel_md": {
+      "market": "Maryland (BW corridor)",
+      "state": "MD",
+      "county_name": "Anne Arundel",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_PropertyData/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcel Points",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPoint"
+      },
+      "jurscode": "ANNE",
+      "notes": "STATEWIDE MD service — same service_url is shared by howard_md and baltimore_md below; filter on JURSCODE. NOTE: this is a POINT layer (parcel centroid), not polygon — sufficient for a FEMA point query but NOT for a true pad/yard polygon split (see ora-flood-zoning-dd Step 1 caveat). Owner names are SDAT-scrubbed statewide (mailing address only)."
+    },
+    "howard_md": {
+      "market": "Maryland (BWI/DC corridor)",
+      "state": "MD",
+      "county_name": "Howard",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_PropertyData/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcel Points",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPoint"
+      },
+      "jurscode": "HOWA",
+      "notes": "Same statewide service as anne_arundel_md; point geometry only. Owner names scrubbed."
+    },
+    "baltimore_md": {
+      "market": "Maryland (Baltimore metro)",
+      "state": "MD",
+      "county_name": "Baltimore County",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_PropertyData/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcel Points",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPoint"
+      },
+      "jurscode": "BACO",
+      "supplemental_arcgis": {
+        "service_url": "https://bcgis.baltimorecountymd.gov/arcgis/rest/services/Property/Property/MapServer/1",
+        "layer_id": 1,
+        "layer_name": "Tax parcel",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon",
+        "note": "County's OWN GIS — full TRUE POLYGON (not point) and publishes owner names (unlike the scrubbed state extract). Join state ACCTID to county TAXPIN on ACCTID[4:]. Full URL discovered/verified this pass (county-endpoints.md left it truncated as '.../Property/MapServer/1'). PREFER this layer over the statewide point layer for a Baltimore County polygon pad/yard split."
+      },
+      "notes": "Statewide point layer verified for JURSCODE parity with the other two MD counties; supplemental county polygon+owner layer verified separately and is the better source for this county specifically."
+    },
+    "jackson_mo": {
+      "market": "Kansas City (KCMO core)",
+      "state": "MO",
+      "county_name": "Jackson",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://jcgis.jacksongov.org/arcgis/rest/services/ParcelViewer/ParcelsAscendRelate/FeatureServer/1",
+        "layer_id": 1,
+        "layer_name": "Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Geometry is layer 1 (verified this pass — county-endpoints.md documents layer 2, 'Ascend_GisInfo', which is the CAMA ATTRIBUTE table, not geometry; both share parcel_number as key). Attribute-query quirk on layer 2 requires orderByFields=OBJECTID."
+    },
+    "clay_mo": {
+      "market": "Kansas City (North KC / Liberty)",
+      "state": "MO",
+      "county_name": "Clay",
+      "status": "VERIFIED-PARTIAL",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services7.arcgis.com/3c8lLdmDNevrTlaV/ArcGIS/rest/services/ClayCountyParcelService/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcels",
+        "type": "Feature Layer",
+        "geometry_type": null
+      },
+      "notes": "Live current-parcel geometry layer confirmed, but per county-endpoints.md carries NO use code and NO values (those sit in a separate 2020-frozen snapshot service, parcels_2_view, not re-tested this pass — flag VALUES-2020 if used)."
+    },
+    "wyandotte_ks": {
+      "market": "Kansas City (KCK Unified Government)",
+      "state": "KS",
+      "county_name": "Wyandotte",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://gisweb.wycokck.org/arcgis/rest/services/UGMAPS/UGMAPS_4_V02_Parcels/MapServer/7",
+        "layer_id": 7,
+        "layer_name": "Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "No tax-mail address published (situs only). Layer 1 of same service = 'Tax Sale Eligible' motivated-seller list."
+    },
+    "johnson_ks": {
+      "market": "Kansas City (Olathe/Lenexa/OP)",
+      "state": "KS",
+      "county_name": "Johnson",
+      "status": "NOT-FOUND",
+      "verified_date": "2026-07-19",
+      "arcgis": null,
+      "notes": "Re-confirmed this pass: maps.jocogov.org/arcgis/rest/services is live but its FreeData2 layers are boundaries/utilities only — no parcel layer. AIMS open-data portal (jocogov-aims.opendata.arcgis.com) has no parcel layer; parcels are gated behind the paid AIMS Data Subscription (ADS). No live public ArcGIS parcel/CAMA endpoint exists for this county — do not guess one. Path forward unchanged: buy ADS extract or file a county appraiser records request."
+    },
+    "platte_mo": {
+      "market": "Kansas City (KCI corridor)",
+      "state": "MO",
+      "county_name": "Platte",
+      "status": "VERIFIED-PARTIAL",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services2.arcgis.com/ji2hJlB9RmHn0um4/arcgis/rest/services/Platte_City_MO_Property_view/FeatureServer/1",
+        "layer_id": 1,
+        "layer_name": "Platte County Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Geometry-only (TRC/SEC/BNUM/PNUM) — no owner/use/value fields, but usable as-is for a flood/zoning polygon pull, which is exactly what this registry is for. County GIS domains proper do not resolve; this is a municipal (Platte City) mirror covering the county."
+    },
+    "dane_wi": {
+      "market": "Madison WI",
+      "state": "WI",
+      "county_name": "Dane",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels_DB/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "V1200_WisconsinParcels_2026",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "DRIFT CAUGHT 2026-07-19: county-endpoints.md's URL (service name 'Wisconsin_Statewide_Parcels', layer 'V1100_WisconsinParcels_2025_0925_2') now 400s ('Invalid URL') — WI DOA renamed the service to 'Wisconsin_Statewide_Parcels_DB' and rolled the layer to the 2026 vintage ('V1200_WisconsinParcels_2026') between the 2026-06-09 source-doc run and this pass. Corrected URL above is live and verified. Filter CONAME='DANE'. Flagged back into county-endpoints.md (see its Dane County section)."
+    },
+    "kent_mi": {
+      "market": "Grand Rapids MI",
+      "state": "MI",
+      "county_name": "Kent",
+      "status": "VERIFIED-PARTIAL",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://gis.kentcountymi.gov/agisprod/rest/services/OpenData/Parcel_Related_Layers/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcels With Condos",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "REGRESSION CAUGHT 2026-07-19: county-endpoints.md's PRIMARY layer (Hosted/ParcelsWithCondos/FeatureServer/0) now returns {\"error\":{\"code\":499,\"message\":\"Token Required\"}} — it has gone from public to auth-gated since the 2026-06-09 run. This registry points instead to the OpenData mirror (still public, confirmed live). City of Grand Rapids mirror also independently confirmed live: https://maps.grcity.us/arcgis/rest/services/ArcGIS_Online/ENG_CGR_Sidewalks/MapServer/4 (layer 'ArcGIS.GDBO.PARCELS_WITH_CONDOS' — yes, filed under a Sidewalks service name, that is correct per county-endpoints.md). Re-verify the primary Hosted endpoint periodically in case the token gate is lifted."
+    },
+    "ottawa_mi": {
+      "market": "Grand Rapids MI",
+      "state": "MI",
+      "county_name": "Ottawa",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://gis.miottawa.org/arcgis/rest/services/HostedServices/ParcelsPublic/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "Ottawa County Parcels (Public)",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Best-in-market source per county-endpoints.md (ECF sales analysis PDFs). No sale date/price fields in this layer itself."
+    },
+    "henrico_va": {
+      "market": "Richmond VA",
+      "state": "VA",
+      "county_name": "Henrico",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://portal.henrico.gov/mapping/rest/services/Layers/Tax_Parcels_and_CAMA_Data_External/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "Tax Parcels and CAMA Data External",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "No owner/mail fields in any public layer (owner lookup is a separate Oracle APEX per-parcel endpoint, browser-only). Building SF populated (SQFT_FINISHED)."
+    },
+    "chesterfield_va": {
+      "market": "Richmond VA",
+      "state": "VA",
+      "county_name": "Chesterfield",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services3.arcgis.com/TsynfzBSE6sXfoLq/arcgis/rest/services/Cadastral_ProdA/FeatureServer/3",
+        "layer_id": 3,
+        "layer_name": "ParcelsEnriched",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "FairMarketValue = LAND only; market-basis total = FairMarketValue + ImprovementValue (do not use TotalAssessment for calibration)."
+    },
+    "richmond_city_va": {
+      "market": "Richmond VA",
+      "state": "VA",
+      "county_name": "Richmond City (independent city)",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services1.arcgis.com/k3vhq11XkBNeeOfM/ArcGIS/rest/services/Parcels/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Full URL resolved and verified this pass — county-endpoints.md printed it truncated ('.../services/Parcels/FeatureServer/0' with an elided org path). Org host is services1.arcgis.com (not services.arcgis.com bare, which 400s), org id k3vhq11XkBNeeOfM. Building SF is a separate layer (AssessorProVaGPINlImpDataPublish), not re-tested this pass."
+    },
+    "hanover_va": {
+      "market": "Richmond VA",
+      "state": "VA",
+      "county_name": "Hanover",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://services2.arcgis.com/sKZWgJlU6SekCzQV/arcgis/rest/services/Hanover_Parcels/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "Hanover Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "No use code, no building SF, no sale date/price in-layer. Industrial universe inferred from ZONING_LIST IN ('M-1','M-2','M-3')."
+    },
+    "polk_ia": {
+      "market": "Des Moines IA",
+      "state": "IA",
+      "county_name": "Polk",
+      "status": "NOT-FOUND",
+      "verified_date": "2026-07-19",
+      "arcgis": null,
+      "notes": "No live ArcGIS REST parcel/CAMA layer — gis.polkcountyiowa.gov does not resolve (re-confirmed pattern this pass, per county-endpoints.md). The county's real data source is a bulk CSV export (verified LIVE this pass: https://web.assess.co.polk.ia.us/info/web/exports/comm/inven/polk/POLKCOUNTY.csv, HTTP 200, ~10.3MB, includes x/y State Plane coordinates but NO polygon geometry). ora-flood-zoning-dd cannot use this registry for a true Polk County parcel polygon; fall back to Step 3 discovery / x,y point query, or request a CAMA GIS extract from the county."
+    },
+    "dallas_ia": {
+      "market": "Des Moines IA",
+      "state": "IA",
+      "county_name": "Dallas",
+      "status": "VERIFIED",
+      "verified_date": "2026-07-19",
+      "arcgis": {
+        "service_url": "https://gis.dallascountyiowa.gov/arcgis/rest/services/Public/Parcels/FeatureServer/0",
+        "layer_id": 0,
+        "layer_name": "Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "No building SF, no use codes, no sale data in this layer (sales are separate Assessor/Sales/FeatureServer year layers, not re-tested this pass)."
+    }
+  }
+}

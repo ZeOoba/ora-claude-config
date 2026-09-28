@@ -1,0 +1,343 @@
+{
+  "_meta": {
+    "purpose": "Per-state recordation/execution/limitations/tax/notice overlay for ORA lease addenda. Every entry independently verified against the state's official legislature/code site as of verified_date -- no citation was carried forward from this skill's build notes, from another ORA skill (lease-form-qc, loi-generation, masterlease-jurisdiction-rebase all carry overlapping but independently-sourced state citations), or from this prompt without re-verification. threshold_years feeds scripts/addendum_qc.py check 7 directly.",
+    "confidence_values": ["VERIFIED", "UNVERIFIED — counsel confirmation required"],
+    "last_build": "2026-08-14"
+  },
+  "OH": {
+    "state_name": "Ohio",
+    "threshold_years": 3,
+    "recordation_acknowledgment": {
+      "statute_cite": "Ohio Rev. Code Ann. § 5301.08",
+      "plain_language_rule": "Leases of 3 years or less do not need to be acknowledged or recorded to be valid. Leases exceeding 3 years fall under the general R.C. 5301.01 acknowledgment regime to be recordable and effective against subsequent purchasers/third parties. NOTE: R.C. 5301.01 governs execution/acknowledgment mechanics generally; 5301.08 is the specific term-length exemption -- do not cite 5301.01 alone for the threshold.",
+      "primary_source_url": "https://codes.ohio.gov/ohio-revised-code/section-5301.08",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": "Ohio Rev. Code Ann. § 5301.251",
+      "plain_language_rule": "A memorandum of lease (parties, addresses, lease date, property description, term, renewal rights, commencement date) may be recorded in lieu of the full lease; must be executed/acknowledged per R.C. 5301.01.",
+      "primary_source_url": "https://codes.ohio.gov/ohio-revised-code/section-5301.251",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "execution_formalities": {
+      "statute_cite": "Ohio Rev. Code Ann. § 5301.01",
+      "plain_language_rule": "Signature by the lessor plus acknowledgment before a notary public, judge/clerk of a court of record, county auditor, county engineer, or mayor. No seal and no witnesses required (witness requirement eliminated for instruments executed on/after Feb. 1, 2002; H.B. 72 (2014) retroactively validated pre-2002 unwitnessed instruments absent fraud).",
+      "primary_source_url": "https://codes.ohio.gov/ohio-revised-code/section-5301.01",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "limitations_period": {
+      "statute_cite": "Ohio Rev. Code Ann. § 2305.06",
+      "plain_language_rule": "6 years for actions on a written contract, agreement, promise, or specialty (sealed instrument) -- current period effective June 16, 2021 (reduced from 8 years). Ohio does not distinguish sealed from unsealed written instruments; both get 6 years. Pre-6/14/2021 accruals carry a saving-clause deadline (earlier of 6/14/2027 or the old 8-year period) -- relevant when amending a pre-2021 lease with claims already accrued.",
+      "primary_source_url": "https://codes.ohio.gov/ohio-revised-code/section-2305.06",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Ohio Rev. Code Ann. § 319.54(G)(3)(i); Ohio Rev. Code Ann. Ch. 322 (§ 322.01, § 322.02)",
+      "plain_language_rule": "County conveyance fee and the optional county real-property transfer tax are NOT charged on a conveyance made by lease, unless the lease is for a term of years renewable forever. An ordinary lease amendment (extension, rent change) does not trigger the fee/tax; only a perpetually-renewable lease would.",
+      "primary_source_url": "https://codes.ohio.gov/ohio-revised-code/section-319.54",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "notice_requirements": {
+      "statute_cite": null,
+      "plain_language_rule": "No Ohio statute specifically governs notice of a term change (extension, rent adjustment) for a commercial/industrial lease. Ch. 5321 (Landlord-Tenant Act, incl. § 5321.17 termination notice) is scoped to residential premises only (§ 5321.01(C)) and does not reach industrial/commercial leases. R.C. 1923.04 (forcible entry and detainer, 3+ days' notice to leave) is not term-specific and applies only at the eviction stage. Notice obligations for a term change on an ORA industrial lease are purely a matter of the lease's own contractual notice clause.",
+      "primary_source_url": "https://codes.ohio.gov/ohio-revised-code/section-5321.01",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (negative finding across Ch. 5321/1923 only; not an exhaustive Code-wide search)"
+    },
+    "sources_consulted": "codes.ohio.gov (official Ohio Revised Code) -- primary source, independently re-verified for this skill; not carried forward from lease-form-qc's existing R.C. 5301.01 citation."
+  },
+  "MD": {
+    "state_name": "Maryland",
+    "threshold_years": 7,
+    "recordation_acknowledgment": {
+      "statute_cite": "Md. Code Ann., Real Prop. § 3-101(a), (c), (d)",
+      "plain_language_rule": "No estate/leasehold above 7 years may pass or take effect unless the deed/lease is executed and recorded. § 3-101(c) exempts a lease with an initial term of 7 years or less even with renewal options, provided each renewal term is itself 7 years or less and is not automatic/perpetual. Recording is optional as to validity between the original parties (§ 3-101(d)) but required for effect against subsequent purchasers/BFPs. NOTE: the statute contains NO express text stating cumulative term is measured 'from original commencement across all amendments' -- that is a reasonable practitioner inference from § 3-101(c)'s structure, not verified statutory or case-law text. Flag as interpretive gloss when applying to a multi-amendment lease.",
+      "primary_source_url": "https://mgaleg.maryland.gov/mgawebsite/Laws/StatuteText?article=grp&section=3-101",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED (threshold text); UNVERIFIED — counsel confirmation required (cumulative-from-commencement-across-amendments aggregation rule)"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": "Md. Code Ann., Real Prop. § 3-101(e)",
+      "plain_language_rule": "A memorandum of lease, executed by every party, may be recorded in lieu of the full lease with like effect. Must contain lessor/lessee names and addresses, lease reference and execution date, premises description, term with commencement/termination dates, and any extension/renewal right with its maximum period/exercise date. The full lease (not just the memorandum) must still be presented to the recording office for tax assessment purposes, but only the memorandum is placed in the public land records.",
+      "primary_source_url": "https://mgaleg.maryland.gov/mgawebsite/Laws/StatuteText?article=grp&section=3-101",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "execution_formalities": {
+      "statute_cite": "Md. Code Ann., Real Prop. § 4-101(a), (b)",
+      "plain_language_rule": "No seal or witness/attestation required for a deed or lease to be valid (§ 4-101(b)); a lease need not even be acknowledged/notarized to be legally sufficient (§ 4-101(a)(2)), unlike a deed transferring fee title. A seal does NOT affect validity or recordability -- it affects only the limitations period (see below). Local recording-office intake practice (whether a clerk will insist on acknowledgment as a practical matter) was not independently verified.",
+      "primary_source_url": "https://mgaleg.maryland.gov/mgawebsite/Laws/StatuteText?article=grp&section=4-101",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "limitations_period": {
+      "statute_cite": "Md. Code Ann., Cts. & Jud. Proc. §§ 5-101, 5-102(a)-(c)",
+      "plain_language_rule": "3-year general limitations period (§ 5-101); 12-year period for specialties incl. a contract under seal (§ 5-102(a)), running from accrual or 12 years from the last-to-die of principal debtor/creditor, whichever is sooner. CORRECTION to a commonly-repeated overstatement: the statute contains NO text requiring the seal to be 'recited in the body AND appear at each signature.' That is Maryland case law (General Petroleum Corp. v. Seaboard Terminals Corp.; Rouse-Teachers Properties, Inc. v. Maryland Casualty Co., 358 Md. 208 (2000)), and it is signer-type-dependent: for an INDIVIDUAL signer, a seal adjacent to the signature suffices without any body recital; for a CORPORATE/ENTITY signer (the operative case for ORA, whose counterparties are near-always LLCs), courts require some additional indication of intent, typically a body recital. Draft the body recital as the ORA default (entity signers), but do not represent this as a universal statutory requirement.",
+      "primary_source_url": "https://mgaleg.maryland.gov/mgawebsite/Laws/StatuteText?article=gcj&section=5-102",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED (statutory periods); the seal-placement rule is case law, correctly scoped above, not misstated as statute"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Md. Code Ann., Tax-Property § 12-105(d), (e); § 13-207",
+      "plain_language_rule": "For a lease exceeding 7 years (not perpetually renewable), recordation tax applies to the average annual rent over the term (including renewals) capitalized at 10%, plus non-rent consideration -- but only if the lease was required to be recorded under § 3-101 in the first place (§ 12-105(e)(4)). A recorded memorandum or assignment of lease is independently a taxable 'document.' The statute contains no express provision on AMENDMENTS specifically; if an amendment extends cumulative term past the 7-year § 3-101 threshold, or changes the capitalized-rent calculation on an already-recordable lease, that amendment is the kind of instrument the § 12-105(e) logic would reach when presented for recording -- this is a reasonable extrapolation, not an explicit statutory holding on amendments.",
+      "primary_source_url": "https://mgaleg.maryland.gov/mgawebsite/Laws/StatuteText?article=gtp&section=12-105",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED (base rule); UNVERIFIED — counsel confirmation required (amendment-specific application)"
+    },
+    "notice_requirements": {
+      "statute_cite": "Md. Code Ann., Real Prop. § 8-209",
+      "plain_language_rule": "§ 8-209's 90/60/7-day rent-increase notice requirement applies ONLY to residential leases (§ 8-209(a)(1)). No general Maryland statute was found imposing notice obligations on a commercial lease term/rent change. This is a negative finding within Real Property Title 8; it does not rule out a Howard County commercial-tenant ordinance, which was not separately checked.",
+      "primary_source_url": "https://mgaleg.maryland.gov/mgawebsite/Laws/StatuteText?article=grp&section=8-209",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (negative finding, not an exhaustive Title 8 + county-ordinance canvas)"
+    },
+    "confessed_judgment_procedure": {
+      "statute_cite": "Md. Rule 2-611",
+      "plain_language_rule": "Circuit Court procedure for confession-of-judgment complaints (District Court parallel: Rule 3-611). Citation and subject matter corroborated across multiple independent secondary sources (case commentary, law-firm summaries, official MD District Court complaint forms citing the same subsections), but primary verbatim text at mdcourts.gov could not be loaded in this research pass (403 / no extractable text). Governs enforcement PROCEDURE only -- counsel drafts the underlying confessed-judgment clause; do not draft one from this skill without counsel review regardless of this citation's status.",
+      "primary_source_url": "https://www.mdcourts.gov/rules",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (citation corroborated only via secondary sources; primary text not personally loaded)"
+    },
+    "sources_consulted": "mgaleg.maryland.gov (official Maryland General Assembly statute text) for all Real Property and Courts & Judicial Proceedings citations, independently re-verified for this skill against the two 2026-08-14 Howard County-deal seed citations in the build prompt -- both corrected (cumulative-term-from-commencement flagged as gloss, seal-placement rule corrected to entity-signer-specific case law, not blanket statute). Md. Rule 2-611 sourced from mdcourts.gov attempt + secondary corroboration only."
+  },
+  "MO": {
+    "state_name": "Missouri",
+    "threshold_years": null,
+    "recordation_acknowledgment": {
+      "statute_cite": "Mo. Rev. Stat. §§ 442.380, 442.390, 442.400",
+      "plain_language_rule": "No term-length threshold exists in Missouri law -- the recording act applies uniformly to any instrument affecting real estate regardless of term. Recording is always optional as to validity between the parties (§ 442.400) but required to bind subsequent purchasers/mortgagees with constructive notice (§ 442.390).",
+      "primary_source_url": "https://revisor.mo.gov/main/OneSection.aspx?section=442.380",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": null,
+      "plain_language_rule": "No Missouri statute specifically names or authorizes a 'memorandum of lease' as a distinct instrument type. § 442.380's broad language ('any instrument... whereby any real estate may be affected') is wide enough to cover a memorandum on its own recordable terms, but the practice is custom/convention, not a codified entitlement.",
+      "primary_source_url": "https://revisor.mo.gov/main/OneSection.aspx?section=442.380",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (practice-based, no statutory citation exists)"
+    },
+    "execution_formalities": {
+      "statute_cite": "Mo. Rev. Stat. §§ 442.130, 442.150",
+      "plain_language_rule": "Signature by the party to be bound (or authorized agent) plus acknowledgment before a court/judge/clerk with a seal, or a notary public (in-state); no seal or witness required. 2022 amendment (H.B. 1662) added a requirement that the instrument state grantors' marital status.",
+      "primary_source_url": "https://revisor.mo.gov/main/OneSection.aspx?section=442.130",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "limitations_period": {
+      "statute_cite": "Mo. Rev. Stat. § 516.110(1)",
+      "plain_language_rule": "10 years for an action on any writing, whether sealed or unsealed, for the payment of money or property -- the statute text explicitly collapses the sealed/unsealed distinction. A non-monetary contract theory could instead fall under the 5-year general period at § 516.120 (not independently verified in full text this pass).",
+      "primary_source_url": "https://revisor.mo.gov/main/OneSection.aspx?section=516.110",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Mo. Const. Art. X, § 25; Mo. Rev. Stat. § 59.319",
+      "plain_language_rule": "Missouri has NO real estate transfer tax and is constitutionally barred from enacting one (adopted 2010). A recorded lease amendment (or memorandum) is subject only to the flat per-instrument recorder's fee under § 59.319 ($6 + $3 = $9 flat), never a percentage-of-value transfer tax.",
+      "primary_source_url": "https://revisor.mo.gov/main/OneSection.aspx?section=59.319",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "notice_requirements": {
+      "statute_cite": "Mo. Rev. Stat. § 441.060",
+      "plain_language_rule": "§ 441.060 governs termination notice for oral/informal tenancies (at-will, sufferance, month-to-month) -- one month's written notice, 60 days for mobile-home tenancies. This is a termination-notice statute for informal tenancies, not a notice trigger for amending a written commercial lease's term. No general Missouri statute ties notice obligations to a lease term AMENDMENT.",
+      "primary_source_url": "https://revisor.mo.gov/main/OneSection.aspx?section=441.060",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (negative finding)"
+    },
+    "sources_consulted": "revisor.mo.gov (official Missouri Revisor of Statutes), independently verified -- no threshold assumption carried in from other states' patterns."
+  },
+  "KS": {
+    "state_name": "Kansas",
+    "threshold_years": null,
+    "recordation_acknowledgment": {
+      "statute_cite": "Kan. Stat. Ann. §§ 58-2221, 58-2222, 58-2223; K.S.A. 33-105 (Statute of Frauds, distinct)",
+      "plain_language_rule": "No term-length threshold for recording eligibility or purchaser-notice effect -- any lease may be recorded once acknowledged, and recording is what confers constructive notice on subsequent purchasers regardless of term. Unrecorded instruments bind only the parties and those with actual notice (§ 58-2223). SEPARATE from recording: K.S.A. 33-105 requires leases exceeding 1 year to be in writing/signed (Statute of Frauds, enforceability, not recordability).",
+      "primary_source_url": "https://ksrevisor.gov/statutes/chapters/ch58/058_022_0021.html",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": null,
+      "plain_language_rule": "No KSA provision names or authorizes a 'memorandum of lease' for general commercial real estate (Kansas's only memorandum-adjacent statute, K.S.A. 55-205, is oil-and-gas-specific). § 58-2221(d)'s broad language would cover a memorandum on its own recordable terms, but this is practitioner custom, not a codified instrument type.",
+      "primary_source_url": "https://ksrevisor.gov/statutes/chapters/ch58/058_022_0021.html",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (practice-based, no statutory citation exists)"
+    },
+    "execution_formalities": {
+      "statute_cite": "Kan. Stat. Ann. § 58-2211; K.S.A. 16-106",
+      "plain_language_rule": "Must be acknowledged before a notarial officer under the Revised Uniform Law on Notarial Acts, or (if acknowledged in-state) a county clerk, register of deeds, or mayor/clerk of an incorporated city. No seal required -- Kansas abolished private seals for individuals in 1868 (Sigler v. Sigler, 98 Kan. 524). No witness requirement found in the recording chapter (Kansas's witness rule is for wills, K.S.A. 59-606, not real property conveyances/leases).",
+      "primary_source_url": "https://ksrevisor.gov/statutes/chapters/ch58/058_022_0011.html",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "limitations_period": {
+      "statute_cite": "Kan. Stat. Ann. § 60-511(1)",
+      "plain_language_rule": "5 years for an action on any written agreement, contract, or promise. Kansas has NO separate sealed-instrument limitations class -- consistent with the 1868 abolition of private seals. CORRECTION: K.S.A. 60-508 does NOT govern sealed instruments/specialties (a common misconception) -- it actually governs tolling for persons under legal disability (minors, incapacitated, imprisoned) in real-property actions, an unrelated topic. Do not cite 60-508 for sealed-instrument treatment.",
+      "primary_source_url": "https://ksrevisor.gov/statutes/chapters/ch60/060_005_0011.html",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Kan. Stat. Ann. § 79-3102 (repealed)",
+      "plain_language_rule": "Kansas's mortgage registration tax was fully repealed effective January 1, 2019 (L. 2014, ch. 140, § 22). No mortgage registration tax or real estate transfer tax currently applies to anything in Kansas -- a lease, a lease amendment, or a mortgage. Moot for any document dated after 1/1/2019.",
+      "primary_source_url": "https://ksrevisor.gov/statutes/chapters/ch79/079_031_0002.html",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "notice_requirements": {
+      "statute_cite": "Kan. Stat. Ann. § 58-2541 (Residential Landlord and Tenant Act, exclusions); § 58-2506 (farm/pastureland only)",
+      "plain_language_rule": "The Residential Landlord and Tenant Act (§ 58-2540 et seq.) excludes non-residential tenancies. The older general landlord-tenant article's notice provisions govern default/no-agreement scenarios (holdover, farm/pastureland termination) — § 58-2506 is farm/pastureland-specific, not a general commercial rule. No Kansas statute requires notice to any third party merely because a commercial lease's term is amended; any such trigger would be contractual (e.g., a lender covenant), not statutory.",
+      "primary_source_url": "https://ksrevisor.gov/statutes/chapters/ch58/058_025_0006.html",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (negative finding)"
+    },
+    "sources_consulted": "kslegislature.gov and ksrevisor.gov (both official Kansas sources, cross-checked identical text), independently verified. Corrected two likely-wrong assumptions: no term-based recording threshold, and K.S.A. 60-508 is not a sealed-instrument statute."
+  },
+  "WI": {
+    "state_name": "Wisconsin",
+    "threshold_years": 1,
+    "recordation_acknowledgment": {
+      "statute_cite": "Wis. Stat. §§ 706.001(2)(c), 706.02(1), 704.03(1)",
+      "plain_language_rule": "Chapter 706's formal conveyancing requirements apply to any lease exceeding 1 year. Leases of 1 year or less -- and modifications/terminations that leave an unexpired term of 1 year or less -- are excluded from Ch. 706 formalities (§ 706.001(2)(c) applies this test to modifications specifically: if an amendment leaves more than 1 year unexpired, Ch. 706 formalities apply to the amendment itself).",
+      "primary_source_url": "https://docs.legis.wisconsin.gov/statutes/statutes/706/001",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": null,
+      "plain_language_rule": "No dedicated 'memorandum of lease' statute exists. § 706.001/706.02 define 'conveyance' broadly enough (any writing satisfying § 706.02(1)) that a short-form memorandum recording is standard, statute-compatible market practice, but is not itself a codified instrument type under a discrete section number.",
+      "primary_source_url": "https://docs.legis.wisconsin.gov/statutes/statutes/706/001",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (practice-based, no statutory citation exists)"
+    },
+    "execution_formalities": {
+      "statute_cite": "Wis. Stat. §§ 706.05(6)-(7), 706.06",
+      "plain_language_rule": "No seal or witnesses required for valid execution or recording (§ 706.05(6): 'no instrument shall be denied acceptance for record because of the absence of venue, seals, witnesses or other matter of form'). Authentication/acknowledgment is required for a recordable instrument, performable by any public officer or State Bar member endorsing the instrument as 'Acknowledged' or 'Authenticated' -- traditional notarization is one acceptable method, not exclusive.",
+      "primary_source_url": "https://docs.legis.wisconsin.gov/statutes/statutes/706/05",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "limitations_period": {
+      "statute_cite": "Wis. Stat. § 893.43(1)",
+      "plain_language_rule": "6 years from accrual for an action on any contract, obligation, or liability, express or implied. Wisconsin's consolidated contract-limitations statute does not distinguish sealed instruments -- that historical distinction is eliminated, folded into the standard 6-year period.",
+      "primary_source_url": "https://docs.legis.wisconsin.gov/document/statutes/893.43",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Wis. Stat. §§ 77.21(1), 77.22(1)",
+      "plain_language_rule": "A lease is a taxable 'conveyance' ONLY if its term is at least 99 years (leases under 99 years are expressly excluded); fee is 30 cents per $100 of value where triggered, imposed on the grantor. No statutory language aggregates renewal/extension options with a base term to reach the 99-year threshold -- it's a flat term-length test on the instrument. Given ORA's buy-box (sub-50K SF industrial/flex, not 99-year ground leases), this provision is very unlikely to be triggered by a routine ORA amendment.",
+      "primary_source_url": "https://docs.legis.wisconsin.gov/statutes/statutes/77/ii/21",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "notice_requirements": {
+      "statute_cite": "Wis. Stat. § 704.19",
+      "plain_language_rule": "§ 704.19's notice requirements (28 days minimum; 90 days for year-to-year agricultural tenancies) apply ONLY to periodic tenancies and tenancies at will -- not fixed-term leases or amendments to them. No general Wisconsin statute imposes notice requirements on a negotiated amendment to a fixed-term commercial lease; Ch. 704's mandatory provisions and ATCP 134 are residential/consumer-protection-scoped. A term-change amendment would trigger § 704.19 only in the edge case where it converts the tenancy into a periodic tenancy or tenancy-at-will.",
+      "primary_source_url": "https://docs.legis.wisconsin.gov/statutes/statutes/704/19",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (negative finding, ATCP 134 confirmed residential-only but not an exhaustive canvas)"
+    },
+    "sources_consulted": "docs.legis.wisconsin.gov (official Wisconsin State Legislature statute text), independently verified via live fetch of each cited section."
+  },
+  "IN": {
+    "state_name": "Indiana",
+    "threshold_years": 3,
+    "recordation_acknowledgment": {
+      "statute_cite": "Ind. Code §§ 32-31-2-1(b), 32-31-2-2(b); Ind. Code § 32-21-1-1(a) (Statute of Frauds, distinct)",
+      "plain_language_rule": "A lease for a term longer than 3 years must be recorded within 45 days of execution or it is void against a subsequent good-faith purchaser/lessee/mortgagee for value who records first (race-notice, not automatic invalidity between the parties). Separately, the Statute of Frauds requires a lease for a term of more than 3 years to be in writing (IC 32-21-1-1(a) exempts 3-years-or-less).",
+      "primary_source_url": "https://iga.in.gov/laws/2026/ic/titles/32#32-31-2-1",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": "Ind. Code § 32-21-4-1(a)(2); Ind. Code § 32-21-3-4",
+      "plain_language_rule": "Statutorily grounded, not just customary: 'conveyance' (the recordable, priority-bearing instrument) is defined to expressly include 'a lease or memorandum of lease for a term exceeding three (3) years.' A memorandum, once acknowledged/proved like a conveyance, gets full recording priority and constructive-notice effect without the full lease becoming a public record.",
+      "primary_source_url": "https://iga.in.gov/laws/2026/ic/titles/32#32-21-4-1",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "execution_formalities": {
+      "statute_cite": "Ind. Code § 32-21-2-3",
+      "plain_language_rule": "Notarial acknowledgment OR proof (one, not both) by a notarial officer or remote notary. No seal required. Witness signature/proof is no longer required (removed by P.L.185-2021). Instrument must carry a mailing-address statement and an English translation if executed abroad in a foreign language.",
+      "primary_source_url": "https://iga.in.gov/laws/2026/ic/titles/32#32-21-2-3",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "limitations_period": {
+      "statute_cite": "Ind. Code § 34-11-2-11(a); Ind. Code § 34-37-1-1(a)",
+      "plain_language_rule": "10 years for actions on written contracts other than for payment of money (20 years if the contract predates September 1, 1982). Indiana has abolished any sealed-vs-unsealed distinction by statute: 'Every writing that is not sealed has the same force and effect that it would have if sealed.'",
+      "primary_source_url": "https://iga.in.gov/laws/2026/ic/titles/34#34-11-2-11",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Ind. Code § 6-1.1-5.5-2(a)(1)(F), (b)(2)",
+      "plain_language_rule": "No general Indiana real estate transfer tax. The sales-disclosure-form filing-fee regime applies only to a 'conveyance document,' which by statutory definition excludes any lease under 90 years -- an ordinary ORA industrial lease amendment is categorically outside this regime.",
+      "primary_source_url": "https://iga.in.gov/laws/2026/ic/titles/6#6-1.1-5.5-2",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "notice_requirements": {
+      "statute_cite": "Ind. Code §§ 32-31-2.9-3, 32-31-5-3, 32-31-5-4, 32-31-1-8",
+      "plain_language_rule": "The commonly-cited 30-day modification-notice rule (IC 32-31-5-4) is a RESIDENTIAL-ONLY statute -- IC 32-31-2.9-3 scopes Chapters 3-11 (incl. Ch. 5) to rental agreements for 'dwelling units' (IC 32-31-5-3: apartment/boarding/rooming/manufactured-home/single-or-two-family dwelling), which does not include industrial/flex space. IC 32-31-1-8 (general provisions, not residential-scoped) confirms no notice is required to terminate a lease where the term is fixed by contract. Indiana imposes no general statutory notice requirement for amending a commercial lease's terms.",
+      "primary_source_url": "https://iga.in.gov/laws/2026/ic/titles/32#32-31-2.9-3",
+      "verified_date": "2026-08-14",
+      "confidence": "VERIFIED"
+    },
+    "sources_consulted": "iga.in.gov (official Indiana General Assembly, 2026 Indiana Code data files, Last-Modified 2026-06-30). Corrected two likely-wrong assumptions: the recordation statute is IC 32-31-2-1/-2, not IC 32-21-1; and the 30-day notice statute (IC 32-31-5-4) is residential-only, not general commercial."
+  },
+  "TN": {
+    "state_name": "Tennessee",
+    "threshold_years": null,
+    "recordation_acknowledgment": {
+      "statute_cite": "Tenn. Code Ann. §§ 66-7-101, 66-24-101(a)(15), 66-26-101, 66-26-102, 66-26-103 (working citation, not fully primary-confirmed -- see confidence)",
+      "plain_language_rule": "Working rule: leases exceeding 3 years must be in writing and, to bind anyone other than the lessor/heirs/persons with actual notice, must be proved and registered (§ 66-7-101); § 66-24-101(a)(15) makes leases over 3 years (or a summary/abstract) eligible for registration; registration is what confers constructive notice on third parties (§§ 66-26-101/-102, live-verified verbatim), and an unregistered instrument is void against subsequent BFPs/creditors without notice (§ 66-26-103). threshold_years intentionally left null (not 3) in this file's machine-readable field because §§ 66-7-101 and 66-26-103 -- the sections that actually state the 3-year trigger and its consequence -- were NOT independently confirmed against live primary text this pass (LexisNexis TCA portal CAPTCHA-gated the research agent mid-session); only the downstream constructive-notice mechanics (§§ 66-26-101/-102) were live-verified. Do not auto-flag a Tennessee cumulative-term threshold in scripts/addendum_qc.py check 7 until this is closed out.",
+      "primary_source_url": "https://www.lexisnexis.com/hottopics/tncode",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (§§ 66-26-101/-102 live-verified verbatim; §§ 66-7-101, 66-24-101(a)(15), 66-26-103 sourced from secondary aggregators only, portal access-gated before primary confirmation)"
+    },
+    "memorandum_of_lease": {
+      "statute_cite": "Tenn. Code Ann. § 66-24-101(a)(15)",
+      "plain_language_rule": "No separately named 'memorandum of lease' statute exists. The customary short-form-memorandum practice rests on § 66-24-101(a)(15)'s allowance that 'a summary or abstract' of a lease over 3 years is independently eligible for registration.",
+      "primary_source_url": "https://www.lexisnexis.com/hottopics/tncode",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (subsection (a)(15) not reached live; header and items (1)-(4) were, secondary-sourced for (15))"
+    },
+    "execution_formalities": {
+      "statute_cite": "Tenn. Code Ann. § 66-22-101",
+      "plain_language_rule": "Working rule: signature must be EITHER notarially acknowledged OR proved by 2 subscribing witnesses -- one or the other, not both (notarization alone is sufficient; witnesses are only a fallback). Correct a common overstatement: Tennessee is not a strict two-witness state for recordable real-property instruments (that framing better fits will-execution formalities under Title 32, a different statute).",
+      "primary_source_url": "https://www.lexisnexis.com/hottopics/tncode",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (portal gated before live confirmation; secondary sources converge)"
+    },
+    "limitations_period": {
+      "statute_cite": "Tenn. Code Ann. § 28-3-109(a)(3)",
+      "plain_language_rule": "Working rule: 6 years, as the residual/catch-all 'contracts not otherwise expressly provided for' clause -- Tennessee has NO statute expressly labeled 'written contracts'; do not cite § 28-3-109 as a dedicated written-contract statute, cite it as the residual provision practitioners use by default.",
+      "primary_source_url": "https://www.lexisnexis.com/hottopics/tncode",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (portal gated before live confirmation; secondary sources converge on 6 years)"
+    },
+    "recordation_transfer_tax": {
+      "statute_cite": "Tenn. Code Ann. § 67-4-409",
+      "plain_language_rule": "Working rule: § 67-4-409 imposes 11.5 cents per $100 of 'indebtedness' on instruments evidencing indebtedness (mortgages, deeds of trust) -- NOT a general deed-transfer tax, and does not apply to an ordinary lease or lease amendment. Would only reach an amendment that is itself or accompanies a financing/security instrument (e.g., a leasehold deed of trust) increasing secured indebtedness.",
+      "primary_source_url": "https://www.lexisnexis.com/hottopics/tncode",
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (portal gated before live confirmation; secondary sources converge)"
+    },
+    "notice_requirements": {
+      "statute_cite": null,
+      "plain_language_rule": "No Tennessee statute was located imposing a notice obligation specifically triggered by amending a commercial lease's term. § 66-7-108 governs pre-execution disclosures (not amendments); § 66-7-109 governs landlord termination notice (not term modification). The only statutory consequence a term-extending amendment could trigger is crossing the recordation threshold in this entry's first field, once that field is fully verified.",
+      "primary_source_url": null,
+      "verified_date": "2026-08-14",
+      "confidence": "UNVERIFIED — counsel confirmation required (reasoned negative finding, not a clean primary-source pass through the full chapter -- flagged by the researching agent as the least reliable of the six TN items)"
+    },
+    "sources_consulted": "Attempted advance.lexis.com (LexisNexis-hosted TN Code Unannotated Free Public Access, the correct primary source since wapp.capitol.tn.gov does not host TCA full text). Only §§ 66-26-101 and 66-26-102 were live-verified verbatim before the portal's bot-detection gated further requests behind a CAPTCHA, which the research agent correctly declined to attempt to bypass. Every other TN citation in this entry is secondary-sourced only (Justia/FindLaw/CTAS-UT convergence) and is explicitly marked UNVERIFIED per this skill's non-negotiable verification rule -- re-run once the portal's rate limit clears before relying on this entry for a live Tennessee deal with recordation/execution consequences."
+  }
+}

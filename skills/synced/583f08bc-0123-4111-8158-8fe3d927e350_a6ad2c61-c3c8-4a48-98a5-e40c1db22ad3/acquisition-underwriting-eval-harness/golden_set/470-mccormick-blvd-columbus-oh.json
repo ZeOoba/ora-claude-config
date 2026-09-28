@@ -1,0 +1,97 @@
+{
+  "deal_id": "470-mccormick-blvd-columbus-oh",
+  "deal_name": "470 McCormick Blvd, Columbus OH 43213",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-09",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), queried 2026-08-14; cross-referenced Acquisition Pipeline Tracker (collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b)",
+  "confidence": "LOW",
+  "known_gaps": [
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): this deal's original 2026-06-09 screen predates the 2026-07-14 RCT v03 replacement-cost recalibration (a deliberate, ratified doctrine change -- old RCT v02 + 30%/25% floor ramp vs today's RCT v03 + 65%/60% ramp). The archived pre-v03 Notion score is preserved below under archived_pre_v03_reference for historical context ONLY and is NOT the diff target.",
+    "REBASELINED 2026-08-15 (n=1 -> n=4, first-ever repeatability check for this deal, Gabriel-directed): the 2026-08-14 golden was a single unreplicated run whose Combined (0.0) was explicitly documented as a LOWER BOUND, not a point estimate (45 of 55 Quality points were null -- Product & Physical, Market & Location, Value-Add all unresolved that run). The 2026-08-15 forced-repeatability run added 3 independent replays (20.0/15.5/14.0) that each resolved Market & Location and Value-Add from the same frozen facts, which the original run did not. Golden Combined moved 0.0 -> 12.38 (mean of 4). This deal's own range across the 4 runs is 20.0 pts (stdev 8.63) -- BY FAR the widest in the golden set, and dramatically exceeds the harness's 5.0-pt tolerance. This is NOT ordinary replay-to-replay judgment noise the way Port Sheldon's or 1333 Research's dispersion is: it is largely an artifact of run 1 being a genuinely incomplete lower-bound construction, not a comparable full replay -- 3 of run 1's 5 non-floor categories were null where the other 3 runs resolved 2 of them. Flagged explicitly rather than averaged over silently at the time (superseded by the 2026-09-12 rebaseline below).",
+    "REBASELINED 2026-09-12 (n=4 -> n=3, run 1 excluded from the golden mean; PROVENANCE: Gabriel asked whether to rebaseline, a Claude session made the call, and Gabriel approved landing it 2026-09-12 -- not a Gabriel-originated directive. Corroboration: every scheduled-poll 3-replay mean since the golden was set sits at 19.00-20.67 (08-16 19.00, 08-23 20.67, 08-24 19.33, 08-25 19.67, 09-12 19.00), consistent with 16.5 and inconsistent with 12.38): run 1 is not a sample of the same measurement as runs 2-4 -- it was built and explicitly documented as a LOWER BOUND (3 of 5 non-floor categories deliberately left null) before this deal had ANY repeatability data, whereas runs 2-4 are independent full-replay attempts against the same frozen input packet. Averaging a structurally-incomplete lower-bound construction into a mean-of-full-replays mixes two different instruments, not three draws from one distribution -- the harness's own aggregation module (`lib/aggregate_replays.py`) treats a replay's absent category_breakdown as informationally distinct from a resolved-but-zero one for exactly this reason. This is the same treatment already applied to Port Sheldon's and Hamilton's contaminated/non-comparable runs (see their golden files): exclude, do not silently blend, keep for audit trail. Golden Combined moves 12.38 (mean of 4, incl. run 1) -> 16.5 (mean of runs 2-4 only); combined_range drops from the anomalous 20.0 pts to 6.0 pts, in line with ordinary replay dispersion elsewhere in the set. Run 1 stays in `repeatability.runs` with `excluded_from_golden: true`, per the Hamilton precedent -- never dropped, always visible.",
+    "The replays have 1-3 of 7 scorecard categories unresolvable from the frozen input packet per run (Product & Physical is null in 3 of 4 runs; Market & Location and Value-Add resolved in 3 of 4) -- the frozen input packet sourced from Notion's structured fields does not capture the physical/site detail the original live-tooled screen evidently had access to. Confidence kept LOW for this reason -- excluded from strict pass/fail.",
+    "NOI is not recorded anywhere (not disclosed, not derivable from a cap rate). Score components note '@ $700K' -- scoring used a $700,000 walk price, not the $950,000 asking price.",
+    "Notion's current 'Verdict' field reads KILLED (Gabriel's 2026-07-08 kill decision, post-hoc status overwrite) -- not a skill verdict-band output, see archived_pre_v03_reference."
+  ],
+  "inputs": {
+    "address": "470 McCormick Blvd, Columbus, OH 43213",
+    "market": "Columbus OH",
+    "asking_price": 950000,
+    "price_used_for_scoring": 700000,
+    "building_sf": 9600,
+    "price_per_sf_at_asking": 98.96,
+    "year_built": 1975,
+    "occupancy_pct": 0,
+    "asset_type": "Single-Tenant Industrial",
+    "noi_annual": null,
+    "noi_basis": "NOT FOUND -- no disclosed NOI, no cap rate to derive one, despite a non-zero pre-v03 archived Yield component. Treat as an unrecoverable input gap, not a zero.",
+    "physical": {
+      "construction_type": null,
+      "clear_height": null,
+      "docks_drive_ins": null
+    },
+    "environmental_notes": null,
+    "other_facts": "Vacant single-tenant industrial box, Columbus market."
+  },
+  "repeatability": {
+    "runs": [
+      {"combined": 0.0, "quality": null, "economics": 0.0, "expected_score": 0.0, "p_exec_pct": 20.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": null, "market_location": null, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": null}, "note": "run 1 (2026-08-14 baseline, unreplicated at the time) -- explicitly a LOWER BOUND, not a comparable full replay: 3 of 5 non-floor categories null (Market & Location and Value-Add unresolved, unlike every other run in this set)", "excluded_from_golden": true, "exclusion_reason": "structurally-incomplete lower-bound construction, not a full-replay sample of the same measurement as runs 2-4 (2026-09-12 rebaseline); kept for audit trail, not averaged into golden"},
+      {"combined": 20.0, "quality": 20.0, "economics": 0.0, "expected_score": 4.0, "p_exec_pct": 20.0, "category_breakdown": {"basis": 0.0, "yield": null, "product_physical": 5.0, "market_location": 8.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 7.0}, "note": "run 2 (2026-08-15 forced-repeatability run, replay A) -- the high outlier; only run to resolve product_physical"},
+      {"combined": 15.5, "quality": 15.5, "economics": 0.0, "expected_score": 3.1, "p_exec_pct": 20.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": null, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 6.5}, "note": "run 3 (2026-08-15 forced-repeatability run, replay B)"},
+      {"combined": 14.0, "quality": 14.0, "economics": 0.0, "expected_score": 2.8, "p_exec_pct": 20.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": null, "market_location": 8.0, "seller_motivation": 0.0, "tenancy_lease": 0.0, "value_add": 6.0}, "note": "run 4 (2026-08-15 forced-repeatability run, replay C)"}
+    ],
+    "combined_mean": 16.5,
+    "combined_stdev": 3.12,
+    "combined_sem": 1.8,
+    "combined_range": 6.0,
+    "n": 3,
+    "n_raw_including_excluded": 4,
+    "sampling_note": "First-ever repeatability check for this deal (run 1 was a lone 2026-08-14 baseline; runs 2-4 added by the 2026-08-15 forced-repeatability run, Gabriel-directed). Run 1 is EXCLUDED from `n`/`combined_mean`/etc. above per the 2026-09-12 rebaseline (see known_gaps) -- it is a structurally-incomplete lower-bound construction, not a comparable full replay; `n_raw_including_excluded` is the full draw count. The clean 3-run range (6.0 pts, stdev 3.12) is in line with ordinary replay dispersion elsewhere in the golden set, confirming the prior 20.0-pt range was an artifact of pooling run 1 rather than genuine judgment variance."
+  },
+  "golden": {
+    "baselined_date": "2026-09-12",
+    "baselined_against_skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+    "baselined_method": "mean of 3 independent replays (runs 2-4), EXCLUDING the structurally-incomplete run 1 lower-bound construction (see repeatability block); REBASELINED 2026-09-12 from the all-4-runs mean 12.38 (that mean improperly pooled a lower-bound construction with full replays -- see known_gaps). Replay data itself unchanged (still captured under skill_sha 83547a76651c53c8f3311c2f30db53cbf16fd219); only the aggregation method changed.",
+    "quality": 16.5,
+    "quality_note": "Partial lower bound in every run -- Product & Physical null in 2 of 3 runs (only run 2 resolved it); Market & Location and Value-Add resolved in all 3 runs.",
+    "economics": 0.0,
+    "combined": 16.5,
+    "combined_note": "Mean of runs 2-4 only (run 1 excluded 2026-09-12 -- see known_gaps and repeatability.sampling_note). No longer a pure lower bound the way the single-run 0.0 golden was; still LOW confidence given 2 of 7 categories remain null in most runs.",
+    "category_breakdown": {
+      "basis": 0.0,
+      "yield": 0.0,
+      "product_physical": 1.67,
+      "market_location": 8.33,
+      "seller_motivation": 0.0,
+      "tenancy_lease": 0.0,
+      "value_add": 6.5
+    },
+    "category_breakdown_sum_check": "0+0+1.67+8.33+0+0+6.5 = 16.5, matches Combined. product_physical (2 of 3 null, runs 3-4), market_location and value_add (0 of 3 null) means treat nulls as 0 points, consistent with lib/aggregate_replays.py.",
+    "expected_score": 3.3,
+    "p_exec_pct": 20.0,
+    "verdict_tier": "PASS-band / FLOOR-FLAGGED (T2 WATCH ceilings from bear-mode UNKNOWN + DD-Critical unknowns are non-binding on a sub-60 score)",
+    "floor_result": "FLOOR-FLAGGED in all 3 clean runs (also FLOOR-FLAGGED in the excluded run 1) -- Basis floor breached: ~64.1% discount to RCT v03 Columbus LOW ($229.65/SF) at the $700K scoring price vs 65% vintage-ramp floor (YB 1975); DENOMINATOR-SENSITIVE (within +/-5 pts of floor) in every run",
+    "replay_notes": "Bear-mode: both sources unavailable -> UNKNOWN, scored OFF, T2 WATCH cap (ceiling only, non-binding) in every run. Yield 0.0 is the skill's documented no-NOI scoring convention (null in run 2, scored 0.0 in the other 3), not a derived yield. Lease-Up Assumption Block TI included in basis in every run; downtime carry and LC omitted as incomputable (biases discount conservative, i.e. floor breach is robust). P(exec) 20% in all 4 runs -- the one figure with zero cross-run disagreement, despite everything else varying widely."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-09, before the 2026-07-14 RCT v03 recalibration. NOT the diff target.",
+    "combined": 71,
+    "category_breakdown": {
+      "basis": 25,
+      "yield": 4.2,
+      "product_physical": 15,
+      "market_location": 11,
+      "seller_motivation": 6,
+      "tenancy_lease": 0,
+      "value_add": 10
+    },
+    "archived_verdict_tier": "KILLED (post-hoc status overwrite; bands_predicted_tier from the pre-v03 Combined 71 was T2 WATCH)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tolerance_rationale": "Widened harness-wide from an initial arbitrary 3.0 after a repeatability check on the 2 HIGH-confidence deals (see their golden_set files) showed a 3-run range as large as 4.5 pts on identical inputs/doctrine. Moot for this LOW-confidence row's pass/fail (excluded from strict scoring regardless) but kept consistent across all 6 files.",
+    "tier_check": "informational_only",
+    "reason": "LOW confidence: baseline replay itself has 3 of 7 categories null (input-packet incompleteness, not doctrine ambiguity). Runs and reports; excluded from strict pass/fail until the frozen input packet is enriched with physical/site detail."
+  }
+}

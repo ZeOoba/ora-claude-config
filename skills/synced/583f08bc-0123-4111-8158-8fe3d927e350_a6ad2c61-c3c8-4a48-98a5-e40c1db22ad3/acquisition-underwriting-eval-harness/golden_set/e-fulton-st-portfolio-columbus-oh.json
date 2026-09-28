@@ -1,0 +1,122 @@
+{
+  "deal_id": "e-fulton-st-portfolio-columbus-oh",
+  "deal_name": "E Fulton St Portfolio (3492, 3530-3540, 3483-3585), Columbus OH 43227",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-09",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), pre-Phase-II snapshot; physical specs enriched 2026-08-14 from the Robert Weiler Co. OM, Crexi South Fulton listing, Franklin County Auditor CAMA record, and pre-6/9 ORA Morning Brief pages (structural/forensic-engineer callout) -- see known_gaps for exactly which facts came from where and why each is admissible.",
+  "confidence": "MEDIUM",
+  "known_gaps": [
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is a fresh replay under current doctrine, still using ONLY pre-Phase-II-admissible facts by design.",
+    "DECLASSIFIED 2026-07-09 per Gabriel (projects.md) -- no confidentiality restriction on citing these facts, confirmed before use.",
+    "ENRICHMENT 2026-08-14 (Gabriel's request to close the Economics-blind-spot documented in SKILL.md Limitations): researched real physical specs for this deal. Two categories of missing fact needed DIFFERENT treatment. (1) STRUCTURAL/DIMENSIONAL specs (construction type, clear height, dock/drive-in count, per-building SF) do not change on their own between the 2026-06-09 freeze date and the later source documents (weeks-to-months apart, not decades) -- CORRECTED 2026-08-14 per REFUTE finding F5: the original wording said these are usable from 'any point in time,' which overstated the theory (a 1966-built structure's ORIGINAL dimensions are stable, but the building itself is not immune to renovation/demolition/addition over 60 years -- the real invariance claim is only that nothing material changed in the narrow freeze-to-source window, which is a much safer claim and the one actually relied on here). This narrower framing does NOT extend to CONDITION (Product & Physical's construction-and-condition sub-score) -- condition genuinely can change even over weeks, so scoring uses ONLY the pre-6/9-admissible structural-condition finding (see inputs.structural_condition), never the later OM's own condition claims. It also does not extend to a rail spur being described as 'active' -- Penn Central ceased operating in 1976, so 'active Penn Central rail spur' in the sourced OM is almost certainly stale boilerplate language carried across years of re-listings, not a verified current-as-of-freeze-date fact; carried in inputs.physical.docks_drive_ins as a physical-infrastructure detail (the spur's physical presence), not as evidence the spur was in active use at 6/9. (2) TENANCY/OCCUPANCY is explicitly a genuine UNKNOWN at 6/9 (ORA's own DD-Critical status said 'rent roll unreconciled' through the freeze date, corroborated by pre-6/9 Morning Brief pages) -- this is NOT a research gap to backfill, it is an irreducible fact of this deal's history. Later occupancy data exists (a Crexi listing's per-building tenant mix, and a later ~83% vacant portfolio-wide figure) but using it would import hindsight into a frozen pre-Phase-II snapshot, so it is deliberately excluded. Tenancy & Lease therefore stays null -- this is why confidence is MEDIUM, not HIGH: 6 of 7 categories are now resolved, but the 7th is structurally unresolvable without breaking the frozen-snapshot discipline, not merely under-researched. See SKILL.md for the full writeup.",
+    "PER-BUILDING SIZE-GATE FINDING (surfaced by the enrichment, not previously known): the researched per-building breakdown shows the North portfolio's 'Main Building' (126,924 SF) is either a single building over the skill's 50,000 SF/building gate, or an internal split into a 74,700 SF 'Building A' section plus a 52,224 SF 'remainder' section -- EITHER reading breaches the 50K/building gate (both sub-figures individually exceed it too). Building-count ambiguity is unresolved from available sources (the OM describes it as one main building with named internal areas, which reads as a single structure, not multiple discrete buildings). The original 6/9 screen never caught this because per-building SF was completely unknown at that time -- a genuine screen-time gap, not something Ruling 5 already flagged. Frozen as `main_building_sf_ambiguity` below; the replay should screen this as a GATE-FLAGGED exception (Ruling 5: flag, not kill) given every plausible reading breaches.",
+    "Year-built cross-source conflict (reported, not resolved): Notion Deal Sourcing Log / this golden set = 1966; Franklin County Auditor CAMA (parcel 010-099214-00) = 1967 (immaterial to the vintage ramp -- both are far below the 1995 floor-ramp threshold); a LATER (post-7/9-termination) re-listing of the north parcels states 1998, which is inadmissible here -- that OM is a post-freeze re-marketing of the property, not a fact knowable at the 6/9 screen, and is used ONLY for its time-invariant structural details (construction type, clear height, loading), never its stated vintage, price, or 'value-add' framing.",
+    "South-parcel loading detail (docks/drive-ins) was not found in any sourced document -- only the North parcels' OM had full loading detail. South parcels' construction/loading fields below are partially null as a result; this is a smaller, honestly-flagged residual gap, not swept into the Tenancy discussion above.",
+    "NOI is not disclosed on this 6/9 snapshot; Basis rests on an [est] all-in build. The enrichment adds a real, sourced pre-6/9 CapEx input (roof/structural repair estimate) that materially changes this from the original replay's price+closing-only all-in -- see inputs.structural_condition.",
+    "REBASELINED 2026-08-15 (n=3/4 -> n=7 for Combined/Quality/Economics, Gabriel-directed): 3 more replays (56.0/59.0/55.0) collected by the forced-repeatability run, same doctrine SHA, same enriched input packet. No leakage risk identified on this deal (not cited in SKILL.md's own text; the ledger-leakage finding was specific to 11850 Hamilton, whose ledger row happens to record a settled outcome -- this deal's own ledger entry, if any, was not read by any of these replays). Golden Combined moved 57.17 -> 56.79 (mean of all 7 known Combined values: the 3 original + the 1 unfolded 2026-08-14 scheduled-poll sample + the 3 new 2026-08-15 samples), a 0.38-pt shift, inside noise.",
+    "CATEGORY-LEVEL DATA IS PARTIAL (n=4 of 7): the original 3 baseline replays (2026-08-14) recorded only combined/quality/economics/expected_score/p_exec_pct in `repeatability.runs` -- their per-category breakdowns were never captured in this file. Only the 2026-08-14 scheduled-poll's 1 extra sample and the 3 new 2026-08-15 samples have full category_breakdown data (n=4). `golden.category_breakdown` below is therefore the mean of those 4 runs, NOT the same 7-run population as `golden.combined`/`quality`/`economics` -- flagged explicitly rather than silently mixing populations. The two are close (category sum on the n=4 subset is 56.5 vs the n=7 scalar mean of 56.79) but are not the same statistic."
+  ],
+  "inputs": {
+    "address": "3492, 3530-3540, 3483-3585 E Fulton St, Columbus, OH 43227",
+    "market": "Columbus OH",
+    "asking_price": 4000000,
+    "price_used_for_scoring": 4000000,
+    "building_sf": 202164,
+    "building_sf_pipeline_variant_post_phase2": 202703,
+    "building_sf_independent_crosscheck": "Per-building sum below = 202,171 SF, within rounding of both figures above -- independently validates the portfolio total.",
+    "year_built": 1966,
+    "year_built_crosscheck": "Franklin County Auditor CAMA (parcel 010-099214-00): 1967. A later re-listing OM states 1998 for part of the North parcels; inadmissible on SOURCE-CREDIBILITY grounds (a re-listing OM's stated vintage is marketing copy, not authoritative the way a county assessor record is), not on the structural-facts freeze-timing theory used elsewhere in this file (year built is exactly as dimensionally stable as clear height, so timing alone would not disqualify it -- REFUTE finding F5). If 1998 were in fact correct for part of the North parcels, the vintage-ramp floor could be mis-specified (1966/67 -> 65% floor vs. a hypothetical newer-construction floor for that portion); immaterial to this deal's verdict since the realized ~90% discount clears either floor by a wide margin. Not used, per source-credibility exclusion -- see known_gaps.",
+    "occupancy_pct": null,
+    "occupancy_note": "Genuinely unknown at 6/9 -- 'rent roll unreconciled' per ORA's own contemporaneous DD status. Do not backfill; see known_gaps.",
+    "asset_type": "Multi-building industrial portfolio, 5 parcels",
+    "noi_annual": null,
+    "noi_basis": "Not disclosed on the 6/9 SCREEN row. A later pipeline cap rate (8.91%, POST-Phase-II) exists but is out of scope for this frozen pre-Phase-II snapshot.",
+    "physical": {
+      "parcel_count": 5,
+      "acreage": 15.67,
+      "basis_per_sf": 19.79,
+      "per_building_sf": {
+        "north_main_building": 126924,
+        "north_main_building_internal_split_if_applicable": "Building A section 74,700 SF + remainder section 52,224 SF -- see main_building_sf_ambiguity",
+        "north_flex_building": 11779,
+        "south_building_a": 29938,
+        "south_building_b": 29530,
+        "south_building_c": 4000,
+        "sum_check": "126924 + 11779 + 29938 + 29530 + 4000 = 202171"
+      },
+      "main_building_sf_ambiguity": "The North 'Main Building' (126,924 SF) reads in the source OM as ONE structure with named internal areas ('Building A' section, 'remainder' section) rather than two discrete buildings -- but every plausible reading (one 126,924 SF building, or two sub-buildings at 74,700 SF and 52,224 SF) breaches the skill's 50,000 SF/building Gate 2 cap. Source: Robert Weiler Co. OM (later re-listing, structural detail only -- see known_gaps).",
+      "construction_type": "Steel frame and masonry (North parcels, sourced OM). South parcels: not specified in available sources.",
+      "clear_height": "18-20 feet average, up to 28 feet in select areas (North Main Building); North Main Building 'Building A' section: 17.5 feet net clearance under a 5-ton crane hook. South parcels: not specified in available sources.",
+      "docks_drive_ins": "North Main Building: 4 dock doors + 5 overhead doors (aggregate); North Main Building 'Building A' section additionally: 6 dock-level truck doors + 1 grade-level truck door + 2 dock-level rail doors + an active Penn Central rail spur. North Flex Building: 5 drive-in doors. South parcels: not specified in available sources (flagged gap, not fabricated).",
+      "power": "120/240V single-phase and 480/277V three-phase (North parcels, sourced OM). South parcels: not specified.",
+      "zoning": "PID 010-085755 (North) = M-Manufacturing (City of Columbus); PID 090-005616 (North) = CCD (City of Whitehall) -- confirms the dual-jurisdiction zoning-variance context already on file (CV91-002A). South parcels: M-zoned throughout per the Crexi listing."
+    },
+    "structural_condition": "Pre-6/9-admissible: forensic-engineer callout for a ~500 SF collapsed area at the North Main Building's NW corner; roof in poor condition (CBRE denied access to inspect pre-6/9); a $150,000 partial repair estimate covers only ~25% of the roof; contingency budgeted $200,000-$400,000 for the remainder. Source: ORA Morning Brief pages dated 2026-04-13/14 (Notion), predating the 6/9 freeze date -- admissible as a known-at-screen-time fact, distinct from the later-confirmed environmental (TCE) finding, which remains excluded.",
+    "environmental_notes": "As of 6/9 (pre-Phase-II): DD-Critical shows 'FEMA UNK; Phase II + roof reports due wk of 6/9; rent roll unreconciled; zoning variance CV91-002A documented.' The confirmed TCE/chlorinated-solvent finding that later terminated this acquisition (2026-07-09) postdates this snapshot and remains intentionally excluded.",
+    "other_facts": "Foreclosure seller (Stearns v. SIJ, lis pendens) -- named seller-motivation signal."
+  },
+  "repeatability": {
+    "note": "7 independent fable-pinned replays against the identical enriched input packet, spanning 2026-08-14 and 2026-08-15. The first 3 (2026-08-14 baseline) never recorded per-category detail -- category_breakdown is null for those, not because the underlying replay had no categories, but because this file's original schema only captured combined/quality/economics/expected_score/p_exec_pct for that batch. See known_gaps 'CATEGORY-LEVEL DATA IS PARTIAL'.",
+    "runs": [
+      {"combined": 58.0, "quality": 33.0, "economics": 25.0, "expected_score": 23.2, "p_exec_pct": 40.0, "category_breakdown": null, "note": "run 1 (2026-08-14 baseline)"},
+      {"combined": 56.0, "quality": 31.0, "economics": 25.0, "expected_score": 19.6, "p_exec_pct": 35.0, "category_breakdown": null, "note": "run 2 (2026-08-14 baseline)"},
+      {"combined": 57.5, "quality": 32.5, "economics": 25.0, "expected_score": 20.1, "p_exec_pct": 35.0, "category_breakdown": null, "note": "run 3 (2026-08-14 baseline)"},
+      {"combined": 56.0, "quality": 31.0, "economics": 25.0, "expected_score": null, "p_exec_pct": null, "category_breakdown": {"basis": 25.0, "yield": 0.0, "product_physical": 10.0, "market_location": 8.0, "seller_motivation": 8.0, "tenancy_lease": 0.0, "value_add": 5.0}, "note": "run 4 (2026-08-14 scheduled-poll; re-replayed against the enriched packet after a mid-run rebaseline by a concurrent session) -- recorded that same day but left unfolded from golden.combined at the time (n=4 mean 56.88 vs shipped golden 57.17, a 0.29-pt shift inside noise)"},
+      {"combined": 56.0, "quality": 31.0, "economics": 25.0, "expected_score": 50.4, "p_exec_pct": 90.0, "category_breakdown": {"basis": 25.0, "yield": 0.0, "product_physical": 10.0, "market_location": 9.0, "seller_motivation": 8.0, "tenancy_lease": null, "value_add": 4.0}, "note": "run 5 (2026-08-15 forced-repeatability run, replay A)"},
+      {"combined": 59.0, "quality": 34.0, "economics": 25.0, "expected_score": 23.6, "p_exec_pct": 40.0, "category_breakdown": {"basis": 25.0, "yield": 0.0, "product_physical": 10.0, "market_location": 10.0, "seller_motivation": 9.0, "tenancy_lease": 0.0, "value_add": 5.0}, "note": "run 6 (2026-08-15 forced-repeatability run, replay B)"},
+      {"combined": 55.0, "quality": 30.0, "economics": 25.0, "expected_score": 22.0, "p_exec_pct": 40.0, "category_breakdown": {"basis": 25.0, "yield": 0.0, "product_physical": 9.0, "market_location": 8.0, "seller_motivation": 8.0, "tenancy_lease": 0.0, "value_add": 5.0}, "note": "run 7 (2026-08-15 forced-repeatability run, replay C)"}
+    ],
+    "combined_mean": 56.79,
+    "combined_stdev": 1.41,
+    "combined_sem": 0.53,
+    "combined_stdev_note": "REFUTE finding F7 (carried forward from the original 3-run computation): sample stdev (ddof=1/Bessel's correction) throughout, matching the methodology used on Port Sheldon and Liberty.",
+    "combined_range": 4.0,
+    "n": 7,
+    "category_breakdown_n": 4,
+    "category_breakdown_note": "Only runs 4-7 recorded per-category detail (n=4 of 7) -- runs 1-3 (the original 2026-08-14 baseline) did not. golden.category_breakdown is therefore a 4-run mean, distinct from golden.combined's 7-run mean. See golden.category_breakdown_note.",
+    "consistency_note": "Tighter than the Port Sheldon/Liberty repeatability check that set the harness-wide 5.0-pt tolerance (that check saw up to a 4.5-pt range, pre-leakage-fix). All 7 runs to date independently agreed on GATE-FLAGGED (per-building size cap), Basis 25.0/25 full points every time, Yield 0.0/20 every time. Variance concentrated in Product & Physical (9.0-10.0 across the 4 runs with category detail) and, to a lesser extent, Market & Location and Seller & Motivation, flowing through to Combined."
+  },
+  "golden": {
+    "baselined_date": "2026-08-15",
+    "baselined_against_skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+    "baselined_method": "combined/quality/economics = mean of 7 independent replays (see repeatability block); category_breakdown = mean of the 4 replays with recorded category-level detail (see known_gaps 'CATEGORY-LEVEL DATA IS PARTIAL'); REBASELINED 2026-08-15 from the n=3 value 57.17 (an n=4 additional-samples figure of 56.88 was recorded 2026-08-14 but left unfolded at the time)",
+    "quality": 31.79,
+    "economics": 25.0,
+    "combined": 56.79,
+    "category_breakdown": {
+      "basis": 25.0,
+      "yield": 0.0,
+      "product_physical": 9.75,
+      "market_location": 8.75,
+      "seller_motivation": 8.25,
+      "tenancy_lease": null,
+      "value_add": 4.75
+    },
+    "category_breakdown_n": 4,
+    "category_breakdown_note": "This breakdown is the mean of only the 4 runs (of 7) that recorded per-category detail -- see known_gaps 'CATEGORY-LEVEL DATA IS PARTIAL'. Its own category sum (25+0+9.75+8.75+8.25+0+4.75=56.5) does not exactly equal golden.combined (56.79) because they are means over different n (4 vs 7). Do not treat this as an inconsistency in aggregate_replays.py -- it is a data-availability gap in the original 3 baseline runs, documented rather than backfilled.",
+    "expected_score": 26.48,
+    "expected_score_note": "Mean of the 6 runs with a recorded expected_score (23.2/19.6/20.1/50.4/23.6/22.0); the 2026-08-14 scheduled-poll's extra run (run 4) did not record one and is excluded from this mean, not treated as 0.",
+    "p_exec_pct": 46.67,
+    "p_exec_pct_caveat": "REFUTE finding F7 (carried forward): this mean is informational only, not a real P(exec) value -- P(exec) is assigned from discrete named bands (SKILL.md STAGE 2.2), and no single run actually produced this exact figure; averaging across runs that picked different discrete bands manufactures false precision. Do not cite this figure as an authoritative P(exec) band placement. Computed over the 6 runs with a recorded p_exec_pct (40/35/35/90/40/40); the 2026-08-15 run 5's 90.0% is a notably different band placement than the other 5 (35-40%) -- run 5's own notes placed it in the 'under LOI/PSA' band on the theory that the 6/9 DD-Critical record shows Phase II + roof reports already commissioned, a reading the other 5 runs didn't share. Worth a closer look if this deal is ever re-scored live, but not adjudicated here.",
+    "verdict_tier": "PASS-band (GATE-FLAGGED -- per-building 50K SF cap breached under every reading of the North Main Building; T2 WATCH ceilings from bear-mode UNKNOWN + FEMA UNK + unresolved reassessed tax are non-binding on a sub-60 raw score, per the Stage 2.5 disambiguation)",
+    "floor_result": "Basis floor CLEARS (~90.2% discount to RCT v03 Columbus LOW $229.65/SF at an all-in of ~$22.41/SF, vs the 65% vintage-ramp floor; every building individually clears at its Portfolios-sub-rule allocated price). Yield/IRR/DSCR/carrying-cost floors UNRESOLVABLE from frozen facts (no NOI, no millage pull permitted) -- flagged unknown, not breached.",
+    "replay_notes": "Enrichment closed the Economics-blind-spot this row previously represented (Basis moved from an [est] price+closing-only figure to a real CapEx-supported build using the sourced structural-condition finding) and surfaced a genuine new Gate 2 breach (per-building SF cap) the original 6/9 screen could not have caught -- no per-building SF existed in the archive until this enrichment. Tenancy & Lease stays null by design: occupancy was a confirmed unknown at screen time ('rent roll unreconciled'), and per the skill's own vacancy-reallocation rule, an UNKNOWN occupancy is not the same as a CONFIRMED-vacant one, so VA does not absorb Tenancy's 7 points here the way it does on Port Sheldon (which was confirmed 0% occupied). All 3 replay runs applied this distinction identically without being told to reason about it beyond the frozen facts -- a good sign the skill's documented vacancy-reallocation rule is unambiguous on this point."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-09 (pre-Phase-II), before the 2026-07-14 RCT v03 recalibration. NOT the diff target.",
+    "quality": 40,
+    "economics": 25,
+    "combined": 65,
+    "quality_plus_economics_check": "40 + 25 = 65, matches archived Combined exactly.",
+    "expected_score": 58.5,
+    "p_exec_pct": 90,
+    "archived_verdict_tier": "T2 WATCH (consistent with pre-v03 VERDICT BANDS applied to Combined=65)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tolerance_rationale": "Matches the harness-wide tolerance set from the Port Sheldon/Liberty repeatability check.",
+    "tier_check": "informational_only",
+    "reason": "MEDIUM confidence: 6 of 7 scorecard categories now resolved from real, sourced facts (up from 5 of 7). Tenancy & Lease stays null by design, not by gap -- occupancy was a genuine unknown at the 6/9 screen date and backfilling it would violate the frozen-snapshot discipline. Scored (gates PASS/FLAG) because Economics is now well-supported (a real CapEx input from the structural-condition finding, not just price+closing) -- this is the row that closes the harness's prior Economics-blind-spot (see SKILL.md Limitations)."
+  }
+}

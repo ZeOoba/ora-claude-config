@@ -1,0 +1,582 @@
+{
+  "lastUpdated": 1789851966333,
+  "skills": [
+    {
+      "skillId": "skill_01FkUaQciMD1f1qs5CuGg9nH",
+      "name": "parcel-data-recovery",
+      "description": "County-level building SF, market value, year-built, and tax-delinquency recovery for Oxford Realty Advisors off-market parcel screens. Use when the user mentions: recover SF, missing building SF, parcel data gap, UNSCREENABLE rows, DATA-GAP rows, county GIS pull, footprint SF, assessor values, CAMA extract, refresh parcel data, re-run P1 on recovered data, off-market master rebuild, or when an off-market screen workbook has rows lacking Bldg SF or auditor values. Encodes verified endpoints (per `references/endpoints.md`, live-monitored quarterly by `ora-gis-endpoint-liveping`) for Jackson MO, Wyandotte KS, Clay MO, Hamilton/Butler/Clermont/Warren OH, footprint-vs-GBA rules, value-basis conversions (calibrated per-county, never assumed — Iron rule 10; RCT floor-discount is the default when Year Built coverage can't support a true cost approach), P1 Buy Box recompute math, the v03/v04 QC gate, and RCT-version import (Iron rule 11). Companion to county-parcel-screen; patches an existing master. v1.9",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:39.419608Z",
+      "backingPluginId": "plugin_01Sr4A3RA6LCW9EMLTCAuKL5"
+    },
+    {
+      "skillId": "skill_01XmzFNQ2Ry3d5h3J5BRSoAu",
+      "name": "capital-asset-register",
+      "description": "Maintain ORA's per-property building asset register — nameplate capture, remaining useful life, and the replacement pipeline that feeds the annual capital plan. Trigger on: asset register, equipment register, how old is this unit, what model is it, nameplate, serial number, remaining useful life, EUL, when does this need replacing, replacement pipeline, building systems inventory, walk the roof, capital plan inputs.",
+      "source": "plugin",
+      "updatedAt": "2026-09-18T15:04:42.861968Z",
+      "backingPluginId": "plugin_01DJSM5GFWCcaJGVysRgBpmW"
+    },
+    {
+      "skillId": "skill_01KVGM41ToAgoQBDwiKemQs5",
+      "name": "insurance-climate-risk-comparison",
+      "description": "Compares insurance costs and natural-disaster/climate-change risk for a target market against the national average and Oxford Realty Advisors' other target markets, for underwriting and market-entry decisions. Use when the user mentions: insurance cost comparison, climate risk, natural disaster risk, climate change risk, disaster exposure, hazard risk, how a market compares on insurance or climate, or is evaluating a new/entry-phase target market and needs its risk profile benchmarked against the portfolio. Pulls FEMA National Risk Index composite + per-hazard scores by county, and insurance $/SF (ORA's own realized premiums where owned, a public proxy elsewhere). Distinct from insurance-renewal-review (single-property premium history/renewal decisions) and ora-flood-zoning-dd (single-parcel FEMA flood-zone/zoning DD-Critical gate) — this skill is MARKET-level and comparative, and never gates a deal. v1.0",
+      "source": "plugin",
+      "updatedAt": "2026-09-11T19:04:50.150145Z",
+      "backingPluginId": "plugin_01Ny3276QEMzenfwaZm6HzGA"
+    },
+    {
+      "skillId": "skill_01HEfZPm3W9V7Rwbhny1TuTb",
+      "name": "vendor-management",
+      "description": "Two modes for ORA's vendor relationships. MANAGE (default): prequalification, scoring, RFP issuance, contract intake, performance review — trigger on vendor, contractor, RFP, prequalify, vendor score/performance, 1099, W-9, COI, MSA, concentration, rebid, onboarding/offboarding, vendor audit. QC: pre-execution defect scan of a SINGLE repeat-trade proposal or service agreement where an ORA property entity is/should be Owner — trigger on QC this vendor contract, review this proposal before I sign, contractor proposal, service agreement, should we sign this bid, or an uploaded proposal/bid. Scans 27 defects at BLOCK/HIGH/MED/LOW. Multi-bid leveling routes to capital-bid-comparison. Distinct from pma-qc, listing-agreement-qc, legal-intelligence. 18 PROPOSED QC positions, unratified. v2.1",
+      "source": "plugin",
+      "updatedAt": "2026-09-18T15:04:49.094131Z",
+      "backingPluginId": "plugin_01PRgQpGuF8rU9XU5PAqvEpA"
+    },
+    {
+      "skillId": "skill_014HuWQSXz6sef3Zv2hhwG1E",
+      "name": "annual-cycle",
+      "description": "Year-end and annual planning cycle for Oxford Realty Advisors — twin to monthly-close. Use when the user mentions: year-end, annual close, annual budget, year in review, tax planning, annual report, 1099 cycle, K-1 prep, audit prep, year-end distribution, fiscal year close, annual cycle, or any task related to the firm's annual rhythm. Distinct from portfolio-reporting, which owns investor and portfolio reporting deliverables. Powers the ora-annual-budget-kickoff (Nov 1) and ora-year-end-review (Dec 15) scheduled tasks. v1.0",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:22.503855Z",
+      "backingPluginId": "plugin_01NLBSa3pC3o2NsEREaxbYdH"
+    },
+    {
+      "skillId": "skill_013hYMwNwpgN5ZNcdcsNoxEm",
+      "name": "owner-outreach",
+      "description": "Oxford Realty Advisors weekly off-market owner cold-outreach pipeline. Use whenever the user mentions owner outreach, off-market letters, T1 letter pack, cold outreach queue, owner mailing, motivated seller outreach, off-market owner letters, or asks to refresh/run/check the weekly owner-outreach cycle -- even if they just say \"run outreach\" or \"what's in the owner outreach queue this week.\" Promotes qualifying parcels from the off-market master (built by parcel-data-recovery / acquisition-underwriting off-market screens) into a dated queue, dedups against the Notion Owner Outreach ledger, drafts T1 cold-outreach letters on ORA letterhead, and reports promoted/net-new counts. DRAFT ONLY -- this is outbound counterparty communication (Hard Invariant 1); nothing is ever sent without Gabriel's explicit confirmation. v1.3 (2026-08-24: see Changelog).",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T22:05:15.953516Z",
+      "backingPluginId": "plugin_014GBovkq4Jqd1jMqvz32JUi"
+    },
+    {
+      "skillId": "skill_01TQ84gxX4emKNoirSpwiUHf",
+      "name": "capital-bid-comparison",
+      "description": "Level two or more contractor proposals for the same building-system scope into a comparable basis, code-check each, allocate risk, and produce an award recommendation plus per-contractor RFI lists. Trigger on: compare these proposals, bid comparison, bid leveling, normalize these bids, apples to apples, which contractor should we use, award recommendation, scope gap, RFI list, or two or more uploaded proposals for the same work. Hands the winning bid to vendor-management QC before signature.",
+      "source": "plugin",
+      "updatedAt": "2026-09-18T15:04:36.694738Z",
+      "backingPluginId": "plugin_01R7NQamKvxJCManAE3S3Tv4"
+    },
+    {
+      "skillId": "skill_015rm93Mj5wY8zHZWatHosB1",
+      "name": "cash-position-monitor",
+      "description": "Multi-entity cash position consolidation across QuickBooks accounts. Use when the user mentions: cash position, cash balance, treasury, reserve adequacy, distribution headroom, cash forecast, weekly cash, daily cash, intercompany, sweep account, cash concentration, debt service coverage of cash, or any task requiring real-time consolidated cash visibility. Powers the ora-cash-position-snapshot scheduled task and the ora-cash-position artifact. v1.0",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:25.154286Z",
+      "backingPluginId": "plugin_016UTy7rbEeNNcrvkRFFfhWF"
+    },
+    {
+      "skillId": "skill_01LZwYQLGNet62kJcxV6inV5",
+      "name": "portfolio-growth",
+      "description": "Oxford Realty Advisors long-term portfolio growth modeling and strategic capital planning. Use when projecting AUM growth, calculating acquisition capacity, modeling scenarios, or planning capital deployment. Triggers: AUM projection, growth model, acquisition capacity, capital plan, portfolio trajectory, scenario analysis, how much can we buy, compounding model, path to 700M, 35-year model. Distinct from capex-budgeting, which owns building-system reserve and replacement planning. v1.0",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T22:04:56.805884Z",
+      "backingPluginId": "plugin_01TckhrjG3jb1JBCB1KLXsy4"
+    },
+    {
+      "skillId": "skill_012LaApNHVTHpCbhXf5ic7eB",
+      "name": "security-and-hardening",
+      "description": "Hardens code against vulnerabilities. Use for a dedicated security review or hardening pass — authentication, data storage, external integrations, or untrusted-input handling — once a feature exists or is designed. Generic \"build a feature\" / \"fix a bug\" requests route through Engineering OS's lane triage first; this applies once security is the explicit ask, not as a first-touch gate on every feature.",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:39.579977Z",
+      "backingPluginId": "plugin_011ZfJ5QZosudcq4ubJbJxX8"
+    },
+    {
+      "skillId": "skill_013iSpKFazPkZYDqCbVPhZNa",
+      "name": "county-sales-monitor",
+      "description": "ORA recurring industrial sales/transfer digest. Pulls recently RECORDED industrial sales (bldg SF <150,000) from county-parcel-screen's endpoint registry on a trailing 30-day window, flags non-arms-length/nominal transfers, and writes each transaction into a queryable Notion comps database with $/SF where derivable. Trigger on: recent industrial sales, county sales tracker, sales digest, transaction monitor, comp tracking, recent county transfers, industrial sales this month, what traded, who's buying or selling industrial in a market, new comps since [date], set up a sales feed — Franklin OH / Baltimore Co MD / Polk IA at launch, other ORA markets are a documented next phase. MARKET INTELLIGENCE, not sourcing: does NOT replace county-parcel-screen (off-market owner call lists, motivated sellers, delinquent-tax/estate leads). Single-property comp grids route to acquisition-underwriting COMPS mode. v0.5 — changelog in body.",
+      "source": "plugin",
+      "updatedAt": "2026-09-07T15:58:32.327747Z",
+      "backingPluginId": "plugin_017JVNCc6hCMB4PE6CSm6EcX"
+    },
+    {
+      "skillId": "skill_015uA2kVSEkP4VRVUavYzpxa",
+      "name": "lease-generation",
+      "description": "Oxford Realty Advisors NEW-LEASE production skill — from an LOI, broker term sheet, e-mail or typed deal terms to an execution-ready lease on ORA landlord paper, with a tracked-change redline and an LOI conformance memo. Use when the user says: generate the lease, draft the lease from this LOI, fill in the lease template, new lease for [suite/tenant], make the lease match the LOI, lease from these terms, produce the lease, or uploads an LOI/proposal to lease and wants a lease. Pipeline: DEAL-TERMS-REGISTER → property template (never the last executed lease) → token fill + clause modules (option, gross vs modified gross, escalations, overnight parking, landlord work, maintenance split, co-tenant) → LOI conformance matrix → cross-reference audit → lease-form-qc gate → clean DOCX + PDF + redline. NOT amendments (lease-addendum), template maintenance (masterlease-jurisdiction-rebase), counterparty paper (legal-intelligence) or LOIs (loi-generation). Draft only — outbound send needs confirmation. v1.0",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:35.794141Z",
+      "backingPluginId": "plugin_01Ap95wutSjb2wMkFmbdbSvr"
+    },
+    {
+      "skillId": "skill_01X1Pw2a52dVgKtLEjhzfQje",
+      "name": "pma-qc",
+      "description": "Pre-execution and pre-renewal QC gate for PROPERTY MANAGEMENT AGREEMENTS on third-party manager paper where Oxford Realty Advisors or an ORA entity is the Owner. Use when the user says: QC this management agreement, review the PM agreement, property management agreement, management agreement review, PM fee review, can I give leasing to another party, can the manager sign contracts for us, terminate the property manager, or uploads a DOCX/PDF that is a property management agreement. Run before signing, before every auto-renewal, and before engaging a third-party leasing broker. Scans 34 defects (exclusive leasing grant with no per-property carve-out, manager authority to execute leases or trade contracts in its own name, indemnity reaching the manager's own negligence, undefined fee bases, no turnover obligations) at BLOCK/HIGH/MED/LOW. Distinct from lease-form-qc, listing-agreement-qc and legal-intelligence. 19 PROPOSED positions, unratified. v1.2",
+      "source": "plugin",
+      "updatedAt": "2026-09-11T17:25:14.160628Z",
+      "backingPluginId": "plugin_01MhYo7j9h7ckNkdQeXaC9cE"
+    },
+    {
+      "skillId": "skill_016Sp89bqkTbiV8o1PMyDjN5",
+      "name": "county-parcel-screen",
+      "description": "ORA county-parcel direct-to-owner acquisition screen. Pulls a county's industrial parcel universe from public auditor/assessor data, calibrates auditor values to market empirically, scores every parcel 0-100 against the ORA buy-box, mines delinquency / estate / seller-in-motion motivation signals, and delivers ranked call-list workbooks. Use this skill whenever the user mentions: parcel screen, county screen, off-market sourcing, direct-to-owner, owner outreach list, cold call list, delinquent tax leads, motivated sellers, estate owners, sellers in motion, county auditor data, assessor data, parcel data, or asks to find off-market industrial acquisition candidates in ANY target market (Columbus, Cincinnati, Kansas City, Indianapolis, Maryland, Madison, Grand Rapids, Richmond, Des Moines, or a new county). Also trigger for \"next market\", \"run the screen on X\", or any request to build owner-level lead lists from public property records. v1.1 — changelog in body.",
+      "source": "plugin",
+      "updatedAt": "2026-09-07T17:14:02.493343Z",
+      "backingPluginId": "plugin_01RMHXXB22qQ55oiQ4y8pDKf"
+    },
+    {
+      "skillId": "skill_01RNxZtVAVpL29E3kje3eUhD",
+      "name": "acquisition-underwriting-eval-harness",
+      "description": "Golden-set regression harness for the acquisition-underwriting skill — replays a frozen set of 6 past SCREEN-mode deals against CURRENT SKILL.md doctrine, diffs the resulting Combined score against a re-baselined golden snapshot, flags deltas beyond tolerance, and writes a dated re-runnable snapshot. Use after any material doctrine edit to acquisition-underwriting (a scorecard-weight amendment, a new QC-gate rule, a ruling/amendment) to check whether the change actually moved scores and by how much — not a live deal-evaluation tool, never invoke this for an actual acquisition screen. PILOT — piloted on one skill only; registered 2026-08-14 as a daily-polling scheduled task.",
+      "source": "plugin",
+      "updatedAt": "2026-09-17T19:40:52.647554Z",
+      "backingPluginId": "plugin_01HEZpFAjYKk6ycmhP1CBiS9"
+    },
+    {
+      "skillId": "skill_01SihfZDmxtPpshjAXSSGkT2",
+      "name": "package-and-stage-skill",
+      "description": "ORA skill packaging and staging helper — companion to ora-skill-store-drift-check. Use when the user says: package a skill, stage a skill, repackage skill, re-upload skill, install pre-packaged .skill, or after a drift check reports \"repo newer → re-upload needed\". Packages the repo copy into a validated, Cowork-importable .skill via tools/package_skills.py (never Compress-Archive). Hash-prechecks cache content; short-circuits only on a corroborating main.log install, never a bare hash. Stages it and surfaces the Save-skill installer. Does NOT register — Gabriel clicks Save skill. Multi-file skills route to Cowork, not desktop Settings. Logs confirmed installs to event_log.md, then clears PENDING_REIMPORT. Plugin-bundled skills rebuild the plugin. Entry point B asserts the package exists first; missing means first build. Pre-flight gate asserts name==dir and description <=1024 — both fail SILENTLY at import. Closing sweep before sign-off. v1.32",
+      "source": "plugin",
+      "updatedAt": "2026-09-07T17:14:36.837439Z",
+      "backingPluginId": "plugin_01C3c51yKs6NuGcHhXioX4AQ"
+    },
+    {
+      "skillId": "skill_01MPtcsJ17xTkV59u8ysWgci",
+      "name": "ora-millage-lookup",
+      "description": "Resolve a parcel's property-tax rate and taxable base from verified government endpoints for Oxford Realty Advisors acquisitions. Use whenever the user mentions: millage, mill rate, certified tax rate, effective tax rate, property tax lookup, tax rate by district, assessed value lookup, assessment lookup, taxable value, tax history, county assessor pull, auditor tax record, parcel tax record, reassessed tax, or when an acquisition SCREEN/UNDERWRITE has an unresolved property-tax figure. Companion to acquisition-underwriting STAGE 2.5 item 5 (millage lookup ladder), which caps any deal with an unknown reassessed tax at T2 WATCH. Distinct from tax-appeal, which owns the assessment-challenge workflow; this skill only resolves the rate and base. Produces a sourced rate + taxable-base block per parcel. v1.1 — changelog in body.",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T22:04:48.698059Z",
+      "backingPluginId": "plugin_01Qw6ciKCWPpmRb1L9R4SyrX"
+    },
+    {
+      "skillId": "skill_01EM53un3t5e8gougYwgBf5x",
+      "name": "exception-detection",
+      "description": "Automated anomaly and exception detection across Oxford Realty Advisors operations. Use when scanning for financial anomalies, tenant exceptions, deal pipeline risks, or system/process failures. Triggers: exception scan, anomaly detection, what's wrong, flag issues, portfolio exception scan, scan for problems, audit exceptions, find anomalies, red flags. Tenant risk scoring / WALT / concentration analytics route to tenant-intelligence. v1.5 — changelog in body.",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T22:04:21.754626Z",
+      "backingPluginId": "plugin_011F2c6yDN9wVgrSNnmdhNJb"
+    },
+    {
+      "skillId": "skill_01T1eJhuHCJLQ4tAkB8cZQGQ",
+      "name": "tenant-intelligence",
+      "description": "Tenant risk scoring, renewal probability prediction, and portfolio analytics for Oxford Realty Advisors. Use when analyzing tenant risk, predicting renewals, calculating portfolio health metrics, or generating predictive flags. Triggers: tenant risk, renewal probability, portfolio health metrics, WALT, revenue concentration, HHI, tenant score, at-risk tenant, delinquency analysis, occupancy analysis. Exception/anomaly scans route to exception-detection; fleet health to automation-health-monitor. v1.1",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T22:04:25.305963Z",
+      "backingPluginId": "plugin_01B2DjCURpJmGk2DUULQgCsC"
+    },
+    {
+      "skillId": "skill_012sfF7jGW9idp8M5RXQykiG",
+      "name": "deal-folder-intake",
+      "description": "Archive an uploaded or received acquisition document package into a permanent, hash-verified Oxford Realty Advisors deal folder — structure, byte-verification, source manifest, OneDrive mirror, and memory pointer. Use when the user says: store this deal, archive this package, save these files for [property], file this broker package, set up a deal folder, keep this for the record, or uploads a multi-file acquisition package (OM, leases, tax bills, site plan, Argus/CoStar exports, models, IC memos) without asking for an underwrite. Does NOT underwrite, screen, or price — that is acquisition-underwriting; does NOT pre-screen a single target — that is verified-deal-recon. Run it AFTER an underwrite to make the package permanent, or standalone to park a package that has not been underwritten yet. v1.0",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T18:09:33.313668Z",
+      "backingPluginId": "plugin_01MgpmYCnjRhwomuAcGxhb2k"
+    },
+    {
+      "skillId": "skill_01X2EDEjH5SrLgEfEm1Dyukx",
+      "name": "disposition-analysis",
+      "description": "Oxford Realty Advisors hold / refinance / 1031 / sell decision engine. Use when the user mentions: should we sell, hold or sell, disposition, dispose of, exit an asset, recycle or prune the portfolio, 1031, like-kind exchange, replace an asset, refinance vs sell, harvest gains, cash out, when to sell, or keeping vs selling a property. Defaults to HOLD + cash-out refinance for liquidity (ORA generational-hold doctrine); when capital is recycled the default exit is a 1031 exchange; a taxable sale is the rare exception that must clear a high bar. Charges the forfeited estate step-up and deferred depreciation recapture (Sec 1245 ordinary + unrecaptured Sec 1250 + LTCG + NIIT + state) against any taxable sale; models the 1031 deferral (carryover basis, 45/180-day, QI, boot) and the estate step-up overlay. Produces a hold/refi/1031/sell recommendation with tax-charged net proceeds. Conforms to the ORA Tax-Inclusive Underwriting Standard. Refi execution (term sheets, lender selection) routes to debt-management. v1.3",
+      "source": "plugin",
+      "updatedAt": "2026-09-10T18:36:14.748864Z",
+      "backingPluginId": "plugin_01AM61M29GFtXNMkpABCtpev"
+    },
+    {
+      "skillId": "skill_017q8vdPaqYQqVYNkWdKd2KM",
+      "name": "deal-execution",
+      "description": "Oxford Realty Advisors deal execution skill covering PSA negotiation through closing. Use when the user mentions: PSA, purchase and sale agreement, due diligence, DD checklist, redline analysis, seller response, closing checklist, title review, environmental review, estoppel content/DD conformance (drafting an actual certificate routes to estoppel-request-generation), closing statement, post-closing, deal execution, under contract, PSA negotiation, seller redlines, buyer provisions, contract markup, review PSA draft, PSA vs LOI, check the PSA against the LOI, LOI conformance. Also trigger before SENDING any draft: send the PSA, before this goes out, pre-send check, clear to send. Workflow 2A reviews ANY inbound draft against the executed LOI + deal-terms register; Workflow 2B gates every OUTBOUND draft against prior review memos, the LOI, the register, and the 6 mandatory buyer protections. Handles Litera/Workshare compare files, which carry no tracked changes. v1.8",
+      "source": "plugin",
+      "updatedAt": "2026-09-10T18:36:13.157179Z",
+      "backingPluginId": "plugin_01SdFqycEVzr3jV75begNFM6"
+    },
+    {
+      "skillId": "skill_01KaozfTdatmfAQgfnncjxdA",
+      "name": "register-scheduled-task",
+      "description": "Register, update, pause, or retire an ORA scheduled task via the supervised create_scheduled_task/update_scheduled_task MCP tools ONLY. JSON-splice registration is PROHIBITED (proven 2026-06-09). Use when the user says register/schedule/add a cron task, update a task's cron, pause/disable/retire a task, or any skill/workflow needs a new recurring job. Encodes the dual-fleet registry model (CC/MCP + LAMS/Cowork), routing canon (ggoldberg-only; Daily Brief cc-Eric exception), COM-only send path, PAUSE-vs-RETIRE, cross-fleet blast radius, a fire-time sanity check, a cloud-vs-on-device surface note, an id-collision rule, a bounded-pause rule (resume per fleet, same pass; fireAt collision-checked against period-bounded slots and overlapping one-time efficacy checks), a progress-marker convention, a pre-flight surface assertion, a dispatch-time surface-routing rule (LAMS writes go only to a named on-device session), and the registration QC gate. v2.21 (2026-09-07)",
+      "source": "plugin",
+      "updatedAt": "2026-09-07T17:14:40.162581Z",
+      "backingPluginId": "plugin_019GervmY1BSvci4kDuq6jGQ"
+    },
+    {
+      "skillId": "skill_01QwApr8Fwp5EXzaeWdqA6aM",
+      "name": "acquisition-underwriting",
+      "description": "Oxford Realty Advisors acquisition underwriting and deal evaluation skill — Buy Box & Scorecard schema rev 1.1. Trigger on: underwriting, deal analysis, acquisition, screen this deal, LOI, PSA, due diligence, cap rate, pro forma, IRR model, yield on cost, replacement cost, broker package, offering memorandum, OM, buy box, scorecard, expected score, P(exec), evaluating a purchase, Crexi, LoopNet listing. Also trigger on: industrial/flex market research (Columbus, Cincinnati, Kansas City, Indianapolis, Maryland, Madison, Grand Rapids, Richmond, Des Moines, Louisville KY), broker package or OM upload. Modes: SCREEN · SNAPSHOT · UNDERWRITE · COMPS · FULL. Computes pro-forma reassessed property tax and total carrying cost ($/SF) per a 10-state reassessment matrix; trigger also on: carrying cost, operating expense, OpEx per SF, property tax reassessment, reassessed taxes, transfer tax, controlling-interest, abatement, PILOT, drop-and-swap. v4.20",
+      "source": "plugin",
+      "updatedAt": "2026-09-10T18:36:10.824327Z",
+      "backingPluginId": "plugin_01FZxTYYuPoHBgb2une2UUW7"
+    },
+    {
+      "skillId": "skill_01T9MtyBiq6TwaFdvQezcSXH",
+      "name": "ora-setup-audit",
+      "description": "Formal investigation of Gabriel's Claude Code/Cowork setup — skills, plugins, MCP connectors, hooks, and the dual scheduled-task fleet — scored for accuracy, performance, and token spend, with a keep/fix/combine/delete call on each finding. Use when Gabriel asks to audit, refine, optimize, or investigate his Claude Code setup, wants to reduce token spend, asks what's redundant or safe to remove, wants to prune/declutter/clean up unused skills/plugins/connectors/routines, or references \"the artifact\" meaning the System Schematic or the Automation Audit. Continues the existing \"ORA Automation Audit\" artifact as a new revision rather than starting fresh — check for it first via Artifact action:list before assuming none exists. THE canonical skill for this class of request — see Changelog before building a parallel one. Formerly claude-setup-audit; renamed 2026-08-13 (platform rejects skill names containing \"claude\"). v1.12",
+      "source": "plugin",
+      "updatedAt": "2026-09-07T17:14:06.147769Z",
+      "backingPluginId": "plugin_01Uf2jPN5fzQfnsmugx9TPVb"
+    },
+    {
+      "skillId": "docs",
+      "name": "docs",
+      "description": "docs (living docs people share, comment on and edit; use only when the user asks for one: names a doc, document, page, memo, spec, PRD, runbook or write-up, asks for somewhere to share or keep editing something, or says yes to your doc offer; a plan, comparison, summary or notes asked in chat stays in chat (at most a one-line doc offer); a report, status update, recap or \"something I can send them\" with no form named → ask first: reply, doc or file?; tabs hold tables and live charts too; a pasted claude.ai/code/artifact/… link may be a doc: check with docs tools first; not HTML pages, apps or plain chat answers; a .docx/.pptx/.xlsx/PDF asked for by name → that format's skill): asked for one → no docs-connector instructions in context? call the docs connector's `guide` with topic.instructions first, then create the doc (headings only, no body) before any search, file read or plan, even with files attached. Documenting code means docstrings or repo docs, not a doc.",
+      "source": "anthropic-example",
+      "updatedAt": "2026-09-16T00:10:45.680014Z"
+    },
+    {
+      "skillId": "skill_01QpvEQEdesRRqBY3LF6j3aq",
+      "name": "daily-brief",
+      "description": "Oxford Realty Advisors daily morning intelligence brief. Covers CRE news, industrial transactions, market rates, portfolio watch, ops tip, reading list, CRE law/regulatory watch, shallow bay case study, and competitive intelligence. Use when the user says: daily brief, news, morning brief, CRE news, what's happening today, what should I know. v2.14 (2026-09-19: Sections 1/2/7/9 now fetch a tested fixed source list directly and keep only items whose date is read from the source, with mandatory [DATE UNVERIFIED] tagging; Section 2 declared thin by design because LoopNet/CoStar/Crexi are blocked). v2.13 (2026-09-12: Section 3 FRED prologue table mapped \"30-Day SOFR\" to SOFR30DAYAVG instead of overnight SOFR, added a separate SOFR (overnight) row, fixed the T+1 lag caveat, and added Rate Snapshot prefetch_status/fetched_at staleness disclosure — OI-283)",
+      "source": "plugin",
+      "updatedAt": "2026-09-19T20:38:35.564848Z",
+      "backingPluginId": "plugin_01CBZELjs4NgcBRe5eCwG7bx"
+    },
+    {
+      "skillId": "skill_01EQotJ39NBJ28b8D1SwYsko",
+      "name": "debt-management",
+      "description": "Oxford Realty Advisors debt management, capital-markets, and payoff-statement skill. Use when the user mentions: refinance, refi, term sheet, lender selection, loan negotiation, DSCR, debt yield, LTV, debt covenant, lender call, prepayment, defeasance, swap, rate cap, hedge, balloon, maturity, loan reserves, lender package, lender comparison, capital stack, recap, mezzanine, preferred equity. ALSO the SOLE path for PAYOFF STATEMENTS in either direction — trigger on: payoff statement, payoff letter, payoff figure, payoff good through, per diem, payoff demand, title company payoff request, authorization to obtain/release payoff, our borrower is refinancing, seller-financed note payoff, satisfaction or release of a note we hold, or auditing a payoff quoted TO us. Also trigger when the user uploads a term sheet, commitment letter, lender proposal, amortization schedule, or a title-company payoff authorization form. Strategic hold/refi/1031/sell decisions route to disposition-analysis first. v1.4",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:28.531007Z",
+      "backingPluginId": "plugin_012aJqKB3sU6T6KDT8CPbz4r"
+    },
+    {
+      "skillId": "skill_01L3bFmGeF2pP1UbnniQETyD",
+      "name": "lease-form-qc",
+      "description": "Pre-execution QC gate for leases drafted on Oxford Realty Advisors own landlord form (Fairground Village Center / 1100 Rarig Ave / Sepich portfolio paper). Use when the user says: QC this lease, check this lease before signing, lease form check, run the lease QC, review our lease draft, new tenant lease, lease from the template, or uploads a DOCX that is an ORA-form lease. Also run before ANY outbound lease goes to a tenant or broker. Scans 51 systemic defects in the ORA base form (dead cross-references, undefined terms, OpEx billing, statutory cites, Ohio mitigation exposure) plus a token gate and footer tenant-mismatch check (53 checks) with PASS/FAIL severity. Also runs --loi-conformance: register vs. drafted lease, CONFORMS/CONFORMS+/PARTIAL/MISSING/CONFLICT matrix, for lease-generation's LOI gate. Carries ORA's six ratified standing lease positions (2026-08-03). Distinct from legal-intelligence: audits ORA's OWN paper. v2.6 (T2 tenant-mismatch check + --loi-conformance mode; 53 checks)",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:33.748358Z",
+      "backingPluginId": "plugin_011Szyey7hcQ5TUrfEtUn8VK"
+    },
+    {
+      "skillId": "skill_01EdysDcJd172xhSVrpVGxqf",
+      "name": "lease-renewal-pipeline",
+      "description": "Flag upcoming lease expirations across the portfolio and route renewal-letter drafting through document-assembly. Use when the user mentions upcoming lease expirations, renewal pipeline, which leases are expiring, renewal tracking, expiring leases this quarter, or asks to check/run the lease renewal cycle. Does not itself draft a letter or score tenant risk — see document-assembly and tenant-intelligence. v1.2",
+      "source": "plugin",
+      "updatedAt": "2026-09-09T23:48:38.361716Z",
+      "backingPluginId": "plugin_01MVbgVDa9F67E8SRdYGixkG"
+    },
+    {
+      "skillId": "skill_01UCSfKAzVKtJhABNJnNnULX",
+      "name": "listing-agreement-qc",
+      "description": "Pre-execution QC gate for BROKER LISTING AGREEMENTS on counterparty paper where Oxford Realty Advisors is the Owner. Use when the user says: QC this listing agreement, check this listing before I sign, review the brokerage agreement, listing agreement review, compare listing agreements, exclusive right to sell, exclusive right to lease, commission schedule, broker engagement, or uploads a DOCX/PDF that is a listing agreement. Run before ANY listing is signed or countersigned. Scans 25 systemic defects (dual gross-price definitions, missing excluded-prospect and affiliate carve-outs, automatic holdover, unconditioned tail, lease language in a sale-only instrument, blanket dual agency, missing lender-consent and Ohio agency-disclosure hooks) with BLOCK/HIGH/MED/LOW severity. Carries ORA's sixteen ratified standing listing positions. Distinct from lease-form-qc (ORA's own lease paper) and legal-intelligence. v1.3",
+      "source": "custom",
+      "updatedAt": "2026-08-24T19:21:53.589704Z"
+    },
+    {
+      "skillId": "skill_01FPtiGYrHC8m3BnS6SF6Re6",
+      "name": "masterlease-jurisdiction-rebase",
+      "description": "Rebase Oxford Realty Advisors jurisdiction-conformed Master Lease property templates onto a new master revision in one command, and generate state-conformed (MD/MO) property templates from the OH-anchored master. Use whenever the user mentions: new master lease version, rebase the lease templates, regenerate the MD/MO templates, jurisdiction overlay, conform the lease to a state, state-conformed lease template, update property lease forms, lease template for Easton / Salisbury / Northwood / Raytown / Columbia, or uploads a new ORA_MasterLease_ShallowBayIndustrial_v*.docx. Also use when adding a NEW property or state overlay, or converting a property to NNN. Edits the master DOCX in place with asserted-count substitutions. Companion to lease-form-qc (which QCs drafted leases); this skill produces the templates leases are drafted FROM. v1.7",
+      "source": "custom",
+      "updatedAt": "2026-08-24T19:21:37.084841Z"
+    },
+    {
+      "skillId": "skill_01RA7x64wMCJxLLZ5PryEL5M",
+      "name": "settlement-basis-extraction",
+      "description": "Extract acquisition/disposition data from HUD-1/ALTA settlement statements and build a capitalizable-basis register for Oxford Realty Advisors property entities. Use when the user says: import settlement statements, build the basis register, extract closing costs, OCR the settlement PDFs, capitalize closing charges, reconcile a settlement to Schedule L, or points at a folder of HUD-1/ALTA settlement statements, deeds, or closing packages. Also trigger when a new acquisition or disposition closes and the settlement package needs to be worked into the entity's basis and the portfolio's EXCHANGE_1031 tracking. Produces a workbook (README, ENTITY_MASTER, PROPERTY_PL, BALANCE_SHEET, DEPR_COSTSEG, BASIS_REGISTER, CHARGE_DETAIL, EXCHANGE_1031, PAYMENTS, EXCEPTIONS, SOURCE_INDEX) with every figure transcribed verbatim and blank cells where a digit can't be read with confidence. v1.1",
+      "source": "custom",
+      "updatedAt": "2026-08-24T19:21:30.513403Z"
+    },
+    {
+      "skillId": "skill_01BgTiZ4Tw95sFfLtNMQXavQ",
+      "name": "submarket-spatial-analysis",
+      "description": "Submarket and spatial analysis for ORA properties and acquisition candidates. Use when the user mentions: submarket, spatial analysis, drive time, isochrone, intermodal proximity, highway access, last-mile, demographics, employment density, population growth, MSA, micropolitan, traffic count, locational benchmark, location quality score, GIS, mapping, or any task requiring geographic analysis of properties relative to demand drivers. v1.6 (2026-08-24: see Changelog)",
+      "source": "custom",
+      "updatedAt": "2026-08-24T18:28:34.631650Z"
+    },
+    {
+      "skillId": "skill_012RikMiqwNbae1s4q2HrLAa",
+      "name": "ora-flood-zoning-dd",
+      "description": "Resolve the two hardest DD-Critical screen items for Oxford Realty Advisors acquisitions: FEMA flood determination and zoning/permitted-use verification. Use whenever the user mentions: flood zone, FEMA, SFHA, NFHL, floodplain, flood determination, zoning check, zoning designation, permitted use, zoning GIS, or when an acquisition screen/underwrite has unresolved flood or zoning DD-Critical items (Buy Box v1.0 caps any such deal at T2 WATCH). Produces a sourced determination block per parcel. v1.5 — changelog in body.",
+      "source": "custom",
+      "updatedAt": "2026-08-24T18:28:31.282609Z"
+    },
+    {
+      "skillId": "skill_01Fo6J2mXqVzDfhYEAUg2Zs3",
+      "name": "title-exam-abstraction",
+      "description": "Abstract a title exam, title commitment, preliminary report, or recorded-instrument set for Oxford Realty Advisors and turn every encumbrance into a tracked deal-terms-register item. Use when the user mentions: title exam, title commitment, title report, prelim, Schedule B, Schedule B-II exceptions, title exceptions, encumbrance review, cross-collateral, cross-default, assignment of rents, mortgage payoff, easement of record, deed restriction, chain of title, vesting, legal description, mortgage location survey, ALTA survey, or uploads a title exam / commitment / recorded instrument. Also trigger when a deal folder contains title work older than 90 days. Distinguishes what a document ESTABLISHES from what it merely reports, separates boundary surveys from mortgage location surveys, and routes every finding to a closing deliverable, a survey order, or a register item. Never substitutes for counsel. v1.1",
+      "source": "custom",
+      "updatedAt": "2026-08-24T18:25:57.917997Z"
+    },
+    {
+      "skillId": "skill_01QcpqdZZsctzdbkAbxQNxp8",
+      "name": "monthly-close",
+      "description": "Oxford Realty Advisors monthly accounting and operations close process. Encodes the complete 59-item Monthly Checklist across 10 categories: External Borrower payments, External Lender receipts, Internal Lender receipts, QB Journal Entries, Reconciliations, HubSpot, Tenant Communication, Asset Management Fees, Insurance, and Taxes. Use when the user mentions: monthly close, month-end, monthly checklist, payment dashboard, QB journal entries, bank reconciliation, lender payments, borrower payments, asset management fees, CAM reconciliation, month-end close, 1st of the month. v2.2 — changelog in body.",
+      "source": "custom",
+      "updatedAt": "2026-08-24T18:25:49.462589Z"
+    },
+    {
+      "skillId": "skill_01WJ3eD69r65n7RQmRPAQ6sD",
+      "name": "portfolio-reporting",
+      "description": "Oxford Realty Advisors portfolio-level reporting and investor-ready output generation. Use this skill whenever the user mentions: portfolio report, quarterly report, annual report, investor report, portfolio summary, portfolio overview, portfolio performance, KPI report, management report, board presentation, portfolio PowerPoint, or any request to produce a summary of portfolio performance across all properties and markets. Also trigger when the user asks for a consolidated view of the entire Oxford portfolio. v1.1 — changelog in body.",
+      "source": "custom",
+      "updatedAt": "2026-08-24T18:25:54.937894Z"
+    },
+    {
+      "skillId": "skill_014BikRKUDq1WYPGKN5JUbiT",
+      "name": "document-assembly",
+      "description": "Automated document generation for Oxford Realty Advisors from a library of 9 templates, auto-populated with data from Notion databases via MCP. Use when the user says: draft letter, IC memo, demand letter, renewal offer, tenant notice, rent increase letter, default notice, template, document from template. Does NOT draft letters of intent — LOIs are produced exclusively by the loi-generation skill. Does NOT draft lease addenda or amendments — those are produced exclusively by the lease-addendum skill. Does NOT draft tenant estoppel certificates — those are produced exclusively by the estoppel-request-generation skill. Pulls data from Notion Tenant Database, Acquisition Pipeline Tracker, and Deal Sourcing Log. Outputs DOCX with ORA letterhead. v1.5 — changelog in body.",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:39:38.385553Z"
+    },
+    {
+      "skillId": "skill_01EWyCKMdjVUPWCz4xTmYgRK",
+      "name": "loi-generation",
+      "description": "Oxford Realty Advisors letter-of-intent drafting skill. Use whenever the user mentions: draft LOI, produce LOI, create LOI, generate LOI, build LOI, ship LOI, LOI for a property, letter of intent, offer letter, or non-binding proposal to purchase; when an OM, broker package, or listing PDF is uploaded with intent to make an offer; or when an acquisition-underwriting evaluation advances to an offer. Encodes: STANDARD/CONDENSED formats, five conditional blocks (four numbered + one inline entity-interest election), seven state overlays (OH/MD/IN/MO/KS/WI/TN) incl. the HB 126 BOR dual-threshold rule, seller entity-interest matching, 1031-cooperation default w/ concealment overlay, vacancy preservation covenant, single-source deposit token, a 23-point QC Gate (item 23: offer must clear the ORA walk price), a mandatory DEAL-TERMS-REGISTER, and Lost-Deal Ledger capture at draft time. Outputs versioned DOCX + extractable-text PDF on ORA letterhead. v1.9",
+      "source": "plugin",
+      "updatedAt": "2026-09-10T18:36:16.457651Z",
+      "backingPluginId": "plugin_01AgsQ13xgUxp9epmXnRMSvn"
+    },
+    {
+      "skillId": "skill_01KRAVXSZdSbiaA7EHLhVUiM",
+      "name": "tax-appeal",
+      "description": "Property tax assessment analysis and appeal decision engine for Oxford Realty Advisors. Use this skill whenever the user mentions: property tax, tax assessment, tax appeal, assessed value, tax reduction, county assessor, millage rate, tax bill, reassessment, tax protest, tax grievance, income approach valuation, or any request to evaluate whether a property tax assessment should be appealed. Also trigger when the user uploads a property tax bill or assessment notice. v1.3 (2026-08-24: confirm-the-mechanism rule added to Section 5). v1.2 (2026-08-15: comp-grid pointers repointed from market-monitor to acquisition-underwriting's COMP GRID DISCIPLINE; file-naming citation updated to Cowork Global Operating Prompt v3.0). v1.1 (2026-07-08: file-naming citations repointed from the superseded single 2026-05-14 standard to the ratified three-schema doctrine)",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:33:50.601013Z"
+    },
+    {
+      "skillId": "skill_01VjPRpaJznaySYstgijjWCT",
+      "name": "ratify-hurdle-rate",
+      "description": "Formally ratify the Oxford Realty Advisors unlevered IRR hurdle rate in the capital_config table — flipping hurdle_rate_ratification from 'proposed' to 'ratified', stamping Gabriel's name and date, running the gate, and producing a durable audit memo. Use when Gabriel says: ratify hurdle rate, confirm hurdle rate, lock in IRR hurdle, ratify the 8%, make the hurdle rate official, sign off on hurdle rate, or capital allocation hurdle ratification. Requires migration 015_hurdle_rate.sql to be applied (adds hurdle_rate_* columns to capital_config). v1.3 (2026-08-03: audit-memo template stamped Gabriel as \"Principal\" against CLAUDE.md's ratified \"VP Acquisitions\" — corrected; caught by doctrine-integrity-probe Check 13)",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:33:44.178889Z"
+    },
+    {
+      "skillId": "skill_01CuWJ64BkugGznsU7ngkb3Q",
+      "name": "rent-roll-reconciliation",
+      "description": "Reconcile the Oxford Realty Advisors Notion Tenant Database against an authoritative rent roll export (xlsx), correcting property/suite mistags, filling missing SF/rent/lease-date/escalation fields, retiring phantom or duplicate tenant records, and creating records for genuine gaps. Use whenever the user uploads a rent roll and says it's correct / authoritative and anything that doesn't match should be fixed, or asks to reconcile, audit, true-up, or sync the Tenant Database against a rent roll, master workbook, or PM export. Also trigger on \"rent roll reconciliation,\" \"true up the tenant DB,\" \"does the rent roll match Notion,\" or after any monthly/quarterly rent roll refresh. This is a whole-portfolio pass (all properties, all tenants) — do not treat it as a single-tenant lookup task (use verified-deal-recon or a plain search for that instead).",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:33:47.397801Z"
+    },
+    {
+      "skillId": "skill_012YR8GZScom4Exn45VJmD4y",
+      "name": "automation-health-monitor",
+      "description": "Scheduled health check for all Oxford Realty Advisors Cowork automations. Runs every weekday at 11:00 AM. Enumerates the live dual-fleet scheduled-task registries (CC/MCP + LAMS/Cowork) via list_scheduled_tasks, checks each enabled task for evidence of recent execution, ALSO enumerates 2 off-fleet substrates read-only (all live Windows Task Scheduler ORA* tasks — enumerated and diffed against a roster baseline, never filtered by it; 2 GitHub Actions cron workflows in ora-cowork-watchdog), posts status report to Notion Operations Hub, and drafts failure notification email to [ggoldberg@oxfordra.net](mailto:ggoldberg@oxfordra.net) ONLY (routing canon 2026-06-10 — no cc) if any task missed. Trigger phrases: automation health, task health, fleet health check, scheduled task status, automation monitor, did my tasks run. v1.9 (2026-09-03: see Changelog)",
+      "source": "plugin",
+      "updatedAt": "2026-09-06T22:04:38.270160Z",
+      "backingPluginId": "plugin_011w8FNsWvYtVhJb3WiDfvrj"
+    },
+    {
+      "skillId": "skill_01T1A4Z8cN4cUjKx81XCm7vM",
+      "name": "deal-comparison",
+      "description": "Side-by-side deal comparison and portfolio-fit analysis for Oxford Realty Advisors. Use when comparing 2+ acquisition candidates, scoring deals against portfolio fit, or benchmarking against historical Oxford deals. Triggers: compare deals, side by side, which deal is better, deal comparison, portfolio fit, score deal, rank acquisitions, compare to historical, deal matrix. v1.2 (2026-08-21: DSCR retested at the correct per-property refi-sizing basis and downgraded from kill to Ruling-5 flag; Basis band now follows the vintage ramp instead of a flat cutoff — see Changelog)",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:33:15.598692Z"
+    },
+    {
+      "skillId": "skill_01KYUkRfRst6KpFGRJ3ujgRn",
+      "name": "lease-addendum",
+      "description": "ORA lease amendment/addendum drafting skill -- SOLE path for amending, extending, or modifying a lease already in effect. Use when the user says: draft addendum, lease addendum, amend/amendment, extend the lease, rent change, tenant substitution, name change, novation, add/remove tenant, premises change, add a unit, guaranty exhibit, or uploads a draft addendum to an ORA lease. NOT new leases (masterlease-jurisdiction-rebase + lease-form-qc), NOT counterparty paper (legal-intelligence), NOT LOIs (loi-generation), NOT renewal letters (document-assembly). Encodes MINIMAL AMENDMENT doctrine, 4 modules (Term/Rent/Tenant Change/Premises Change), 7-state recordation overlay, guaranty exhibit for substitutions, 16-check QC gate. DRAFT ONLY -- outbound send needs Gabriel's confirmation. v1.0",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:33:30.010630Z"
+    },
+    {
+      "skillId": "skill_01GRwZUnusCG8mGn4H96rY3z",
+      "name": "verified-deal-recon",
+      "description": "Adversarially-verified acquisition pre-screen for Oxford Realty Advisors — the SINGLE-TARGET PRE-SCREEN DEFAULT. Recon fan-out research, then three independent Explore verifiers that try to REFUTE it (comps/basis · functional/environmental · demand/lease-up), then a PURSUE / PASS / NEEDS_MORE brief with a mandatory pre-mortem. Use whenever ONE named acquisition target — a street address, a property name, or a single offering memorandum — needs a real pursue/pass decision before underwriting. Trigger on: pre-screen this, screen this property, is this worth underwriting, first look, recon this deal, verified deal recon, should we pursue, worth a look. NOT for batch-triaging a broker inbox and NOT for off-market owner lead-lists. Does NOT underwrite — hands off to acquisition-underwriting. v1.2 (2026-08-22: cross-surface port — runs on Cowork and Code)",
+      "source": "custom",
+      "updatedAt": "2026-08-22T21:50:19.067213Z"
+    },
+    {
+      "skillId": "skill_019a6j8hPWtSW54UQng7fa2T",
+      "name": "model-bulk-edit",
+      "description": "Safely change the same input across many ORA financial models at once, and audit workbooks whose formulas carry no cached values. Use when the user says: rebase the models, update the refi rate everywhere, change an assumption across all deals, bulk edit workbooks, propagate a constant to the models, sweep the underwriting models, or after any UNDERWRITING CONVENTIONS constant moves in acquisition-underwriting. Also the SOLE path for the cached-value audit -- trigger on: nulls in the QC gate, model reads blank, dead workbook, formulas but no values, why is DSCR empty. Encodes: archive-then-verify before any write, Excel COM with CalculateFullRebuild (NEVER openpyxl for writes -- it silently destroys every cached value), constant-vs-formula pre-check, and a mandatory post-write diff of every model against its archived original. Historical models for closed or passed deals are rebased only on Gabriel's explicit instruction. v1.1",
+      "source": "custom",
+      "updatedAt": "2026-08-23T00:55:20.461760Z"
+    },
+    {
+      "skillId": "skill_015bghdwgH9TcWnw4HvENWqF",
+      "name": "acquisition-proposal-generation",
+      "description": "Generate or revise Oxford Realty Advisors' seller-facing Acquisition Proposal — a two-page, non-legalistic business-terms offer document positioned as an alternative to a traditional LOI. Trigger on: acquisition proposal, offer document, business-terms offer, proposal to purchase, \"not a legalistic LOI\", make an offer, template offer letter, proposal template. Distinct from loi-generation (the formal conditional-block LOI with QC gate and state overlays) — use THIS skill when the deal calls for a short, principal-to-principal offer that pushes legal detail into the PSA rather than the offer document itself. v3.2 (2026-08-22: walk-price QC gate added — Purchase Price must clear the ORA walk price before the document is produced. Prior: v3.1 named-constant/QC-caveat cleanup, v3.0 final production revision — see git history for detail)",
+      "source": "custom",
+      "updatedAt": "2026-08-23T00:40:58.387339Z"
+    },
+    {
+      "skillId": "skill_01FEBkgc2wdYi7oFAhACkQE5",
+      "name": "fleet-advisory-remediation",
+      "description": "Auto-triage a fleet-status/setup-self-audit advisory report across the dual CC/MCP + LAMS/Cowork scheduled-task fleet — register complete-but-unregistered \"dark\" task folders, delete expired one-time registry entries, route stale-data-producer symptoms to orphaned-task-forensics for root-causing, and hand off WRITES the current session's fleet can't reach (spawn a background task for the other fleet rather than guessing at data — but check `fleet-status.py` first, it reads both fleets regardless of surface, so a handoff should only ever be for the write itself). Use when the user pastes or references a fleet-status/setup-self-audit/automation-health-monitor advisory report, says fix these advisories, dark tasks, fleet hygiene sweep, or clean up the scheduled-task fleet. Cross-fleet handoffs are dispatched to a NATIVE on-device Cowork session by name, never a bare \"Cowork session\" (a cloud sandbox carries none of the scheduled-task MCP tools). v1.3",
+      "source": "custom",
+      "updatedAt": "2026-08-24T16:33:26.783240Z"
+    },
+    {
+      "skillId": "skill_01CJBLcygHVD4c696LCx2Mkx",
+      "name": "repo-architecture-review",
+      "description": "Cross-repo architecture-diagram audit for Oxford Realty Advisors' GitHub repos — reads each repo's embedded architecture diagrams (mermaid in README/docs, .drawio, .puml) and surrounding prose, then screens findings against failure patterns already proven costly here: unbounded per-row loops that blow a platform's rate limit, automation running outside the ORA scheduled-task fleet, dual-write data with only after-the-fact drift detection, a manual build step that can go stale silently, dead links documented as live, missing CI gates on financial-decision code, and unproven coordination-layer infrastructure between systems. Produces a prioritized, evidence-cited punch list — does not implement fixes. Use when Gabriel says: review my repos, audit my architecture, review the diagrams in my repos, cross-repo review, how do my systems talk to each other, find inefficiencies across my apps. Distinct from `ora-setup-audit` (audits the Claude Code/Cowork setup itself, not application repos). v1.0.",
+      "source": "custom",
+      "updatedAt": "2026-08-21T22:01:16.777007Z"
+    },
+    {
+      "skillId": "skill_015UfHvApkTDhNho3YNBR6uN",
+      "name": "isolated-commit",
+      "description": "Use when landing your own reviewed, ready-to-commit change in a shared ORA git checkout (~/.claude, ora-skills, website-canonical, oxford-command-center) that other Claude Code sessions may be concurrently editing — claiming/staging/pushing a change you just finished writing, not triaging someone else's ambient dirty files.",
+      "source": "custom",
+      "updatedAt": "2026-08-21T22:09:26.364459Z"
+    },
+    {
+      "skillId": "skill_01XmdWTjX4X8NpCAgBHm7Hfk",
+      "name": "market-monitor",
+      "description": "Industrial real estate market monitoring and analysis for Oxford Realty Advisors target markets. Use when researching market conditions, comparing markets, tracking demand drivers, or preparing market intelligence reports. Triggers: market update, market conditions, vacancy rate, industrial market, rent growth, supply pipeline, absorption, market comparison, submarket analysis, cap rate trends. v1.5 (2026-08-22: added run-triggered DOCTRINE-DRIFT REPORT section — see Changelog).",
+      "source": "custom",
+      "updatedAt": "2026-08-23T00:41:02.126814Z"
+    },
+    {
+      "skillId": "skill_01EctZd2R8LeVKrzFvJDJzgz",
+      "name": "lease-abstraction-pipeline",
+      "description": "Lease abstraction (single document or batch) and rent roll data extraction for Oxford Realty Advisors. Use whenever the user mentions: abstract this lease, abstract/parse leases, extract lease data or terms, lease abstract, summarize/read/review this lease, process lease folder, batch lease, lease pipeline, run lease abstraction, update rent roll from leases, or scheduled lease scan — for one or more commercial leases uploaded directly or in a folder, SharePoint, or Google Drive. Also trigger when an uploaded PDF/DOCX appears to be a commercial lease, or on \"run the lease pipeline\" / \"process the leases\" / \"update my rent roll\". Produces: 32-field abstract per lease (markdown single-doc; master XLSX batch with derived metrics, quality flags, portfolio analytics), Notion Tenant Database upsert, email summary to ggoldberg@oxfordra.net ONLY (routing canon 2026-06-10). Autonomous unattended operation — do not pause mid-run. v2.7 (2026-08-21: see Changelog)",
+      "source": "custom",
+      "updatedAt": "2026-08-21T21:58:32.990442Z"
+    },
+    {
+      "skillId": "skill_015aD6wenQmtUX7NQF6PH9VY",
+      "name": "dirty-tree-triage",
+      "description": "Safely triage uncommitted \"dirty\" git working trees across ORA's shared checkouts (~/.claude, ora-skills, website-canonical, oxford-command-center) — enumerate what's uncommitted, attribute it to a session with real evidence (never a guess), settle it with a two-pass mtime check, then isolate-and-commit only what's genuinely safe via commit_isolated_replacement(). Contested or live WIP is reported, never force-resolved. Use when the user says dirty tree(s), clean up the dirty repos, investigate and fix dirty trees, uncommitted files backlog, who owns this WIP, reconcile the shared checkout, or git status is a mess across my repos. v1.1 (2026-08-21: step 7's ora-skills check now pairs with a claim_work.py claim — OI-203)",
+      "source": "custom",
+      "updatedAt": "2026-08-21T21:41:41.279813Z"
+    },
+    {
+      "skillId": "skill_01NrrkuH6ovbB3SJmaQ3DL7p",
+      "name": "notion-quota-fallback",
+      "description": "Use this skill whenever a Notion query fails with a \"Query Data Source\" usage-limit / quota error, or whenever you already know the workspace's SQL-mode Notion query quota is exhausted and still need to query, filter, or count rows in a Notion database. Also consult it proactively before running any large or repeated SQL-mode notion-query-data-sources call against a big database (a rent roll, tenant database, deal pipeline, etc.) in a session that has already burned meaningful quota, since hitting the limit mid-task stalls the work. Covers the view-mode + pagination fallback (no tool-specific quota) and a bundled script to aggregate/filter the paginated results without re-querying. Also documents a secondary, unrelated caveat about the Notion UI's \"+Filter\" control appearing to hang in browser-automation sessions — consult that section if a multi-condition Notion database filter isn't opening in the browser.",
+      "source": "custom",
+      "updatedAt": "2026-08-17T00:58:28.501874Z"
+    },
+    {
+      "skillId": "skill_01BEKUZZ6k5uTMyQJw53s7uU",
+      "name": "insurance-renewal-review",
+      "description": "Oxford Realty Advisors property insurance renewal review — extract carrier declarations (text-layer first, OCR only if needed), build a per-property premium history, decompose rate from exposure, diff each renewal against the prior term, reconcile trackers and named insureds against the declarations, and ship both an XLSX and an interactive HTML dashboard. Use when the user says: review insurance policies, insurance renewal review, how has insurance changed, premium history, shop our insurance, self-insure, insurance declarations, coverage changes, deductible options, insurance dashboard — or points at a folder of insurance PDFs/declarations. Also trigger when a folder holds scanned carrier declarations (Erie, Selective, Westchester/Chubb, Mesa, Hartford) and the user asks for trends, comparisons, or a renewal decision. v2.0 (2026-08-17: text-layer-first triage, dashboard deliverable, quoted-vs-realized check — see Changelog).",
+      "source": "custom",
+      "updatedAt": "2026-08-21T21:41:36.104919Z"
+    },
+    {
+      "skillId": "skill_01FUSk1F6kgTogN6Wuhq7TwM",
+      "name": "estoppel-request-generation",
+      "description": "Build tenant estoppel certificate requests for Oxford Realty Advisors directly from abstracted lease data, so every certified fact is pre-filled from the lease and every known defect is put to the tenant to cure. Use when the user mentions: estoppel, estoppel certificate, tenant estoppel, estoppel request, send estoppels, estoppel form, SNDA, subordination non-disturbance attornment, tenant acknowledgment, or asks what the estoppels should say. Also trigger during DD on any acquisition with occupied suites, and whenever lease-abstraction-pipeline or deal-execution surfaces a chain gap, an unexecuted counterpart, a manuscript amendment or a landlord-of-record mismatch. Pre-fills from the 32-field abstract, converts each quality flag into a certification, and produces one tailored form per tenant plus a cover letter. DRAFT ONLY — outbound counterparty send requires Gabriel confirmation. v1.1",
+      "source": "custom",
+      "updatedAt": "2026-08-21T21:58:30.058972Z"
+    },
+    {
+      "skillId": "skill_017krueKEReAuAKp2eGru9q2",
+      "name": "tenant-email",
+      "description": "Draft a tenant communication email. Use when writing to tenants about renewals, notices, maintenance, rent, or introductions. v1.3 (2026-08-15: see Changelog)",
+      "source": "custom",
+      "updatedAt": "2026-08-15T19:41:32.876728Z"
+    },
+    {
+      "skillId": "skill_01Xxe9tumRCrCdTfrwcM5nVi",
+      "name": "masterlease-revision-cycle",
+      "description": "Oxford Realty Advisors end-to-end master-lease revision cycle — one command from external AI reviews to a new master revision with rebased property templates. Use when the user supplies external LLM reviews (ChatGPT/Grok/Gemini) of the ORA master lease and asks to adjudicate + implement, or says: run the revision cycle, rev the master, adjudicate and build, implement lease review feedback, new master version end-to-end. Chains: lease-form-qc external-review intake (verify claims against XML, screen against ratified positions, rule each point) → adjudication memo → tracked-change build via ora_docx_redline.py → lease_qc regression → masterlease-jurisdiction-rebase --all → pointer/ledger close-out. Proven twice on 2026-08-04 (v2.4.1→v2.5, v2.5→v2.6). v1.0",
+      "source": "custom",
+      "updatedAt": "2026-08-04T19:31:58.258020Z"
+    },
+    {
+      "skillId": "skill_01VcAHV3aUeDAafexrat53BU",
+      "name": "graph-app-registration",
+      "description": "Runbook for registering a new Azure AD (Entra) application and wiring Microsoft Graph API access for a new integration — app registration, client secret generation, application permissions (e.g. Mail.Send, Sites.Selected), admin consent, and the separate Graph Explorer site-permission grant (POST /sites/{siteId}/permissions) needed to give the app write access to one specific SharePoint site. Use when the user mentions: new Graph-backed integration, Azure AD app registration, Entra app registration, register an app in Azure, SharePoint site permission grant, Sites.Selected, Graph API access provisioning, wire up Microsoft Graph, or rotating/regenerating GRAPH_CLIENT_SECRET (24-month expiry — will recur ~2028). v1.0",
+      "source": "custom",
+      "updatedAt": "2026-07-21T20:33:18.512507Z"
+    },
+    {
+      "skillId": "skill_01DLtNXyD1PmJZ1uWLzFMdLu",
+      "name": "solar-lease-underwriting",
+      "description": "Oxford Realty Advisors rooftop solar / community-solar lease underwriting skill. Use when evaluating, negotiating, or reviewing a rooftop solar, community solar, or PPA-style lease proposal (King Energy or any developer) before signature, or auditing an already-executed one. Trigger on: solar lease, rooftop lease, community solar, King Energy, roof rent, solar PPA, Site Access Fee, ITC, SREC, solar rent benchmark, should we lease our roof, solar developer proposal, solar lease economics, King Energy pitch. Companion to legal-intelligence (clause-level contract review) and acquisition-underwriting (whole-property acquisition) — this skill owns the counterparty-economics and rent-benchmarking layer specific to third-party rooftop energy leases. v1.1 (2026-08-15: see Changelog).",
+      "source": "custom",
+      "updatedAt": "2026-08-15T19:41:20.727502Z"
+    },
+    {
+      "skillId": "skill_01AJASvMnLVGtgrzDEMbduDk",
+      "name": "rent-roll-qc",
+      "description": "Final quality audit and institutional polish for rent roll spreadsheets before external delivery. Use this skill whenever the user mentions: audit rent roll, QC rent roll, rent roll check, clean up rent roll, prep rent roll, finalize rent roll, rent roll before sending, review rent roll, rent roll ready to send, polish rent roll, institutional rent roll, format rent roll for delivery, or any request to quality-check a rent roll spreadsheet before sending it to a third party. Also trigger when the user uploads a rent roll file and mentions a recipient such as a lender, PM company, property manager, investor, buyer, broker, attorney, or appraiser. This skill does NOT change data values — it fixes structural defects, standardizes inconsistencies, and flags gaps the user must resolve before delivery.",
+      "source": "custom",
+      "updatedAt": "2026-07-27T18:25:40.807692Z"
+    },
+    {
+      "skillId": "skill_016rG8eMX1W61B756RA6HqUc",
+      "name": "legal-intelligence",
+      "description": "Oxford Realty Advisors legal document analysis, clause library, and contract intelligence. Use this skill whenever the user mentions: lease review, PSA review, contract analysis, redline, clause comparison, compare two versions, blackline, Litera, Workshare, DeltaView, lease clause, indemnification, default provisions, personal guaranty, environmental indemnity, estoppel clause / SNDA analysis (NOT certificate drafting — that's estoppel-request-generation), tenant improvement, CAM clause, assignment and subletting, insurance requirements, memorandum of lease, deed of trust, promissory note, loan document, solar lease, vendor contract, or any request to analyze, compare, draft, or negotiate a legal document. Also trigger when the user uploads a PDF or DOCX that appears to be a lease, contract, PSA, loan document, or legal agreement. Module 6 Step 0 detects whether a marked-up file carries real tracked changes or compare-tool formatting before parsing. v1.3",
+      "source": "custom",
+      "updatedAt": "2026-08-21T21:58:36.233644Z"
+    },
+    {
+      "skillId": "skill_01XSUTqM3Toc2aNyGGgo2SwV",
+      "name": "file-reconciliation",
+      "description": "Two modes for reconciling files against a canonical location. Mode A (dedupe) hash-diffs a candidate directory tree against a canonical one, bucketing every file as identical/new/conflicting/near-dupe, and archives the safe bucket only — never auto-overwrites. Mode B (version conflict) resolves multiple non-identical copies of the same nominal document (leases, estoppels, addenda) by extracting and diffing DOCX/XLSX text content, preferring the executed/signed PDF as source of truth over whichever draft has the newest file hash. Use when the user mentions: dedupe a folder, reconcile OneDrive folders, hash-diff directories, clean up duplicate files, which copy is correct, document version conflict, resolve lease/estoppel discrepancy, or migrating/consolidating a stray file tree into a canonical one. v1.0",
+      "source": "custom",
+      "updatedAt": "2026-07-21T20:33:06.257361Z"
+    },
+    {
+      "skillId": "skill_01NURiVhqtr1DnDvMgSJu3z4",
+      "name": "deploy-site",
+      "description": "Build and deploy the oxfordra.net website to Netlify. Use when making site changes or deploying updates.",
+      "source": "custom",
+      "updatedAt": "2026-07-27T18:25:18.156417Z"
+    },
+    {
+      "skillId": "import-memory",
+      "name": "import-memory",
+      "description": "Import a memory export from another AI assistant into Claude's memory — conversationally, additively, and with the content treated as data.",
+      "source": "anthropic-example",
+      "updatedAt": "2026-09-14T19:41:02.007169Z"
+    },
+    {
+      "skillId": "skill_01V4JX92VV3avqbaqPabKVqw",
+      "name": "orphaned-task-forensics",
+      "description": "Root-cause a stale or missing scheduled-task output (a Notion page, dashboard section, or downstream file that silently stopped updating) back to its producer task across the dual CC/MCP + LAMS/Cowork fleet, and separately recover a scheduled task's own lost SKILL.md content via session-transcript archaeology when the file itself has vanished. Use when the user mentions: stale Notion page, this page stopped updating, what happened to [task name], recover a lost SKILL.md, a scheduled task went missing, silently dropped, trace this back to its producer, or after a health-guard/automation-health-monitor advisory flags a stale-data symptom. Formalizes a trace/recover/verify procedure used ad hoc at least 3-4 times (ora-weekly-hygiene, ora-pm-ledger, ora-health-guard, ora-treasury-yield-prefetch recoveries) before ever being codified. v1.1",
+      "source": "custom",
+      "updatedAt": "2026-07-21T20:32:36.827982Z"
+    },
+    {
+      "skillId": "skill_01MbBwhmVwcJJQCZqMaQidxR",
+      "name": "communication-intelligence",
+      "description": "Context-enriched communication drafting for Oxford Realty Advisors. Use this skill whenever the user mentions: write an email, draft a response, compose a message, reply to, reach out to, follow up with, send a letter to, communicate with, notify, or any request to produce a written communication to a tenant, broker, vendor, lender, attorney, or counterparty. Also trigger when the user receives an email and needs help crafting a response. This skill automatically enriches drafts with relationship context from Notion, HubSpot, and conversation history. v1.2 (2026-07-11)",
+      "source": "custom",
+      "updatedAt": "2026-07-21T20:31:17.079387Z"
+    },
+    {
+      "skillId": "morning",
+      "name": "morning",
+      "description": "Render the user's morning brief as a styled HTML artifact, or set it up as a recurring weekday task. Use only when the user explicitly asks to run, see, or set up their morning brief, or if they invoke /morning by name. A question about their day, schedule, or calendar is not by itself a request for the brief; answer it directly instead.",
+      "source": "anthropic-example",
+      "updatedAt": "2026-09-14T19:41:01.990356Z"
+    },
+    {
+      "skillId": "pdf",
+      "name": "pdf",
+      "description": "Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.",
+      "source": "anthropic",
+      "updatedAt": "2026-07-10T19:23:15.432550Z"
+    },
+    {
+      "skillId": "skill_012ddCq1e2Koci8Rg3KXuCMy",
+      "name": "website-perfection",
+      "description": "Oxford Realty Advisors website optimization and perfection skill. Use this skill whenever the user mentions: PageSpeed, Lighthouse, Core Web Vitals, website fixes, site performance, image optimization, SEO audit, meta tags, structured data, analytics installation, GA4, LinkedIn pixel, accessibility, WCAG, Netlify headers, CLS, LCP, TBT, oxfordra.net improvements, or any task related to auditing or improving the Oxford Realty Advisors website. v1.0",
+      "source": "custom",
+      "updatedAt": "2026-07-21T16:19:33.574754Z"
+    },
+    {
+      "skillId": "mcp-builder",
+      "name": "mcp-builder",
+      "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).",
+      "source": "anthropic-example",
+      "updatedAt": "2026-09-14T19:41:01.618801Z"
+    },
+    {
+      "skillId": "skill-creator",
+      "name": "skill-creator",
+      "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+      "source": "anthropic-example",
+      "updatedAt": "2026-09-14T19:41:01.499089Z"
+    },
+    {
+      "skillId": "skill_01CnsYmrnNffpeVhzZQVgfSU",
+      "name": "psa-reconciliation",
+      "description": "Oxford Realty Advisors PSA fact extraction and cascade reconciliation. Trigger on: reconcile PSA, extract PSA facts, PSA to workbook or IC memo, update from PSA, PSA reconciliation, canonical facts, build fact table, PSA cascade, refresh from PSA, canonical deal facts, single source of truth, PSA drift, or propagating executed-PSA data to downstream deliverables (DD checklist, IC memo, rent roll, title instructions, underwriting model, Notion deal record). Also trigger on an uploaded executed or near-final PSA (DOCX/PDF) plus 'cascade this,' 'update all the docs,' 'make the workbook match,' 'sync the deal record,' or 'reconcile everything to this version.' Produces a canonical Fact Table (XLSX) as the transaction's single source of truth plus per-target cascade instructions. Does NOT negotiate, draft, or redline the PSA — that is deal-execution. v1.6 (2026-07-16: description trimmed for the 1024-char platform import limit; no behavior change)",
+      "source": "custom",
+      "updatedAt": "2026-07-17T15:22:31.572034Z"
+    },
+    {
+      "skillId": "docx",
+      "name": "docx",
+      "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx) or Word templates (.dotx). Triggers include: any mention of 'Word doc', 'word document', '.docx', '.dotx', or requests to produce professional documents with formatting like tables of contents, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx or .dotx files, inserting or replacing images in documents, find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file (to download, email or print), use this skill. However, if they ask for a document, page, report, memo, or notes WITHOUT naming a file format and the session offers Claude's own dedicated document or page skill or connector, use that instead. Do NOT use for PDFs, spreadsheets, Google Docs, or coding unrelated to document generation.",
+      "source": "anthropic",
+      "updatedAt": "2026-09-14T21:00:33.279708Z"
+    },
+    {
+      "skillId": "pptx",
+      "name": "pptx",
+      "description": "Use this skill any time a .pptx or .potx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations as PowerPoint (.pptx) files; reading, parsing, or extracting text from any .pptx or .potx file (even if the extracted content will be used elsewhere, like in an email, summary, or creating a different type of slide deck); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates (.potx), layouts, speaker notes, or comments. Trigger whenever the user asks for a PowerPoint or .pptx file, or references a .pptx or .potx filename, regardless of what they plan to do with the content afterward. However, when the user asks for a deck, slides, a slide deck, or a presentation without naming a file format, default to using a dedicated slide-deck artifact type or a separate slides skill if this session offers one; otherwise, use this skill.",
+      "source": "anthropic",
+      "updatedAt": "2026-09-14T21:00:33.306681Z"
+    },
+    {
+      "skillId": "xlsx",
+      "name": "xlsx",
+      "description": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .xltx, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \"the xlsx in my downloads\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved.",
+      "source": "anthropic",
+      "updatedAt": "2026-09-14T21:00:33.324012Z"
+    }
+  ]
+}

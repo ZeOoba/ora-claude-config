@@ -1,0 +1,459 @@
+{
+  "$schema_note": "Canonical single source of truth for Oxford Realty Advisors acquisition target markets. Skills, scheduled tasks, and the Notion Acquisition Pipeline 'Market' field must stay in parity with this file. If any skill body diverges from this list, THIS FILE WINS. Enforced monthly by the ora-skill-text-audit scheduled task (target-market parity pattern class).",
+  "known_provisional_addition_2026_07_16": "acquisition-underwriting (v3.4, 2026-06-22) added Louisville KY as a 10th entry-phase cluster within its own governance, with sourced rationale (UPS Worldport anchor, GE Appliances $490M reshoring, Riverport pricing) and its own 7.75% exit cap — but it was never ratified into THIS file. Gabriel's 2026-07-16 ruling (ora-skill-text-audit F3/F4): keep it PROVISIONAL, not fully ratified — do not add Louisville KY as a 10th canonical cluster here until Gabriel formally ratifies it. acquisition-underwriting now carries an explicit provisional caveat at Gate 3 and its exit-cap table. This note exists so future audit runs don't re-flag the Louisville reference as unexplained drift — it's known, and intentionally not yet resolved either way. **[RATIFIED 2026-08-05 — superseded, see changelog_1_7.]** Gabriel formally ratified Louisville KY as a 10th canonical entry-phase cluster 2026-08-05, in-turn, during a review that found the PROVISIONAL split had gone six weeks unresolved. Retained here verbatim for audit trail per this file's own convention (see changelog_1_4).",
+  "version": "1.10",
+  "updated": "2026-08-15",
+  "changelog_1_6": "Documentary-only change (ora-skill-text-audit F3/F4 close-out) — no market data, scores, or governors changed. Added known_provisional_addition_2026_07_16 recording Gabriel's ruling that Louisville KY stays provisional (not a 10th canonical cluster) pending formal ratification; see acquisition-underwriting v3.4 for the original rationale and its now-added caveat.",
+  "changelog_1_5_addendum_2026_07_15": "ora-skill-text-audit (2026-07-15 run) flagged the consumers array's two scheduled-task entries as stale — 'ora-distress-signal-monitor' and 'ora-daily-brief-6am' matched no task on either fleet. Corrected to the current live equivalents: ora-am-brief (LAMS, daily 6:00 AM, Block B = Daily Brief news/transaction scope) and ora-deal-sourcing-scan + ora-entry-market-scan (CC/MCP fleet, jointly cover established + entry-market price-cut/distress monitoring). No market data, scores, or governors changed.",
+  "changelog_1_4": "[SUPERSEDED SAME DAY by 1.5 — see changelog_1_5. The C&W-hard operative benchmark described here was ratified and then RETIRED on 2026-07-14. Retained for audit trail only. DO NOT SCREEN OFF IT.] GABRIEL RATIFIED THE BASIS BENCHMARK (2026-07-14, governor-level, explicitly authorised). The basis hard floor now tests against C&W 2025 SMALL-TIER HARD COST, per metro, replacing the unsourced $140/$170/$150/$130 figures. Per-metro floors (75% of replacement): Columbus $97.88 · Cincinnati $107.36 · Kansas City $97.45 · Indianapolis $107.59 · Maryland $100.27 · Madison $97.54 · Grand Rapids $107.73 · Richmond $100.27 · Des Moines $98.59. Net effect: Maryland tightens 21%, Richmond 11%, Columbus/KC/Madison ~7%; Cincinnati/Indianapolis/Grand Rapids loosen ~2-3%; Des Moines flat. Re-screening all 28 priced candidates from the 2026-07-14 scan flipped exactly TWO — 700 Kane St and 2800 Annapolis Rd, both Baltimore, both PASS -> FAIL-BASIS. Rejected the all-in denominator: it would set the floor at ~$172/SF, which all 17 priced Midwest/MD deals clear — a floor that passes 17 of 17 is not a floor. The all-in figure ($200-240/SF true replacement) is retained as an IC-MEMO narrative point, not a gate.",
+  "changelog_1_2": "Added replacement_cost_doctrine (top-level) + a per-cluster replacement_cost block to all 9 clusters. Driven by a 2026-07-14 finding that ORA's operative basis-floor benchmarks ($140 Midwest / $170 MD / $150 Richmond / $130 DSM) were NEVER SOURCED — and the basis floor is the primary acquisition gate. Sourcing pass produced defensible (DERIVED) hard-cost figures for only 3 of 9 metros; the other 6 are recorded as UNSOURCED rather than interpolated. Also added: KC flood-district DD flag, Montgomery County MD coverage downgrade (monthly), Madison thin-inventory confirmation.",
+  "changelog_1_3": "GABRIEL SUPPLIED THE PRIMARY SOURCE — the Cushman & Wakefield 2025 Industrial Construction Cost Guide (46 Americas markets, March 2025 costs). Hard cost is now SOURCED for 5 of 9 ORA metros directly from its Local Market Data tables (Columbus $130.51, Cincinnati $143.15, Kansas City $129.94, Indianapolis $143.46, Baltimore $133.70); the other 4 (Madison, Grand Rapids, Richmond, Des Moines) are NOT in the guide and now carry explicit [PROXY] figures. THREE FINDINGS: (1) our $140 Midwest was a good hard-cost proxy (within ~7%); (2) our $170 MARYLAND was 27% TOO HIGH — Baltimore is a mid-priced market, and this error wrongly cleared two Baltimore deals on the 2026-07-14 scan; (3) the guide's own size curve (cost ~ size^-0.36, consistent across all 5 metros) PROVES the small-bay premium — extrapolated to a 40,000 SF ORA-sized building it implies ~+43%, independently matching the $160-220/SF band separate sources reported. The guide EXCLUDES land and soft costs, so it is a HARD-COST figure, not all-in. operative_benchmark_psf is DELIBERATELY UNCHANGED — swapping the basis gate is a governor-level decision requiring Gabriel's sign-off (see replacement_cost_doctrine.the_decision).",
+  "owner": "Gabriel Goldberg, Principal, Oxford Realty Advisors",
+  "canonical_paths": [
+    "skills/target-markets.json (authoritative, skills runtime)",
+    "Investment Candidates -- 2026/target-markets.json (user-visible mirror)",
+    "memory: acquisition_target_markets.md (narrative twin)"
+  ],
+  "scoring_rule": {
+    "criterion": "Market Cluster Fit (deal-comparison matrix, 6 pts)",
+    "established_cluster": 6,
+    "entry_phase_cluster": 4,
+    "isolated_non_target": 1,
+    "note": "Entry-phase clusters score 4 ('new target market'), NOT 1 ('isolated'); they graduate to 6 once a beachhead property closes. No prior new-market penalty applies to any listed cluster."
+  },
+  "replacement_cost_doctrine": {
+    "status": "SUPERSEDED 2026-07-14 (SAME DAY). This file no longer carries an operative basis benchmark. THE SINGLE DENOMINATOR IS **RCT v03**, in the acquisition-underwriting skill (per-metro LOW/POINT/HIGH; basis divides by LOW; floor = linear vintage ramp 65% at <=1995 -> 60% at >=2005). This block is retained ONLY as the audit trail of how RCT v03 was sourced. DO NOT SCREEN OFF ANYTHING IN THIS FILE.",
+    "what_happened": "On the morning of 2026-07-14 a C&W-hard-cost benchmark was ratified here as the operative basis gate. By the afternoon it was RETIRED, because reading the acquisition-underwriting skill properly revealed that ORA ALREADY had a replacement-cost doctrine (RCT v02) that was a better instrument on every axis: all-in rather than hard-cost-only, shallow-bay rather than big-box, 2026 rather than March-2025, banded, vintage-ramped, with an adder schedule. Ratifying a C&W benchmark here created a SECOND competing denominator — and two denominators is the actual bug. The C&W guide's correct role is (a) the PRIMARY SOURCE that RCT v03 is rebuilt from, and (b) the COHERENCE CHECK that exposed RCT v02's error. It is not itself a benchmark.",
+    "the_error_C_and_W_caught": "RCT v02 claimed to be ALL-IN yet, for FIVE of nine markets, its all-in POINT sat BELOW C&W's pure HARD cost for the same metro (Cincinnati 134.00 < 143.15; Indianapolis 130.50 < 143.46; Grand Rapids 120.00 < 143.64; Richmond 131.50 < 133.70; Des Moines 130.00 < 131.46). All-in cannot be less than hard cost. RCT v02 had been scaled off a big-box baseline with the shallow-bay premium never applied — understating replacement, which made the discount test too strict, which meant ORA was PASSING ON DEALS THAT CLEAR DOCTRINE. Maryland ran the other way: RCT v02 priced it as the firm's most expensive market ($165) when C&W shows Baltimore is mid-priced ($133.70) — so the MD floor had been too GENEROUS.",
+    "why_this_matters": "The basis hard floor is the PRIMARY gate on every acquisition. The replacement-cost figure IS the gate. It must have exactly one home. That home is RCT v03.",
+    "primary_source": {
+      "name": "Cushman & Wakefield — 2025 Industrial Construction Cost Guide (Americas), Project & Development Services",
+      "as_of": "March 2025 costs; published 2025",
+      "coverage": "46 Americas markets; 45 with parseable Total Cost figures",
+      "what_it_measures": "GROUND-UP BUILD-TO-SUIT DISTRIBUTION CENTERS, core & shell. 'Total Cost' = Site Work + Base Bldg Structural & Enclosure + Base Bldg Architectural + Base Bldg MEP + GC's/GR's & Fee + Contingency.",
+      "what_it_EXCLUDES": "LAND PURCHASE and SOFT COSTS (stated on its own page 2), plus FF&E, IT, A/V, security. It is therefore a HARD-COST figure, NOT all-in.",
+      "size_tiers": "small = 109,200 rsf | medium = 476,400 rsf | large = 901,000 rsf. NOTE: ORA buys 10,000-80,000 SF — BELOW the smallest tier. Even the 'small' column is for a building 1.4x-10x larger than ORA's product."
+    },
+    "cw_2025_hard_cost_small_tier_psf": {
+      "columbus": 130.51,
+      "cincinnati": 143.15,
+      "kansas_city": 129.94,
+      "indianapolis": 143.46,
+      "baltimore": 133.7,
+      "not_covered_by_guide": [
+        "Madison WI",
+        "Grand Rapids MI",
+        "Richmond VA",
+        "Des Moines IA"
+      ],
+      "americas_small_tier_range": "min $85.72 (Monterrey) / mean $138.13 / max $183.51 (Calgary), n=45",
+      "note": "These are the 2025 SMALL-tier (109,200 rsf) Total Cost figures, verbatim from the guide's Local Market Data tables.",
+      "role": "PRIMARY SOURCE feeding RCT v03, and the coherence check that caught RCT v02's error. NOT a benchmark. Do not screen off these figures directly."
+    },
+    "verdict_on_the_old_benchmarks": "Our unsourced $140 Midwest was a GOOD hard-cost proxy — within ~7% of the real C&W figures (Columbus $130.51, KC $129.94, Cincinnati $143.15, Indianapolis $143.46). Our $170 MARYLAND was 27% TOO HIGH as a hard-cost figure — Baltimore is $133.70. That error made the MD basis floor too generous, and two Baltimore deals were wrongly cleared on the 2026-07-14 scan (700 Kane St at $115.38 and 2800 Annapolis Rd at $126.53 both FAIL against a C&W-hard benchmark).",
+    "the_small_bay_premium_is_REAL_and_the_guide_proves_it": {
+      "finding": "The guide's own three size tiers imply cost scales as size^-0.36 (fitted exponent is 0.349-0.364 across all 5 ORA metros — remarkably consistent). Extrapolating that curve DOWN to a 40,000 SF ORA-sized building gives roughly +43% over the small-tier figure: Columbus ~$187, Cincinnati ~$205, Kansas City ~$186, Indianapolis ~$207, Baltimore ~$190.",
+      "caution": "That is an extrapolation BELOW the observed data range — directional, not underwriting-grade. But it independently lands in the $160-220/SF band that separate small-bay sources (Bisnow/Penntex Sept 2025; NAIOP Spring 2026) reported. Two independent lines of evidence agree.",
+      "implication": "TRUE all-in replacement for ORA's product (small-bay premium + soft costs + land) is plausibly $200-240/SF in the Midwest — far above anything we have been using."
+    },
+    "the_decision": {
+      "question": "What does the basis floor test AGAINST — hard cost, or all-in (hard + soft + land)?",
+      "RULING": "GABRIEL RATIFIED HARD COST, 2026-07-14. The basis floor tests against C&W small-tier HARD COST, per metro.",
+      "the_trap_this_avoids": "All-in is the theoretically correct denominator (an existing building comes WITH its land). BUT modelling all-in at ~$230/SF Midwest sets the 25%-discount floor at <=$172/SF, which EVERY ONE of the 17 priced Midwest/MD deals on the 2026-07-14 scan clears. A floor that passes 17 of 17 is not a floor — it stops discriminating and the basis-buyer discipline evaporates.",
+      "why_hard_cost_is_the_right_gate": "It is SOURCED and dated; it is deliberately CONSERVATIVE (excluding land and soft costs, and priced for a building 1.4x-10x larger than ORA's, it UNDERSTATES true replacement — so the floor is HARDER to clear and we never overpay on a bad basis); it preserves week-over-week continuity; and it fixes the one real error (Maryland was 27% too generous).",
+      "the_all_in_number_is_still_true_but_it_is_NARRATIVE_not_a_GATE": "True all-in replacement for ORA product (small-bay premium + soft + land) is plausibly $200-240/SF Midwest. That is a legitimate IC-MEMO point — 'we are buying at 30-50% of true replacement cost' — and it should be USED in memos and lender packages. It is NOT the screening threshold. Do not let a big denominator dissolve the screen."
+    },
+    "operative_benchmark_psf": {
+      "RETIRED": "2026-07-14 (same day it was ratified). This file NO LONGER carries an operative basis benchmark.",
+      "USE_INSTEAD": "RCT v03 — acquisition-underwriting skill, 'Replacement Cost Table (RCT v03)' under UNDERWRITING CONVENTIONS. Per-metro LOW/POINT/HIGH; BASIS DIVIDES BY LOW. Floor = linear vintage ramp 65% discount at <=1995 -> 60% at >=2005. Basis is ALL-IN (price + 2% closing + CapEx + lease-up carry), not price alone.",
+      "rct_v03_LOW_psf": {
+        "columbus": 229.65,
+        "cincinnati": 251.46,
+        "kansas_city": 227.9,
+        "indianapolis": 253.83,
+        "madison": 229.08,
+        "maryland_baltimore_dc": 232.97,
+        "grand_rapids": 253.11,
+        "richmond": 232.97,
+        "des_moines": 231.66
+      },
+      "rct_v03_note": "Mirrored here for reference ONLY. acquisition-underwriting is authoritative; if these ever disagree, THAT file wins and this copy is the bug.",
+      "retired_benchmarks_DO_NOT_REINTRODUCE": [
+        "C&W hard cost as an operative gate (Columbus 130.51 etc., flat 25% floor) — ratified and retired 2026-07-14. Hard-cost/big-box/2025 standing in for all-in/shallow-bay/2026.",
+        "$140 Midwest / $170 Maryland / $150 Richmond / $130 Des Moines — the original scan constants. Never sourced at all.",
+        "RCT v02 (Columbus LOW 124.86 etc.) — failed the all-in-vs-hard-cost coherence test in 5 of 9 markets."
+      ],
+      "if_you_find_a_second_denominator_it_is_a_bug": true
+    },
+    "remaining_gaps": "Even with the guide in hand, TWO of the three all-in components are still unsourced: (a) SOFT-COST percentage (assumed ~20%, never verified) and (b) LAND $/acre by submarket. If Gabriel rules for an all-in basis, both must be sourced before the floor can be trusted. A GC or lender quote per core market on a 30-50K SF shallow-bay build would settle hard cost, soft costs, and the small-bay premium in one stroke — still the highest-value two emails available.",
+    "staleness_warning": "The C&W figures are MARCH 2025 costs. Construction cost has reaccelerated since: Turner Building Cost Index +4.87% YoY (Q1 2026); Mortenson +6.77% YoY; AGC nonresidential input PPI +8.4% YoY through May 2026 on tariff-driven steel (+20.7%), aluminum (+33.0%), copper (+20.9%). Expect the 2026 guide to print higher. Note the guide's OWN YoY moves were mostly NEGATIVE (Cincinnati -11.5%, Cleveland -14.3%, Columbus -7.7%) because the 2024->2025 industrial pipeline slowed — that trend has since reversed. RE-CHECK ANNUALLY on publication; inflate by a construction index in between.",
+    "research_provenance": "Benchmarks flagged as unsourced 2026-07-14 after a 9-metro public-web pass returned defensible figures for only 3 of 9. Gabriel supplied the C&W guide the same day, which settled hard cost for 5 of 9 from a primary source. Local copy parsed from '2025 Industrial Construction Cost Guide.pdf' (40pp, Local Market Data tables pp.26-38)."
+  },
+  "acceptable_states": {
+    "current_holdings": [
+      "OH",
+      "MD",
+      "IN",
+      "WI",
+      "MO",
+      "KS",
+      "TN"
+    ],
+    "target_activity_added_2026_05_30": [
+      "MI",
+      "VA",
+      "IA"
+    ],
+    "note": "current_holdings = states where ORA owns property today (~27 properties). Target activity now also spans MI/VA/IA where ORA has no holdings yet. KY added 2026-08-05 for the Louisville entry-phase cluster ratification — target-activity only, ORA holds no property in KY today.",
+    "target_activity_added_2026_08_05": [
+      "KY"
+    ]
+  },
+  "clusters": [
+    {
+      "market": "Columbus OH",
+      "state": "OH",
+      "status": "established",
+      "tier": "primary",
+      "has_existing_exposure": true,
+      "market_cluster_fit_score": 6,
+      "demand_drivers": "Intel megafab (New Albany), Honda EV, Rickenbacker intermodal/air-cargo, central-OH distribution/e-commerce last-mile",
+      "notes": "Densest cluster (8+ properties).",
+      "replacement_cost": {
+        "hard_cost_psf": 130.51,
+        "hard_cost_flag": "SOURCED — C&W 2025 guide, Local Market Data, small tier (109,200 rsf)",
+        "hard_cost_2024_psf": 141.43,
+        "hard_cost_yoy_pct": -7.7,
+        "small_bay_adjusted_psf": 187,
+        "small_bay_flag": "EXTRAPOLATED to ~40,000 SF via the guide's own size curve (cost ~ size^-0.359). Directional, below the observed data range.",
+        "all_in_psf": null,
+        "all_in_flag": "STILL UNSOURCED — needs a soft-cost % and this is the only cluster with a land figure",
+        "land_psf_acre": 189000,
+        "land_note": "Broad market Q4 2025; data-center-competing parcels reach ~$235,000/acre",
+        "confidence": "HIGH (hard cost — primary source) / None (all-in) / Medium (land, demand-skewed)",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide (Local Market Data table); Newmark Ohio industrial land research",
+        "as_of": "2026-07-14"
+      }
+    },
+    {
+      "market": "Kansas City MO/KS",
+      "state": "MO",
+      "status": "established",
+      "tier": "primary",
+      "has_existing_exposure": true,
+      "market_cluster_fit_score": 6,
+      "demand_drivers": "BNSF Logistics Park KC intermodal, I-70/I-35 distribution crossroads, ag logistics",
+      "replacement_cost": {
+        "hard_cost_psf": 129.94,
+        "hard_cost_flag": "SOURCED — C&W 2025 guide, Local Market Data, small tier (109,200 rsf)",
+        "hard_cost_2024_psf": 136.86,
+        "hard_cost_yoy_pct": -5.1,
+        "small_bay_adjusted_psf": 186,
+        "small_bay_flag": "EXTRAPOLATED to ~40,000 SF via the guide's own size curve (cost ~ size^-0.356). Directional.",
+        "all_in_psf": null,
+        "all_in_flag": "STILL UNSOURCED — no land figure, no soft-cost %",
+        "land_psf_acre": null,
+        "land_note": "NOT DEFENSIBLE — only a $978,582/acre 'average of current listings' aggregate was found, distorted by small urban parcels. Unusable.",
+        "confidence": "HIGH (hard cost — primary source) / None (all-in, land)",
+        "corrected_lead": "A secondary press citation had described KC as the 'most cost-effective' market at ~$108-114/SF. The PRIMARY table shows $129.94 small-tier. The secondary citation was WRONG (or quoting a different tier) — this is why we go to the primary source.",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide (Local Market Data table)",
+        "as_of": "2026-07-14"
+      },
+      "flood_note": "STANDING DD FLAG (added 2026-07-14): the Kaw River bottoms districts — Fairfax Industrial Park, Armourdale, West Bottoms — sit behind the UG/USACE levee system and are the same districts devastated in the 1951 'Black Friday' flood; levee improvement is still active as of July 2026. Cheap $/SF in these submarkets frequently reflects flood exposure, not mispricing. Pull a FEMA flood-zone determination and a flood-insurance quote BEFORE underwriting any KCK/West Bottoms basis play."
+    },
+    {
+      "market": "Indianapolis IN",
+      "state": "IN",
+      "status": "established",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 6,
+      "demand_drivers": "FedEx 2nd-largest national air hub, interstate convergence, auto-parts/healthcare distribution",
+      "notes": "Active pipeline; graduate-migration mature/flat (~3.5%/yr, decelerating to ~0 accel).",
+      "replacement_cost": {
+        "hard_cost_psf": 143.46,
+        "hard_cost_flag": "SOURCED — C&W 2025 guide, Local Market Data, small tier (109,200 rsf)",
+        "hard_cost_2024_psf": 136.29,
+        "hard_cost_yoy_pct": 5.3,
+        "small_bay_adjusted_psf": 207,
+        "small_bay_flag": "EXTRAPOLATED to ~40,000 SF via the guide's own size curve (cost ~ size^-0.364). Directional.",
+        "all_in_psf": null,
+        "all_in_flag": "STILL UNSOURCED — no land figure, no soft-cost %",
+        "land_psf_acre": null,
+        "land_note": "NOT DEFENSIBLE — LandSearch listings average $371,574/acre; a Marion County figure of $680,034/acre was rejected as skewed by small infill parcels.",
+        "confidence": "HIGH (hard cost — primary source) / None (all-in, land)",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide (Local Market Data table)",
+        "as_of": "2026-07-14",
+        "note": "MOST EXPENSIVE ORA metro to build in ($143.46) and one of the few RISING YoY (+5.3%) — the earlier derived estimate of $129 was ~10% too low."
+      }
+    },
+    {
+      "market": "Maryland (Baltimore/DC)",
+      "state": "MD",
+      "status": "established",
+      "tier": "primary",
+      "has_existing_exposure": true,
+      "market_cluster_fit_score": 6,
+      "demand_drivers": "Port of Baltimore, federal-contractor/biotech base, I-270 corridor",
+      "notes": "Slowest brain-gain of core markets (~2.3%/yr) — basis play.",
+      "replacement_cost": {
+        "hard_cost_psf": 133.7,
+        "hard_cost_flag": "SOURCED — C&W 2025 guide (BALTIMORE), Local Market Data, small tier (109,200 rsf)",
+        "hard_cost_2024_psf": 126.77,
+        "hard_cost_yoy_pct": 5.5,
+        "small_bay_adjusted_psf": 190,
+        "small_bay_flag": "EXTRAPOLATED to ~40,000 SF via the guide's own size curve (cost ~ size^-0.349). Directional.",
+        "all_in_psf": null,
+        "all_in_flag": "STILL UNSOURCED — and MD land is the single biggest missing number in this file",
+        "land_psf_acre": null,
+        "land_note": "NOT DEFENSIBLE — the range found is incoherent: Baltimore aggregate $75,429/acre; Anne Arundel $296,128/acre (single listing); PG County commercial (not industrial) $471,729/acre; DC proper $689,755/acre. No clean industrial-specific figure for the suburban submarkets ORA targets.",
+        "confidence": "HIGH (hard cost — primary source) / None (all-in, land)",
+        "CORRECTION": "Our operative $170/SF Maryland benchmark was 27% TOO HIGH as a hard-cost figure — Baltimore is $133.70, and is actually a MID-priced market, not a premium one (it sits below Cincinnati and Indianapolis). This error made the MD basis floor TOO GENEROUS: it let deals through that a sourced benchmark rejects. On the 2026-07-14 scan, 700 Kane St ($115.38/SF) and 2800 Annapolis Rd ($126.53/SF) were both cleared as T1 PURSUE on the $170 figure; against C&W hard cost ($133.70, floor $100.28) BOTH FAIL BASIS. Corrected in the Deal Sourcing Log 2026-07-14.",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide (Local Market Data table)",
+        "as_of": "2026-07-14"
+      },
+      "coverage_note": "Montgomery County (Rockville/Gaithersburg/Germantown/I-270/Silver Spring) was fetch-verified 2026-07-14 and returned ZERO in-box industrial for-sale inventory — both Yardi platforms show no industrial-for-sale listings county-wide. It is expensive, thin, and office/lab-skewed. DOWNGRADED to a MONTHLY check in the on-market scan; the better route into this geography is county-parcel-screen against Montgomery County assessor data (off-market), not repeated on-market scanning of a pool structurally priced above the buy-box."
+    },
+    {
+      "market": "Cincinnati OH",
+      "state": "OH",
+      "status": "established",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 6,
+      "added": "2026-05-13",
+      "demand_drivers": "CVG Amazon Air global hub + DHL, Ohio River logistics, advanced manufacturing",
+      "notes": "Weakest recent graduate momentum among ORA markets (~1.9%/yr, -1.5 ppt accel) — underwrite conservatively on human-capital axis.",
+      "replacement_cost": {
+        "hard_cost_psf": 143.15,
+        "hard_cost_flag": "SOURCED — C&W 2025 guide, Local Market Data, small tier (109,200 rsf)",
+        "hard_cost_2024_psf": 161.72,
+        "hard_cost_yoy_pct": -11.5,
+        "small_bay_adjusted_psf": 205,
+        "small_bay_flag": "EXTRAPOLATED to ~40,000 SF via the guide's own size curve (cost ~ size^-0.357). Directional.",
+        "all_in_psf": null,
+        "all_in_flag": "STILL UNSOURCED — no land figure, no soft-cost %",
+        "land_psf_acre": null,
+        "land_note": "NOT SOURCED",
+        "confidence": "HIGH (hard cost — primary source) / None (all-in, land)",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide (Local Market Data table)",
+        "as_of": "2026-07-14",
+        "note": "Cincinnati is the 2nd-most expensive ORA metro to build in, and one of the steepest YoY DROPS in the guide (-11.5%) — a slowed 2024->2025 pipeline, since reversed."
+      }
+    },
+    {
+      "market": "Madison WI",
+      "state": "WI",
+      "status": "established",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 6,
+      "added": "2026-05-13",
+      "demand_drivers": "State capital, UW-Madison, biotech/health-tech, strong small-business tenant base",
+      "notes": "Highest educated share but thin pure-industrial inventory — screen product fit carefully. CONFIRMED 2026-07-14: only ~4 industrial for-sale listings exist citywide; a nil result from a Madison scan is the normal, correct outcome, not a scan failure.",
+      "replacement_cost": {
+        "hard_cost_psf": 130.05,
+        "hard_cost_flag": "PROXY — Madison is NOT in the C&W guide. This is MILWAUKEE's 2025 small-tier figure, used as the nearest in-state proxy. Weaker than the 5 sourced metros; replace with a GC/lender quote when available.",
+        "all_in_psf": null,
+        "all_in_flag": "UNSOURCED",
+        "land_psf_acre": null,
+        "land_note": "NOT SOURCED — Milwaukee County ($278,913/acre) is a different submarket and NOT a valid Madison land proxy; the statewide WI average ($25,200/acre) is farmland-driven and unusable.",
+        "confidence": "Medium (proxy) / None (all-in, land)",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide — MILWAUKEE row, used as proxy",
+        "as_of": "2026-07-14"
+      }
+    },
+    {
+      "market": "Grand Rapids MI",
+      "state": "MI",
+      "status": "entry_phase",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 4,
+      "added": "2026-05-30",
+      "demand_drivers": "Office-furniture cluster (Steelcase, MillerKnoll), medical/life-sciences (Medical Mile), West Michigan distribution/food processing",
+      "submarkets": [
+        "Wyoming/Kentwood",
+        "Walker",
+        "Grandville",
+        "Cascade",
+        "Comstock Park"
+      ],
+      "metrics": {
+        "vacancy_pct": 3.7,
+        "vacancy_flex_pct": 7.2,
+        "nnn_rent_psf_industrial": 6.39,
+        "nnn_rent_psf_flex": ">10",
+        "cap_rate_sub10m": "7.5-7.9",
+        "cap_rate_flag": "SPECULATIVE",
+        "sale_psf_asking": "133-160",
+        "replacement_psf": null,
+        "net_absorption_q4_2025_sf": -310000,
+        "source": "Colliers West Michigan Q4 2025 (vacancy/rent/absorption); LoopNet/Crexi (sale psf); cap = aggregator",
+        "as_of": "2026-05-30"
+      },
+      "replacement_cost": {
+        "hard_cost_psf": 143.64,
+        "hard_cost_flag": "PROXY — Grand Rapids is NOT in the C&W guide. This is DETROIT's 2025 small-tier figure, used as the nearest in-state proxy. LIKELY TOO HIGH: RSMeans shows Grand Rapids running well below the national average (Q2-2025 change -1.48%, the largest decrease in the notice), and Detroit is a high-cost union market. Treat as a conservative ceiling; replace with a GC/lender quote.",
+        "all_in_psf": null,
+        "all_in_flag": "UNSOURCED",
+        "land_psf_acre": null,
+        "land_note": "NOT SOURCED",
+        "confidence": "Low (proxy, likely overstated) / None (all-in, land)",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide — DETROIT row, used as proxy",
+        "as_of": "2026-07-14"
+      },
+      "provenance": "ACS graduate-migration Tier 1 (5.1%/yr recent); see 20260530_Grad-Migration-Midwest-MidAtlantic-Ranking_Analysis_v01.xlsx"
+    },
+    {
+      "market": "Richmond VA",
+      "state": "VA",
+      "status": "entry_phase",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 4,
+      "added": "2026-05-30",
+      "demand_drivers": "I-95 mid-Atlantic distribution, Port of Virginia drayage, financial/government base, data-center adjacency; natural extension of Maryland cluster",
+      "submarkets": [
+        "I-95 South / I-295 (Gateway 95)",
+        "I-95 North / Ashland / Hanover",
+        "Henrico / Airport",
+        "Chesterfield",
+        "West Creek"
+      ],
+      "metrics": {
+        "vacancy_pct": 4.4,
+        "vacancy_alt_pct": 4.6,
+        "nnn_rent_psf": 8.08,
+        "cap_rate_institutional_core": 5.3,
+        "cap_rate_sub10m_flex": "6.25-7.0",
+        "cap_rate_flag": "SPECULATIVE",
+        "sale_psf": "108-133",
+        "replacement_psf": null,
+        "net_absorption_fy2025_sf": 2000000,
+        "net_absorption_q1_2026_sf": -353000,
+        "under_construction_sf": ">10000000",
+        "source": "CBRE Q4 2025 (vacancy/rent); C&W-Thalhimer Q4 2025 (alt vacancy); Colliers Q1 2026 (absorption/pipeline); REBusinessOnline 2025 (sale psf/core cap)",
+        "as_of": "2026-05-30",
+        "watch": "10M+ SF supply pipeline (highest since Q2 2022) — monitor absorption before committing"
+      },
+      "replacement_cost": {
+        "hard_cost_psf": 133.7,
+        "hard_cost_flag": "PROXY — Richmond is NOT in the C&W guide. This is BALTIMORE's 2025 small-tier figure, used as the nearest Mid-Atlantic proxy (and Richmond is already framed as a natural extension of the Maryland cluster). Replace with a GC/lender quote when available.",
+        "all_in_psf": null,
+        "all_in_flag": "UNSOURCED",
+        "land_psf_acre": 255000,
+        "land_flag": "SINGLE TRANSACTION — treat as directional, not a baseline",
+        "land_note": "One real deal: 40-acre industrial parcel, $10.2M, Nov 2025, Core Development Group / Magellan Parkway (near RIC airport — likely premium-located and infrastructure-ready, so probably ABOVE a true baseline).",
+        "confidence": "None (hard cost) / Medium (land, single transaction)",
+        "implication": "If Richmond hard cost is anywhere near the Midwest range, land at $255K/acre pushes all-in ABOVE the operative $150/SF benchmark — i.e. the current benchmark is more likely too LOW than too high.",
+        "source": "Traded.co deal record (traded.co/deals/virginia/industrial/sale/8555-magellan-parkway/)",
+        "as_of": "2026-07-14"
+      },
+      "provenance": "ACS graduate-migration Tier 1 (4.1%/yr and accelerating, +0.9 ppt)"
+    },
+    {
+      "market": "Des Moines IA",
+      "state": "IA",
+      "status": "entry_phase",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 4,
+      "added": "2026-05-30",
+      "demand_drivers": "Insurance/financial HQ base (Principal, Nationwide), ag-logistics, central-US distribution (I-35/I-80 crossroads)",
+      "submarkets": [
+        "Northeast (Altoona/Bondurant)",
+        "Western Suburbs (West Des Moines/Grimes/Waukee)",
+        "Ankeny",
+        "Airport/Southeast"
+      ],
+      "metrics": {
+        "vacancy_pct": 7.5,
+        "nnn_rent_psf_overall": 6.9,
+        "nnn_rent_psf_flex": 9.4,
+        "cap_rate_sub10m": "7.0-7.6",
+        "cap_rate_flag": "SPECULATIVE",
+        "sale_psf": 121,
+        "replacement_psf": null,
+        "net_absorption_ytd_2025_sf": 239427,
+        "under_construction_sf": 300000,
+        "source": "Colliers Des Moines Q4/Q1 2025 (vacancy/rent/absorption); LoopNet (sale psf); cap = aggregator/Matthews 2025",
+        "as_of": "2026-05-30"
+      },
+      "replacement_cost": {
+        "hard_cost_psf": 131.46,
+        "hard_cost_flag": "PROXY — Des Moines is NOT in the C&W guide. This is MINNEAPOLIS's 2025 small-tier figure, used as the nearest Upper-Midwest proxy. Replace with a GC/lender quote when available.",
+        "all_in_psf": null,
+        "all_in_flag": "UNSOURCED",
+        "land_psf_acre": null,
+        "land_note": "NOT SOURCED",
+        "confidence": "Medium (proxy) / None (all-in, land)",
+        "note": "The old operative $130/SF turns out to be within ~1% of the Minneapolis proxy ($131.46) — a lucky guess, not a sourced one. Deals here clear the floor by razor-thin margins (2164 NW 108th St cleared by 0.4 pts on 2026-07-14), so this proxy is doing decisive work and deserves a real quote.",
+        "source": "Cushman & Wakefield 2025 Industrial Construction Cost Guide — MINNEAPOLIS row, used as proxy",
+        "as_of": "2026-07-14"
+      },
+      "provenance": "ACS graduate-migration Tier 2 stable hold (3.6%/yr)"
+    },
+    {
+      "market": "Louisville KY",
+      "state": "KY",
+      "status": "entry_phase",
+      "tier": "primary",
+      "has_existing_exposure": false,
+      "market_cluster_fit_score": 4,
+      "added": "2026-08-05",
+      "demand_drivers": "UPS Worldport permanent air-cargo hub (anchor tenant/employer); GE Appliances $490M reshoring investment announced June 2025; Midwest Tier-2 distribution comp to Kansas City/Indianapolis; adjacent to the Indiana established cluster",
+      "submarkets": [
+        "Riverport"
+      ],
+      "metrics": {
+        "sale_asking_nnn_psf_range": "3.90-5.00",
+        "sale_asking_discount_to_msa_avg_pct": 40,
+        "active_listings_riverport": "13-14",
+        "metro_grade": "B+",
+        "vacancy_pct": null,
+        "cap_rate_sub10m": null,
+        "net_absorption_sf": null,
+        "under_construction_sf": null,
+        "source": "acquisition-underwriting SKILL.md STAGE 0 Gate 3 rationale (June 2026 sourcing pass) — vacancy, absorption, and construction-pipeline figures were NOT pulled as part of that pass and are not sourced here",
+        "as_of": "2026-06-22"
+      },
+      "exit_cap": {
+        "point_pct": 7.75,
+        "note": "Ratified within acquisition-underwriting v3.4 (2026-06-22) as a Midwest Tier-2 comp to Kansas City/Richmond; carried here for parity, not independently re-derived by this file."
+      },
+      "provenance": "No ACS graduate-migration pull performed for Louisville; not yet tiered against the other 9 clusters on that metric.",
+      "caveat": "Ruling 3 (acquisition-underwriting STAGE 0 Gate 3): entry clusters, Louisville included, earn NO satellite eligibility until ORA's first closed deal validates the cluster. Kentucky sits outside ORA's preferred-state list (acceptable_states) — this is a target-activity addition, not a current-holdings state, mirroring how MI/VA/IA were added 2026-05-30."
+    }
+  ],
+  "watch_markets_not_targets": [
+    {
+      "market": "Toledo OH",
+      "note": "Adjacent to Columbus; port logistics, auto manufacturing"
+    },
+    {
+      "market": "Nashville TN",
+      "note": "In acceptable-state universe (TN); high growth but compressed caps and graduate-migration past peak"
+    },
+    {
+      "market": "Greenville-Spartanburg SC",
+      "note": "Strong industrial + graduate-migration but outside current state footprint; revisit if SC entry considered"
+    }
+  ],
+  "consumers": [
+    "skill: acquisition-underwriting (Markets hard filter)",
+    "skill: deal-comparison (Market Cluster Fit scoring)",
+    "skill: market-monitor (Target Market Profiles)",
+    "skill: acquisition-underwriting COMP GRID DISCIPLINE section (Oxford Market Benchmarks — the retired `rent-comp` skill, gone 2026-08-05, previously held this consumer slot; absorbed into acquisition-underwriting v4.11, 2026-08-12; distinct from the 'Markets hard filter' consumer entry above)",
+    "skill: daily-brief (news/transaction/law geographic scope)",
+    "scheduled: ora-am-brief (daily 6:00 AM Block B = Daily Brief, Section 1 & 2 news/transaction scope; replaces retired ora-daily-brief-6am)",
+    "scheduled: ora-deal-sourcing-scan + ora-entry-market-scan (CC/MCP fleet; established-cluster + 4-entry-market price-cut/distress monitoring, jointly replace retired ora-distress-signal-monitor)",
+    "notion: Acquisition Pipeline Tracker 'Market' select (bcfe4a03) — FIXED 2026-07-15: renamed 'Kansas City MO' -> 'Kansas City MO/KS' and 'Mid-Atlantic' -> 'Maryland (Baltimore/DC)' to exact canonical parity (verified zero live deal records referenced either old option name before the rename, via direct SQL query against the data source, so nothing was orphaned). Richmond VA's color gap also closed: the Notion API rejects an in-place ALTER COLUMN color change on an existing option ('Cannot update color of select'), so it was dropped (again verified zero rows referenced it) and re-added with a real color in a second call. Full exact-string parity with the canonical cluster names now holds for all 9 markets plus 'Cleveland OH'/'Other'.",
+    "notion: Owner Outreach Queue 'Metro' select (caa809b7) — added 2026-07-12 after a silent gap (Cincinnati/Kansas City missing for weeks, undetected because this database was outside ora-skill-text-audit class (j)'s scope); label convention differs from the canonical cluster names above (e.g. 'Baltimore-MD' not 'Maryland (Baltimore/DC)', 'Kansas City' not 'Kansas City MO/KS') — see ora-skill-text-audit SKILL.md class (j) for the alias mapping used when checking parity"
+  ],
+  "changelog_1_5": "RETIRED the operative basis benchmark from this file entirely. THERE IS NOW EXACTLY ONE DENOMINATOR: **RCT v03**, in the acquisition-underwriting skill. Reading that skill properly revealed ORA ALREADY had a replacement-cost doctrine (RCT v02) that beat the C&W benchmark on every axis — all-in not hard-cost-only, shallow-bay not big-box, 2026 not March-2025, banded, vintage-ramped, with an adder schedule and a renovation effective-vintage rule. Ratifying a C&W benchmark HERE had created a SECOND competing denominator, and two denominators was the actual bug. BUT RCT v02 was itself broken, and C&W is what proved it: for 5 of 9 markets RCT v02's ALL-IN point sat BELOW C&W's pure HARD cost (Cincinnati/Indianapolis/Grand Rapids/Richmond/Des Moines) — arithmetically impossible, since all-in contains hard cost. RCT v02 had been scaled off a big-box baseline with the shallow-bay premium never applied. RCT v03 (ratified 2026-07-14, Gabriel) rebuilds it from the C&W primary source: POINT = C&W hard x shallow-bay size premium (from C&W's OWN size curve, ~+43% at 40K SF) x soft/profit/financing 1.30x [EST — the one unsourced input, low end chosen deliberately so the floor stays hard] x escalation 1.0487 [Turner BCI, lowest of 3 indices]. Coherence now passes: every all-in exceeds hard cost at ~1.95x. The vintage ramp was RECALIBRATED 30/25 -> 65/60, because the floor%% and the denominator are a MATCHED PAIR — leaving 30%% against the corrected table would have set the Columbus floor at $160.76/SF, which every buy-box candidate clears. A floor that passes everything is not a floor. ORA's revealed selectivity implies a ~64%% discount to TRUE replacement: we buy at ~35-40%% of all-in replacement cost. The '25%% discount' language was always an artifact of a wrong denominator. Net per-market: Maryland TIGHTENS ~23%% (was the most over-generous), Grand Rapids LOOSENS ~16%% and Indianapolis ~7%% (both had been unfairly harsh), Columbus/KC/Madison tighten modestly, Richmond/Des Moines ~flat. Re-screen of the 2026-07-14 scan: 11 of 29 priced candidates now clear (a gate that discriminates).",
+  "changelog_1_7": "Louisville KY ratified as the 10th canonical cluster (entry-phase), closing the split this file itself flagged 2026-07-16 (known_provisional_addition_2026_07_16): acquisition-underwriting had been scoring Louisville as an entry cluster since v3.4 (2026-06-22) while this file — the canonical cross-skill source of truth — did not recognize it, leaving deal-comparison, market-monitor, rent-comp, and daily-brief blind to it. Gabriel ratified it in-turn 2026-08-05. Every field in the new cluster record is sourced from acquisition-underwriting's own June-2026 rationale (UPS Worldport anchor, GE Appliances $490M reshoring, Riverport pricing 40% below MSA average, adjacency to the Indiana established cluster) — nothing new was researched for this ratification. Hard cost is a PROXY off Indianapolis (nearest cluster, per the skill's own adjacency framing) pending a real quote; vacancy/absorption/construction-pipeline metrics were never pulled and are left null rather than guessed. Ruling 3 (no satellite eligibility until a closed deal) applies to Louisville exactly as it does to the other three entry clusters. KY added to acceptable_states as a target-activity state (ORA holds no property there). The Notion Acquisition Pipeline Tracker \"Market\" select (bcfe4a03) and Owner Outreach Queue \"Metro\" select (caa809b7) were updated the same session (2026-08-05) via notion-update-data-source — Louisville KY / Louisville added as options, every pre-existing option's UUID verified unchanged (only the new option was appended), so no historical row value was disturbed. All five listed consumers plus both Notion selects are now at parity. No governor, scorecard weight, or Stage 1 floor changed — this is a market-set membership decision, the same class of change Grand Rapids/Richmond/Des Moines were on 2026-05-30.",
+  "changelog_1_8": "Same-day wording-only follow-up to 1.7 — no market data, scores, or fields changed. The changelog_1_7 entry said the Notion Acquisition Pipeline Tracker \"Market\" select and Owner Outreach Queue \"Metro\" select still needed Louisville added manually; that update landed later the same session (notion-update-data-source against collection://bcfe4a03... and collection://caa809b7..., every pre-existing option UUID verified unchanged, only the new option appended). Text corrected to reflect completion rather than leave a stale \"not done here\" note in ratified doctrine.",
+  "changelog_1_9": "Louisville KY: replacement_cost block DELETED (Gabriel, 2026-08-12). It carried hard_cost_psf 143.46 as an INDIANAPOLIS proxy, plus the claim that \"Louisville is NOT in the C&W guide and has no independent hard-cost pull\". BOTH WERE WRONG. Louisville IS in the C&W 2025 guide; its small-tier figure is $135.28/SF, present all along in the repo's own 45-market extract at scheduled-tasks/ora-deal-sourcing-scan/skills/cw-2025-construction-costs.json. That sourced figure now drives a real RCT v03 row in acquisition-underwriting (Louisville KY | 237.07 | 263.41 | 289.75 | 135.28), so no proxy is needed and the stale block was removed rather than corrected — leaving it would have been a third denominator location. Louisville is now the ONLY cluster with no replacement_cost block. The other nine KEEP theirs by decision (Gabriel, 2026-08-12): their figures are correct and match the C&W hard costs behind RCT v03, and they carry provenance found nowhere else (2024 comparatives, YoY %, land $/acre, small-bay extrapolations). Those nine are PROVENANCE, NEVER a denominator — this file's operative benchmark was RETIRED 2026-07-14 and RCT v03 in acquisition-underwriting is the only one. No market data, scores, submarkets or fields changed for any other cluster.",
+  "changelog_1_10": "Two corrections from the 2026-08-15 ora-skill-text-audit remediation pass (findings F4-F6 + F1-F3 wrap-up), no market data, scores, or governors changed. (1) The `consumers` array's `rent-comp` entry (Oxford Market Benchmarks) was stale — that skill was retired 2026-08-05 and its comp-grid function absorbed into acquisition-underwriting's COMP GRID DISCIPLINE section 2026-08-12; the entry is repointed there, distinguished from the pre-existing 'Markets hard filter' acquisition-underwriting entry above it. (2) changelog_1_7's claim \"All five listed consumers plus both Notion selects are now at parity\" was FALSE at the time it was written and stayed false for 10 days: `market-monitor`, `deal-comparison`, and `daily-brief` had NOT actually been updated with the Louisville KY entry-phase profile/list entries (confirmed by direct read 2026-08-15) — only acquisition-underwriting itself and the two Notion selects were current. All three skill files are fixed as of this remediation pass; full parity across every listed consumer now genuinely holds."
+}

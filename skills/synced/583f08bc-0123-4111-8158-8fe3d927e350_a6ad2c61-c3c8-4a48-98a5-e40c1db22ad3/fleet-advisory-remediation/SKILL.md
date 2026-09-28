@@ -1,0 +1,67 @@
+---
+name: fleet-advisory-remediation
+description: Auto-triage a fleet-status/setup-self-audit advisory report across the dual CC/MCP + LAMS/Cowork scheduled-task fleet — register complete-but-unregistered "dark" task folders, delete expired one-time registry entries, route stale-data-producer symptoms to orphaned-task-forensics for root-causing, and hand off WRITES the current session's fleet can't reach (spawn a background task for the other fleet rather than guessing at data — but check `fleet-status.py` first, it reads both fleets regardless of surface, so a handoff should only ever be for the write itself). Use when the user pastes or references a fleet-status/setup-self-audit/automation-health-monitor advisory report, says fix these advisories, dark tasks, fleet hygiene sweep, or clean up the scheduled-task fleet. Cross-fleet handoffs are dispatched to a NATIVE on-device Cowork session by name, never a bare "Cowork session" (a cloud sandbox carries none of the scheduled-task MCP tools). v1.3
+license: ORA Internal
+---
+
+# Fleet Advisory Remediation
+
+Turns a `fleet-status.py`/`setup-self-audit.py`/`automation-health-monitor` advisory dump into triaged, executed (where safe) or handed-off (where not) fixes — replacing the ad hoc `TaskCreate`/`TaskUpdate` scratch list this has been rebuilt as at least twice.
+
+## Scope
+
+Mechanical categories only: dark (complete-but-unregistered) task folders, expired one-time registry entries, and routing (not resolving) stale-producer symptoms and cross-fleet scheduling issues. This skill does not decide policy (e.g. whether a task should exist at all) — it executes the mechanical fix or surfaces the decision, never both silently.
+
+## Triggers
+
+A pasted advisory block from `fleet-status.py`, `setup-self-audit.py`, or the `automation-health-monitor` scheduled task's own output; "fix these advisories", "clean up the fleet", "dark tasks", "fleet hygiene".
+
+## Inputs
+
+- The advisory report text (never-ran tasks, expired one-time entries, throttle skips, same-time collisions, dark/unregistered folders, stale-producer flags).
+- Live registry state: run `python C:\Users\Owner\.claude\maintenance\fleet-status.py --json` FIRST, from either surface — it reads both `scheduled-tasks.json` files directly off disk (`claude-code-sessions` AND `local-agent-mode-sessions` AppData stores) and returns both fleets in one call, regardless of which surface is running it. READ access to the other fleet is NOT the blocker `list_scheduled_tasks` (the MCP tool) makes it look like — that tool is scoped to whichever surface's app is running it, but the underlying registry files are plain JSON on disk and `fleet-status.py` reads both unconditionally. Only WRITES (`create_scheduled_task`/`update_scheduled_task`/`delete_scheduled_task`) genuinely require the correctly-scoped MCP tool on the matching surface — never confuse "I can't write this from here" with "I can't even check this from here."
+
+## Standard Workflows
+
+1. **Parse the advisory into categories:** dark tasks, expired one-time entries, throttle skips, same-time collisions/AM pileup, stale-producer flags. Build a todo list (`TaskCreate`/`TaskUpdate`), one item per category, not per individual advisory line.
+2. **Dark tasks (complete-but-unregistered folders):** for each, read its `SKILL.md` to confirm it's genuinely complete (not a half-written draft), then register via the `register-scheduled-task` skill's supervised `create_scheduled_task` path — never splice the registry JSON directly. If a dark folder looks incomplete or its purpose is unclear, surface it rather than registering blind.
+3. **Expired one-time entries:** confirm the `fireAt` timestamp is genuinely past and the task shows as already-fired-or-disabled, then delete the registry entry (the entry only — never the folder, which may hold useful history) via the supervised path.
+4. **Stale-producer flags:** do not root-cause these yourself — hand off to the `orphaned-task-forensics` skill's Workflow A. This skill's job is *recognizing* the symptom in the advisory and routing it, not re-deriving the trace-and-verify procedure inline.
+5. **Same-time collisions / AM pileup:** `fleet-status.py`'s live read already covers both fleets' cron data, so identifying and proposing a redistribution across BOTH registries is possible from either surface — do not treat cross-fleet collision detection as blocked. Applying the fix is the actual constraint: a CC/MCP session can apply a retime to a CC/MCP task directly, but cannot write to a LAMS/Cowork task even though it can see it. Where a collision is entirely within the CC/MCP fleet, propose a specific retime and get confirmation before applying. Where it spans fleets (or the fix is entirely LAMS-side), produce the fully-specified proposal (exact taskId, exact new cron) from the live data already in hand and hand off the WRITE only — do not re-derive or guess at LAMS cron data, it's already visible.
+6. **Cross-fleet items generally:** if a fix requires writing to the LAMS/Cowork registry, this CC/MCP session cannot do it directly (per `register-scheduled-task` doctrine — registration happens on the surface that owns the target registry) — but it CAN and SHOULD verify current state directly via `fleet-status.py` before handing off, so the handoff is a fully-specified write instruction with an expected before/after, not an open-ended "please check this." **Dispatch to a NATIVE ON-DEVICE Cowork session, and say so in the brief** (`register-scheduled-task` v2.14 RULE 4): a cloud-sandbox Cowork session — device-bridge only, no native app process — never carries `create_/update_/delete_/list_scheduled_tasks`, so a handoff addressed to "a Cowork session" routes by fleet and lands wherever a Cowork session happens to exist, which is a coin flip the sandbox wins. Name the surface literally ("a native on-device Cowork session — the desktop app, or Claude Code's 'Run this task → On your computer'"), and make RULE 3's surface assertion (search the session's own tool registry for `list_scheduled_tasks` before any other step) the brief's explicit step 1, so a mis-landed dispatch stops in its first ten seconds instead of mid-pass. Where the write is an ordered multi-step pass (RETIRE's archive-first-delete-second), say in the brief that it is ONE pass and must not be half-executed. Use `mcp__ccd_session__spawn_task` to flag it rather than leaving it silently unaddressed in the todo list. Precedent for getting this wrong: the `ora-passed-deal-tracker` LAMS deregistration was dispatched to a cloud sandbox twice (2026-08-17, 2026-08-22) — the second time with the v2.10 doctrine note already written, because nothing in this step pointed at it. Whatever session performs the write MUST re-run a live read (`fleet-status.py` or `list_scheduled_tasks` on the matching surface) afterward and confirm the change actually took effect before logging it as done — a logged completion claim is not itself confirmation (see `feedback_verify_registry_mutation_claims` memory, 2026-07-15: a delete claimed complete sat unactioned in the live registry for at least a day before an independent snapshot caught the discrepancy).
+7. **"Unused skill" / prune-candidate analysis — NEVER from `skillUsage` alone (added v1.2, 2026-08-05):** an advisory that names a skill as unused, cold, or a prune candidate is almost always sourced from `~/.claude.json`'s `skillUsage` map (`{skill: {usageCount, lastUsedAt}}`). **That map records CC/MCP invocations only.** Measured 2026-08-05: 94 `skillUsage` entries against 42 LAMS/Cowork scheduled-task folders, of which exactly **1** appeared in the map — and that one only because it is also invoked CC-side. A skill fired daily by a LAMS task is therefore indistinguishable from a genuinely dead one on `skillUsage` evidence, and acting on that evidence deletes live automation. Before treating ANY skill as unused, cross-check all three:
+   - **Both fleet registries** — `fleet-status.py` reads CC/MCP *and* LAMS/Cowork off disk from either surface (see step 5). A skill named by any enabled task's `filePath` is LIVE regardless of its usage count.
+   - **Scheduled-task SKILL.md bodies** — grep both fleet SKILL.md roots for the skill's name. Tasks routinely invoke skills by name in prose rather than by registry path, so registry `filePath` matching alone under-counts.
+   - **Cross-skill references** — a skill named in another skill's Dependencies/tie-break routing is load-bearing even at zero direct invocations.
+
+   A zero that could mean "this surface cannot see that usage" is a **verified-null failure, not a finding** — report the skill as `USAGE-UNVERIFIABLE (CC-only telemetry)`, never as unused. Escalate to a prune recommendation only when all three cross-checks come back clean, and say which three you ran.
+8. **Log every category's resolution** (fixed / handed-off / needs-decision) to `event_log.md` in one consolidated entry, not one per line item.
+
+## Outputs
+
+- Registered dark tasks (via the supervised path only).
+- Deleted expired one-time entries.
+- A spawned background task for any LAMS/Cowork-side fix this session can't reach directly — addressed to a NATIVE on-device Cowork session by name, with the surface assertion as its step 1.
+- One consolidated `event_log.md` entry.
+- For stale-producer flags: a handoff to `orphaned-task-forensics`, not an inline resolution.
+
+## Boundaries
+
+- Never splice scheduled-task registry JSON directly — always the supervised `create_scheduled_task`/`update_scheduled_task`/deletion path.
+- Never dispatch a LAMS/Cowork registry WRITE to an unspecified "Cowork session" — name the native on-device surface in the brief and carry the surface assertion as its first step (step 6). Never dispatch a handoff merely to READ the other fleet: `fleet-status.py` already reads both.
+- Never resolve a cross-fleet scheduling collision by guessing at the other fleet's cron list — propose, don't apply, for anything touching LAMS from a CC/MCP session.
+- Never call a skill unused on `skillUsage` evidence alone — that map is CC/MCP-only and is blind to all 42 LAMS/Cowork scheduled-task invocations (step 7).
+- Never root-cause a stale-producer symptom inline — route to `orphaned-task-forensics` so the trace/recover/verify discipline there (including "verify absorption before treating an archived task as redundant") is actually applied, not skipped under time pressure.
+
+## Dependencies
+
+- `register-scheduled-task` (registration/deletion mechanics)
+- `orphaned-task-forensics` (stale-producer root-causing)
+- `automation-health-monitor` (the advisory source this skill consumes)
+
+## Changelog
+
+- v1.3 (2026-08-22): step 6's dispatch now names the SURFACE, not just the fleet. A handoff addressed to "a Cowork-side session" is satisfied by a cloud-sandbox Cowork session, which carries none of the scheduled-task MCP tools — so the write cannot happen and the gap is only discovered mid-pass, after the receiving session has already started. Step 6, Outputs and Boundaries now require the brief to say "a native on-device Cowork session" literally, to carry `register-scheduled-task` v2.14 RULE 3's surface assertion as its step 1, and to flag an ordered multi-step write (archive-first-delete-second) as one indivisible pass. Root incident: the `ora-passed-deal-tracker` LAMS deregistration was dispatched to a cloud sandbox on 2026-08-17 and again on 2026-08-22 — same id, same class, the second time with the v2.10 doctrine note already written and nothing in the dispatch step pointing at it. Also corrected the frontmatter version, which read v1.1 while the changelog was already at v1.2 (`reference_skill_description_registry_file_desync`).
+- v1.2 (2026-08-05): added step 7 — "unused skill" analysis must never rest on `~/.claude.json`'s `skillUsage`, which is CC/MCP-only. Measured the same day: 94 `skillUsage` entries vs 42 LAMS/Cowork scheduled-task folders, exactly 1 of which appeared in the map (and only via a parallel CC-side invocation). A skill fired daily by a LAMS task is thus indistinguishable from a dead one on that evidence, so a prune acting on it deletes live automation. Folded the three-way cross-check (both registries via `fleet-status.py`, both fleet SKILL.md roots by grep, cross-skill references) in here rather than leaving it to be re-derived per session — it was re-derived from scratch during a 2026-08-05 skill-inventory pass. Also added the matching Boundaries bullet.
+- v1.1 (2026-07-15): corrected a wrong assumption in Inputs/Step 5/Step 6 — "this session cannot see the LAMS/Cowork registry" was never true for READS; `fleet-status.py` reads both registry JSON files directly off disk from either surface. Only WRITES need the matching-surface MCP tool. The wrong claim caused a real incident: a stale-entry cleanup (`ora-tenant-db-dedup-remediation`) was handed off wholesale to a Cowork session for a full list→verify round-trip, when the live state was checkable from the CC session in one `fleet-status.py` call. Also added a mandatory post-write re-verify step to Step 6, per the same incident (a 2026-07-14 completion claim for this exact task's deletion turned out false when independently checked a day later).
+- v1.0 (2026-07-11): initial. Formalizes a remediation loop previously rebuilt ad hoc via a scratch TaskCreate/TaskUpdate list at least twice, surfaced by a workflow-audit session mining recent transcripts.

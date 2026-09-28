@@ -1,0 +1,80 @@
+{
+  "_comment": "Property configs. Provenance: entities AND entity_state from executed leases (2026-08-03) — entity_state is the LLC's formation state per the lease recital, NOT assumed from property location (2026-08-03 eval finding); SF from Portfolio Basis workbook; PM blocks from executed-lease practice. Unknown facts stay bracketed tokens — never invent. 'lease_structure' is optional; omit it for the ratified default (modified gross, calendar base year). Set to 'NNN' only on Gabriel's explicit, sourced direction that the property runs full triple-net — see MD-COL for the model (2026-08-04, confirmed against the executed LINERX/Eddie Woo Park lease and Muirkirk Properties' ~15-year NNN practice at the building).",
+  "MD-EAS": {
+    "state_code": "MD",
+    "entity": "29000 INFORMATION LANE, LLC",
+    "entity_state": "Maryland",
+    "label": "MD-Easton-29000InformationLane",
+    "premises": "29000 Information Lane, Technology Commons, Easton, Maryland (Suite [SUITE NUMBER])",
+    "building_def": "the building known as 29000 Information Lane, Easton, Maryland, containing 48,000 square feet of rentable area",
+    "project_def": null,
+    "share_denominator": "bears to the total rentable square footage of the Building, being 48,000 square feet ",
+    "payment_direction": "to Easton Technology Center c/o Thomas Park Management, PO Box 6309, Hicksville, NY 11802, through the tenant online portal or by check payable to Landlord,",
+    "pm_block": [
+      "COPY TO:Thomas Park Management",
+      "PO Box 6309",
+      "Hicksville, NY 11802",
+      "ATTN: Civita Peters"
+    ]
+  },
+  "MD-SBY": {
+    "state_code": "MD",
+    "entity": "2203 NORTHWOOD, LLC",
+    "entity_state": "Maryland",
+    "label": "MD-Salisbury-2203-2207Northwood",
+    "premises": "[2203 / 2205 / 2207] Northwood Drive, Salisbury, Maryland 21801 (Suite [SUITE NUMBER])",
+    "building_def": "the building known as [BUILDING ADDRESS — 2203, 2205 or 2207 Northwood Drive], Salisbury, Maryland 21801, containing [BUILDING RSF] square feet of rentable area",
+    "project_def": "the buildings known as 2203, 2205 and 2207 Northwood Drive, Salisbury, Maryland 21801, collectively containing 53,700 square feet of rentable area, together with the land on which they are situated and all parking areas, drives, walkways and other common areas serving them",
+    "share_denominator": "bears to the total rentable square footage of the Project, being 53,700 square feet ",
+    "payment_direction": "to 2203 Northwood, LLC through the tenant online portal, payable to Landlord,",
+    "pm_block": [
+      "COPY TO:Sperry Van Ness — Miller Commercial",
+      "[MANAGER STREET ADDRESS]",
+      "Salisbury, MD 21801",
+      "ATTN: Brady Smith"
+    ]
+  },
+  "MO-RAY": {
+    "state_code": "MO",
+    "entity": "9620 STATE 350, LLC",
+    "entity_state": "Missouri",
+    "label": "MO-Raytown-9620StateRoute350",
+    "premises": "9620 E. State Route 350, Raytown, Missouri (Unit [UNIT NUMBER])",
+    "building_def": "the building known as 9620 E. State Route 350, Raytown, Missouri, containing 34,560 square feet of rentable area",
+    "project_def": null,
+    "share_denominator": "bears to the total rentable square footage of the Building, being 34,560 square feet ",
+    "payment_direction": null,
+    "pm_block": [
+      "COPY TO:[PROPERTY MANAGER]",
+      "[MANAGER STREET ADDRESS]",
+      "[MANAGER CITY, STATE ZIP]",
+      "ATTN: [MANAGER CONTACT]"
+    ]
+  },
+  "MD-COL": {
+    "state_code": "MD",
+    "entity": "Muirkirk Properties, LLC",
+    "entity_state": "Maryland",
+    "label": "MD-Columbia-9050RedBranchRoad",
+    "lease_structure": "NNN",
+    "premises": "9050 Red Branch Road, Columbia, Maryland 21045 (Suite [SUITE LETTER])",
+    "building_def": "the building known as 9050 Red Branch Road, Columbia, Maryland 21045, containing 90,000 square feet of rentable area",
+    "project_def": null,
+    "share_denominator": "bears to the total rentable square footage of the Building, being 90,000 square feet ",
+    "payment_direction": "to CRC Commercial, 11161 New Hampshire Avenue, Suite 200, Silver Spring, MD 20904, through the tenant online portal, payable to Landlord,",
+    "pm_block": [
+      "COPY TO:CRC Commercial",
+      "11161 New Hampshire Avenue, Suite 200",
+      "Silver Spring, MD 20904",
+      "ATTN: Steve Seh"
+    ],
+    "_provenance_note": "entity/entity_state: ORA Entity Structure DB (Notion 3386ecd8-9e59-8189), State of Formation MD, Status Active. Building SF: ORA Property Register (Notion 39b6ecd8-9e59-815c), Total SF 90,000, sourced from Master Workbook 'Property NOI' tab as of 2026-07-12 -- cross-checked against the executed Suite E/LINERX lease's stated 5.56% pro rata share on 5,000 SF (implies ~89,928 SF, consistent within rounding). PM block: CRC Commercial per lease notice block + Insurance Renewal Monitor / NorthMarq correspondence (Steve Seh). Tax Account No. left tokenized -- SDAT direct lookup did not resolve programmatically; confirm before use. lease_structure=NNN: Gabriel-confirmed 2026-08-04, building-wide NNN practice since ~2011 across ~16 suites on Muirkirk Properties' own form; overrides ratified position #1 (modified gross / calendar base year) for this property only."
+  },
+  "OH-ST-NNN": {
+    "variant": "single-tenant",
+    "lease_structure": "NNN",
+    "state_code": "OH",
+    "label": "OH-SingleTenant-NNN",
+    "_note": "Generic-tokenized OH single-tenant NNN template family (added v1.6, 2026-08-04). No entity/premises fills — tokens filled at drafting time. Deltas recovered by diff of the v2.4.1 variant against the v2.4.1 base; verified on the v2.6 rebuild."
+  }
+}

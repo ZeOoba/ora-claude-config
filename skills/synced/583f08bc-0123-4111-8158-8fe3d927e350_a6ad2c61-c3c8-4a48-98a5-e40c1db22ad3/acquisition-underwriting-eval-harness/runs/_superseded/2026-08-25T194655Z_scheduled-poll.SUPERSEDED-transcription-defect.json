@@ -1,0 +1,426 @@
+{
+  "run_timestamp": "2026-08-25T194655Z",
+  "run_label": "scheduled-poll",
+  "skill_sha": "189931de92c2a2bb7bec42c7afa3d9c99e6da9c0",
+  "total_deals": 6,
+  "scored_deals": 3,
+  "informational_deals": 3,
+  "scored_pass": 3,
+  "scored_flag": 0,
+  "results": [
+    {
+      "deal_id": "2196-port-sheldon-st-jenison-mi",
+      "status": "PASS",
+      "scored": true,
+      "informational_only": false,
+      "confidence": "HIGH",
+      "combined_golden": 26.81,
+      "combined_observed": 27.0,
+      "combined_delta": 0.19000000000000128,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band (FLOOR-FLAGGED; price-watch re-engage per SKILL.md's own validation example for this deal)",
+      "observed_tier": "PASS-band (T2 WATCH ceiling from DD-Critical/bear-mode unknowns is a ceiling only; FLOOR-FLAGGED, DENOMINATOR-SENSITIVE, INVERTED-SPREAD)",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": 0.7699999999999996,
+        "market_location": -0.33000000000000007,
+        "seller_motivation": 0.0,
+        "tenancy_lease": 0.0,
+        "value_add": -0.25
+      },
+      "aggregate": {
+        "n": 3,
+        "single_sample": false,
+        "combined_samples": [
+          26.0,
+          28.0,
+          27.0
+        ],
+        "combined_mean": 27.0,
+        "combined_stdev": 1.0,
+        "combined_sem": 0.58,
+        "combined_min": 26.0,
+        "combined_max": 28.0,
+        "combined_range": 2.0,
+        "category_null_counts": {
+          "basis": 0,
+          "yield": 0,
+          "product_physical": 0,
+          "market_location": 0,
+          "seller_motivation": 0,
+          "tenancy_lease": 0,
+          "value_add": 0
+        },
+        "replays_without_breakdown": 0,
+        "verdict_tier_variants": [
+          "PASS-band",
+          "PASS-band (T2 WATCH ceiling from DD-Critical/bear-mode unknowns is a ceiling only; FLOOR-FLAGGED, DENOMINATOR-SENSITIVE, INVERTED-SPREAD)"
+        ],
+        "floor_result_variants": [
+          "FLOOR-FLAGGED - Basis FAIL (~55.4% all-in discount vs 65% floor at 1987 vintage) and Yield FAIL (stabilized YoC ~6.14% vs 8.0% floor); DSCR clears at 1.52x vs 1.25x floor, 65% LTV binds; IRR floor not computable; carrying-cost floor UNKNOWN",
+          "FLOOR-FLAGGED - Basis floor FAIL (55.4% discount vs 65% required at 1987 vintage) and Yield floor FAIL (6.14% YoC vs 8.0% floor); DENOMINATOR-SENSITIVE and INVERTED-SPREAD carried",
+          "FLOOR-FLAGGED - Basis floor breached (56-59% [est] discount to RCT v03 GR LOW $253.11/SF vs 65% required at 1987 vintage) and Yield floor breached (YoC 6.25-6.73% [est] vs 8.0%); DSCR ~1.48-1.52x [est] passes vs 1.25x floor (LTV-bound sizing); carrying-cost floor UNKNOWN; IRR floor not computable. Ruling 5: flags, not kills."
+        ]
+      },
+      "floor_drift": false,
+      "notes": [
+        "DSCR floor constant not verified: floor_result prose on golden and observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "YoC floor constant not verified: floor_result prose on observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-20 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference (Combined 36) is historical only.",
+        "known_gap: REBASELINED 2026-08-14 (n=3 -> n=6, Gabriel-directed): the scheduled-poll run added 3 further replays (25.0 / 28.5 / 27.0) under the SAME doctrine SHA and SAME frozen inputs. Golden Combined moved 29.33 -> 28.08. Precision improvement, not detected doctrine change.",
+        "known_gap: REBASELINED AGAIN 2026-08-15 (n=6 -> n=8, leakage fix, Gabriel-directed): 3 more replays added (25.0 / 26.0 / 27.0) under the fixed replay prompt (see SKILL.md's 'Fourth pass' Limitations entry and the SKILL.md-citation-leakage finding below). This is n=9 raw, but run 1 (32.0, the SKILL.md-citation-leaked sample from the very first baseline) is now EXCLUDED from the golden mean -- see the leakage finding below for why. Golden Combined moved 28.08 -> 26.81 on 8 clean samples (25.0/25.0/26.0/27.0/27.0/27.5/28.5/28.5), stdev 1.39, range 3.5 -- both materially tighter than the n=6 contaminated figures (2.31 / 7.0). Doctrine SHA unchanged throughout (83547a76) -- this is a measurement-process correction, not drift.",
+        "known_gap: REPEATABILITY FINDING (2026-08-14, measured at n=6, now superseded by the leakage-excluded n=8 figures above): 6 independent frozen replays of this exact deal, identical inputs, identical doctrine, produced Combined 32.0 / 27.5 / 28.5 / 25.0 / 28.5 / 27.0 -- a 7.0-point range (stdev 2.31), which EXCEEDED the harness's 5.0-pt tolerance on its own. The response was NOT to widen the tolerance further but to gate on the mean of 3 replays per run (SKILL.md Steps 1-3). The 2026-08-15 leakage fix (below) removed most of that dispersion at its source rather than just averaging over it: excluding the one contaminated run drops the range to 3.5 and the stdev to 1.39.",
+        "known_gap: SKILL.md-CITATION LEAKAGE -- FIXED 2026-08-15 (was: documented standing risk). This exact address is named in SKILL.md's own text as the worked validation example for the price-watch re-engage trigger ('Validation: 2196 Port Sheldon'). The first replay ever run (Combined 32.0) awarded 5 Seller & Motivation points, apparently drawing on that citation's owner-user-vacating characterization -- a fact NOT present in this file's frozen `inputs`. Every one of the 8 subsequent independent replays (across two dated runs) declined to award those points. Leakage rate measured at 1-in-9 samples total (1-in-6 at the original n=6 checkpoint). FIXED 2026-08-15: the harness's replay prompt template now explicitly instructs every replay to disregard SKILL.md's own narrative discussion of the exact frozen address (see SKILL.md 'Prompt template' and the 'Fourth pass' Limitations entry). The 3 replays run under the fixed prompt (2026-08-15) showed zero leakage (Seller & Motivation = 0.0 in all three).",
+        "known_gap: WHY THE CONTAMINATED RUN 1 IS NOW EXCLUDED (reversing the 2026-08-14 REFUTE-pass reasoning, which had kept it in): run 1 (32.0) was originally kept in the golden mean on the theory that every future replay reads the same SKILL.md and would leak at roughly the same ~1/6 rate, so the golden should reflect the contaminated steady-state, not a hypothetically clean one. That reasoning no longer applies: the 2026-08-15 fix changes the replay prompt itself, so future replays are drawn from a DIFFERENT population that (as far as measured, 0-for-3) does not produce this leak. A golden meant to predict future replay output should reflect the process future replays will actually run under, not the pre-fix one. Run 1 stays recorded in `repeatability.runs` (tagged `excluded_from_golden: true`, with the reason) for audit trail -- it is not deleted, just no longer averaged into `golden`.",
+        "known_gap: The 2026-08-14/15 replays are otherwise the cleanest of the six deals -- all 7 scorecard categories resolved in 8 of 9 runs (run 6 returned seller_motivation as null rather than 0, a reporting difference worth 0 points either way, not a genuine input-packet gap).",
+        "known_gap: Building SF has a minor OM-vs-assessor variance (19,777 OM vs 19,471 assessor, ~1.6%) -- below the skill's 2% no-flag threshold, normal noise, not a data-quality issue.",
+        "known_gap: NOI is pro-forma/modeled ($137,027 at $7.50/SF NNN, property 100% vacant) -- expected and consistent with the Lease-Up Assumption Block, not an archive gap."
+      ]
+    },
+    {
+      "deal_id": "e-fulton-st-portfolio-columbus-oh",
+      "status": "PASS",
+      "scored": true,
+      "informational_only": false,
+      "confidence": "MEDIUM",
+      "combined_golden": 56.79,
+      "combined_observed": 56.0,
+      "combined_delta": -0.7899999999999991,
+      "tolerance_pts": 5.0,
+      "tier_match": false,
+      "golden_tier": "PASS-band (GATE-FLAGGED -- per-building 50K SF cap breached under every reading of the North Main Building; T2 WATCH ceilings from bear-mode UNKNOWN + FEMA UNK + unresolved reassessed tax are non-binding on a sub-60 raw score, per the Stage 2.5 disambiguation)",
+      "observed_tier": "PASS-band / GATE-FLAGGED",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": 0.25,
+        "market_location": -0.41999999999999993,
+        "seller_motivation": -0.25,
+        "value_add": -0.08000000000000007
+      },
+      "aggregate": {
+        "n": 3,
+        "single_sample": false,
+        "combined_samples": [
+          57.0,
+          56.0,
+          55.0
+        ],
+        "combined_mean": 56.0,
+        "combined_stdev": 1.0,
+        "combined_sem": 0.58,
+        "combined_min": 55.0,
+        "combined_max": 57.0,
+        "combined_range": 2.0,
+        "category_null_counts": {
+          "basis": 0,
+          "yield": 0,
+          "product_physical": 0,
+          "market_location": 0,
+          "seller_motivation": 0,
+          "tenancy_lease": 0,
+          "value_add": 0
+        },
+        "replays_without_breakdown": 0,
+        "verdict_tier_variants": [
+          "PASS-band - GATE-FLAGGED",
+          "PASS-band / GATE-FLAGGED"
+        ],
+        "floor_result_variants": [
+          "Basis floor CLEARS (~90% discount to RCT v03 Columbus LOW $229.65/SF vs 65% vintage-ramp floor); Yield/IRR/DSCR floors NOT COMPUTABLE (NOI null); carrying-cost floor UNKNOWN",
+          "Basis floor CLEARS: all-in ~$22.4/SF vs RCT v03 Columbus LOW $229.65/SF = ~90% discount vs the 65% vintage-ramp floor; Yield, IRR, DSCR, and carrying-cost floors NOT TESTABLE (NOI null)",
+          "Basis floor PASS - 90.0% discount to RCT v03 Columbus LOW ($229.65/SF) vs 65% vintage-ramp floor (1966); Yield/IRR/DSCR/carrying-cost floors NOT COMPUTABLE (no NOI, no tax data)"
+        ]
+      },
+      "floor_drift": false,
+      "notes": [
+        "DSCR floor constant not verified: floor_result prose on golden and observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "YoC floor constant not verified: floor_result prose on golden and observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is a fresh replay under current doctrine, still using ONLY pre-Phase-II-admissible facts by design.",
+        "known_gap: DECLASSIFIED 2026-07-09 per Gabriel (projects.md) -- no confidentiality restriction on citing these facts, confirmed before use.",
+        "known_gap: ENRICHMENT 2026-08-14 (Gabriel's request to close the Economics-blind-spot documented in SKILL.md Limitations): researched real physical specs for this deal. Two categories of missing fact needed DIFFERENT treatment. (1) STRUCTURAL/DIMENSIONAL specs (construction type, clear height, dock/drive-in count, per-building SF) do not change on their own between the 2026-06-09 freeze date and the later source documents (weeks-to-months apart, not decades) -- CORRECTED 2026-08-14 per REFUTE finding F5: the original wording said these are usable from 'any point in time,' which overstated the theory (a 1966-built structure's ORIGINAL dimensions are stable, but the building itself is not immune to renovation/demolition/addition over 60 years -- the real invariance claim is only that nothing material changed in the narrow freeze-to-source window, which is a much safer claim and the one actually relied on here). This narrower framing does NOT extend to CONDITION (Product & Physical's construction-and-condition sub-score) -- condition genuinely can change even over weeks, so scoring uses ONLY the pre-6/9-admissible structural-condition finding (see inputs.structural_condition), never the later OM's own condition claims. It also does not extend to a rail spur being described as 'active' -- Penn Central ceased operating in 1976, so 'active Penn Central rail spur' in the sourced OM is almost certainly stale boilerplate language carried across years of re-listings, not a verified current-as-of-freeze-date fact; carried in inputs.physical.docks_drive_ins as a physical-infrastructure detail (the spur's physical presence), not as evidence the spur was in active use at 6/9. (2) TENANCY/OCCUPANCY is explicitly a genuine UNKNOWN at 6/9 (ORA's own DD-Critical status said 'rent roll unreconciled' through the freeze date, corroborated by pre-6/9 Morning Brief pages) -- this is NOT a research gap to backfill, it is an irreducible fact of this deal's history. Later occupancy data exists (a Crexi listing's per-building tenant mix, and a later ~83% vacant portfolio-wide figure) but using it would import hindsight into a frozen pre-Phase-II snapshot, so it is deliberately excluded. Tenancy & Lease therefore stays null -- this is why confidence is MEDIUM, not HIGH: 6 of 7 categories are now resolved, but the 7th is structurally unresolvable without breaking the frozen-snapshot discipline, not merely under-researched. See SKILL.md for the full writeup.",
+        "known_gap: PER-BUILDING SIZE-GATE FINDING (surfaced by the enrichment, not previously known): the researched per-building breakdown shows the North portfolio's 'Main Building' (126,924 SF) is either a single building over the skill's 50,000 SF/building gate, or an internal split into a 74,700 SF 'Building A' section plus a 52,224 SF 'remainder' section -- EITHER reading breaches the 50K/building gate (both sub-figures individually exceed it too). Building-count ambiguity is unresolved from available sources (the OM describes it as one main building with named internal areas, which reads as a single structure, not multiple discrete buildings). The original 6/9 screen never caught this because per-building SF was completely unknown at that time -- a genuine screen-time gap, not something Ruling 5 already flagged. Frozen as `main_building_sf_ambiguity` below; the replay should screen this as a GATE-FLAGGED exception (Ruling 5: flag, not kill) given every plausible reading breaches.",
+        "known_gap: Year-built cross-source conflict (reported, not resolved): Notion Deal Sourcing Log / this golden set = 1966; Franklin County Auditor CAMA (parcel 010-099214-00) = 1967 (immaterial to the vintage ramp -- both are far below the 1995 floor-ramp threshold); a LATER (post-7/9-termination) re-listing of the north parcels states 1998, which is inadmissible here -- that OM is a post-freeze re-marketing of the property, not a fact knowable at the 6/9 screen, and is used ONLY for its time-invariant structural details (construction type, clear height, loading), never its stated vintage, price, or 'value-add' framing.",
+        "known_gap: South-parcel loading detail (docks/drive-ins) was not found in any sourced document -- only the North parcels' OM had full loading detail. South parcels' construction/loading fields below are partially null as a result; this is a smaller, honestly-flagged residual gap, not swept into the Tenancy discussion above.",
+        "known_gap: NOI is not disclosed on this 6/9 snapshot; Basis rests on an [est] all-in build. The enrichment adds a real, sourced pre-6/9 CapEx input (roof/structural repair estimate) that materially changes this from the original replay's price+closing-only all-in -- see inputs.structural_condition.",
+        "known_gap: REBASELINED 2026-08-15 (n=3/4 -> n=7 for Combined/Quality/Economics, Gabriel-directed): 3 more replays (56.0/59.0/55.0) collected by the forced-repeatability run, same doctrine SHA, same enriched input packet. No leakage risk identified on this deal (not cited in SKILL.md's own text; the ledger-leakage finding was specific to 11850 Hamilton, whose ledger row happens to record a settled outcome -- this deal's own ledger entry, if any, was not read by any of these replays). Golden Combined moved 57.17 -> 56.79 (mean of all 7 known Combined values: the 3 original + the 1 unfolded 2026-08-14 scheduled-poll sample + the 3 new 2026-08-15 samples), a 0.38-pt shift, inside noise.",
+        "known_gap: CATEGORY-LEVEL DATA IS PARTIAL (n=4 of 7): the original 3 baseline replays (2026-08-14) recorded only combined/quality/economics/expected_score/p_exec_pct in `repeatability.runs` -- their per-category breakdowns were never captured in this file. Only the 2026-08-14 scheduled-poll's 1 extra sample and the 3 new 2026-08-15 samples have full category_breakdown data (n=4). `golden.category_breakdown` below is therefore the mean of those 4 runs, NOT the same 7-run population as `golden.combined`/`quality`/`economics` -- flagged explicitly rather than silently mixing populations. The two are close (category sum on the n=4 subset is 56.5 vs the n=7 scalar mean of 56.79) but are not the same statistic.",
+        "tier mismatch (informational only, per diff_policy.tier_check): golden='PASS-band (GATE-FLAGGED -- per-building 50K SF cap breached under every reading of the North Main Building; T2 WATCH ceilings from bear-mode UNKNOWN + FEMA UNK + unresolved reassessed tax are non-binding on a sub-60 raw score, per the Stage 2.5 disambiguation)' vs observed='PASS-band / GATE-FLAGGED'"
+      ]
+    },
+    {
+      "deal_id": "liberty-office-park-west-chester-oh",
+      "status": "PASS",
+      "scored": true,
+      "informational_only": false,
+      "confidence": "HIGH",
+      "combined_golden": 28.11,
+      "combined_observed": 26.33,
+      "combined_delta": -1.7800000000000011,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band (GATE-FLAGGED: >50K SF/building; FLOOR-FLAGGED: Basis + Yield; DENOMINATOR-SENSITIVE; T2 ceilings from bear-mode UNKNOWN + DD-Critical unknowns are moot below 60)",
+      "observed_tier": "PASS-band (GATE-FLAGGED size / FLOOR-FLAGGED Basis+Yield)",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": -0.39000000000000057,
+        "market_location": -0.6699999999999999,
+        "seller_motivation": 0.0,
+        "tenancy_lease": -0.33000000000000007,
+        "value_add": -0.3900000000000001
+      },
+      "aggregate": {
+        "n": 3,
+        "single_sample": false,
+        "combined_samples": [
+          26.0,
+          25.0,
+          28.0
+        ],
+        "combined_mean": 26.33,
+        "combined_stdev": 1.53,
+        "combined_sem": 0.88,
+        "combined_min": 25.0,
+        "combined_max": 28.0,
+        "combined_range": 3.0,
+        "category_null_counts": {
+          "basis": 0,
+          "yield": 0,
+          "product_physical": 0,
+          "market_location": 0,
+          "seller_motivation": 0,
+          "tenancy_lease": 0,
+          "value_add": 0
+        },
+        "replays_without_breakdown": 0,
+        "verdict_tier_variants": [
+          "PASS-band (GATE-FLAGGED / FLOOR-FLAGGED)",
+          "PASS-band (GATE-FLAGGED size / FLOOR-FLAGGED Basis+Yield)",
+          "PASS-band (GATE-FLAGGED; FLOOR-FLAGGED Basis+Yield; DENOMINATOR-SENSITIVE)"
+        ],
+        "floor_result_variants": [
+          "Basis floor BREACHED (57.3% discount vs 60% ramp floor for 2007 vintage); Yield floor BREACHED (7.53% YoC vs 8.0% floor); DSCR floor PASSES 1.42x vs 1.25x floor at 65% LTV / 6.50% / 25-yr, LTV binds; carrying-cost floor UNKNOWN; IRR floor not derivable",
+          "FLOOR-FLAGGED: Basis FAIL (57.3% discount to RCT v03 Cincinnati LOW $251.46 vs 60% floor at 2007 vintage; DENOMINATOR-SENSITIVE); Yield FAIL (YoC 7.53% vs 8.0% floor); DSCR PASS 1.42x vs 1.25x floor at 65% LTV sizing, LTV binds; IRR and carrying-cost floors not computable",
+          "FLOOR-FLAGGED: Basis floor BREACHED (57.3% discount vs 60.0% required at 2007 vintage; DENOMINATOR-SENSITIVE) and Yield floor BREACHED (7.53% YoC vs 8.0% floor); per-property DSCR PASSES 1.42x vs 1.25x floor at 65% LTV refi sizing; IRR and carrying-cost floors NOT COMPUTABLE"
+        ]
+      },
+      "floor_drift": false,
+      "notes": [
+        "DSCR floor constant not verified: floor_result prose on golden side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is the MEAN of 3 independent 2026-08-14 replays under current doctrine (see `repeatability` below).",
+        "known_gap: REPEATABILITY FINDING (2026-08-14, added post-REFUTE-pass): 3 independent frozen replays, identical inputs, identical doctrine, produced Combined 28.0 / 29.0 / 29.0 -- only a 1.0-point range, the tightest of the two HIGH-confidence deals (Port Sheldon's 3-run range was 4.5 pts). This deal's fully-disclosed NOI and detailed physical specs likely explain the lower variance -- less for the replay to judge, less spread in the result.",
+        "known_gap: REBASELINED 2026-08-15 (n=6 -> n=9, Gabriel-directed): 3 more replays (28.5/27.0/27.5) collected by the forced-repeatability run, same doctrine SHA, same frozen inputs, no leakage risk on this deal (unlike Port Sheldon, this address is not cited by SKILL.md's own text). Golden Combined moved 28.67 -> 28.11 -- a 0.56-pt shift, inside noise, but folded in this time (rather than left as an unfolded additional-samples note, per the earlier 6-run precedent) because this rebaseline pass touched every deal's golden uniformly. Range at n=9 is unchanged from the n=6 figure at 2.0 pts, stdev 0.82 -- still the tightest or near-tightest deal in the set.",
+        "known_gap: Pre-v03 archived record separately carried its own internal inconsistency independent of the v03 boundary: archived Quality(36)+Economics(8)=44 != archived Combined(50), and the archived Verdict tier 'T2 WATCH' matched neither the raw-score band nor the FAIL-YIELD floor-breach label. Preserved for context, not used for diffing."
+      ]
+    },
+    {
+      "deal_id": "11850-hamilton-ave-cincinnati-oh",
+      "status": "PASS",
+      "scored": false,
+      "informational_only": true,
+      "confidence": "LOW",
+      "combined_golden": 22.27,
+      "combined_observed": 21.6,
+      "combined_delta": -0.6699999999999982,
+      "tolerance_pts": 5.0,
+      "tier_match": false,
+      "golden_tier": "PASS-band \u00b7 GATE-FLAGGED (retail-only)",
+      "observed_tier": "PASS-band (GATE-FLAGGED: retail-only)",
+      "category_deltas": {
+        "basis": -2.0,
+        "yield": 0.0,
+        "market_location": -0.33000000000000007,
+        "seller_motivation": 0.0,
+        "value_add": -1.0
+      },
+      "aggregate": {
+        "n": 3,
+        "single_sample": false,
+        "combined_samples": [
+          23.9,
+          24.4,
+          16.5
+        ],
+        "combined_mean": 21.6,
+        "combined_stdev": 4.42,
+        "combined_sem": 2.55,
+        "combined_min": 16.5,
+        "combined_max": 24.4,
+        "combined_range": 7.9,
+        "category_null_counts": {
+          "basis": 1,
+          "yield": 0,
+          "product_physical": 0,
+          "market_location": 0,
+          "seller_motivation": 0,
+          "tenancy_lease": 2,
+          "value_add": 0
+        },
+        "replays_without_breakdown": 0,
+        "verdict_tier_variants": [
+          "PASS-band (GATE-FLAGGED: retail-only)",
+          "PASS-band - GATE-FLAGGED (retail-only) - DENOMINATOR-SENSITIVE"
+        ],
+        "floor_result_variants": [
+          "Basis floor CLEARS at solved walk price $936,887 (67.2% discount to RCT v03 Cincinnati LOW $251.46/SF vs 63.5% ramp floor for 1998 vintage) but only by 3.7 pts -> DENOMINATOR-SENSITIVE; Yield floor binds by construction (8.0% YoC vs 8.0% floor); IRR/DSCR/carrying-cost floors NOT COMPUTABLE",
+          "Basis floor CLEARS at solved walk price ~$936,900 [est] (67.2% discount to RCT v03 Cincinnati LOW $251.46/SF vs 63.5% vintage-ramp floor for 1998); Yield floor BINDS at walk by construction (8.0% YoC vs 8.0% floor); IRR/DSCR floors not computable",
+          "Basis floor CLEARS at walk [est] (67.2% discount to RCT v03 Cincinnati LOW vs 63.5% vintage-ramp floor for 1998); Yield floor binds exactly at walk by construction (8.0% YoC vs 8.0% floor); carrying-cost, DSCR, and IRR floors NOT COMPUTABLE"
+        ]
+      },
+      "floor_drift": false,
+      "notes": [
+        "DSCR floor constant not verified: floor_result prose on golden and observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "YoC floor constant not verified: floor_result prose on golden side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only, not the diff target.",
+        "known_gap: REBASELINED 2026-08-15 (n=1 -> n=4 raw / n=3 clean, deal-decision-ledger leakage fix, Gabriel-directed): the 2026-08-14 golden was a single unreplicated run (Combined 22.4). The 2026-08-15 forced-repeatability run added 3 more independent replays (23.4/18.4/21.0), one of which read `memory/deal-decision-ledger.md` and cited that file's row recording this exact property's real 2026-07-09 outcome (PARKED) -- an answer-key leak, structurally the same failure mode as Port Sheldon's SKILL.md-citation leakage, just a different file. See SKILL.md's 'Fourth pass' Limitations entry for the fix (the replay prompt now explicitly bars reading memory/ files). That run (18.4, the low outlier) is EXCLUDED from the golden mean for the same reason Port Sheldon's leaked run is excluded: a fixed-prompt replay population should no longer produce this draw. Golden Combined moved 22.4 -> 22.27 (mean of the 3 clean samples: 22.4/23.4/21.0) -- a small shift, but the METHOD changed from a single unreplicated run to an actual (if thin) repeatability-checked mean.",
+        "known_gap: n=3 is a THIN sample -- only 3 clean draws exist post-exclusion (4 raw). This deal is informational_only regardless (LOW confidence, per-category nulls below), so the thin n does not affect any gate; it is noted for transparency, not as a blocking gap. Future runs will add to this sample as the polling task fires again.",
+        "known_gap: The 2026-08-15 baseline replays have 2 of 7 categories null (Product & Physical, Tenancy & Lease) in every clean run, and both Expected Score and P(exec)% are null in every run -- every P(exec) band is gap-to-ask or deal-status keyed and this deal has no ask price and no LOI/PSA status in the frozen facts, so no band was derivable (the replays correctly declined to invent one rather than guess).",
+        "known_gap: NOI is not disclosed -- only derivable via a later pipeline record's implied cap rate, which the replays used ONLY as an explicitly flagged assumption to solve the unpriced/no-NOI walk price (per the skill's own documented convention). Basis (mean 6.93) and the floor result are therefore assumption-contingent; Yield (0.0) is assumption-independent since it binds by construction at the solved walk price.",
+        "excluded from strict scoring: LOW confidence (delta reported as informational only)",
+        "tier mismatch (informational only, per diff_policy.tier_check): golden='PASS-band \u00b7 GATE-FLAGGED (retail-only)' vs observed='PASS-band (GATE-FLAGGED: retail-only)'",
+        "replay spread (7.9 pts) exceeds this deal's own tolerance (5.0 pts) -- the replays disagreed with each other by more than the gate's width, so this verdict is weakly supported whichever way it landed"
+      ]
+    },
+    {
+      "deal_id": "1333-research-rd-gahanna-oh",
+      "status": "PASS",
+      "scored": false,
+      "informational_only": true,
+      "confidence": "LOW",
+      "combined_golden": 11.75,
+      "combined_observed": 14.0,
+      "combined_delta": 2.25,
+      "tolerance_pts": 5.0,
+      "tier_match": false,
+      "golden_tier": "PASS-band (<60) -- FLOOR-FLAGGED (Basis+Yield) / ENV-WATCH / DENOMINATOR-SENSITIVE / INVERTED-SPREAD / OBSOLESCENCE-WATCH; T2 ceilings non-binding at this score",
+      "observed_tier": "PASS-band - FLOOR-FLAGGED, ENV-WATCH, INVERTED-SPREAD, DENOMINATOR-SENSITIVE, OBSOLESCENCE-WATCH",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": 2.75,
+        "market_location": 0.08000000000000007,
+        "seller_motivation": 0.0,
+        "tenancy_lease": -0.32999999999999996,
+        "value_add": -0.25
+      },
+      "aggregate": {
+        "n": 3,
+        "single_sample": false,
+        "combined_samples": [
+          13.0,
+          14.0,
+          15.0
+        ],
+        "combined_mean": 14.0,
+        "combined_stdev": 1.0,
+        "combined_sem": 0.58,
+        "combined_min": 13.0,
+        "combined_max": 15.0,
+        "combined_range": 2.0,
+        "category_null_counts": {
+          "basis": 0,
+          "yield": 0,
+          "product_physical": 0,
+          "market_location": 0,
+          "seller_motivation": 0,
+          "tenancy_lease": 0,
+          "value_add": 0
+        },
+        "replays_without_breakdown": 0,
+        "verdict_tier_variants": [
+          "PASS-band",
+          "PASS-band (<60) - FLOOR-FLAGGED (Basis/Yield/IRR), ENV-WATCH, DENOMINATOR-SENSITIVE, INVERTED-SPREAD, OBSOLESCENCE-WATCH",
+          "PASS-band - FLOOR-FLAGGED, ENV-WATCH, INVERTED-SPREAD, DENOMINATOR-SENSITIVE, OBSOLESCENCE-WATCH"
+        ],
+        "floor_result_variants": [
+          "Basis BREACH (60.66% discount to RCT v03 Columbus LOW $229.65 vs 65% floor for 1970 vintage); Yield BREACH (YoC 6.52% [est] vs 8.0% floor); IRR BREACH (~7.5-8% 5-yr levered [est] vs 15% floor); DSCR PASS 1.42x vs 1.25x floor at 65%-LTV-bound refi sizing; Carrying-cost UNKNOWN",
+          "FLOOR-FLAGGED - Basis floor breached (60.66% discount to RCT v03 Columbus LOW $229.65 vs 65% required at 1970 vintage) AND Yield floor breached (YoC 6.52% vs 8.0% floor); DENOMINATOR-SENSITIVE; IRR/DSCR floors not computable; carrying-cost floor unresolved",
+          "FLOOR-FLAGGED: Basis breached (60.7% discount to RCT v03 Columbus LOW $229.65 vs 65% floor at 1970 vintage) and Yield breached (6.51% YoC vs 8.0% floor); DSCR clears 1.39x vs 1.25x floor, 65%-LTV constraint binds at refi sizing; IRR floor not formally computed; carrying-cost floor not computable"
+        ]
+      },
+      "floor_drift": false,
+      "notes": [
+        "DSCR floor constant not verified: floor_result prose on golden side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only.",
+        "known_gap: REBASELINED 2026-08-15 (n=1 -> n=4, first-ever repeatability check for this deal, Gabriel-directed): the 2026-08-14 golden was a single unreplicated run (Combined 9.0). The 2026-08-15 forced-repeatability run added 3 independent replays (9.0/14.0/15.0 -- one of which coincidentally also scored Combined 9.0, a different category makeup, not a re-run of the same result) under the same doctrine SHA and same frozen inputs -- no leakage risk identified on this deal. Golden Combined moved 9.0 -> 11.75 (mean of 4). This deal's own range (6.0 pts, stdev 3.20) EXCEEDS the harness's 5.0-pt harness-wide tolerance on internal dispersion alone -- consistent with, and reinforcing, its LOW-confidence/informational-only status; the input-packet nulls that drive that classification (see below) plausibly also drive the higher judgment variance across replays.",
+        "known_gap: Nulls vary by run: run 1 has 3 of 7 categories null (Product & Physical, Seller & Motivation, Value-Add), run 2 has 2 (Product & Physical, Value-Add), runs 3-4 have zero -- driven by input-packet incompleteness that individual replays resolved to differing degrees, not a consistent per-run gap. Quality is a partial lower bound in runs 1-2; robust PASS-band verdict holds regardless (max attainable Combined at the walk price stays well under 60 across all 4 runs).",
+        "known_gap: Pre-v03 archived record ALSO carried its own internal inconsistency independent of the v03 boundary: archived Quality(39)+Economics(2.7)=41.7 != archived Combined(48), and the archived Verdict tier 'T1 PURSUE' directly contradicts VERDICT BANDS applied to Combined=48 (<60 = PASS-band). This was the most internally inconsistent row in the original (pre-rebaseline) golden set -- preserved here for context, not used for diffing.",
+        "excluded from strict scoring: LOW confidence (delta reported as informational only)",
+        "tier mismatch (informational only, per diff_policy.tier_check): golden='PASS-band (<60) -- FLOOR-FLAGGED (Basis+Yield) / ENV-WATCH / DENOMINATOR-SENSITIVE / INVERTED-SPREAD / OBSOLESCENCE-WATCH; T2 ceilings non-binding at this score' vs observed='PASS-band - FLOOR-FLAGGED, ENV-WATCH, INVERTED-SPREAD, DENOMINATOR-SENSITIVE, OBSOLESCENCE-WATCH'"
+      ]
+    },
+    {
+      "deal_id": "470-mccormick-blvd-columbus-oh",
+      "status": "FLAG",
+      "scored": false,
+      "informational_only": true,
+      "confidence": "LOW",
+      "combined_golden": 12.38,
+      "combined_observed": 19.67,
+      "combined_delta": 7.290000000000001,
+      "tolerance_pts": 5.0,
+      "tier_match": false,
+      "golden_tier": "PASS-band / FLOOR-FLAGGED (T2 WATCH ceilings from bear-mode UNKNOWN + DD-Critical unknowns are non-binding on a sub-60 score)",
+      "observed_tier": "PASS-band",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": 3.75,
+        "market_location": 1.75,
+        "seller_motivation": 0.0,
+        "tenancy_lease": 0.0,
+        "value_add": 1.79
+      },
+      "aggregate": {
+        "n": 3,
+        "single_sample": false,
+        "combined_samples": [
+          20.0,
+          19.0,
+          20.0
+        ],
+        "combined_mean": 19.67,
+        "combined_stdev": 0.58,
+        "combined_sem": 0.33,
+        "combined_min": 19.0,
+        "combined_max": 20.0,
+        "combined_range": 1.0,
+        "category_null_counts": {
+          "basis": 0,
+          "yield": 1,
+          "product_physical": 0,
+          "market_location": 0,
+          "seller_motivation": 0,
+          "tenancy_lease": 0,
+          "value_add": 0
+        },
+        "replays_without_breakdown": 0,
+        "verdict_tier_variants": [
+          "PASS-band",
+          "PASS-band (FLOOR-FLAGGED - Basis; DENOMINATOR-SENSITIVE)",
+          "PASS-band (FLOOR-FLAGGED Basis; DENOMINATOR-SENSITIVE; OBSOLESCENCE-WATCH)"
+        ],
+        "floor_result_variants": [
+          "Basis floor BREACHED borderline at $700K scoring price: 64.1% (< 65% ramp floor, 1975 vintage) once the standing $8/SF TI lease-up default loads; Yield, IRR, DSCR, and carrying-cost floors NOT COMPUTABLE (no NOI/OpEx)",
+          "Basis floor FAIL: <=64.1% discount vs 65% required at 1975 vintage (RCT v03 Columbus LOW $229.65/SF; all-in $82.38/SF); Yield/IRR/DSCR/carrying-cost floors NOT COMPUTABLE (NOI unrecoverable)",
+          "FLOOR-FLAGGED (Basis): 64.13% discount at a partial all-in basis ($82.37/SF) vs the 65% vintage-ramp floor for a 1975 building against RCT v03 Columbus LOW $229.65; DENOMINATOR-SENSITIVE; Yield/IRR/DSCR/carrying-cost floors not computable"
+        ]
+      },
+      "floor_drift": false,
+      "notes": [
+        "DSCR floor constant not verified: floor_result prose on golden and observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "YoC floor constant not verified: floor_result prose on golden and observed side does not state an explicit '<observed> vs <floor>' comparison (reported as a gap, not assumed clean)",
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): this deal's original 2026-06-09 screen predates the 2026-07-14 RCT v03 replacement-cost recalibration (a deliberate, ratified doctrine change -- old RCT v02 + 30%/25% floor ramp vs today's RCT v03 + 65%/60% ramp). The archived pre-v03 Notion score is preserved below under archived_pre_v03_reference for historical context ONLY and is NOT the diff target.",
+        "known_gap: REBASELINED 2026-08-15 (n=1 -> n=4, first-ever repeatability check for this deal, Gabriel-directed): the 2026-08-14 golden was a single unreplicated run whose Combined (0.0) was explicitly documented as a LOWER BOUND, not a point estimate (45 of 55 Quality points were null -- Product & Physical, Market & Location, Value-Add all unresolved that run). The 2026-08-15 forced-repeatability run added 3 independent replays (20.0/15.5/14.0) that each resolved Market & Location and Value-Add from the same frozen facts, which the original run did not. Golden Combined moved 0.0 -> 12.38 (mean of 4). This deal's own range across the 4 runs is 20.0 pts (stdev 8.63) -- BY FAR the widest in the golden set, and dramatically exceeds the harness's 5.0-pt tolerance. This is NOT ordinary replay-to-replay judgment noise the way Port Sheldon's or 1333 Research's dispersion is: it is largely an artifact of run 1 being a genuinely incomplete lower-bound construction, not a comparable full replay -- 3 of run 1's 5 non-floor categories were null where the other 3 runs resolved 2 of them. Flagged explicitly rather than averaged over silently; this deal is informational_only regardless so it does not gate, but a future reader should not treat this golden's dispersion as representative of normal replay variance.",
+        "known_gap: The replays have 1-3 of 7 scorecard categories unresolvable from the frozen input packet per run (Product & Physical is null in 3 of 4 runs; Market & Location and Value-Add resolved in 3 of 4) -- the frozen input packet sourced from Notion's structured fields does not capture the physical/site detail the original live-tooled screen evidently had access to. Confidence kept LOW for this reason -- excluded from strict pass/fail.",
+        "known_gap: NOI is not recorded anywhere (not disclosed, not derivable from a cap rate). Score components note '@ $700K' -- scoring used a $700,000 walk price, not the $950,000 asking price.",
+        "known_gap: Notion's current 'Verdict' field reads KILLED (Gabriel's 2026-07-08 kill decision, post-hoc status overwrite) -- not a skill verdict-band output, see archived_pre_v03_reference.",
+        "excluded from strict scoring: LOW confidence (delta reported as informational only)",
+        "tier mismatch (informational only, per diff_policy.tier_check): golden='PASS-band / FLOOR-FLAGGED (T2 WATCH ceilings from bear-mode UNKNOWN + DD-Critical unknowns are non-binding on a sub-60 score)' vs observed='PASS-band'"
+      ]
+    }
+  ]
+}

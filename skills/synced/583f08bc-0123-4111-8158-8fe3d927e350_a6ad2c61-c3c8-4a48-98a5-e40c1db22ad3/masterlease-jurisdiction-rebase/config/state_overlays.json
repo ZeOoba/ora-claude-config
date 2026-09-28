@@ -1,0 +1,27 @@
+{
+  "_comment": "State law overlay tables. Empty/RESEARCH-REQUIRED fields fail closed — the engine refuses to run a property whose state entry is incomplete. Ratified entries: MD, MO (2026-08-03).",
+  "MD": {
+    "state": "Maryland",
+    "ueta": "the federal ESIGN Act and the Maryland Uniform Electronic Transactions Act (Md. Code Ann., Commercial Law, Title 21).",
+    "holdover_statute": "Md. Code Ann., Real Property §8-402",
+    "possession_statutes": "summary ejectment proceedings under Md. Code Ann., Real Property §8-401 and breach-of-lease proceedings under Md. Code Ann., Real Property §8-402.1",
+    "env_overlay": "the Environment Article of the Maryland Code",
+    "parcel_reference": "(Maryland SDAT Tax Account No. [TAX ACCOUNT NO])",
+    "extra_no_recording": "  Notwithstanding the foregoing, if the Lease Term, together with all renewal or extension terms, exceeds seven (7) years, Landlord may prepare, execute and record a memorandum of lease in the form permitted by Md. Code Ann., Real Property §3-101(e), and Tenant shall execute, acknowledge and deliver such memorandum within ten (10) days after Landlord’s request; in no event shall a full copy of this Lease be recorded by either party.",
+    "notes": "Late fee/default interest: commercial freedom of contract; usury regime consumer-directed; savings clause retained regardless. §8-203 security deposit statute residential-only. Jury waiver enforceable in commercial leases (knowing and voluntary)."
+  },
+  "MO": {
+    "state": "Missouri",
+    "ueta": "the federal ESIGN Act and the Missouri Uniform Electronic Transactions Act (Sections 432.200 to 432.295, RSMo).",
+    "holdover_statute": "Section 441.080, RSMo",
+    "possession_statutes": "actions for rent and possession under Chapter 535, RSMo, and actions for unlawful detainer under Chapter 534, RSMo",
+    "env_overlay": "the Missouri Hazardous Waste Management Law, Chapter 260, RSMo",
+    "parcel_reference": "(Jackson County Parcel No. [PARCEL NO])",
+    "extra_no_recording": null,
+    "notes": "§535.300 double-damages does not reach commercial tenants (PDQ Tower Services v. Adams, Mo. App. 2007). Jury waiver: standalone conspicuous all-caps clause required (Malan Realty Investors v. Harris, 953 S.W.2d 624 (Mo. banc 1997)) — the master's format satisfies this; do not merge it into another section."
+  },
+  "IN": { "state": "Indiana", "RESEARCH_REQUIRED": true },
+  "WI": { "state": "Wisconsin", "RESEARCH_REQUIRED": true },
+  "KS": { "state": "Kansas", "RESEARCH_REQUIRED": true },
+  "TN": { "state": "Tennessee", "RESEARCH_REQUIRED": true }
+}

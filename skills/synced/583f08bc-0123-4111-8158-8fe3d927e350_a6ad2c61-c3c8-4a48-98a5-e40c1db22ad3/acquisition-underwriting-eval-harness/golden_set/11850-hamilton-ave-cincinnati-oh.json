@@ -1,0 +1,224 @@
+{
+  "deal_id": "11850-hamilton-ave-cincinnati-oh",
+  "deal_name": "11850 Hamilton Ave, Cincinnati OH 45231 (Dollar General, quasi-IOS)",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-09",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), scored row (pre-v03 Combined 53), queried 2026-08-14; cross-referenced Acquisition Pipeline Tracker row 'Dollar General Quasi-IOS'",
+  "confidence": "LOW",
+  "known_gaps": [
+    "REBASELINED 2026-09-12 under acquisition-underwriting v4.21 (n=3 fresh replays; Gabriel-approved): v4.21 made unpriced-AND-no-NOI Basis = null [DATA-GAP] instead of floor-solved from an implied NOI. Every earlier golden sample scored Basis ~6.0-7.4 off a walk price solved from the frozen noi_basis implied NOI (~$76,450), so the prior golden (22.27) encoded the now-forbidden reading and would FLAG on every post-v4.21 run. Across the 4 prior scheduled polls (08-23 -> 09-12) replays of these identical inputs split on exactly this question, swinging Combined 7-8 pts. Golden Combined 22.27 -> 17.0 (runs 5-7: 13.0/18.0/20.0). The frozen inputs block is deliberately UNCHANGED: noi_basis records how the original screen used the implied NOI; v4.21 doctrine now limits a replay to using it as a sensitivity band. SKILL.md now cites this address in the v4.21 changelog and rule, so the replay prompt's address-exclusion clause applies to this deal.",
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only, not the diff target.",
+    "REBASELINED 2026-08-15 (n=1 -> n=4 raw / n=3 clean, deal-decision-ledger leakage fix, Gabriel-directed): the 2026-08-14 golden was a single unreplicated run (Combined 22.4). The 2026-08-15 forced-repeatability run added 3 more independent replays (23.4/18.4/21.0), one of which read `memory/deal-decision-ledger.md` and cited that file's row recording this exact property's real 2026-07-09 outcome (PARKED) -- an answer-key leak, structurally the same failure mode as Port Sheldon's SKILL.md-citation leakage, just a different file. See SKILL.md's 'Fourth pass' Limitations entry for the fix (the replay prompt now explicitly bars reading memory/ files). That run (18.4, the low outlier) is EXCLUDED from the golden mean for the same reason Port Sheldon's leaked run is excluded: a fixed-prompt replay population should no longer produce this draw. Golden Combined moved 22.4 -> 22.27 (mean of the 3 clean samples: 22.4/23.4/21.0) -- a small shift, but the METHOD changed from a single unreplicated run to an actual (if thin) repeatability-checked mean.",
+    "n=3 is a THIN sample -- only 3 clean draws exist post-exclusion (4 raw). This deal is informational_only regardless (LOW confidence, per-category nulls below), so the thin n does not affect any gate; it is noted for transparency, not as a blocking gap. Future runs will add to this sample as the polling task fires again.",
+    "The 2026-08-15 baseline replays have 2 of 7 categories null (Product & Physical, Tenancy & Lease) in every clean run, and both Expected Score and P(exec)% are null in every run -- every P(exec) band is gap-to-ask or deal-status keyed and this deal has no ask price and no LOI/PSA status in the frozen facts, so no band was derivable (the replays correctly declined to invent one rather than guess).",
+    "NOI is not disclosed -- only derivable via a later pipeline record's implied cap rate, which the replays used ONLY as an explicitly flagged assumption to solve the unpriced/no-NOI walk price (per the skill's own documented convention). Basis (mean 6.93) and the floor result are therefore assumption-contingent; Yield (0.0) is assumption-independent since it binds by construction at the solved walk price."
+  ],
+  "inputs": {
+    "address": "11850 Hamilton Ave, Cincinnati, OH 45231",
+    "market": "Cincinnati OH",
+    "asking_price": null,
+    "price_used_for_scoring": null,
+    "building_sf": 11579,
+    "building_sf_pipeline_variant": 11574,
+    "year_built": 1998,
+    "occupancy_pct": null,
+    "asset_type": "Dollar General net-lease, quasi-IOS",
+    "noi_annual": null,
+    "noi_basis": "Not disclosed. Implied only: linked pipeline Purchase Price $1,100,000 x Going-In Cap Rate 6.95% = ~$76,450 -- used only as a flagged assumption to solve the no-NOI walk price, not an archived SCREEN-time input.",
+    "physical": {
+      "construction_type": null,
+      "clear_height": null,
+      "docks_drive_ins": null
+    },
+    "environmental_notes": null,
+    "other_facts": "Single-tenant Dollar General, DD-Critical items (FEMA, zoning, roof, reassessed tax) all unknown at screen time -- no OM/financials ever produced."
+  },
+  "repeatability": {
+    "runs": [
+      {
+        "combined": 22.4,
+        "quality": 15.0,
+        "economics": 7.4,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": 7.4,
+          "yield": 0.0,
+          "product_physical": null,
+          "market_location": 8.0,
+          "seller_motivation": 4.0,
+          "tenancy_lease": null,
+          "value_add": 3.0
+        },
+        "note": "run 1 (2026-08-14 baseline, unreplicated at the time) -- as originally recorded in this file before the 2026-08-15 rebaseline",
+        "excluded_from_golden": true,
+        "exclusion_reason": "pre-v4.21 doctrine: scored Basis off a walk price solved from the implied NOI, which the v4.21 unpriced-AND-no-NOI rule forbids (Basis=null). Kept for audit trail; not comparable to post-v4.21 replays."
+      },
+      {
+        "combined": 23.4,
+        "quality": 16.0,
+        "economics": 7.4,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": 7.4,
+          "yield": 0.0,
+          "product_physical": null,
+          "market_location": 9.0,
+          "seller_motivation": 4.0,
+          "tenancy_lease": null,
+          "value_add": 3.0
+        },
+        "note": "run 2 (2026-08-15 forced-repeatability run, replay A)",
+        "excluded_from_golden": true,
+        "exclusion_reason": "pre-v4.21 doctrine: scored Basis off a walk price solved from the implied NOI, which the v4.21 unpriced-AND-no-NOI rule forbids (Basis=null). Kept for audit trail; not comparable to post-v4.21 replays."
+      },
+      {
+        "combined": 18.4,
+        "quality": 11.0,
+        "economics": 7.4,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": 7.4,
+          "yield": 0.0,
+          "product_physical": null,
+          "market_location": 8.0,
+          "seller_motivation": 3.0,
+          "tenancy_lease": null,
+          "value_add": null
+        },
+        "note": "run 3 (2026-08-15 forced-repeatability run, replay B) -- read memory/deal-decision-ledger.md and cited this deal's actual PARKED outcome; the low outlier",
+        "excluded_from_golden": true,
+        "exclusion_reason": "deal-decision-ledger answer-key leakage (fixed 2026-08-15, see known_gaps); kept for audit trail, not averaged into golden"
+      },
+      {
+        "combined": 21.0,
+        "quality": 15.0,
+        "economics": 6.0,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": 6.0,
+          "yield": 0.0,
+          "product_physical": null,
+          "market_location": 8.0,
+          "seller_motivation": 4.0,
+          "tenancy_lease": null,
+          "value_add": 3.0
+        },
+        "note": "run 4 (2026-08-15 forced-repeatability run, replay C)",
+        "excluded_from_golden": true,
+        "exclusion_reason": "pre-v4.21 doctrine: scored Basis off a walk price solved from the implied NOI, which the v4.21 unpriced-AND-no-NOI rule forbids (Basis=null). Kept for audit trail; not comparable to post-v4.21 replays."
+      },
+      {
+        "combined": 13.0,
+        "quality": 13.0,
+        "economics": 0.0,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": null,
+          "yield": 0.0,
+          "product_physical": null,
+          "market_location": 9.0,
+          "seller_motivation": 4.0,
+          "tenancy_lease": null,
+          "value_add": null
+        },
+        "note": "run 5 (2026-09-12 v4.21 rebaseline, replay A)"
+      },
+      {
+        "combined": 18.0,
+        "quality": 18.0,
+        "economics": 0.0,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": null,
+          "yield": 0.0,
+          "product_physical": 3.0,
+          "market_location": 9.0,
+          "seller_motivation": 4.0,
+          "tenancy_lease": null,
+          "value_add": 2.0
+        },
+        "note": "run 6 (2026-09-12 v4.21 rebaseline, replay B)"
+      },
+      {
+        "combined": 20.0,
+        "quality": 20.0,
+        "economics": 0.0,
+        "expected_score": null,
+        "p_exec_pct": null,
+        "category_breakdown": {
+          "basis": null,
+          "yield": 0.0,
+          "product_physical": 5.0,
+          "market_location": 9.0,
+          "seller_motivation": 4.0,
+          "tenancy_lease": 0.0,
+          "value_add": 2.0
+        },
+        "note": "run 7 (2026-09-12 v4.21 rebaseline, replay C)"
+      }
+    ],
+    "combined_mean": 17.0,
+    "combined_stdev": 3.61,
+    "combined_sem": 2.08,
+    "combined_range": 7.0,
+    "n": 3,
+    "n_raw_including_excluded": 7,
+    "sampling_note": "Runs 5-7 (2026-09-12) are the only replays under v4.21 doctrine and the only ones in n/combined_mean. Runs 1-4 predate the v4.21 unpriced-AND-no-NOI Basis rule and are excluded (run 3 additionally for ledger leakage). Range 7.0 exceeds the 5.0-pt tolerance: Basis is now null in 3/3 (the rule converged it); the residual spread is judgment on null-input Quality categories (Product & Physical, Tenancy & Lease, Value-Add). Informational_only, so no gate is affected."
+  },
+  "golden": {
+    "baselined_date": "2026-09-12",
+    "baselined_against_skill_sha": "76fb7e0fabeddba01dcf1c60346c7775be736b56",
+    "baselined_method": "mean of 3 independent Fable replays under v4.21 (runs 5-7); all pre-v4.21 runs excluded -- see repeatability block and known_gaps. Gabriel-approved 2026-09-12.",
+    "quality": 17.0,
+    "quality_note": "Partial lower bound -- Basis null in 3/3 by rule; Product & Physical, Tenancy & Lease and Value-Add null in some replays (see aggregate null counts in the next scheduled-poll snapshot).",
+    "economics": 0.0,
+    "combined": 17.0,
+    "category_breakdown": {
+      "basis": null,
+      "yield": 0.0,
+      "product_physical": 2.67,
+      "market_location": 9.0,
+      "seller_motivation": 4.0,
+      "tenancy_lease": 0.0,
+      "value_add": 1.33
+    },
+    "category_breakdown_sum_check": "aggregate_replays() per-category means with null counted as 0; basis is null in 3/3 runs so recorded null. Quality-side categories sum to golden.quality (2.67+9.0+4.0+0+1.33 = 17.0); Economics = yield 0.0; Combined = 17.0.",
+    "expected_score": null,
+    "p_exec_pct": null,
+    "verdict_tier": "PASS-band · GATE-FLAGGED (retail-only)",
+    "floor_result": "NOT TESTABLE -- Basis null [DATA-GAP: no price, no NOI] per v4.21 unpriced-AND-no-NOI rule in 3/3 replays; Yield 0 by no-NOI convention; IRR/DSCR/carrying-cost not computable. Pipeline-implied $1.1M shown only as an unscored sensitivity band (61.5% discount vs 63.5% 1998 floor).",
+    "replay_notes": "All 3 replays applied the v4.21 rule (Basis null, implied ~$76,450 NOI used only for a labeled sensitivity band), flagged Gate 6 retail-only, recorded bear-mode UNKNOWN (OFF, T2 ceiling moot), and left P(exec)/Expected Score null. All 3 noticed and excluded SKILL.md's own narrative about this address in the v4.21 changelog/rule citation -- this deal is now a self-cited golden deal like Port Sheldon.",
+    "baselined_against_skill_sha_note": "git blob (content) hash of acquisition-underwriting/SKILL.md v4.21 AS COMMITTED. The replays ran on an earlier uncommitted v4.21 draft (blob 8688becd, not retained). Edits between replay and commit, all wording-only: (a) the unpriced-AND-no-NOI rule's supporting sentence was reworded to drop this deal's figures (directive text unchanged); (b) the priced-no-NOI rule's Basis price wording was clarified to the standing walk-price convention (does not apply to this unpriced deal); (c) changelog archive-filename annotations. No change touches how this deal is scored."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-09, before the 2026-07-14 RCT v03 recalibration. NOT the diff target. A separate, unscored duplicate Notion row (Date Seen 2026-05-17) also exists for this address and was not used.",
+    "combined": 53,
+    "category_breakdown": {
+      "basis": 20,
+      "basis_flag": "[est]",
+      "yield": 0,
+      "yield_flag": "[est]",
+      "product_physical": 10,
+      "market_location": 10,
+      "seller_motivation": 5,
+      "tenancy_lease": 3,
+      "value_add": 5
+    },
+    "expected_score": 4.8,
+    "p_exec_pct": 10,
+    "archived_verdict_tier": "T2 WATCH (bands_predicted_tier from pre-v03 Combined 53 was PASS-band per current STAGE 2.5 disambiguation -- an inconsistency present even before the v03 boundary issue)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tolerance_rationale": "Widened harness-wide from an initial arbitrary 3.0 after a repeatability check on the 2 HIGH-confidence deals showed a 3-run range as large as 4.5 pts on identical inputs/doctrine. Moot for this LOW-confidence row's pass/fail (excluded from strict scoring regardless) but kept consistent across all 6 files.",
+    "tier_check": "informational_only",
+    "reason": "LOW confidence: baseline replays have 2 of 7 categories null plus null Expected Score/P(exec) in every run, driven by frozen-input-packet incompleteness (no OM/financials ever existed for this deal, so this may be close to the practical ceiling of what any input packet could supply). Also the deal whose 2026-08-15 repeatability check surfaced the deal-decision-ledger leakage finding -- see known_gaps."
+  }
+}

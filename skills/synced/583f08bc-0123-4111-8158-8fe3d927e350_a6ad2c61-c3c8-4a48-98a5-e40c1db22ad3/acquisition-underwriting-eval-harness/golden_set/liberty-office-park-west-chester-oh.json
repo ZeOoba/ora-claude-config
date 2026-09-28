@@ -1,0 +1,98 @@
+{
+  "deal_id": "liberty-office-park-west-chester-oh",
+  "deal_name": "Liberty Office Park (7102-7116 Office Park Dr), West Chester OH",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-09",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), queried 2026-08-14",
+  "confidence": "HIGH",
+  "known_gaps": [
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is the MEAN of 3 independent 2026-08-14 replays under current doctrine (see `repeatability` below).",
+    "REPEATABILITY FINDING (2026-08-14, added post-REFUTE-pass): 3 independent frozen replays, identical inputs, identical doctrine, produced Combined 28.0 / 29.0 / 29.0 -- only a 1.0-point range, the tightest of the two HIGH-confidence deals (Port Sheldon's 3-run range was 4.5 pts). This deal's fully-disclosed NOI and detailed physical specs likely explain the lower variance -- less for the replay to judge, less spread in the result.",
+    "REBASELINED 2026-08-15 (n=6 -> n=9, Gabriel-directed): 3 more replays (28.5/27.0/27.5) collected by the forced-repeatability run, same doctrine SHA, same frozen inputs, no leakage risk on this deal (unlike Port Sheldon, this address is not cited by SKILL.md's own text). Golden Combined moved 28.67 -> 28.11 -- a 0.56-pt shift, inside noise, but folded in this time (rather than left as an unfolded additional-samples note, per the earlier 6-run precedent) because this rebaseline pass touched every deal's golden uniformly. Range at n=9 is unchanged from the n=6 figure at 2.0 pts, stdev 0.82 -- still the tightest or near-tightest deal in the set.",
+    "Pre-v03 archived record separately carried its own internal inconsistency independent of the v03 boundary: archived Quality(36)+Economics(8)=44 != archived Combined(50), and the archived Verdict tier 'T2 WATCH' matched neither the raw-score band nor the FAIL-YIELD floor-breach label. Preserved for context, not used for diffing."
+  ],
+  "inputs": {
+    "address": "7102-7116 Office Park Dr, West Chester, OH",
+    "market": "Cincinnati OH (West Chester submarket)",
+    "asking_price": 8050000,
+    "price_used_for_scoring": 8050000,
+    "purchase_price_target_pipeline": 7490776,
+    "building_sf": 76501,
+    "year_built": 2007,
+    "occupancy_pct": 100,
+    "asset_type": "Multi-tenant office/flex",
+    "noi_annual": 617989,
+    "noi_basis": "Explicitly disclosed -- broker NOI, source CBRE OM.",
+    "physical": {
+      "construction_type": "Tilt-up concrete",
+      "clear_height": "19 feet",
+      "docks_drive_ins": "8 docks + 1 drive-in",
+      "sprinkler": "Fully sprinklered, wet pipe",
+      "acreage": 6.873,
+      "tenant_count": 5,
+      "walt_years": 4.4
+    },
+    "environmental_notes": "Phase I not ordered as of screen date.",
+    "other_facts": "Roof KNOWN-bad (Yr-19 EPDM, priced but no dollar figure disclosed); Butler Co reassessment pending; zoning OK."
+  },
+  "repeatability": {
+    "runs": [
+      {"combined": 28.0, "quality": 28.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 15.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 1.0}, "note": "run 1 (original baseline)"},
+      {"combined": 29.0, "quality": 29.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 15.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 2.0}, "note": "run 2"},
+      {"combined": 29.0, "quality": 29.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 15.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 2.0}, "note": "run 3"},
+      {"combined": 27.0, "quality": 27.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 14.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 1.0}, "note": "run 4 (2026-08-14 scheduled-poll, replay A)"},
+      {"combined": 28.0, "quality": 28.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 14.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 2.0}, "note": "run 5 (2026-08-14 scheduled-poll, replay B)"},
+      {"combined": 29.0, "quality": 29.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 15.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 2.0}, "note": "run 6 (2026-08-14 scheduled-poll, replay C)"},
+      {"combined": 28.5, "quality": 28.5, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 14.5, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 2.0}, "note": "run 7 (2026-08-15 forced-repeatability run, replay A)"},
+      {"combined": 27.0, "quality": 27.0, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 14.0, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 1.0}, "note": "run 8 (2026-08-15 forced-repeatability run, replay B)"},
+      {"combined": 27.5, "quality": 27.5, "economics": 0.0, "category_breakdown": {"basis": 0.0, "yield": 0.0, "product_physical": 14.5, "market_location": 9.0, "seller_motivation": 0.0, "tenancy_lease": 3.0, "value_add": 1.0}, "note": "run 9 (2026-08-15 forced-repeatability run, replay C)"}
+    ],
+    "combined_mean": 28.11,
+    "combined_stdev": 0.82,
+    "combined_sem": 0.27,
+    "combined_range": 2.0,
+    "n": 9,
+    "sampling_note": "Runs 1-3: 2026-08-14 original repeatability check. Runs 4-6: 2026-08-14 scheduled-poll (Gabriel-directed) -- recorded that same day but deliberately left unfolded from the golden at the time (the resulting shift, 28.67 -> 28.33, was under 0.4 pts, inside noise). Runs 7-9: 2026-08-15 forced-repeatability run (Gabriel-directed). All 9 are now folded into golden.combined -- this rebaseline touched every deal's golden uniformly, including two others that required exclusion logic for leaked samples, so keeping Liberty on the same fully-folded footing keeps the golden_set internally consistent about what golden.combined means across files. All 9 runs are same-doctrine-hash, same-frozen-inputs draws; no leakage risk identified on this deal."
+  },
+  "golden": {
+    "baselined_date": "2026-08-15",
+    "baselined_against_skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+    "baselined_method": "mean of 9 independent replays (see repeatability block); REBASELINED 2026-08-15 from the n=3 value 28.67 (an n=6 additional-samples figure of 28.33 was recorded 2026-08-14 but deliberately left unfolded at the time)",
+    "quality": 28.11,
+    "economics": 0.0,
+    "combined": 28.11,
+    "category_breakdown": {
+      "basis": 0.0,
+      "yield": 0.0,
+      "product_physical": 14.56,
+      "market_location": 9.0,
+      "seller_motivation": 0.0,
+      "tenancy_lease": 3.0,
+      "value_add": 1.56
+    },
+    "category_breakdown_sum_check": "0+0+14.5556+9+0+3+1.5556 = 28.1111, rounds to 28.11, matches Combined exactly.",
+    "expected_score": null,
+    "expected_score_note": "P(exec) varied slightly by run alongside the score -- left null rather than averaged; see repeatability.",
+    "p_exec_pct": null,
+    "verdict_tier": "PASS-band (GATE-FLAGGED: >50K SF/building; FLOOR-FLAGGED: Basis + Yield; DENOMINATOR-SENSITIVE; T2 ceilings from bear-mode UNKNOWN + DD-Critical unknowns are moot below 60)",
+    "floor_result": "FLOOR-FLAGGED in all 9 runs -- Basis floor breached (~57.3% discount to RCT v03 Cincinnati LOW $251.46 vs 60% ramp floor at 2007 vintage) and Yield floor breached (~7.5% YoC vs 8.0%); DSCR clears (~1.36-1.45x, LTV-bound refi) in every run; carrying-cost floor UNKNOWN in every run (OpEx/millage unavailable)",
+    "replay_notes": "76,501 SF treated as a single building (Gate 2 breach, GATE-FLAGGED) in every run since building count is a live-check fact not in the frozen packet. All-in basis computed WITHOUT the known-bad roof's capex in every run (priced but no dollar figure disclosed) -- true discount/YoC are somewhat worse than shown, so the floor breach is conservative, not overstated. Bear-mode UNKNOWN -> OFF, T2 ceiling (moot below 60) in every run."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-09, before the 2026-07-14 RCT v03 recalibration, AND internally inconsistent independent of that boundary (see known_gaps). NOT the diff target.",
+    "quality": 36,
+    "economics": 8,
+    "combined": 50,
+    "quality_plus_economics_check": "36 + 8 = 44, vs archived Combined 50 -- 6pt unexplained discrepancy.",
+    "expected_score": 5.5,
+    "p_exec_pct": 12.5,
+    "archived_verdict_tier": "T2 WATCH (matches neither the raw-score PASS-band prediction nor the FLOOR-FLAGGED label implied by the archived FAIL-YIELD floor result)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tolerance_rationale": "Widened harness-wide from an initial arbitrary 3.0 after the repeatability check on Port Sheldon showed a 3-run range (4.5 pts) exceeding that tolerance. This deal's own range (2.0 pts at n=9) would have been fine at 3.0, but a single harness-wide tolerance keeps the pilot simple; per-deal tolerance calibration is a documented follow-up.",
+    "tier_check": "informational_only",
+    "reason": "HIGH confidence: fully resolved (zero null categories) across all 9 replays, internally consistent (category sums match Combined in every run), and the tightest or near-tightest repeatability in the set (stdev 0.82, range 2.0 at n=9) -- one of the most reliable rows in the golden set for detecting a real doctrine-edit delta."
+  }
+}

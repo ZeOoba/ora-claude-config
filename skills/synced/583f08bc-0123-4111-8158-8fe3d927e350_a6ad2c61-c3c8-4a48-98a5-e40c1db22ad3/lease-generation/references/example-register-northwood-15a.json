@@ -1,0 +1,64 @@
+{
+  "deal_id": "NORTHWOOD-15A-IMPACT-2026-09",
+  "source_documents": [
+    {"name": "Unit 15 A LOI.pdf", "type": "LOI", "date": "2026-08-27"},
+    {"name": "Lease Suite A15 Impact Home Technology LLC -- 2203-2207 Northwood 09.2026.docx", "type": "prior lease", "date": "2026-09"}
+  ],
+  "template": {"property_key": "Northwood", "state": "MD", "file": "legacy Northwood form (re-paper onto ORA_MasterLease Northwood/MD template when available)"},
+  "landlord": {"entity": "2203 Northwood, LLC", "entity_type": "limited liability company", "state_of_formation": "Maryland",
+    "notice_address": "c/o Eric Goldberg, 9510 Persimmon Tree Road, Potomac, MD 20854",
+    "copy_to": "Sperry Van Ness, Property Management Department, 206 E Main Street, Salisbury, MD 21801, Attn: Brady Smith",
+    "signatory": "Gabriel Goldberg", "signatory_title": "Manager"},
+  "tenant": {"entity": "Impact Home Technology LLC", "entity_type": "limited liability company", "state_of_formation": "Maryland",
+    "co_tenants": ["Ryan Adam Spear"], "notice_address": null, "notice_email": null,
+    "business_description": "home automation systems and related services; offices Ocean City MD, warehouse relocating from Pittsville MD",
+    "signatory": "", "signatory_title": ""},
+  "premises": {"project_name": "Technology Commons", "address": "2207 Northwood Drive, Salisbury, Maryland 21801", "suite": "15A",
+    "rsf": 1200, "building_rsf": null, "project_rsf": 53700, "proportionate_share_pct": 2.23, "county": "Wicomico", "parcel_id": null,
+    "exhibit_a_plan": "TO BE ATTACHED"},
+  "use": {"permitted_use": "office and warehouse", "restrictions": []},
+  "term": {"months": 36, "target_commencement": "2026-10-01", "commencement_basis": "later_of_target_or_delivery", "expiration": "2029-09-30 (anticipated)", "outside_date_days": 90, "early_access": null},
+  "options": [{"months": 36, "notice_window_months": [12, 6], "rent_basis": "schedule", "conditions": "ORA standard"}],
+  "rent": {
+    "schedule": [
+      {"lease_year": 1, "period": "2026-10-01 to 2027-09-30", "monthly": 1200.00, "annual": 14400.00},
+      {"lease_year": 2, "period": "2027-10-01 to 2028-09-30", "monthly": 1236.00, "annual": 14832.00},
+      {"lease_year": 3, "period": "2028-10-01 to 2029-09-30", "monthly": 1273.08, "annual": 15276.96},
+      {"lease_year": 4, "period": "Option Term", "monthly": 1311.27, "annual": 15735.24},
+      {"lease_year": 5, "period": "Option Term", "monthly": 1350.61, "annual": 16207.32},
+      {"lease_year": 6, "period": "Option Term", "monthly": 1391.13, "annual": 16693.56}
+    ],
+    "escalation": {"type": "fixed_pct", "value": 3.0, "applies_to_option": true},
+    "first_month_on_execution": true, "late_charge_pct": 10, "default_rate_pct": 18, "payment_method": "Tenant Portal"
+  },
+  "expense_structure": {"type": "gross", "base_year": null, "included_in_rent": ["Taxes", "Landlord's insurance", "Operating Costs (CAM)"],
+    "tenant_exclusions": ["personal property taxes", "tenant-caused insurance increases", "separately metered utilities", "tenant-caused repairs", "parking charges"]},
+  "utilities": {"electric": "separately_metered_tenant_direct", "gas": null, "water_sewer": "pro_rata_building_meter", "water_sewer_flat_fee": null, "trash": "tenant"},
+  "security_deposit": {"amount": 1200.00, "months": 1.0},
+  "parking": {"allocation": "pro rata (Tenant's Allocation)", "overnight_vehicles": 6, "vehicle_class_cap": "≤10,000 lb GVWR; no trailers/box trucks", "reserved_spaces": null},
+  "landlord_work": {"items": [
+      "clean warehouse floor and interior; major mechanical systems (electrical, plumbing, HVAC) in working condition",
+      "service front entrance door locks",
+      "construct small lockable office in front portion for 1–2 persons (Exhibit B spec)",
+      "connect existing heat pump HVAC to office and confirm operational"],
+    "exhibit_b_spec": "ORA standard office spec (partitions, one lockable door, 2 duplex + 1 light, HVAC tie-in, Building Standard finishes)",
+    "substantial_completion_standard": "ORA standard", "punch_list_days": 5, "latent_defect_days": 60},
+  "maintenance": {"allocation": "LOI_landlord_hvac_and_major_mechanicals",
+    "landlord": ["roof", "structure", "HVAC", "major electrical to panel", "major plumbing to fixture connection", "exterior doors and windows", "lawn", "landscaping", "snow removal", "parking areas"],
+    "tenant": ["interior", "plumbing fixtures", "outlets/switches/bulbs", "interior locks", "janitorial", "trash", "pest control", "HVAC filters quarterly"],
+    "hvac_replacement": "landlord", "filters_on_tenant": true},
+  "insurance": {"cgl_occurrence": 1000000, "cgl_aggregate": 2000000, "umbrella": 2000000, "auto_csl": 1000000, "employers_liability": 500000},
+  "signage": "one exterior sign over entrance + entry door signage, Landlord-approved",
+  "broker": {"firm": "SVN | Miller Commercial Real Estate", "landlord_agent": "Trent Spicer-Davis", "tenant_agent": "Chris Peek, CCIM", "dual_agency": true, "commission_agreement": "separate written agreement"},
+  "special_provisions": [],
+  "ratified_position_departures": [
+    {"position": 1, "reason": "LOI: taxes, insurance and CAM included in rent — full gross, no base year", "compelled_by_loi": true},
+    {"position": 6, "reason": "LOI grants one 3-year option", "compelled_by_loi": true}
+  ],
+  "decision_gates": [
+    {"question": "Primary Term escalations", "options": ["flat per LOI", "3% annual"], "recommendation": "flat per LOI", "resolved": "3% annual (Gabriel, 2026-09-07)"},
+    {"question": "Option Term rent", "options": ["flat", "3% compounding", "FMR with floor"], "recommendation": "3% compounding", "resolved": "3% compounding"},
+    {"question": "HVAC filters on tenant", "options": ["yes", "no"], "recommendation": "yes", "resolved": "yes"}
+  ],
+  "open_items": ["Exhibit A suite plan", "tenant notice address/e-mail (blank lines left)", "confirm water meter basis with SVN PM", "SVN dual-agency consent on file", "permit timing for office partition vs 1 Oct delivery"]
+}

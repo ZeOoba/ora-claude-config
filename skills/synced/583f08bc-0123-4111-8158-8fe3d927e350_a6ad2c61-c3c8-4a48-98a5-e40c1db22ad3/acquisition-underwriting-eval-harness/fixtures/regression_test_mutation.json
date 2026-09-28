@@ -1,0 +1,75 @@
+{
+  "deal_id": "2196-port-sheldon-st-jenison-mi",
+  "deal_name": "2196 Port Sheldon St, Jenison MI 49428/49429",
+  "mode": "SCREEN",
+  "date_seen": "2026-06-20",
+  "source": "Notion Deal Sourcing Log (collection://9a6ae219-85a3-4621-899c-c757fd062f8b), queried 2026-08-14",
+  "confidence": "HIGH",
+  "known_gaps": [
+    "RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-20 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference (Combined 36) is historical only -- the pre-v03 Basis score cleared its then-current floor comfortably, while the 2026-08-14 baseline replay under RCT v03 shows Basis BREACHING (0/25) at the same price/SF, which is the expected, ratified effect of the recalibration, not a regression. The `golden` block is the fresh 2026-08-14 replay under current doctrine.",
+    "The 2026-08-14 baseline replay is the CLEANEST of the six -- all 7 scorecard categories resolved (zero nulls) using only frozen facts + the skill's own documented fallbacks. This is the strongest row in the re-baselined set.",
+    "Building SF has a minor OM-vs-assessor variance (19,777 OM vs 19,471 assessor, ~1.6%) -- below the skill's 2% no-flag threshold, normal noise, not a data-quality issue.",
+    "NOI is pro-forma/modeled ($137,027 at $7.50/SF NNN, property 100% vacant) -- expected and consistent with the Lease-Up Assumption Block, not an archive gap."
+  ],
+  "inputs": {
+    "address": "2196 Port Sheldon St, Jenison, MI 49428/49429",
+    "market": "Grand Rapids MI (Jenison submarket)",
+    "asking_price": 995000,
+    "price_used_for_scoring": 995000,
+    "building_sf_om": 19777,
+    "building_sf_assessor": 19471,
+    "price_per_sf_at_asking": 100.87,
+    "asking_cap_rate_pct": 6.87,
+    "year_built": 1987,
+    "occupancy_pct": 0,
+    "asset_type": "Shallow Bay Flex",
+    "noi_annual": 137027,
+    "noi_basis": "Pro-forma/modeled: base-case $7.50/SF NNN stabilized assumption (100% vacant) -- see SKILL.md Lease-Up Assumption Block.",
+    "physical": {
+      "construction_type": "Precast concrete, 4-unit condo",
+      "docks_drive_ins": "4 docks + 4 drive-ins + leveler",
+      "power": "480V 3-phase, full A/C"
+    },
+    "environmental_notes": null,
+    "flood_status": "RESOLVED, Zone X",
+    "other_facts": "MI deal -- Proposal A uncapped-SEV tax reassessment applies. This deal validates the skill's own documented price-watch re-engage trigger and the MI Prop A pre-mortem line ($33K->$68K reassessed tax)."
+  },
+  "golden": {
+    "baselined_date": "2026-08-14",
+    "baselined_against_skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+    "quality": 32.0,
+    "economics": 0.0,
+    "combined": 32.0,
+    "category_breakdown": {
+      "basis": 0.0,
+      "yield": 0.0,
+      "product_physical": 12.0,
+      "market_location": 6.0,
+      "seller_motivation": 5.0,
+      "tenancy_lease": 0.0,
+      "value_add": 9.0
+    },
+    "category_breakdown_sum_check": "0+0+12+6+5+0+9 = 32, matches Combined exactly.",
+    "expected_score": 8.0,
+    "p_exec_pct": 25.0,
+    "verdict_tier": "PASS-band (FLOOR-FLAGGED; price-watch re-engage, not a cold pass)",
+    "floor_result": "FLOOR-FLAGGED -- Basis breached (54.4% discount to RCT v03 GR LOW $253.11 vs 65% floor at 1987 vintage) + Yield breached (6.0% YoC vs 8.0% floor); DSCR clears (1.45x, LTV-bound refi); DENOMINATOR-SENSITIVE + INVERTED-SPREAD (6.87% in vs 8.00% exit)",
+    "replay_notes": "Bear-mode UNKNOWN (market-monitor unavailable) -> scored OFF, T2 ceiling, non-binding (moot -- Tenancy already 0). Walk price to floors ~$1.44-1.48M independently reproduces the skill's own documented $1.45-1.50M re-engage band -- a strong internal-consistency signal. Price-watch trigger applies per the skill's named validation example for this exact deal."
+  },
+  "archived_pre_v03_reference": {
+    "note": "Historical only -- screened 2026-06-20, before the 2026-07-14 RCT v03 recalibration. The pre-v03 Basis score cleared comfortably at the old (lower) floor/denominator; under RCT v03 the same price/SF now breaches. This is the expected, ratified effect of the recalibration, not a regression. NOT the diff target.",
+    "quality": 36,
+    "economics": 0,
+    "combined": 36,
+    "expected_score": 7,
+    "p_exec_pct": 20,
+    "archived_verdict_tier": "PASS (consistent with pre-v03 VERDICT BANDS applied to Combined=36)"
+  },
+  "diff_policy": {
+    "primary_signal": "combined_score",
+    "tolerance_combined_pts": 5.0,
+    "tier_check": "informational_only",
+    "reason": "HIGH confidence: the 2026-08-14 baseline replay is fully resolved (zero null categories), internally consistent (category sum matches Combined exactly), and cross-validates against an independent skill-documented figure (the price-watch re-engage band). The strongest row in the re-baselined golden set -- the one most worth watching for future doctrine-edit deltas."
+  },
+  "_mutation_note": "SELF-TEST FIXTURE: asking_price mutated 1995000 -> 995000 (~50% cut) to prove the harness flags a beyond-tolerance delta. Never a real golden file."
+}

@@ -1,0 +1,183 @@
+{
+  "run_timestamp": "2026-08-14T215119Z",
+  "run_label": "scheduled-poll",
+  "skill_sha": "83547a76651c53c8f3311c2f30db53cbf16fd219",
+  "total_deals": 6,
+  "scored_deals": 3,
+  "informational_deals": 3,
+  "scored_pass": 3,
+  "scored_flag": 0,
+  "results": [
+    {
+      "deal_id": "11850-hamilton-ave-cincinnati-oh",
+      "status": "FLAG",
+      "scored": false,
+      "informational_only": true,
+      "confidence": "LOW",
+      "combined_golden": 22.4,
+      "combined_observed": 13.0,
+      "combined_delta": -9.399999999999999,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band \u00b7 GATE-FLAGGED (retail-only)",
+      "observed_tier": "PASS-band \u00b7 GATE-FLAGGED (retail-only)",
+      "category_deltas": {
+        "basis": null,
+        "yield": null,
+        "market_location": 1.0,
+        "seller_motivation": 0.0,
+        "value_add": null
+      },
+      "notes": [
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only, not the diff target. The `golden` block is a fresh 2026-08-14 replay under current doctrine.",
+        "known_gap: The 2026-08-14 baseline replay has 2 of 7 categories null (Product & Physical, Tenancy & Lease) and both Expected Score and P(exec)% are null -- every P(exec) band is gap-to-ask or deal-status keyed and this deal has no ask price and no LOI/PSA status in the frozen facts, so no band was derivable (the replay correctly declined to invent one rather than guess).",
+        "known_gap: NOI is not disclosed -- only derivable via a later pipeline record's implied cap rate, which the replay used ONLY as an explicitly flagged assumption to solve the unpriced/no-NOI walk price (per the skill's own documented convention). Basis (7.4) and the floor result are therefore assumption-contingent; Yield (0.0) is assumption-independent since it binds by construction at the solved walk price.",
+        "excluded from strict scoring: LOW confidence (delta reported as informational only)"
+      ]
+    },
+    {
+      "deal_id": "1333-research-rd-gahanna-oh",
+      "status": "PASS",
+      "scored": false,
+      "informational_only": true,
+      "confidence": "LOW",
+      "combined_golden": 9.0,
+      "combined_observed": 14.0,
+      "combined_delta": 5.0,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band (<60) -- FLOOR-FLAGGED (Basis+Yield) / ENV-WATCH / DENOMINATOR-SENSITIVE / INVERTED-SPREAD / OBSOLESCENCE-WATCH; T2 ceilings non-binding at this score",
+      "observed_tier": "PASS-band",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "market_location": 0.0,
+        "tenancy_lease": 0.0
+      },
+      "notes": [
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is a fresh 2026-08-14 replay under current doctrine.",
+        "known_gap: The 2026-08-14 baseline replay has 3 of 7 categories null (Product & Physical, Seller & Motivation, Value-Add) -- Quality (9.0) is a partial lower bound; the replay itself notes max attainable Combined at the walk price is 49.4, so PASS-band holds under any resolution of the nulls (a robust, if incomplete, verdict).",
+        "known_gap: Pre-v03 archived record ALSO carried its own internal inconsistency independent of the v03 boundary: archived Quality(39)+Economics(2.7)=41.7 != archived Combined(48), and the archived Verdict tier 'T1 PURSUE' directly contradicts VERDICT BANDS applied to Combined=48 (<60 = PASS-band). This was the most internally inconsistent row in the original (pre-rebaseline) golden set -- preserved here for context, not used for diffing.",
+        "excluded from strict scoring: LOW confidence (delta reported as informational only)"
+      ]
+    },
+    {
+      "deal_id": "2196-port-sheldon-st-jenison-mi",
+      "status": "PASS",
+      "scored": true,
+      "informational_only": false,
+      "confidence": "HIGH",
+      "combined_golden": 29.33,
+      "combined_observed": 25.0,
+      "combined_delta": -4.329999999999998,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band (FLOOR-FLAGGED; price-watch re-engage per SKILL.md's own validation example for this deal)",
+      "observed_tier": "PASS-band",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": -2.0,
+        "market_location": 0.0,
+        "seller_motivation": -1.67,
+        "tenancy_lease": 0.0,
+        "value_add": -0.6699999999999999
+      },
+      "notes": [
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-20 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference (Combined 36) is historical only. The `golden` block is the MEAN of 3 independent 2026-08-14 replays under current doctrine (see `repeatability` below) -- not a single N=1 run.",
+        "known_gap: REPEATABILITY FINDING (2026-08-14, added post-REFUTE-pass): 3 independent frozen replays of this exact deal, identical inputs, identical doctrine, produced Combined 32.0 / 27.5 / 28.5 -- a 4.5-point range, exceeding the harness's original 3.0-pt tolerance on its own. Tolerance widened to 5.0 pts harness-wide as a result (see diff_policy and SKILL.md). This deal is the noisier of the two HIGH-confidence rows -- Liberty Office Park's 3-run range was only 1.0 pt.",
+        "known_gap: SKILL.md-CITATION LEAKAGE (identified via the repeatability check): this exact address is named in SKILL.md's own text as the worked validation example for the price-watch re-engage trigger ('Validation: 2196 Port Sheldon'). The first replay (Combined 32.0) awarded 5 Seller & Motivation points, apparently drawing on that citation's owner-user-vacating characterization -- a fact NOT present in this file's frozen `inputs`. Two independent re-replays (Combined 27.5, 28.5) explicitly declined to award those points, one of them explicitly noting the citation was inadmissible since it wasn't in the frozen fact set. This is a narrow but real leakage risk specific to golden deals SKILL.md happens to cite by name -- a frozen-replay subagent reading the full skill file sees its own answer key for that one input. Not fixable without either stripping the citation from SKILL.md (out of scope -- read-only) or excluding self-citing deals from the golden set; documented instead as a standing caveat.",
+        "known_gap: The 2026-08-14 baseline replays are otherwise the cleanest of the six -- all 7 scorecard categories resolved (zero nulls) across all 3 runs.",
+        "known_gap: Building SF has a minor OM-vs-assessor variance (19,777 OM vs 19,471 assessor, ~1.6%) -- below the skill's 2% no-flag threshold, normal noise, not a data-quality issue.",
+        "known_gap: NOI is pro-forma/modeled ($137,027 at $7.50/SF NNN, property 100% vacant) -- expected and consistent with the Lease-Up Assumption Block, not an archive gap."
+      ]
+    },
+    {
+      "deal_id": "470-mccormick-blvd-columbus-oh",
+      "status": "FLAG",
+      "scored": false,
+      "informational_only": true,
+      "confidence": "LOW",
+      "combined_golden": 0.0,
+      "combined_observed": 21.0,
+      "combined_delta": 21.0,
+      "tolerance_pts": 5.0,
+      "tier_match": false,
+      "golden_tier": "PASS-band / FLOOR-FLAGGED (T2 WATCH ceilings from bear-mode UNKNOWN + DD-Critical unknowns are non-binding on a sub-60 score)",
+      "observed_tier": "PASS-band",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "seller_motivation": 0.0,
+        "tenancy_lease": 0.0
+      },
+      "notes": [
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): this deal's original 2026-06-09 screen predates the 2026-07-14 RCT v03 replacement-cost recalibration (a deliberate, ratified doctrine change -- old RCT v02 + 30%/25% floor ramp vs today's RCT v03 + 65%/60% ramp). The archived pre-v03 Notion score is preserved below under archived_pre_v03_reference for historical context ONLY and is NOT the diff target -- diffing a post-v03 replay against a pre-v03 score would always show a large 'delta' that is actually the already-ratified recalibration, not a regression. The `golden` block below is instead a fresh 2026-08-14 replay under current doctrine, establishing the baseline future doctrine edits should be diffed against.",
+        "known_gap: The 2026-08-14 baseline replay itself has 3 of 7 scorecard categories unresolvable from the frozen input packet (Product & Physical, Market & Location, Value-Add Optionality all null) -- the frozen input packet sourced from Notion's structured fields does not capture the physical/site detail the original live-tooled screen evidently had access to. Quality is therefore entirely null in this baseline; only Economics (0.0, both floors breached) is a real number. Confidence kept LOW for this reason -- excluded from strict pass/fail.",
+        "known_gap: NOI is not recorded anywhere (not disclosed, not derivable from a cap rate). Score components note '@ $700K' -- scoring used a $700,000 walk price, not the $950,000 asking price.",
+        "known_gap: Notion's current 'Verdict' field reads KILLED (Gabriel's 2026-07-08 kill decision, post-hoc status overwrite) -- not a skill verdict-band output, see archived_pre_v03_reference.",
+        "excluded from strict scoring: LOW confidence (delta reported as informational only)",
+        "tier mismatch (informational only, per diff_policy.tier_check): golden='PASS-band / FLOOR-FLAGGED (T2 WATCH ceilings from bear-mode UNKNOWN + DD-Critical unknowns are non-binding on a sub-60 score)' vs observed='PASS-band'"
+      ]
+    },
+    {
+      "deal_id": "e-fulton-st-portfolio-columbus-oh",
+      "status": "PASS",
+      "scored": true,
+      "informational_only": false,
+      "confidence": "MEDIUM",
+      "combined_golden": 57.17,
+      "combined_observed": 56.0,
+      "combined_delta": -1.1700000000000017,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band (GATE-FLAGGED -- per-building 50K SF cap breached under every reading of the North Main Building; T2 WATCH ceilings from bear-mode UNKNOWN + FEMA UNK + unresolved reassessed tax are non-binding on a sub-60 raw score, per the Stage 2.5 disambiguation)",
+      "observed_tier": "PASS-band (raw 56.0) - GATE-FLAGGED",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": -0.16999999999999993,
+        "market_location": -1.0,
+        "seller_motivation": 0.0,
+        "value_add": 0.0
+      },
+      "notes": [
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is a fresh replay under current doctrine, still using ONLY pre-Phase-II-admissible facts by design.",
+        "known_gap: DECLASSIFIED 2026-07-09 per Gabriel (projects.md) -- no confidentiality restriction on citing these facts, confirmed before use.",
+        "known_gap: ENRICHMENT 2026-08-14 (Gabriel's request to close the Economics-blind-spot documented in SKILL.md Limitations): researched real physical specs for this deal. Two categories of missing fact needed DIFFERENT treatment: (1) PHYSICAL BUILDING SPECS (construction, clear height, loading, per-building SF) are time-invariant -- a 1966/67 building's clear height doesn't change -- so it is legitimate to source them from ANY point in time, not just what was on file 2026-06-09. Sourced below. (2) TENANCY/OCCUPANCY is explicitly a genuine UNKNOWN at 6/9 (ORA's own DD-Critical status said 'rent roll unreconciled' through the freeze date, corroborated by pre-6/9 Morning Brief pages) -- this is NOT a research gap to backfill, it is an irreducible fact of this deal's history. Later occupancy data exists (a Crexi listing's per-building tenant mix, and a later ~83% vacant portfolio-wide figure) but using it would import hindsight into a frozen pre-Phase-II snapshot, so it is deliberately excluded. Tenancy & Lease therefore stays null -- this is why confidence is MEDIUM, not HIGH: 6 of 7 categories are now resolved, but the 7th is structurally unresolvable without breaking the frozen-snapshot discipline, not merely under-researched. See SKILL.md for the full writeup.",
+        "known_gap: PER-BUILDING SIZE-GATE FINDING (surfaced by the enrichment, not previously known): the researched per-building breakdown shows the North portfolio's 'Main Building' (126,924 SF) is either a single building over the skill's 50,000 SF/building gate, or an internal split into a 74,700 SF 'Building A' section plus a 52,224 SF 'remainder' section -- EITHER reading breaches the 50K/building gate (both sub-figures individually exceed it too). Building-count ambiguity is unresolved from available sources (the OM describes it as one main building with named internal areas, which reads as a single structure, not multiple discrete buildings). The original 6/9 screen never caught this because per-building SF was completely unknown at that time -- a genuine screen-time gap, not something Ruling 5 already flagged. Frozen as `main_building_sf_ambiguity` below; the replay should screen this as a GATE-FLAGGED exception (Ruling 5: flag, not kill) given every plausible reading breaches.",
+        "known_gap: Year-built cross-source conflict (reported, not resolved): Notion Deal Sourcing Log / this golden set = 1966; Franklin County Auditor CAMA (parcel 010-099214-00) = 1967 (immaterial to the vintage ramp -- both are far below the 1995 floor-ramp threshold); a LATER (post-7/9-termination) re-listing of the north parcels states 1998, which is inadmissible here -- that OM is a post-freeze re-marketing of the property, not a fact knowable at the 6/9 screen, and is used ONLY for its time-invariant structural details (construction type, clear height, loading), never its stated vintage, price, or 'value-add' framing.",
+        "known_gap: South-parcel loading detail (docks/drive-ins) was not found in any sourced document -- only the North parcels' OM had full loading detail. South parcels' construction/loading fields below are partially null as a result; this is a smaller, honestly-flagged residual gap, not swept into the Tenancy discussion above.",
+        "known_gap: NOI is not disclosed on this 6/9 snapshot; Basis rests on an [est] all-in build. The enrichment adds a real, sourced pre-6/9 CapEx input (roof/structural repair estimate) that materially changes this from the original replay's price+closing-only all-in -- see inputs.structural_condition."
+      ]
+    },
+    {
+      "deal_id": "liberty-office-park-west-chester-oh",
+      "status": "PASS",
+      "scored": true,
+      "informational_only": false,
+      "confidence": "HIGH",
+      "combined_golden": 28.67,
+      "combined_observed": 27.0,
+      "combined_delta": -1.6700000000000017,
+      "tolerance_pts": 5.0,
+      "tier_match": true,
+      "golden_tier": "PASS-band (GATE-FLAGGED: >50K SF/building; FLOOR-FLAGGED: Basis + Yield; DENOMINATOR-SENSITIVE; T2 ceilings from bear-mode UNKNOWN + DD-Critical unknowns are moot below 60)",
+      "observed_tier": "PASS-band (GATE-FLAGGED + FLOOR-FLAGGED)",
+      "category_deltas": {
+        "basis": 0.0,
+        "yield": 0.0,
+        "product_physical": -1.0,
+        "market_location": 0.0,
+        "seller_motivation": 0.0,
+        "tenancy_lease": 0.0,
+        "value_add": -0.6699999999999999
+      },
+      "notes": [
+        "known_gap: RE-BASELINED 2026-08-14 (see harness README 'RCT v03 date-boundary finding'): original 2026-06-09 screen predates the 2026-07-14 RCT v03 recalibration. archived_pre_v03_reference is historical only. The `golden` block is the MEAN of 3 independent 2026-08-14 replays under current doctrine (see `repeatability` below).",
+        "known_gap: REPEATABILITY FINDING (2026-08-14, added post-REFUTE-pass): 3 independent frozen replays, identical inputs, identical doctrine, produced Combined 28.0 / 29.0 / 29.0 -- only a 1.0-point range, the tightest of the two HIGH-confidence deals (Port Sheldon's 3-run range was 4.5 pts). This deal's fully-disclosed NOI and detailed physical specs likely explain the lower variance -- less for the replay to judge, less spread in the result.",
+        "known_gap: Pre-v03 archived record separately carried its own internal inconsistency independent of the v03 boundary: archived Quality(36)+Economics(8)=44 != archived Combined(50), and the archived Verdict tier 'T2 WATCH' matched neither the raw-score band nor the FAIL-YIELD floor-breach label. Preserved for context, not used for diffing."
+      ]
+    }
+  ]
+}
