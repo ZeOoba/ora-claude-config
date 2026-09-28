@@ -1,0 +1,16 @@
+{
+  "check": "mirror-drift",
+  "ranAt": "2026-09-10T14:38:00",
+  "host": "LAPTOP-CSHSCBE6",
+  "status": "CANT_VERIFY",
+  "exitCode": 2,
+  "findingCount": 0,
+  "findings": [],
+  "errors": [
+    {
+      "summary": "mirror classifier failed to run (rc=143)",
+      "evidence": ""
+    }
+  ],
+  "notes": []
+}

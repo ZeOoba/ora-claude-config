@@ -1,0 +1,16 @@
+{
+  "check": "freshness",
+  "ranAt": "2026-09-10T14:34:54",
+  "host": "LAPTOP-CSHSCBE6",
+  "status": "CLEAN",
+  "exitCode": 0,
+  "findingCount": 0,
+  "findings": [],
+  "errors": [],
+  "notes": [
+    "integrity-guard fresh (0.1h old, threshold 30h)",
+    "mirror-drift fresh (0.0h old, threshold 96h)",
+    "stranded-spec fresh (0.1h old, threshold 30h)",
+    "freshness cannot detect its own loss; fleet-deadman.ps1 is the backstop"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "check": "mirror-drift",
+  "ranAt": "2026-09-17T10:55:22",
+  "host": "LAPTOP-CSHSCBE6",
+  "status": "FINDINGS",
+  "exitCode": 1,
+  "findingCount": 1,
+  "findings": [
+    {
+      "severity": "HIGH",
+      "summary": "Mirror deploy ALARM_UNEXPLAINED_KILL -- Run was killed (rc=3221225786) mid-flight with NO usable power/session event within 90s of the run's end (09/17/2026 10:41:08). Something other than normal machine lifecycle terminated the deploy.",
+      "evidence": "{\n  \"checkedAt\": \"2026-09-17T10:55:01.3534635-04:00\",\n  \"taskName\": \"ORA Command Center - Mirror Deploy\",\n  \"repoRoot\": \"C:\\\\Users\\\\Owner\\\\oxford-command-center\",\n  \"lastRunTime\": \"2026-09-17T10:36:34.0000000-04:00\",\n  \"lastTaskResult\": 3221225786,\n  \"nextRunTime\": \"2026-09-17T11:00:00.0000000-04:00\",\n  \"runEndedAt\": \"2026-09-17T10:41:08.4770883-04:00\",\n  \"beaconPresent\": true,\n  \"beaconStatus\": \"running\",\n  \"beaconOutcome\": null,\n  \"gitBehind\": 28,\n  \"gitAhead\": 1,\n  \"aheadFlag\": {\n    \"isAhead\": true,\n    \"severity\": \"ESCALATE\",\n    \"thresholdHours\": 24,\n    \"ageHours\": 187,\n    \"oldestAheadCommitAt\": \"2026-09-09T14:55:56.0000000-04:00\",\n    \"reason\": \"Local main is 1 commit(s) AHEAD of origin/main -- unreviewable on GitHub, and lost if local main is ever reset. (Since PR #279 the mirror builds origin/main in an isolated build root, so this does NOT affect what the mirror serves -- it is a work-loss hazard, not a mirror-content one.) Push or open a PR. The oldest of those commits (2026-09-09T14:55:56.0000000-04:00) has been stranded 187 hours, at or past the 24-hour staleness threshold -- this is no longer an active session's work in flight, so it alarms rather than sitting in a silent Notion row.\"\n  },\n  \"verdict\": \"ALARM_UNEXPLAINED_KILL\",\n  \"reason\": \"Run was killed (rc=3221225786) mid-flight with NO usable power/session event within 90s of the run's end (09/17/2026 10:41:08). Something other than normal machine lifecycle terminated the deploy.\",\n  \"correlatingEvent\": null,\n  \"suspendedMinutes\": 0,\n  \"errors\": []\n}"
+    }
+  ],
+  "errors": [],
+  "notes": []
+}

@@ -1,0 +1,17 @@
+{
+  "check": "stranded-spec",
+  "ranAt": "2026-09-17T11:56:51",
+  "host": "LAPTOP-CSHSCBE6",
+  "status": "FINDINGS",
+  "exitCode": 1,
+  "findingCount": 1,
+  "findings": [
+    {
+      "severity": "HIGH",
+      "summary": "Stranded spec folder(s): folder inventory and registry membership do not reconcile.",
+      "evidence": "cc: folder_root=C:\\Users\\Owner\\.claude\\scheduled-tasks registry=C:\\Users\\Owner\\AppData\\Roaming\\Claude\\claude-code-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json\n  [ACTION] UNCOMMITTED_VS_GIT in cc: ora-routine-pause-resume-09-21 -- the SKILL.md on disk differs from HEAD, so the bytes the scheduler actually reads exist in NO commit anywhere. Nothing reviews, backs up, or reproduces this content. Commit it, or revert it.\nlams: folder_root=C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled registry=C:\\Users\\Owner\\AppData\\Roaming\\Claude\\local-agent-mode-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json\n  OK -- lams folders and registry reconcile cleanly."
+    }
+  ],
+  "errors": [],
+  "notes": []
+}

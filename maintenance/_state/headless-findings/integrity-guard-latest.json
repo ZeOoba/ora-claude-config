@@ -1,0 +1,19 @@
+{
+  "check": "integrity-guard",
+  "ranAt": "2026-09-17T11:56:52",
+  "host": "LAPTOP-CSHSCBE6",
+  "status": "FINDINGS",
+  "exitCode": 1,
+  "findingCount": 1,
+  "findings": [
+    {
+      "severity": "HIGH",
+      "summary": "Phantom dispatch(es) detected -- task(s) were dispatched but never started, so lastRunAt looks identical to a real run.",
+      "evidence": "[ACTION] These dispatches never started -- lastRunAt says otherwise:\n  2026-09-16 10:01:35  CC/MCP       ora-am-brief  [cleared-stale] (cleared 10:16:35, 900s pending)\n\nBy task:\n    1  ora-am-brief\n\nVerify against OUTPUT, never lastRunAt/fleet-status.py -- both are\nadvanced by the stale-clear itself. Detail: memory/reference_scheduler_lastrunat_stamped_at_dispatch.md"
+    }
+  ],
+  "errors": [],
+  "notes": [
+    "fleet-status: ...healed (task fired again since) is invisible here; see OI-070 and the scheduler's own run log for history.\n  pause-explained (NOT missed) 0   -\n      pause record: 2 recorded window(s)  (_state/fleet-pause-windows.json; advisory, never a FAIL)\n  throttle skips ..... 413 events across 23 tasks (all-time)\n                       top: ora-ground-truth-auditor=60, ora-pm-daily-crons=46, ora-checkout-merge-forward=35, ora-ar-feed-sweep=33, ora-memory-commit-sweep=32\n      of which last 24h 0   -\n  same-time collisions 0   -\n  duplicate registrations 0 -\n  AM pileup (05-0930). 22 tasks\n\n  VERDICT: OK"
+  ]
+}
