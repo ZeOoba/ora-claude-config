@@ -437,10 +437,82 @@ function Invoke-OutlookSend {
     }
 }
 
+# --- COLD-START GUARD (2026-09-23) -- root cause of the recurring "TIMEOUT: COM call exceeded 15s".
+# When OUTLOOK.EXE is not running, New-Object -ComObject Outlook.Application LAUNCHES Outlook, which
+# takes well over the 15s job budget. The job is then killed (Outlook survives, now running), the
+# send is lost, and the NEXT send minutes later succeeds -- exactly the "worked earlier, fails now,
+# works again" pattern. Evidence: 2026-09-23 timeouts at 16:40:52/16:41:29, OUTLOOK.EXE StartTime
+# 16:41:17, next send OK at 16:46. Fix: start Outlook explicitly and wait for COM to answer BEFORE
+# the 15s-bounded send. No effect when Outlook is already running.
+function Ensure-OutlookReady {
+    if (Get-Process OUTLOOK -ErrorAction SilentlyContinue) { return }
+    Write-Log "WARN" "OUTLOOK-COLDSTART: no OUTLOOK process; launching and waiting up to 120s for COM"
+    try {
+        $exe = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE' -ErrorAction Stop).'(default)'
+        Start-Process -FilePath $exe
+    } catch {
+        try { Start-Process -FilePath 'outlook.exe' } catch { Write-Log "WARN" "OUTLOOK-COLDSTART: could not launch Outlook ($($_.Exception.Message))" }
+    }
+    $deadline = (Get-Date).AddSeconds(120)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 3
+        $p = Get-Process OUTLOOK -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($p -and $p.Responding) {
+            $j = Start-Job -ScriptBlock { $o = New-Object -ComObject Outlook.Application; $null = $o.Session.CurrentUser.Name; 'ok' }
+            if (Wait-Job $j -Timeout 10) {
+                $r = Receive-Job $j -ErrorAction SilentlyContinue
+                Remove-Job $j -Force
+                if ($r -eq 'ok') { Write-Log "OK" "OUTLOOK-COLDSTART: COM ready"; return }
+            } else { Stop-Job $j; Remove-Job $j -Force }
+        }
+    }
+    Write-Log "WARN" "OUTLOOK-COLDSTART: COM not ready after 120s; attempting send anyway"
+}
+
+# After a timeout the killed job may already have queued the message. Before any retry, look for the
+# same subject in Sent Items / Outbox (last 10 min) so a retry cannot double-send.
+function Test-AlreadyQueued {
+    param($Subject)
+    $j = Start-Job -ScriptBlock {
+        param($Subject)
+        $o = New-Object -ComObject Outlook.Application
+        $since = (Get-Date).AddMinutes(-10)
+        $q = $Subject.Replace("'", "''")
+        foreach ($fid in 5, 4) {   # 5 = Sent Items, 4 = Outbox
+            $items = $o.Session.GetDefaultFolder($fid).Items.Restrict("[Subject] = '$q'")
+            foreach ($it in $items) { if ($it.CreationTime -ge $since) { return 'found' } }
+        }
+        'none'
+    } -ArgumentList $Subject
+    if (Wait-Job $j -Timeout 20) {
+        $r = Receive-Job $j -ErrorAction SilentlyContinue
+        Remove-Job $j -Force
+        return ($r -eq 'found')
+    }
+    Stop-Job $j; Remove-Job $j -Force
+    return $false
+}
+
+Ensure-OutlookReady
 $attempt = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined
 
 if ($attempt.Timeout) {
     Write-Log "ERROR" "TIMEOUT: COM call exceeded 15s (Outlook likely blocked)"
+    if (Test-AlreadyQueued $Subject) {
+        $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
+        $ccLog = if ($Cc) { $Cc } else { "none" }
+        Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog (verified in Sent Items/Outbox after timeout; no retry)"
+        exit 0
+    }
+    Start-Sleep -Seconds 10
+    $retry = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined
+    if ($retry.Success) {
+        $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
+        $ccLog = if ($Cc) { $Cc } else { "none" }
+        Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog (after timeout retry)"
+        exit 0
+    }
+    Write-Log "ERROR" "TIMEOUT/FAIL on retry after cold-start guard (Outlook blocked, likely a modal dialog)"
     exit 4
 }
 elseif (-not $attempt.Success) {
