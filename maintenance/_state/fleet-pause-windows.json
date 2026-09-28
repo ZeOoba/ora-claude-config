@@ -1,0 +1,660 @@
+{
+  "last_capture_utc": "2026-09-28T15:28:27Z",
+  "observed": {
+    "cc:ora-aaos-expire-leases": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-aaos-publish-contracts": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-acquisition-underwriting-eval-harness": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-am-brief": [
+      {
+        "end_utc": "2026-09-22T18:20:02Z",
+        "open": false,
+        "start_utc": "2026-09-22T18:20:02Z"
+      }
+    ],
+    "cc:ora-appsec-sweep": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-ar-feed-sweep": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-audit-log-sweep": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-broker-touch-cadence": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-calibration-snapshot": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-cc-schematic-refresh": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-cc-snapshot-refresh": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-checkout-merge-forward": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-claude-setup-audit": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-command-center-mirror-drift-check": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-county-sales-monitor": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-deal-aging-sla": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-deal-command-board": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-23T18:21:18Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-24T06:21:41Z"
+      }
+    ],
+    "cc:ora-deal-sourcing-scan": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-23T18:21:18Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-24T06:21:41Z"
+      }
+    ],
+    "cc:ora-doctrine-integrity-guard": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-entry-market-scan": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-23T18:21:18Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-24T06:21:41Z"
+      }
+    ],
+    "cc:ora-excess-usage-sweep": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-financial-code-integrity-sweep": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-forward-calendar-digest": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-ground-truth-auditor": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-health-guard": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-hubspot-renewal-closeout-tasks": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-incentive-registry-refresh": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-lease-snapshot-refresh": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-loan-balance-check": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-loopnet-listings-sync": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-master-workbook-ingest": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-memory-commit-sweep": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-model-release-watch": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-monthly-portfolio-briefing": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-23T18:21:18Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-24T06:21:41Z"
+      }
+    ],
+    "cc:ora-noi-opportunity-digest": [
+      {
+        "end_utc": "2026-09-23T18:21:18Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-24T06:21:41Z"
+      }
+    ],
+    "cc:ora-open-sessions-board": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-passed-deal-tracker": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-pm-daily-crons": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-pm-ledger": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-pm-monthly-billing": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-prepush-gate-sweep": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-psa-drift-watch": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-recovery-structure-audit-annual": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-renewal-hubspot-reconcile": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-site-exposure-probe": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-sofr-direct-prefetch": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-sourcing-construction-verify": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-24T06:21:41Z"
+      }
+    ],
+    "cc:ora-task-integrity-guard": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-tenant-hubspot-reconciliation": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-vacancy-aging-report": [
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ],
+    "cc:ora-weekly-hygiene": [
+      {
+        "end_utc": "2026-09-20T12:20:11Z",
+        "open": false,
+        "start_utc": "2026-09-14T18:38:37Z"
+      },
+      {
+        "end_utc": "2026-09-28T00:20:04Z",
+        "open": false,
+        "start_utc": "2026-09-22T14:42:42Z"
+      }
+    ]
+  },
+  "version": 2,
+  "windows": [
+    {
+      "end_utc": "2026-09-11T20:01:42Z",
+      "fleet": "cc",
+      "key": "cc:pause-2026-09-07",
+      "note": "Hand backfill 2026-09-12 (pause predates observation). Evidence: Gabriel's 09-07 instruction 'pause all routines until Friday 4:01 PM ET' (session-context); start = resume task createdAt (registered at pause time; latest pre-pause task lastRunAt on CC was 16:18:58Z); end = resume task lastRunAt; task_ids = the ids listed one-per-line in the resume SKILL.md that were re-enabled (carve-outs ora-cowork-heartbeat/automation-health-monitor excluded on LAMS).",
+      "source": "manual",
+      "start_utc": "2026-09-07T17:07:11Z",
+      "task_ids": [
+        "ora-master-workbook-ingest",
+        "ora-financial-code-integrity-sweep",
+        "ora-monthly-portfolio-briefing",
+        "ora-health-guard",
+        "ora-task-integrity-guard",
+        "ora-weekly-hygiene",
+        "ora-deal-sourcing-scan",
+        "ora-pm-ledger",
+        "ora-doctrine-integrity-guard",
+        "ora-open-sessions-board",
+        "ora-command-center-mirror-drift-check",
+        "ora-site-exposure-probe",
+        "ora-aaos-expire-leases",
+        "ora-aaos-publish-contracts",
+        "ora-model-release-watch",
+        "ora-calibration-snapshot",
+        "ora-entry-market-scan",
+        "ora-cc-schematic-refresh",
+        "ora-sofr-direct-prefetch",
+        "ora-broker-touch-cadence",
+        "ora-am-brief",
+        "ora-deal-command-board",
+        "ora-deal-aging-sla",
+        "ora-appsec-sweep",
+        "ora-tenant-hubspot-reconciliation",
+        "ora-cc-snapshot-refresh",
+        "ora-lease-snapshot-refresh",
+        "ora-psa-drift-watch",
+        "ora-claude-setup-audit",
+        "ora-acquisition-underwriting-eval-harness",
+        "ora-county-sales-monitor",
+        "ora-passed-deal-tracker",
+        "ora-memory-commit-sweep",
+        "ora-ar-feed-sweep",
+        "ora-pm-daily-crons",
+        "ora-pm-monthly-billing",
+        "ora-checkout-merge-forward",
+        "ora-ground-truth-auditor"
+      ],
+      "updated_at": "2026-09-12T21:48:24Z"
+    },
+    {
+      "end_utc": "2026-09-11T20:01:37Z",
+      "fleet": "lams",
+      "key": "lams:pause-2026-09-07",
+      "note": "Hand backfill 2026-09-12 (pause predates observation). Evidence: Gabriel's 09-07 instruction 'pause all routines until Friday 4:01 PM ET' (session-context); start = resume task createdAt (registered at pause time; latest pre-pause task lastRunAt on CC was 16:18:58Z); end = resume task lastRunAt; task_ids = the ids listed one-per-line in the resume SKILL.md that were re-enabled (carve-outs ora-cowork-heartbeat/automation-health-monitor excluded on LAMS).",
+      "source": "manual",
+      "start_utc": "2026-09-07T17:12:46Z",
+      "task_ids": [
+        "ora-consolidate-memory-monthly",
+        "ora-skill-store-drift-check",
+        "ora-skill-text-audit",
+        "ora-om-intake-ocr",
+        "ora-owner-outreach-queue-refresh",
+        "ora-replacement-cost-refresh",
+        "ora-bearmode-refresh",
+        "ora-friday-closeout",
+        "ora-lease-expiration-brief",
+        "ora-monday-sync",
+        "ora-stale-pipeline-nudge",
+        "ora-ar-export-freshness-nudge",
+        "ora-session-sweep",
+        "ora-gis-endpoint-liveping",
+        "ora-ic-memo-pipeline-reconciliation",
+        "ora-underwrite-doctrine-staleness-check",
+        "ora-exit-cap-spotcheck",
+        "ora-critical-deadlines-scan",
+        "ora-capex-idea-stage-nudge",
+        "ora-tenant-contact-gap-sweep",
+        "ora-health-guard-fail-aging-nudge",
+        "ora-dd-critical-tracker",
+        "ora-insurance-renewal-monitor",
+        "ora-loan-terms-reconciliation",
+        "ora-hubspot-notion-contact-sync"
+      ],
+      "updated_at": "2026-09-12T21:48:24Z"
+    }
+  ]
+}
