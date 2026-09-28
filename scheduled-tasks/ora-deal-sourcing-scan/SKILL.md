@@ -3,7 +3,41 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.7, 2026-09-19).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.8, 2026-09-23).
+
+v2.8 — COVERAGE-GAP CLOSURE (2026-09-23, Gabriel-directed). NO SCORE, WEIGHT, GATE,
+THRESHOLD, FLOOR OR GOVERNOR CHANGED — this version changes run ORDER, SOURCE COVERAGE and
+REPORTING only. The 2026-09-23 run named six coverage gaps; root cause for four of them was
+the same: mandatory steps sat at the END of a long run (tracker fetch, roster refresh,
+construction photos, provisional verification) and were dropped when budget ran out, while
+the source ladder was executed text-only by scouts that had no browser. Fixes:
+  1. NEW STEP 0 PRE-FLIGHT runs BEFORE any scouting: Pipeline Tracker fetch + capacity
+     gate, Property Register roster-drift refresh, provisional carry-forward load,
+     Montgomery-cadence decision. These can no longer be starved by a long Step 1.
+  2. NEW STEP 1B BROWSER PASS, run by the ORCHESTRATOR (not scouts — the browser pane is
+     one shared surface), sequential and paced: Crexi public marketplace, LoopNet public
+     search, the JS-rendered broker-direct pages, provisional-listing detail resolution —
+     under HARD page-load caps and compact-JSON extraction. A per-market SOURCE COVERAGE
+     CONTRACT (Step 1) says which source families each market must touch; KC now REQUIRES
+     Block & Co and Newmark Zimmer direct. Crexi's public search was MEASURED loadable in
+     the logged-out pane on 2026-09-23 (the working URL form is recorded in 1B-A).
+  3. CONSTRUCTION: new STEP 3C (after tiers) photo-checks every T1 PURSUE /
+     T1-PENDING-PRICE row in-run; T2 UNKNOWN rows are HANDED OFF to
+     `ora-sourcing-construction-verify` (created 2026-09-23 for exactly this; it waits for
+     this scan's DONE-MARKER so the two never drive the browser pane at once). A handoff is
+     a RECEIPT, not a coverage gap. A skipped or unattributable T1 check is still a gap.
+     Existing T1/T2 rows with a blank Construction Type are set to 'Unknown — CONFIRM'
+     when touched, so they enter the backstop queue.
+  4. PROVISIONAL LISTINGS: must get a detail-page resolution attempt in Step 1B. Addressed
+     + still unresolved → LOGGED as PROVISIONAL (T2 max), never silently dropped.
+     Unaddressed → carried forward in a state file and retried for 3 runs.
+  5. LISTING-DATE BASIS captured per listing (listed / days-on-market / updated-only /
+     ORA-first-sighted). An "updated" date alone is never evidence of a new listing or a
+     re-list. Step 4 carries the re-list-vs-refresh decision rule.
+  6. DIGEST §7 SPLIT into 7a RUN RECEIPTS (every mandatory step: DONE / HANDED-OFF /
+     FAILED + reason), 7b SOURCE COVERAGE MATRIX, 7c TRUE COVERAGE GAPS, 7d FILTERED BY
+     DESIGN (Madison nil, Montgomery cadence, sub-scale). Scope-by-design items no longer
+     masquerade as gaps, and real gaps can no longer hide among them.
 
 v2.7 — LISTING-AGENT CAPTURE + BROKER RELATION LINKING (2026-09-19, Gabriel-directed).
 NO SCORE, WEIGHT, GATE, THRESHOLD OR GOVERNOR CHANGED — this version only adds data
@@ -188,7 +222,68 @@ ORA BUY-BOX (screening filter — apply unchanged)
   TERMINATED (now a lender-note/foreclosure track), so no Columbus deal is under
   contract and NO candidate should be marked CAPACITY-GATED. Do not apply this gate
   on the strength of this note alone — check the Acquisition Pipeline Tracker
-  (bcfe4a03) each run and say in the digest which way you found it.
+  (bcfe4a03) each run and say in the digest which way you found it. (v2.8: that check
+  now happens in STEP 0, before scouting — never at the end of the run.)
+
+RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
+  STEP 0 pre-flight → STEP 1 text scouts (parallel) → STEP 1B browser pass (orchestrator,
+  sequential) → STEP 2 / 2.5 / 3A / 3B gate + score → STEP 3C construction photos for
+  T1-bound rows → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
+  ora-sourcing-construction-verify → STEP 6 digest → DONE-MARKER (last action).
+  BUDGET — HARD CAPS, NOT JUDGMENT (the 2026-09-23 run died on "if running long"):
+    STEP 1B-A discovery: ≤ 30 page loads TOTAL across all ten markets (≈1 Crexi + ≤2
+      broker-direct per market; LoopNet only for markets where Crexi was blocked or
+      returned 0). STEP 1B-B provisional resolution: ≤ 12 loads. STEP 3C: ≤ 4 loads per
+      T1 row. Count loads; stop the sub-step at its cap and name what was not loaded.
+    EXTRACTION DISCIPLINE: read pages with `javascript_tool` returning COMPACT JSON (address,
+      price, SF, DOM/listed date, href — nothing else), or `get_page_text` with
+      max_chars ≤ 6000. Never pull a full accessibility tree or full page text into
+      context — raw page dumps are what exhaust the run.
+    CHECKPOINT: STEP 0 must be complete before 1B-A starts, and the Step 1 text-scout
+      candidate list must already be recorded in the run notes, so a 1B overrun can cost
+      only 1B's own breadth — never the gate, dedupe or Notion writes.
+  If a mandatory step nevertheless fails, it is a FAILED receipt with its reason — the
+  digest never omits it and never re-labels it a "scope choice".
+  MANDATORY STEP ROSTER (each gets a receipt line in digest §7a, every run):
+    R1 Pipeline Tracker fetch + capacity gate · R2 Property Register roster refresh ·
+    R3 provisional carry-forward load · R4 text scouts, all ten clusters ·
+    R5 browser pass (Crexi · LoopNet · JS broker-direct) · R6 provisional detail
+    resolution · R7 construction — T1 in-run · R8 construction — handoff list ·
+    R9 full-set dedupe · R10 Notion writes · R11 Step 5B tracker cross-writes ·
+    R12 own-portfolio guard · R13 carry-forward file written · R14 done-marker written.
+  DONE-MARKER (R14, the run's LAST action, after the digest send attempt): write
+    C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\deal-sourcing-scan-done.json
+    = {"run_date":"YYYY-MM-DD","completed_at":"<ISO>","handoff_rows":N}. The follow-on
+    ora-sourcing-construction-verify reads it and does NOT start until it shows today's
+    date — that is what stops it driving the browser pane while this scan still is.
+
+STEP 0 — PRE-FLIGHT (v2.8 — runs FIRST, before any scout is dispatched)
+Compute the run date once (`date '+%A %Y-%m-%d'`) and the day-of-month.
+  0a. ACQUISITION PIPELINE TRACKER — query collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b
+      for ALL rows (paginate on has_more; no LIMIT window — same rule as the Step 4
+      dedupe guard). Keep the result in context: STEP 4 (don't re-surface active deals)
+      and STEP 5B (verified-ask cross-writes) BOTH reuse this one fetch — do not re-pull.
+      CAPACITY GATE: from the same result, determine whether any Columbus OH row sits in
+      an under-contract stage (PSA executed / under contract / DD / closing). State the
+      finding and the rows it rests on in receipt R1. If the fetch fails (quota → the
+      `notion-quota-fallback` skill; still failing → R1 FAILED): apply NO capacity gate,
+      SKIP 5B (write nothing to the tracker), and say both in the digest header line —
+      never fall back silently on the "last known" note above.
+  0b. PROPERTY REGISTER ROSTER REFRESH — read collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3
+      (Address column) and the Tenant DB 'Property Address' options; diff against
+      _shared\ora-own-portfolio-exclusions.json. Every owned address missing from the
+      roster is added to an IN-MEMORY supplement for this run's STEP 2(e) check (treat as
+      owned) and reported "ROSTER DRIFT: <address>" in R2. Do not edit the roster file.
+      If the read fails, R2 FAILED and the guard runs on roster v-current only — say so.
+  0c. PROVISIONAL CARRY-FORWARD — read
+      C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\deal-sourcing-provisional-carryforward.json
+      (outside every git checkout on purpose — a state file in ~/.claude would show up as
+      unowned WIP in dirty-tree triage)
+      (absent on first run = empty list; that is not a failure). Each entry
+      {id, market, descriptor, source_url, first_seen, attempts, last_attempt, reason} is
+      queued for STEP 1B-B detail resolution this run.
+  0d. MONTGOMERY COUNTY MD — run it only when day-of-month <= 7 (the first Tuesday). Decide
+      here, record the decision in §7d; this is cadence by design, not a gap.
 
 STEP 1 — PULL NEW LISTINGS (preceding ~8 days; widen to ~30 if prior run missed)
 For each of the ten clusters, web-search for newly listed industrial/flex product:
@@ -238,7 +333,11 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   verified data). Sanity check: a per-market agent that returns in under ~5 tool
   calls almost certainly delegated rather than worked — re-dispatch with the
   guardrail before trusting a thin or empty result.
-- BROWSER-TOOL REQUIREMENT (added 2026-09-05): a per-market dispatch given ONLY
+- [v2.8: the Claude-in-Chrome references in the SOURCE STRATEGY ladder above and the
+  "grant the dispatch browser-pane access" option below are SUPERSEDED by the v2.8
+  RESOLUTION that follows and by STEP 1B — every browser read is done by the orchestrator
+  in the browser pane (mcp__Claude_Browser__*), never by a scout.]
+- BROWSER-TOOL REQUIREMENT (added 2026-09-05; remedy superseded by v2.8): a per-market dispatch given ONLY
   WebSearch/WebFetch cannot read JS-rendered broker-direct inventory pages — WebFetch
   returns an empty page or a nav shell for these, which reads as "no crawlable
   inventory" when the page may in fact carry live listings. Confirmed unreachable this
@@ -248,6 +347,37 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   the dispatch browser-pane / Claude-in-Chrome tool access and have it actually load the
   page, or say explicitly in the run notes that only a text-only pass was attempted —
   do not let a text-only null read as a confirmed empty inventory.
+  v2.8 RESOLUTION: scouts stay text-only (WebSearch/WebFetch) and run in parallel; every
+  browser-dependent source is read by the ORCHESTRATOR in STEP 1B, sequentially. Do NOT
+  give per-market subagents the browser pane — it is one shared pane, and parallel agents
+  driving it clobber each other's navigation. Each scout's final message MUST include a
+  SOURCE LEDGER: one line per source it tried → {loaded + N listings | loaded, 0 listings
+  | empty/JS shell | 403 | not tried}. Every "empty/JS shell" and "403" line becomes a
+  STEP 1B work item. A scout that returns no ledger is re-dispatched (like the <5-tool-call
+  delegation check above).
+
+- SOURCE COVERAGE CONTRACT (v2.8). A market is COVERED only when all three families
+  below have a receipt (loaded with listings, verified-loaded-empty, or a named block):
+    F1 Yardi network (commercialsearch / commercialcafe) — text scout.
+    F2 Crexi public marketplace + LoopNet public search — STEP 1B browser pass.
+    F3 Broker-direct: AT LEAST the REQUIRED brokerages below — text scout first, STEP 1B
+       browser if the text pass returned empty/JS shell.
+  REQUIRED broker-direct per market (the rest of the list above is best-effort):
+    Columbus — NAI Ohio Equities, Colliers Columbus · Cincinnati — Colliers (Kroger team),
+    Cushman Cincinnati · KANSAS CITY — BLOCK & CO AND NEWMARK ZIMMER, BOTH REQUIRED
+    (2026-09-23 run covered KC from CommercialSearch/CommercialCafe only) · Indianapolis —
+    Bradley Co, Colliers Indy · Madison — Oakbrook, Colliers WI · Maryland — MacKenzie,
+    NAI KLNB · Grand Rapids — NAI Wisinski, Colliers West MI · Richmond — Cushman
+    Thalhimer, Porter Realty · Des Moines — CBRE Hubbell, NAI Iowa · Louisville —
+    Commercial Kentucky, KCREA.
+  Record the per-market × per-family result in the digest's §7b SOURCE COVERAGE MATRIX.
+  A family with no receipt for a market is a TRUE GAP (§7c) naming the market and family.
+  CELL SEMANTICS (one rule, used by the contract AND §7c): `N listings` and `0 (verified
+  loaded)` are COVERED. `blocked` (403 / Access Denied / bot-check) is a GAP-EXTERNAL —
+  listed in §7c under its own sub-heading, because nothing the run can legitimately do
+  fixes it. `JS shell — not read`, `pane throttled` and `not tried` are GAP-RUN — the run
+  fell short, and they lead §7c. Note: the 2026-09-19 "Crexi 403s" finding was for PLAIN
+  FETCH; the logged-out browser pane loaded Crexi search on 2026-09-23 (STEP 1B-A).
 - SUBMARKET COVERAGE (do NOT skip): the KS side of Kansas City (Lenexa, Olathe, Shawnee, Overland
   Park) and Maryland's Howard County (Columbia, Jessup, Elkridge) + Anne Arundel/Hanover.
   Run these explicitly through the step-1 aggregators / Claude-in-Chrome, not just
@@ -289,7 +419,21 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   year built, occupancy/tenancy, clear height, parking, power (if stated),
   CONSTRUCTION TYPE (masonry / brick / block / tilt-up / precast / PEMB-metal /
   hybrid — see the Construction & envelope score in Step 3B), broker + firm,
-  listing URL, date first seen.
+  listing URL, date first seen, and LISTING-DATE BASIS (v2.8, below).
+
+  *** LISTING-DATE BASIS — MANDATORY (v2.8, 2026-09-23) ***
+  The 2026-09-23 run's dates were mostly platform "updated" stamps, so re-list vs refresh
+  could not be told apart. For every candidate record exactly one basis, strongest first:
+    LISTED <date>   — the page shows a listed / "on market since" / "date listed" date.
+    DOM <n>         — the page shows days-on-market (Crexi and LoopNet usually do; derive
+                      listed = run date − n and record both). This is why STEP 1B reads the
+                      Crexi/LoopNet copy of a listing even when the Yardi copy was found.
+    UPDATED-ONLY <date> — only a "last updated"/"refreshed" stamp (typical on
+                      CommercialSearch/CommercialCafe). NEVER treat this as a listing date.
+    NONE            — nothing shown. ORA's own `First Sighted` is then the only anchor.
+  Write it into Notes / Flags as `DATE-BASIS: <basis>` (no new Notion property — the scan
+  must not mutate the DB schema unattended). When two sources disagree, keep the EARLIEST
+  listed date and name both. The re-list decision rule that uses this is in STEP 4.
 
   *** LISTING-AGENT CAPTURE — MANDATORY (v2.7, 2026-09-19, Gabriel-directed) ***
   Capture the LISTING AGENT(S) for every candidate: full name, firm, and email/phone
@@ -349,6 +493,30 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   this step is a COVERAGE GAP to name explicitly in that run's digest, exactly like a
   submarket that returned nothing — never a silent scope trade-off a run makes on its
   own. Restore it every run. ***
+  *** v2.8 SPLIT (2026-09-23 — skipped again on the 2026-09-23 run, budget exhausted): ***
+  - IN-RUN (receipt R7): after STEP 3A/3B assigns tiers, run steps 1-2 below for EVERY
+    T1 PURSUE and T1-PENDING-PRICE row, in STEP 3C. These are the rows that trigger an
+    OM request or a broker call this week; they cannot wait. Skipping one = R7 FAILED and
+    a §7c gap naming the address. T1 rows are NEVER handed off.
+  - HANDOFF (receipt R8): every T2 WATCH row left UNKNOWN is written with
+    `Construction Type` = 'Unknown — CONFIRM' AND a populated `Listing URL` (except a
+    Crexi/LoopNet-only-URL row, which stays BLANK per STEP 5), which is
+    exactly the target set of `ora-sourcing-construction-verify` (runs after this scan's
+    done-marker, own budget, corrects the construction score only). Name the handoff count
+    in §7a. A handed-off row is NOT a coverage gap — EXCEPT a T2 whose only working URL is
+    crexi/loopnet: that task skips those domains, so name it in §7c as "construction
+    unverifiable — Crexi/LoopNet-only URL" rather than counting it as handed off.
+  - BACKFILL ON TOUCH: when STEP 4 updates an EXISTING active T1/T2 row whose
+    `Construction Type` is BLANK (116 such rows on 2026-09-23 — they predate the field),
+    set it to 'Unknown — CONFIRM' in the same update so the row enters the backstop queue —
+    EXCEPT rows carrying `PROVISIONAL-UNRESOLVED` or whose only URL is crexi/loopnet, which
+    stay blank (see STEP 5).
+    Do not mass-backfill untouched rows from this task.
+  - MARK WHAT YOU CHECKED: every row photo-checked in-run (resolved OR verified-attempt
+    UNKNOWN) gets the verify task's own token appended to Notes / Flags —
+    `CONSTRUCTION-CHECKED <run date>: <type or 'UNKNOWN — <reason>'>; findings: <...>` —
+    so the verify task does not redo it.
+  - Step 1 of the procedure (read the listing text) still runs for EVERY candidate.
   1. Read the listing text first. A minority state it outright ("masonry", "precast
      concrete", "pre-engineered steel", "block"). Cheapest win; take it and stop.
   2. Otherwise open the listing in the BROWSER PANE (preview_start / navigate), then:
@@ -408,6 +576,82 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   already settled from text — and note that the "non-diagnostic" aerials still produced
   three of those five findings.
 
+STEP 1B — BROWSER PASS (v2.8 — ORCHESTRATOR ONLY, sequential, browser pane)
+Why: the 2026-09-23 scouts were text-only, so Crexi/LoopNet were never fetched, JS-rendered
+broker inventory was never read, and two provisional finds were dropped for want of a
+detail page. The browser pane (mcp__Claude_Browser__*) reads all three. Run it yourself,
+after the text scouts return and before gating.
+SETUP: resize_window 1280x900 FIRST and confirm `window.innerWidth` > 0 (a fresh pane is
+0x0 and renders nothing). If the browser tools are absent or a permission prompt blocks
+them with nobody attending: R5/R6/R7 = FAILED ("no browser pane this session"), every
+affected market-family goes to §7c, and the run CONTINUES text-only — never substitute
+curl/WebFetch against a 403 and never look for another route around a block.
+HARD LIMITS (all sub-steps): public, logged-out pages ONLY. Never log in, never create an
+account, never solve or bypass a CAPTCHA / "Access Denied" / bot-check. On any block page:
+stop that SITE for the rest of the run (no retry, no alternate route), record `403/blocked`
+in the source ledger, move on. PACING: ≥20 s between page loads on the same domain (LoopNet
+tripped "Access Denied" at ~25 loads in a few minutes on 2026-09-18 — see
+ora-loopnet-listings-sync). A block on LoopNet here can also block Monday's
+ora-loopnet-listings-sync, so stay well inside the pace.
+  1B-A  DISCOVERY (receipt R5) — per market, in this order, within the HARD CAPS:
+        · Crexi public marketplace — MEASURED 2026-09-23 (logged-out, browser pane): the
+          public search DOES load and filters work. WORKING URL FORM:
+            https://www.crexi.com/properties?types%5B%5D=Industrial&placeIds%5B%5D=<Google place id>
+          (Columbus OH = ChIJcd6QucGJOIgRM7Wxz_hmMuQ, verified — the tab title resolved to
+          "Columbus, OH Industrial For Sale | Crexi"). For other metros get the place id by
+          typing the metro into Crexi's own location box once; record the id in run notes.
+          The city-path form (/properties/OH/Columbus?...) HUNG on a spinner — do not use it.
+          Results hydrate SLOWLY: wait ≥10 s and confirm the tab title names the metro
+          before reading — an early read returns a 51-character shell that looks like
+          "no listings". Extract cards with javascript_tool: unique hrefs matching
+          /properties/<id>/ plus the enclosing tile's innerText (walk up the parent chain
+          until the text is >60 chars; cap 300 chars per card). If the pane is HIDDEN and a
+          script times out, retry once with a shorter script, then record `pane throttled`.
+        · LoopNet public search — only where Crexi was blocked or returned 0 for the metro
+          (protects Monday's ora-loopnet-listings-sync from an Access-Denied block).
+        · Every REQUIRED broker-direct page from the SOURCE COVERAGE CONTRACT whose scout
+          ledger line says empty/JS shell (plus any other empty/JS-shell ledger line, budget
+          permitting). Record listings found; "loaded, 0 for-sale listings" is a legitimate
+          verified-empty result — "never loaded" is not.
+        New finds here join the candidate list exactly like scout finds (same Step 1 record,
+        same agent capture, same DATE-BASIS). For a candidate already found via Yardi, read
+        its Crexi/LoopNet card only to get DOM / listed date — do not duplicate it.
+  1B-B  PROVISIONAL RESOLUTION (receipt R6) — for every PROVISIONAL candidate (index-only,
+        snippet-only, or unaddressed) from this run's scouts AND every carry-forward entry
+        loaded in STEP 0c: try to load a DETAIL page (search the platform/broker site by
+        the descriptor — e.g. "50,000 SF industrial West Chester OH" — in the pane).
+          · Resolved (detail page loaded) → normal candidate; drop PROVISIONAL.
+          · ADDRESSED but unresolved → it IS LOGGED to Notion (STEP 5) flagged with the exact
+            token `PROVISIONAL-UNRESOLVED` in Notes / Flags (ora-sourcing-construction-verify
+            excludes rows on that exact token — keep the spelling),
+            Verdict capped at T2 WATCH (the standing "PROVISIONAL cannot be T1" rule), Next
+            Action "VERIFY LISTING — detail page not loadable <run date>". It is NEVER
+            silently left out (2026-09-23: 1211 Cox Ave, Erlanger KY was dropped this way).
+            It still runs STEP 2(e) own-portfolio guard first. TWO FIELDS STAY BLANK on a
+            PROVISIONAL row, deliberately:
+              - `Ask at First Sighting` — an index-page figure must never become the
+                write-once baseline (index rows understated one KC price by $125K in July;
+                baking that in fires a phantom CUT/RAISED later). Put the index ask in
+                `Asking Price` with "PROVISIONAL ASK" in Notes; write `Ask at First
+                Sighting` on the run that first VERIFIES the ask (this is not the
+                "overwrite" case — the field was empty).
+              - `Construction Type` — leave BLANK, not 'Unknown — CONFIRM'. The verify task
+                would otherwise load the index URL, find no gallery, stamp
+                CONSTRUCTION-CHECKED and drop the row from its queue for good. Set it to
+                'Unknown — CONFIRM' on the run that resolves the detail page.
+          · UNADDRESSED and unresolved → cannot become a Notion row (no dedupe key). Keep it
+            in the carry-forward file (STEP 0c path) with attempts+1; after 3 failed
+            attempts drop it and name it once in §7c as "abandoned after 3 runs".
+        Write the carry-forward file at the end of the run (receipt R13): the surviving
+        unaddressed entries only. This is a local JSON state file — no Notion write. On a
+        later run, a resolved PROVISIONAL row is updated in place (STEP 4 match): replace the
+        `PROVISIONAL-UNRESOLVED` token with `PROVISIONAL-RESOLVED <run date>` (the verify task
+        then picks the row up), write the verified ask to `Asking Price` AND the (still-empty)
+        `Ask at First Sighting`, set `Construction Type` = 'Unknown — CONFIRM' unless resolved
+        (or leave it BLANK if the only working URL is Crexi/LoopNet, per STEP 5).
+  (Construction photos for T1-bound rows are NOT part of this pass — they need tiers, so
+  they run later as STEP 3C, after TIER ASSIGNMENT. Do not attempt them here.)
+
 STEP 2 — ELIGIBILITY GATE
 Keep a candidate only if: (a) industrial/flex/office-warehouse product; (b) in a
 target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no instant
@@ -433,7 +677,8 @@ For EVERY candidate, before any scoring or Notion read/write:
   - exit 0 / CLEAR → continue to (a)-(d).
   The matcher is RANGE-AWARE (a "2000-2026" listing hits owned 2018) and normalizes
   suffixes/directionals. Roster: _shared\ora-own-portfolio-exclusions.json (v1.0).
-  ROSTER REFRESH each run: read the Notion Property Register
+  ROSTER REFRESH each run (v2.8: EXECUTED IN STEP 0b, before scouting — use its in-memory
+  supplement here; do not re-read): read the Notion Property Register
   (collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3) Address column and the Tenant DB
   'Property Address' options; any owned address missing from the roster → treat as owned
   for this run and report "ROSTER DRIFT: <address>" in the run notes (do not edit the
@@ -587,6 +832,23 @@ A score >=60 NEVER promotes a FAIL-BASIS deal into T1. If you find yourself writ
 "scores 78 but fails basis — worth a look," STOP: that is the exact failure this
 redesign exists to prevent. It is a T2.
 
+STEP 3C — CONSTRUCTION PHOTOS, T1-BOUND (v2.8, receipt R7 — runs NOW, after tiers exist)
+For every T1 PURSUE and T1-PENDING-PRICE row whose construction is still UNKNOWN after the
+listing-text read: run the STEP 1 construction procedure (browser pane, both traps), ≤ 4
+page loads per row. Order of URLs to try: the commercialsearch/commercialcafe detail page
+(the `.property-details-gallery` selector and the alt-text attribution check are VALIDATED
+only there) → broker-direct listing page → Crexi public detail page.
+NON-YARDI PAGES: there is no validated gallery selector. Take only images inside the
+listing's own media/gallery container (never a "similar"/"nearby"/"recommended" block),
+and only when the alt text or the adjacent caption names the SUBJECT address or title —
+the same attribution rule as the Yardi trap. If attribution cannot be established, the
+result is NOT a verified-attempt UNKNOWN: it is R7 FAILED for that row, named in §7c
+("T1 construction unverified — no attributable gallery on <platform>"), with Next Action
+"CONFIRM CONSTRUCTION" on the broker call. Never mark an unattributable page as checked.
+Write the result, the CONSTRUCTION-CHECKED token and any by-products into the row in
+STEP 5. If a confirmed construction type moves the score across the 60 line, re-apply
+TIER ASSIGNMENT (the gate is unchanged; only the 5-pt component moved).
+
 BENCHMARK HONESTY (mandatory in every digest): the denominator is RCT v03 — SOURCED
 from the C&W 2025 guide and ratified by Gabriel 2026-07-14. State in the digest which
 metro floor was applied, and state the discount as a share of TRUE replacement ("this
@@ -661,7 +923,8 @@ spot. All 144 priced rows were backfilled on 2026-07-14, so the baseline exists:
 On each run:
 - Existing + unchanged: skip silently.
 - Existing + PRICE CUT: update `Asking Price` and `Price / SF` ONLY. Leave
-  `Ask at First Sighting` untouched. The formula surfaces the delta. These LEAD the
+  `Ask at First Sighting` untouched (except a PROVISIONAL row being resolved, whose empty
+  `Ask at First Sighting` is filled once per STEP 1B-B). The formula surfaces the delta. These LEAD the
   digest — a cut is the strongest motivation signal in the whole scan.
 - Existing + RE-LIST (was Dead/Passed, now live again): flip Status, flag "RE-LIST".
 - ONE EXCEPTION to the never-overwrite rule: if the stored first ask was OUR OWN
@@ -670,7 +933,27 @@ On each run:
   formula fires a phantom "RAISED x%" signal on what was actually our data error —
   this happened on 3255 N 7th St Trafficway, corrected 2026-07-14.
 - New: create a record. Never create duplicates. Also check the Acquisition
-  Pipeline Tracker (bcfe4a03) so active deals are not re-surfaced as leads.
+  Pipeline Tracker (bcfe4a03) so active deals are not re-surfaced as leads — against the
+  STEP 0a fetch already in context (v2.8); do not re-pull it here.
+
+RE-LIST vs REFRESH — DECISION RULE (v2.8; uses the STEP 1 DATE-BASIS). Flag "RE-LIST" ONLY
+when one of these is true:
+  (a) the matching row is Dead/Passed and the listing is live again (the rule above); or
+  (b) the EARLIEST LISTED/DOM-derived date across ALL platforms carrying the listing is
+      LATER than the row's `First Sighted` (re-entered on market after ORA first saw it).
+      Use the earliest across sources — a Crexi copy posted after the Yardi copy ORA saw
+      first is syndication lag, not a re-list.
+  A changed platform ID / URL by itself (no dated evidence under (b)) is flagged
+  "POSSIBLE RE-LIST — URL changed" in Notes, never "RE-LIST", and is not a motivation
+  signal in the digest. (No field records every re-sighting — unchanged rows are skipped
+  silently — so an "absent N days" test is not executable; do not attempt one.)
+  An UPDATED-ONLY date newer than `First Sighted` is a REFRESH — never a re-list, never a
+  new listing, never a motivation signal. ONLY when a re-list question actually arises on
+  an existing row (price changed, URL/ID changed, or a newer UPDATED stamp) AND neither (a)
+  nor (b) can be tested (DATE-BASIS UPDATED-ONLY/NONE on every source), write "RE-LIST
+  UNDETERMINABLE" in Notes and count it in §7c — do not guess either way. Unchanged rows
+  stay silent; they never generate this flag. For a NEW row, `First Sighted` = run date regardless of
+  basis; the DATE-BASIS token records what the platform actually claimed.
 - EXISTING ROW THAT IS AN OWN ASSET (v2.6): if the full active-set fetch contains a row
   the own-portfolio guard flags (e.g. legacy LoopNet-inbound rows for 2800-2826 Banwick,
   384-398 Morrison, 1100 Rarig; the 2026-09-05 Zettler row), do NOT update it as a lead.
@@ -688,11 +971,20 @@ to fall back to document provenance. Write it on creation AND whenever a re-sigh
 different working URL; leave blank only when the ask came from an OM or a broker directly,
 i.e. when there genuinely is no listing page); Status = "New Lead" (or existing status on
 update); Asking Price;
-**Ask at First Sighting + First Sighted (on creation only)**; Total SF; Price / SF
+**Ask at First Sighting + First Sighted (on creation only — EXCEPT a PROVISIONAL row:
+`First Sighted` = creation date as usual, but `Ask at First Sighting` stays BLANK until the
+run that verifies the ask; see STEP 1B-B)**; Total SF; Price / SF
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
 T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
-FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type; Broker /
-Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
+FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type;
+**`Construction Type`** (v2.8 — select; EXACT options: 'Masonry / Brick' · 'Block / CMU' ·
+'Tilt-Up / Precast Concrete' · 'Hybrid (masonry + metal)' · 'Pre-Engineered Metal (PEMB)' ·
+'Unknown — CONFIRM'. Write it on EVERY create and whenever this run resolved it; an
+unresolved row MUST carry 'Unknown — CONFIRM' — that value plus `Listing URL` is the
+handoff key ora-sourcing-construction-verify selects on, so a blank here silently drops
+the row from the backstop. TWO EXCEPTIONS stay BLANK on purpose: a PROVISIONAL-UNRESOLVED
+row (STEP 1B-B), and a T2 whose only working URL is crexi/loopnet (the verify task cannot
+load those domains; name it in §7c instead)); Broker / Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
@@ -768,10 +1060,11 @@ the deal owner to ask the broker for a price on a call the next morning. Two ORA
 held contradictory states because this task had a read of the tracker but no write.)
 
 WHEN THIS RUNS: for every scanned candidate that matches an EXISTING row in the
-Acquisition Pipeline Tracker (bcfe4a03-7e61-4ac1-a0bb-c44174fa138b). STEP 4 already
-fetches that tracker to avoid re-surfacing active deals as leads — reuse that same fetch
-and the same normalized-address match key (street-number + street-name, SF within 2%).
-Do NOT issue a second pull.
+Acquisition Pipeline Tracker (bcfe4a03-7e61-4ac1-a0bb-c44174fa138b). STEP 0a already
+fetched that tracker (v2.8 — moved up front so 5B cannot be starved: on 2026-09-23 the
+fetch was never executed and 5B silently did not run) — reuse that same fetch and the same
+normalized-address match key (street-number + street-name, SF within 2%). Do NOT issue a
+second pull. If STEP 0a FAILED, write nothing here and say so (receipt R11 FAILED).
 
 *** "VERIFIED" IS A HARD PRECONDITION, NOT A LABEL. *** Write ONLY if this run actually
 loaded a listing DETAIL page and read the ask off it. If the candidate is PROVISIONAL
@@ -885,8 +1178,28 @@ Body order:
   (5) One-line count of PASS/DECLINE logged.
   (6) Benchmark honesty note: which replacement-cost figure was used, that it is
       [EST] and PROVISIONAL, and any deal within ~3 ppt of the floor line.
-  (7) Coverage gaps, named explicitly — a submarket that returned nothing gets said
-      out loud, never silently omitted.
+  (7) COVERAGE — four sub-sections (v2.8; replaces the single "coverage gaps" list, which
+      mixed real gaps with scope-by-design items):
+      7a RUN RECEIPTS — one line per mandatory step R1-R14 (roster under RUN ORDER; R14 is
+         written after the send, so the digest lists it as "pending — written last"):
+         DONE (with the key count/finding) · HANDED-OFF (to what, how many) · FAILED
+         (reason). R1 must state the capacity-gate finding and the rows it rests on. R8
+         must state the handoff count to ora-sourcing-construction-verify. A step with no
+         receipt line is a defect in the run, not a quiet week.
+      7b SOURCE COVERAGE MATRIX — ten markets × F1 Yardi / F2 Crexi+LoopNet / F3 required
+         broker-direct: each cell `N listings` · `0 (verified loaded)` · `blocked` ·
+         `JS shell — not read` · `not tried`. Compact table.
+      7c TRUE COVERAGE GAPS — anything that should have been read and was not: every
+         non-green matrix cell, any FAILED receipt, T1 rows without a photo check,
+         PROVISIONAL rows logged unresolved, carry-forward entries abandoned after 3 runs,
+         RE-LIST UNDETERMINABLE count, a submarket that returned nothing. Named, never
+         omitted.
+      7d FILTERED BY DESIGN — not gaps, listed so they are visibly deliberate: Madison nil
+         (normal — ~4 citywide — but ONLY when Madison's F1, F2 and F3 matrix cells are all
+         loaded; a Madison nil with any unread family is a §7c gap, not by-design), Montgomery County MD skipped (not first Tuesday — STEP 0d),
+         sub-scale exclusions (<10K SF or <$1M: address + SF + ask, one line each — the
+         buy-box floor is unchanged; this list lets Gabriel override by hand), and the
+         own-assets-seen-on-market list.
   (8) BROKER CAPTURE (added v2.7, 2026-09-19) — four counts, one short section:
         - listings scanned this run;
         - listings with a NAMED listing agent;
