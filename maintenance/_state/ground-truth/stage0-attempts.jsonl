@@ -1,0 +1,2 @@
+{"at": "2026-09-14T14:30:46.000Z", "exit": 0, "index_path": "C:/Users/Owner/.claude/maintenance/_state/ground-truth/run-index-2026-09-14.json", "window_reason": "prior auditor run was 25.5h ago (> 24h)"}
+{"at": "2026-09-22T13:34:33.000Z", "exit": 0, "index_path": "C:/Users/Owner/.claude/maintenance/_state/ground-truth/run-index-2026-09-22.json", "window_reason": "prior auditor run was 191.1h ago (> 24h); fleet-resume event 'ora-routine-pause-resume-09-21' fired in window; fleet-resume event 'ora-resume-0921-attend-reminder' fired in window"}

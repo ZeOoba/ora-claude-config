@@ -1,0 +1,88 @@
+<div style="font-family:Segoe UI,Arial,sans-serif;color:#1B2A4A;max-width:900px">
+<h2 style="border-bottom:2px solid #C9A96E">ORA Ground-Truth Audit &mdash; 2026-09-12</h2>
+<p style="font-size:13px">Window: <b>default 24h</b> (window_reason: "default 24h window (no widen condition met)"). Audit run started ~16:34 ET, directly after the post-pause catch-up burst. <b>15 CONTRADICTED claims survived the refuter pass, across 6 runs. Nothing was sent or applied.</b> Separately, one run turned up a money-moving risk on the tenant ledger (OI-278, see Open Items).</p>
+
+<h3>1. Runs audited</h3>
+<ul style="font-size:13px">
+<li><b>Total: 13 runs</b>. CC/MCP 12, LAMS/Cowork 1.</li>
+<li><b>side_effect_stats (verbatim):</b> <code>13 runs: 13 to verifier, 0 stamped clean</code>. 13 verifiers were dispatched: Fable x8, Opus x2, Sonnet x3. The Fable floor was applied to runs that touch financial, governor or confidential data.</li>
+<li><b>Join-rate floor: PASS on both fleets.</b> cc: "12/12 joined (100%) against a 90% floor for a 24.0h window (widen_kind=none)". lams: "1/1 joined (100%) against a 90% floor". Stage 0 exit 0.</li>
+<li><b>Unjoined runs:</b> none. <b>Runs skipped entirely:</b> none. Stage 0 duplicate_flags: none.</li>
+<li><b>Recorded skips (context only, all <code>global_limit</code>):</b> memory-commit-sweep 112 (09-05 to 09-07); eval-harness 72 (09-05 to 09-12); pm-daily-crons 64; am-brief 60; aaos-publish-contracts 59; aaos-expire-leases 56 (09-06 to 09-12); task-integrity-guard 18; health-guard 11; doctrine-integrity-guard 9; cowork-heartbeat 6. pm-ledger, open-sessions-board and checkout-merge-forward had none.</li>
+<li>Note: <code>cc:ora-am-brief</code> carried <code>last_scheduled_for: None</code> in the registry.</li>
+</ul>
+<table style="border-collapse:collapse;font-size:12px" border="1" cellpadding="4">
+<tr style="background:#1B2A4A;color:#fff"><th>run_id</th><th>Idempotency</th><th>Claims (post-refuter)</th><th>Notes</th></tr>
+<tr><td>cc:ora-health-guard:2026-09-12T09:15:00.000Z</td><td>PASS</td><td>28 SUPPORTED / 0 CONTRADICTED / 3 UNVERIFIABLE</td><td>All staleness alarms fired correctly. The C.0b pause-evidence source differs from the written procedure.</td></tr>
+<tr><td>cc:ora-task-integrity-guard:2026-09-12T11:05:00.000Z</td><td>PASS</td><td>1 CONTRADICTED; 1 downgraded to UNVERIFIABLE</td><td>The heartbeat push reported "inconclusive" has since resolved as FAILED (OI-279).</td></tr>
+<tr><td>cc:ora-pm-ledger:2026-09-12T19:00:00.000Z</td><td>PASS</td><td><b>5 CONTRADICTED</b></td><td>Lease-expiry alert under-reported (6 leases, about $210.8K/yr). Notion post failed on block quota.</td></tr>
+<tr><td>cc:ora-doctrine-integrity-guard:2026-09-12T16:55:00.000Z</td><td>PASS</td><td>1 CONTRADICTED (narrowed)</td><td>Governor constants DSCR 1.25 / LTV 40 / 65 confirmed consistent at source.</td></tr>
+<tr><td>cc:ora-open-sessions-board:2026-09-11T21:00:00.000Z</td><td>PASS</td><td>2 CONTRADICTED</td><td>2 of the 4 cards were already resolved before the board ran.</td></tr>
+<tr><td>cc:ora-aaos-expire-leases:2026-09-12T11:20:00.000Z</td><td>PASS</td><td>no published claims</td><td>No-op sweep; the lock queue was empty.</td></tr>
+<tr><td>cc:ora-aaos-publish-contracts:2026-09-12T13:15:00.000Z</td><td>PASS</td><td>all SUPPORTED</td><td>Mirror is byte-identical. Stamped <code>-dirty</code> only because of untracked <code>.claude/worktrees/*</code>.</td></tr>
+<tr><td>cc:ora-am-brief:None</td><td>PASS</td><td><b>5 CONTRADICTED</b>; 1 downgraded</td><td>Richmond and Brennan items mis-sourced. Rate Snapshot SOURCE_DEGRADED (09-03) was not surfaced.</td></tr>
+<tr><td>cc:ora-acquisition-underwriting-eval-harness:2026-09-12T16:14:00.000Z</td><td>PASS</td><td>1 CONTRADICTED</td><td>All six scored rows re-derived mechanically. A replay-level parse failure did not trigger the Notion post; the rule needs a decision.</td></tr>
+<tr><td>cc:ora-memory-commit-sweep:2026-09-11T23:00:00.000Z</td><td>PASS</td><td>all SUPPORTED</td><td>Committed a zero-byte <code>event_log.md.lock</code>, which <code>.gitignore</code> does not cover. Commit 9ce0923 is local only.</td></tr>
+<tr><td>cc:ora-pm-daily-crons:2026-09-12T13:40:00.000Z</td><td>PASS</td><td>SUPPORTED as a ledger computation</td><td><b>Freshness alarm owed but not fired:</b> the payments table has never held a row, so all 68 "delinquent" tenants are delinquent by construction (OI-278).</td></tr>
+<tr><td>cc:ora-checkout-merge-forward:2026-09-11T20:45:00.000Z</td><td>PASS</td><td>SUPPORTED</td><td>BLOCKED_DIRTY_OVERLAP is genuine (5 overlap paths). event_log names the wrong overlap path.</td></tr>
+<tr><td>lams:ora-cowork-heartbeat:2026-09-12T09:50:00.000Z</td><td>PASS</td><td>SUPPORTED</td><td>The run fired about 10.5h late. Watchdog raised 3 alarms (18.1h, 24.5h, 27.8h), all unread (OI-280).</td></tr>
+</table>
+<p style="font-size:12px">F-id discipline drops: 2 verdicts. (a) checkout-merge-forward: the "overlap path" claim came from the auditor's own locator text, not from anything the run published. (b) cowork-heartbeat: an "implicit" claim tied to page text this run did not write.<br>
+Refuter downgrades to UNVERIFIABLE: 2. (a) task-integrity-guard "07:05 ET run" is the task's established slot label. (b) am-brief "30-Day SOFR" used the skill's own series mapping, which is itself wrong; filed as OI-283.</p>
+
+<h3 style="color:#8B0000">2. CONTRADICTED claims (post-refuter: 15)</h3>
+<p style="font-size:12px">Correction drafts are under <code>C:\Users\Owner\.claude\maintenance\_state\ground-truth-pending-approval\2026-09-12\</code>. Colons in run_id are replaced by underscores in folder names. <b>None has been sent or applied.</b></p>
+<p><b>cc:ora-pm-ledger</b> &rarr; <code>cc_ora-pm-ledger_2026-09-12T19_00_00.000Z\correction-email.html</code></p>
+<ol style="font-size:13px">
+<li>Digest: "Lease expirations 0&ndash;90d: 0 active leases". <b>Wrong:</b> portfolio.json <code>leases[]</code> has 6 rows ending between 2026-10-31 and 11-30, all status "Expiring Soon", about $210,786/yr. The largest is 9050 Red Branch P at $106,923. The run filtered status==Active; neither SKILL.md &sect;A.4 nor conditions.ts contains that filter. [F-17]</li>
+<li>Ledger T3-1 lists 5 lapsed/cancelled policies but omits <b>9050 Red Branch Rd</b>: Package and BCL both EXPIRED 2026-08-31 ($23,739 premium). The Digest had reported them. [F-15/F-27]</li>
+<li>"Likely root cause" of the snapshot staleness given as the mirror-deploy git fetch failure. <b>Wrong:</b> the snapshot producers were paused 09-07 to 09-11, and the file was already 4.4 days stale before the first fetch failure. [F-30]</li>
+<li>"Got it, 19:05 ET". <b>Wrong:</b> it was sent 19:05<b>Z</b>, which is 15:05 ET. [F-31]</li>
+<li>"Only 2 emails sent" / "all 4 sent items today". <b>Wrong:</b> 4 automated sends plus Gabriel's 14:24 ET reply preceded the run. [F-23/F-33]</li>
+</ol>
+<p><b>cc:ora-am-brief:None</b> (original cc'd egoldberg) &rarr; <code>cc_ora-am-brief_None\correction-email.html</code></p>
+<ol style="font-size:13px">
+<li>&sect;1 Richmond: the Vital Records Control 230K+ SF Ruffin Mill lease is attributed to REBusinessOnline 2026-08-24. <b>Not in that article.</b> It is a 2024-09-03 Lingerfelt announcement. [F-25]</li>
+<li>&sect;8 Brennan: Dan Smith quoted as favouring "one-off in-fill &hellip; <i>rather than large portfolio bets</i>". <b>The contrast is not in the source</b>, which announces a 13-property portfolio buy and is dated 2026-01-20, undated in the brief. The ORA Takeaway built on it should be withdrawn. [F-25]</li>
+<li>&sect;4d 754 Old State Route 74: "blank Exhibit B not yet obtained &hellip; no update since 08-12". <b>Omits</b> the 09-05 drift-watch flag: a post-execution rent roll is now at PSA p.24, its authority is unresolved, and there is an SF conflict. [F-22]</li>
+<li>&sect;4a "All 37 CC/MCP tasks enabled &hellip; no disabled tasks". <b>Wrong:</b> 39 entries, 38 enabled, and the spent one-time trigger is disabled. [F-24]</li>
+<li>&sect;4a: ora-checkout-merge-forward "firing in the 20:21&ndash;20:50 UTC band today". <b>Wrong:</b> at send time its last run was 09-11, and it fires on-slot, not as part of the catch-up burst. [F-24]</li>
+</ol>
+<p><b>cc:ora-open-sessions-board:2026-09-11</b> &rarr; <code>cc_ora-open-sessions-board_2026-09-11T21_00_00.000Z\correction-email.html</code></p>
+<ol style="font-size:13px">
+<li>Insurance card: "background build was stopped mid-run with no completion record". <b>Wrong:</b> the build was committed (79aaa45, 17:38Z) and installed (19:04Z) before the board ran. The stopped item was a pre-design <code>find</code>. [F-10/F-11]</li>
+<li>"Your last instruction was 'Build it.'" <b>Wrong:</b> a later instruction at 17:40Z was answered. [F-10]</li>
+</ol>
+<p><b>cc:ora-doctrine-integrity-guard</b> &rarr; <code>cc_ora-doctrine-integrity-guard_2026-09-12T16_55_00.000Z\correction-note.md</code></p>
+<ol style="font-size:13px"><li>Suggested follow-up "create <code>retire-pending.json</code> at the intended location". <b>Unsafe:</b> the file already exists at <code>maintenance/_state/</code>, a directory the probe does not search. The factual sentence itself was correctly scoped; the refuter narrowed the finding to this follow-up option. [F-10]</li></ol>
+<p><b>cc:ora-task-integrity-guard</b> &rarr; <code>cc_ora-task-integrity-guard_2026-09-12T11_05_00.000Z\correction-note.md</code></p>
+<ol style="font-size:13px"><li>"The bytes &hellip; exist in no commit" for 8 SKILL.mds. <b>True for 7; false for ora-ground-truth-auditor</b>, whose blob c790c41 is on origin/main at 1059741. The checkout is 107 commits behind main, so the fix for that file is merge-forward, not commit/revert. [F-13]</li></ol>
+<p><b>cc:ora-acquisition-underwriting-eval-harness</b> &rarr; <code>cc_ora-acquisition-underwriting-eval-harness_2026-09-12T16_14_00.000Z\state-json-edit.md</code></p>
+<ol style="font-size:13px"><li>state.json Liberty note: "Third straight run below golden (25.83, 25.83, 27.00)". <b>Wrong:</b> the 08-25 snapshot recorded 26.33, and Liberty has been below golden for 7 consecutive runs. The error was carried forward from a bad mean field in the 08-25 state.json. [F-17]</li></ol>
+
+<h3>3. Duplicate side effects</h3>
+<ul style="font-size:13px">
+<li><b>Audited runs:</b> none. Stage 0 duplicate_flags was empty. All 13 verifiers found exactly one email, page and commit per cycle. Health-guard's exit-4 COM retry produced a single delivery.</li>
+<li><b>Pre-existing duplicates found in passing (not from these runs):</b>
+<ul>
+<li>Notion Ops Hub has 2 pages titled "Doctrine/Governor Integrity &mdash; 2026-09-02" (<code>3cf6ecd8-&hellip;-c1077014c220</code> and <code>3cf6ecd8-&hellip;-fa0d3367afb6</code>). Remediation: compare the two, move the redundant page to Archives with a [DUPLICATE] prefix, and keep the one the 09-02 sentinel references.</li>
+<li>Notion "Daily Brief &mdash; 2026-09-06" has a live page plus a "&#128465; &hellip; [D&hellip;" twin (<code>3d36ecd8-&hellip;-4162a250</code>). This was already dedup-marked; remediation is to move the twin to Archives.</li>
+<li>ora-health-guard block-completion state still has <code>2026-09-02.blockB = IN_PROGRESS</code>. Remediation: close the record manually; it is not a duplicate send.</li>
+</ul></li>
+</ul>
+
+<h3>4. Open items filed</h3>
+<ul style="font-size:13px">
+<li><b>OI-278 (HIGH, money-moving):</b> ora-pm delinquency-check posts $50 late fees against a ledger whose payments table is empty. 68 fees ($5,150) are posted so far. [FORECAST] On 2026-10-05, absent a fix, it posts 139 more and emails a 139-tenant digest.</li>
+<li><b>OI-279:</b> Fleet heartbeat push has been blocked by a failing hook test since about 09-09. The origin/main heartbeat is ~77h stale. The primary checkout is 107 commits behind main, and merge-forward is BLOCKED_DIRTY_OVERLAP daily.</li>
+<li><b>OI-280:</b> Cowork watchdog threshold (16h) is shorter than the heartbeat cadence (24h), so it false-alarms daily. Issue #11 has been open since 08-06, and a real ~28h outage went unnoticed.</li>
+<li><b>OI-281:</b> The Notion workspace block quota is exhausted, so every Notion-publishing task has degraded to email-only since 09-08.</li>
+<li><b>OI-282:</b> The auditor's Stage 1 side-effect extractor over-counts from prompt text, so 0 runs were stamped clean.</li>
+<li><b>OI-283:</b> daily-brief SKILL.md:131 maps "30-Day SOFR" to overnight SOFR instead of SOFR30DAYAVG.</li>
+<li><b>OI-284:</b> The ora-pm-ledger lease-expiry filter excludes "Expiring Soon" rows, and SKILL.md still says 18:00 ET although the cron has been 15:00 since 08-12.</li>
+<li><b>OI-285:</b> task-folder-registration-probe checks BEHIND against @{upstream} only, so it misreports main-merged SKILL.mds as UNCOMMITTED.</li>
+<li><b>OI-286:</b> open-sessions-board presents resolved sessions as awaiting, and the 754 &sect;30.9 consent session aged out with no recorded decision.</li>
+<li><b>OI-287:</b> session-context-xref-probe roots omit <code>maintenance/_state</code>, and the session-context.md line-20 pause bullet is itself stale.</li>
+</ul>
+<p style="font-size:11px;color:#666">Model floor: one pm-daily-crons verifier ran SELECT-only queries against the ora-pm Supabase DB, using a key loaded in-process from ora-pm/.env and written to no output. All verifiers and refuters were READ-ONLY. ora-ground-truth-auditor excluded itself from its own index.</p>
+</div>

@@ -1,0 +1,143 @@
+<html><body style="font-family:Calibri,Arial,sans-serif;font-size:14px;color:#1a1a1a;max-width:980px">
+<h2 style="margin-bottom:4px">[ORA] Ground-Truth Audit -- 2026-09-22</h2>
+<p style="margin-top:0;color:#555">Auditor run <code>ora-ground-truth-auditor-20260922T1334</code>. Read-only, re-derived from primary sources. No corrections were sent or applied; drafts are listed in section 2.</p>
+
+<p><b>Bottom line:</b> 31 runs were audited over a 191h window. 35 contradicted claims survived verification and the refuter pass, across 12 runs. There was 1 duplicate send. 9 systemic open items were filed. Two live problems need action now:
+(1) 12 LAMS tasks are still disabled after the 09-21 resume. They include the Cowork heartbeat, which has been dark for 162h+, and automation-health-monitor (OI-340).
+(2) The 09-21 Forward Calendar and the 09-22 Inbox Pre-Brief both reached your inbox with wrong facts or times.</p>
+
+<h3>1. Runs audited</h3>
+<ul>
+<li><b>Total:</b> 31 runs: CC/MCP 19, LAMS/Cowork 12.</li>
+<li><b>side_effect_stats (STEP 2, verbatim):</b> <code>31 runs: 31 to verifier, 0 stamped clean</code>. Verifiers found the Stage-1 classifier matches SKILL prose rather than tool calls, so this 0 is inflated (OI-339).</li>
+<li><b>Window:</b> 191.1h. <code>window_reason</code>: "prior auditor run was 191.1h ago (&gt; 24h); fleet-resume event 'ora-routine-pause-resume-09-21' fired in window; fleet-resume event 'ora-resume-0921-attend-reminder' fired in window". Widen kind: both.</li>
+<li><b>Join-rate floor:</b> PASS on both fleets. CC 19/19 joined (100%, floor 30%); LAMS 12/12 joined (100%, floor 30%). STEP 1 exit 0.</li>
+<li><b>Unjoined runs (UNVERIFIABLE):</b> none.</li>
+<li><b>Runs skipped:</b> none. Seven verifiers were delayed by the 20-concurrent-subagent cap and re-dispatched; all 31 completed.</li>
+<li><b>Refuter scope:</b> 43 claims refuted. Where one run had several contradictions, a single refuter agent returned a separate verdict for each claim. That is a deviation from one agent per claim, made for concurrency.</li>
+<li><b>Model floors:</b> every dispatch pinned a model. Runs touching financial or governor data were rounded up to Fable.</li>
+</ul>
+
+<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;font-size:12px">
+<tr style="background:#eee"><th>Run (task @ scheduled-for)</th><th>Fleet</th><th>Idem.</th><th>Claims S / C / U (post-refuter C)</th><th>Staleness</th><th>Freshness</th><th>Note</th></tr>
+<tr><td>ora-financial-code-integrity-sweep @ 09-21 17:30Z</td><td>CC</td><td>PASS</td><td>33 / 0 / 14</td><td>FLAG</td><td>FLAG</td><td>A READ-ONLY task session continued after the send: 24 commits, PRs #347-349 merged with 0 reviews, migration 032 applied live (OI-345). LTV quoted from an 8-day-old snapshot with no note.</td></tr>
+<tr><td>ora-doctrine-integrity-guard @ 09-14 16:55Z</td><td>CC</td><td>PASS</td><td>17 / 2 / 3 (1)</td><td>partial</td><td>stale input</td><td>No guard-run evidence since 09-14. The governor probe now shows DRIFT (3) on the OI-338 row (false-positive pattern), unreported (OI-347).</td></tr>
+<tr><td>ora-command-center-mirror-drift-check @ 09-14 14:40Z</td><td>CC</td><td>PASS</td><td>14 / 3 / 11 (3)</td><td>no-op alarm</td><td>ok</td><td>No Notion row ever written (OI-288 quota), never backfilled.</td></tr>
+<tr><td>ora-aaos-publish-contracts @ 09-22 13:15Z</td><td>CC</td><td>PASS</td><td>4 / 0 / 0</td><td>ok</td><td>n/a</td><td>AAOS checkout 1 commit behind origin/main (not affecting published files); pre-flight doesn't check this.</td></tr>
+<tr><td>ora-model-release-watch @ 09-21 15:20Z</td><td>CC</td><td>PASS</td><td>0 / 0 / 0</td><td>no-op</td><td>ok</td><td>Correct silent no-op.</td></tr>
+<tr><td>ora-cc-schematic-refresh @ 09-14 18:15Z</td><td>CC</td><td>PASS</td><td>10 / 0 / 6</td><td>STALE</td><td>degraded</td><td>Artifact still REV 2026-09-14a. No run since (pause), and no stale-artifact alarm.</td></tr>
+<tr><td>ora-am-brief @ 09-22 10:00Z</td><td>CC</td><td>PASS</td><td>63 / 6 / 16 (6)</td><td>ok</td><td>ok</td><td>Block C window applied in UTC and times printed as UTC labelled ET (OI-341). HubSpot third-leg check skipped (self-disclosed).</td></tr>
+<tr><td>ora-acquisition-underwriting-eval-harness @ 09-14 16:14Z</td><td>CC</td><td>PASS</td><td>12 / 0 / 0</td><td>ok</td><td>ok</td><td>Correct no-op. SKILL tags [MODEL: fable]; the wrapper ran Opus.</td></tr>
+<tr><td>ora-checkout-merge-forward @ 09-21 20:45Z</td><td>CC</td><td>PASS</td><td>3 / 1 / 1 (1)</td><td>mixed</td><td>ok</td><td>The refused merge rewrote 49 dirty files (mtime, LF to CRLF). The PR #250 fix is not committed on HEAD.</td></tr>
+<tr><td>ora-routine-pause-resume-09-21 @ 09-21 14:00Z</td><td>CC</td><td>PASS</td><td>21 / 1 / 4 (1)</td><td>ok</td><td>stale input</td><td>Catch-up 0/9. Master Workbook Notion mirror 15 days stale (OI-346/347).</td></tr>
+<tr><td>ora-resume-0921-attend-reminder @ 09-21 13:30Z</td><td>CC</td><td><b>DUPLICATE</b></td><td>4 / 2 / 1 (1)</td><td>unresolved</td><td>stale figure</td><td>Two byte-identical emails 1s apart (see section 3).</td></tr>
+<tr><td>ora-excess-usage-sweep @ 09-18 19:00Z</td><td>CC</td><td>PASS</td><td>21 / 4 / 6 (4 narrowed)</td><td>stale input</td><td>alarm missed</td><td>Recommended work already done on 09-16. PR #44's merge broke main's deploy for 14 minutes.</td></tr>
+<tr><td>ora-renewal-hubspot-reconcile @ 09-21 14:20Z</td><td>CC</td><td>PASS</td><td>14 / 0 / 3</td><td>ok (2 flags)</td><td>ok</td><td>Interactive workbook write: AutoSave persisted Q51 after the script aborted (OI-344). PR #243 had no GitHub review.</td></tr>
+<tr><td>ora-forward-calendar-digest @ 09-21 16:10Z</td><td>CC</td><td>PASS</td><td>20 / 9 / 4 (9)</td><td>stale content</td><td>FAIL</td><td>Store verified 09-18 and never re-checked against sources (OI-346). The Sent-Items probe stem can never match.</td></tr>
+<tr><td>ora-vacancy-aging-report @ (none) 09-18</td><td>CC</td><td>PASS</td><td>23 / 0* / 3</td><td>remit exceeded</td><td>mapping stale</td><td>*2 conflicts are outside the email (see section 2 note). Run edited its own SKILL.md; people.md rows uncommitted.</td></tr>
+<tr><td>ora-arch-review-followup-check @ 09-19 03:17Z</td><td>CC</td><td>PASS</td><td>28 / 4 / 3 (1)</td><td>REVERTED</td><td>ok</td><td>Bridge self-retired on one "fixed" sample; Mirror Deploy kill recurring. Completion email never sent.</td></tr>
+<tr><td>ora-audit-log-sweep @ (none) 09-18</td><td>CC</td><td>PASS</td><td>8 / 0 / 1</td><td>ok</td><td>ok</td><td>Archive loses the original mtime (gzip header).</td></tr>
+<tr><td>ora-loopnet-listings-sync @ 09-21 14:40Z</td><td>CC</td><td>PASS</td><td>4 / 2 / 0 (1)</td><td>no-op + drift</td><td>ok</td><td>Autonomy gate blocked cleanup, stranding a worktree and branch (OI-343). LoopNet now shows Banwick "208" (likely mis-keyed 2808).</td></tr>
+<tr><td>ora-hubspot-renewal-closeout-tasks @ 09-21 14:50Z</td><td>CC</td><td>PASS</td><td>11 / 0 / 0</td><td>ok</td><td>ok</td><td>Log schema deviates from spec (VERIFICATION status, name_prefix_skips).</td></tr>
+<tr><td>ora-skill-store-drift-check @ 09-14 16:10Z</td><td>LAMS</td><td>PASS</td><td>2 / 1 / 0 (1)</td><td>no-op</td><td>n/a</td><td>Zero tool calls: refused its own trigger and asked a question, so the weekly check was skipped (OI-343).</td></tr>
+<tr><td>ora-skill-text-audit @ 09-15 13:45Z</td><td>LAMS</td><td>PASS</td><td>9 / 2 / 1 (0)</td><td>latent risk</td><td>ok</td><td>Cited a stale sandbox copy of the Cowork prompt (v2.1) as global doctrine (OI-342). WP4 plan would edit the correct CLAUDE.md.</td></tr>
+<tr><td>ora-owner-outreach-queue-refresh @ 09-14 14:55Z</td><td>LAMS</td><td>PASS</td><td>8 / 0 / 3</td><td>no-op (reported)</td><td>alarms fired</td><td>Master vintage 07-27; the one-time ratification silently re-clears every week.</td></tr>
+<tr><td>ora-lease-expiration-brief @ 09-14 14:45Z</td><td>LAMS</td><td>PASS</td><td>1 / 1 / 0 (1)</td><td>label stale</td><td>alarm missed</td><td>Nothing published. An unauthorized create-view hung 23 minutes on a prompt (OI-343). Tenant DB mirror 9+ days stale.</td></tr>
+<tr><td>ora-monday-sync @ 09-14 14:35Z</td><td>LAMS</td><td>PASS</td><td>5 / 0 / 3</td><td>carried stale</td><td>artifact missing</td><td>No Notion page ever (quota), not backfilled; 180h alarm boundary reached today.</td></tr>
+<tr><td>automation-health-monitor @ 09-15 15:05Z</td><td>LAMS</td><td>PASS</td><td>12 / 1 / 6 (0)</td><td>ok</td><td>alarm fired</td><td>ora-friday-closeout MISS on 09-11 is still true. The task is now disabled (OI-340).</td></tr>
+<tr><td>ora-ar-export-freshness-nudge @ 09-15 15:30Z</td><td>LAMS</td><td>PASS</td><td>19 / 2 / 2 (2)</td><td>stale input</td><td>partial</td><td>Missed ora-ar-feed-sweep (CC). The task is now disabled.</td></tr>
+<tr><td>ora-ic-memo-pipeline-reconciliation @ 09-15 14:30Z</td><td>LAMS</td><td>PASS</td><td>17 / 3 / 3 (3)</td><td>ok</td><td>ok</td><td>sharepoint_search cannot see Eric's drive.</td></tr>
+<tr><td>ora-cowork-heartbeat @ 09-15 09:50Z</td><td>LAMS</td><td>PASS</td><td>3 / 0 / 0</td><td>STALE</td><td>producer outage</td><td>Last heartbeat write; watchdog issue #14 open at 162.1h (OI-340).</td></tr>
+<tr><td>ora-tenant-contact-gap-sweep @ 09-14 14:50Z</td><td>LAMS</td><td>PASS</td><td>10 / 0 / 1</td><td>no-op</td><td>ok</td><td>Never posted (quota), not backfilled. Gap rows now 6 (was 2).</td></tr>
+<tr><td>ora-health-guard-fail-aging-nudge @ 09-15 13:00Z</td><td>LAMS</td><td>PASS</td><td>10 / 0 / 2</td><td>frozen</td><td>alarm missed</td><td>Health Guard probe suite silent since 09-13 (216.8h), caught only by GitHub watchdog issue #12.</td></tr>
+<tr><td>ora-insurance-renewal-monitor @ 09-14 15:40Z</td><td>LAMS</td><td>PASS</td><td>16 / 1 / 1 (0)</td><td>ok</td><td>unverifiable</td><td>Workbook row 25 (3034 Westerville) not rolled to the bound 26-27 term, so it will falsely escalate EXPIRED. Now disabled.</td></tr>
+</table>
+
+<p><b>Recorded skips (STEP 5, context only):</b>
+<ul>
+<li>ora-arch-review-followup-check: 112 per_task_limit skips, 09-18 23:17Z to 09-19 16:59Z. The prior fire hung on a permission prompt.</li>
+<li>ora-hubspot-renewal-closeout-tasks (15), ora-loopnet-listings-sync (7), ora-renewal-hubspot-reconcile (4) and ora-vacancy-aging-report (1): global_limit, all during the 09-21 ~15:14Z catch-up burst (vacancy 09-22).</li>
+<li>ora-cowork-heartbeat (6) and ora-health-guard-fail-aging-nudge (2): global_limit, 09-15 14:37-14:49Z.</li>
+</ul></p>
+
+<h3>2. CONTRADICTED claims (post-refuter)</h3>
+<p><b>Counts:</b> 51 before the refuter pass. After F-id discipline and refuters, 35 survive: 33 survived a refuter and 2 were confirmed by the auditor against primary state. The other 16:
+<ul>
+<li>10 downgraded to UNVERIFIABLE, because the refuter showed the original claim held.</li>
+<li>2 dropped for F-id discipline: monday-sync cited EOD ledger pages, which are prior summaries.</li>
+<li>4 reclassified as not published claims.</li>
+</ul>
+All draft corrections are under <code>C:\Users\Owner\.claude\maintenance\_state\ground-truth-pending-approval\2026-09-22\&lt;run_id&gt;\</code>. <b>None has been sent or applied.</b></p>
+<ol>
+<li><b>ora-forward-calendar-digest (09-21 email): 9 claims.</b> Evidence: F-5/6/9/11/14/16/17. Draft: <code>cc_ora-forward-calendar-digest_2026-09-21T16_10_00.000Z\retraction-email-and-store-edits.txt</code>.
+ <ul>
+ <li>d01 "fleet disabled": wrong. CC was 53/56 enabled after the 15:21Z resume.</li>
+ <li>d02 "email-fallback running": wrong. The flag was cleared 09-18.</li>
+ <li>d06 "budget review 10-07": wrong. It was replaced by the 9th-of-quarter cycle.</li>
+ <li>d09 "DELVAL/Soldier renewal deals open": wrong. They are closedwon and closedlost since 09-18.</li>
+ <li>d10 "Zettler": wrong tenant. It is Bakers Specialty, 1100 Rarig K.</li>
+ <li>d10 "escalation one year early": withdrawn by OI-232 on 09-05.</li>
+ <li>d10 "deal 58521966440 lacks the renewal": wrong. It is closedwon, 2029-10-31.</li>
+ <li>Footer "no lease/loan/insurance dates inside 12 months": wrong. The .ics carries 5 of them.</li>
+ <li>d26 "Medspeed at appointmentscheduled": wrong. It is closedwon, 2029-08-31.</li>
+ </ul></li>
+<li><b>ora-am-brief Inbox Pre-Brief (09-22 email + Notion 3e36ecd8…efb185ef9b36): 6 claims.</b>
+ <ul>
+ <li>"Total messages swept: 122": true for the window actually queried (16:30Z to 13:50Z), but that is not the stated "16:30 ET to 09:50 ET" window, which holds 53. The window line is false.</li>
+ <li>Five item times are UTC printed as ET. Actual ET: wpalmer 16:29/17:15; Neyer 15:44 to 16:08; ADDENDUM 18:42; EXHIBIT D 14:01; metaug02 05:25.</li>
+ </ul>
+ Evidence F-29, F-30. Draft: <code>cc_ora-am-brief_2026-09-22T10_00_00.000Z\retraction-email-and-notion-edit.txt</code> (includes the page edit).</li>
+<li><b>ora-excess-usage-sweep (09-18 email): 4 claims, narrowed by the refuter.</b> "Pushing the RLS migration remains" is wrong: 0013 was applied 2026-09-16T19:17:47Z. "Blocked four-plus weeks" is out of date. "OI-223/233/255 all real" and the top-of-backlog list are wrong: only OI-311 and OI-223's residuals are real. Evidence F-10/11/13. Draft: <code>cc_ora-excess-usage-sweep_2026-09-18T19_00_00.000Z\retraction-email.txt</code>.</li>
+<li><b>ora-command-center-mirror-drift-check (09-14 alarm): 3 claims.</b>
+ <ul>
+ <li>"Can't be reviewed on GitHub": wrong.</li>
+ <li>"Risk is lost work": wrong. The content was already on origin/main via squash 5040518 (PR #329), and the commit was on a remote branch and a local branch.</li>
+ <li>"4 kills in about 20h": 3 by the classifier's doctrine.</li>
+ </ul>
+ Evidence F-13/17/19/20. Draft: <code>cc_ora-command-center-mirror-drift-check_2026-09-14T14_40_00.000Z\retraction-email.txt</code>.</li>
+<li><b>ora-ic-memo-pipeline-reconciliation (09-15 email): 3 claims.</b> "2146 Enterprise: no memo file" is wrong: <code>2146 Enterprise Investment Memo.docx</code> (2026-03-03) exists. "2 STALE POINTERS" should be 1. The Old Alexandria Ferry memo is dated 2026-08-26, not 08-28. Evidence F-15. Draft: <code>lams_ora-ic-memo-pipeline-reconciliation_2026-09-15T14_30_00.000Z\retraction-email.txt</code>.</li>
+<li><b>ora-ar-export-freshness-nudge (09-15 email): 2 claims.</b> "No automatic trigger exists" is wrong: ora-ar-feed-sweep posted 37 records on 09-14. "Still manual / NOT retirable" is wrong: the SKILL required a "may be retirable" flag. Evidence F-15/16/17. Draft: <code>lams_ora-ar-export-freshness-nudge_2026-09-15T15_30_00.000Z\retraction-email.txt</code>.</li>
+<li><b>ora-resume-0921-attend-reminder (09-21 email): 1 claim.</b> "Cannot finish unattended… approve each call" is wrong: all 37 re-enables completed unattended in 6m13s. Evidence F-4/F-9/F-10. Draft: <code>cc_ora-resume-0921-attend-reminder_2026-09-21T13_30_00.000Z\retraction-email.txt</code>.</li>
+<li><b>ora-routine-pause-resume-09-21 (09-21 email): 1 claim.</b> "lease-snapshot-refresh and pm-daily-crons fire again tomorrow" is wrong: both are Monday-only, and neither fired 09-22. Evidence F-20/F-21. Draft: <code>cc_ora-routine-pause-resume-09-21_2026-09-21T14_00_00.000Z\retraction-email.txt</code>.</li>
+<li><b>ora-doctrine-integrity-guard (09-14 email and backfilled Notion page): 1 claim.</b> "66 checked skills IN-SYNC" should be 62, as printed by the script. Evidence F-23 plus the refuter's transcript read. Draft: <code>cc_ora-doctrine-integrity-guard_2026-09-14T16_55_00.000Z\retraction-email-and-notion-edit.txt</code>.</li>
+<li><b>ora-arch-review-followup-check (state file): 1 claim.</b> <code>errors: []</code>, yet the mandated completion email was never sent: the run hung and exited 1. Evidence F-15/F-16. Draft (state fix plus the owed email): <code>cc_ora-arch-review-followup-check_2026-09-19T03_17_00.000Z\state-correction-and-owed-email.txt</code>.</li>
+<li><b>ora-checkout-merge-forward (SKILL.md doctrine): 1 claim.</b> "BLOCKED_DIRTY_OVERLAP = git refused before writing anything" is contradicted by the 16:47 run, which rewrote 49 files. PR #250 names this incident. Draft: <code>cc_ora-checkout-merge-forward_2026-09-21T20_45_00.000Z\skill-doctrine-edit.txt</code>.</li>
+<li><b>ora-skill-store-drift-check (final run text only, not published): 1 claim.</b> "Source path is wrong / illegitimate fire" is wrong: the trigger was byte-identical to prior genuine runs. No retraction needed. Note: <code>lams_ora-skill-store-drift-check_2026-09-14T16_10_00.000Z\note.txt</code>.</li>
+<li><b>Auditor-verified against primary state (no refuter needed):</b>
+ <ul>
+ <li>Lease-expiration view 3a56 is labelled "(as of 2026-09-07)" over a 09-14 filter. Draft view rename: <code>lams_ora-lease-expiration-brief_2026-09-14T14_45_00.000Z\notion-view-edit.txt</code>.</li>
+ <li>The loopnet SKILL's "exit 0 ⇒ remove worktree, delete branch" contract failed. <code>git worktree list</code> confirms the stranded worktree and <code>sync/loopnet-2026-09-21</code>. Removing them needs your OK (site repo).</li>
+ </ul></li>
+</ol>
+<p style="font-size:12px;color:#555"><b>Downgraded after refuter (the original claim held):</b> resume-reminder "1-2h / up to 5h" (a forecast of the designed workload); doctrine "3 gitignored" (the verifier replayed the 09-22 worktree); skill-text-audit F1/F3 (the text is real in the stale LAMS sandbox prompt; reported as OI-342); monday-sync meeting time (organizer rescheduled to 2:30 PM after the send); automation-health "3 throttled ids" (the 24h window covers the 09-14 insurance throttle; recordedSkips was pruned later); insurance "15:11 local" (value correct as UTC, label wrong; OI-341); arch-review "result 0", "retired_at" and "67 touches" (true sample, placeholder time, legitimate metric).
+<b>Not published, so no retraction:</b> vacancy SKILL/people.md say "1900 N Broadway: only contact George Renehan" while property_master lists Steve Se[h] (a registry conflict to reconcile), plus a closing chat SF figure.</p>
+
+<h3>3. Duplicate side effects</h3>
+<ul>
+<li><b>STEP 1 duplicate_flags:</b> none.</li>
+<li><b>Found at the target (IDEMPOTENCY axis):</b> <code>ora-resume-0921-attend-reminder</code> sent "[ACTION] 10:00 today: CC fleet resume needs you at the machine" <b>twice</b>, at 2026-09-21T15:18:41Z and 15:18:42Z. The two bodies are byte-identical, with different conversationIds, from a single registry run. Cause: after a send timeout, the SKILL's retry-once path re-sent without re-running the Sent-Items probe. The send log shows 11:17:44 [ERROR] TIMEOUT, then [OK]. <b>Remediation:</b> none needed for the mailbox; it was a one-time task and is now disabled. Doctrine fix: any SKILL with a retry path must re-probe Sent Items before an exit-4 retry, as the auditor's own STEP 8 does. Check other one-time task templates for the same gap.</li>
+<li><b>Other targets:</b> no duplicate emails, Notion pages, HubSpot tasks, OI ids or commits in any other run. Several runs produced zero Notion pages because of the OI-288 quota. That is a missing artifact, not a duplicate.</li>
+</ul>
+
+<h3>4. Open items filed</h3>
+<ul>
+<li><b>OI-339</b>: The auditor's Stage-1 side-effect classifier counts SKILL prose rather than tool calls (0/31 stamped clean). The run-index join also pulls interactive follow-on work into the scheduled run.</li>
+<li><b>OI-340</b> (HIGH): The LAMS resume is incomplete. 12 LAMS tasks are still disabled, including cowork-heartbeat (dark 162h+) and automation-health-monitor. The guard is not alarming. Needs an on-device Cowork session.</li>
+<li><b>OI-341</b>: UTC timestamps are rendered as ET or "local" across tasks: am-brief Block C window and times, insurance-monitor, and the arch-review threshold.</li>
+<li><b>OI-342</b>: LAMS session sandboxes carry a stale Cowork operating prompt (v2.1, superseded 07-16).</li>
+<li><b>OI-343</b>: Unattended runs stall or quit on permission prompts, questions and gate blocks (lease-expiration, skill-store, loopnet cleanup).</li>
+<li><b>OI-344</b>: The Master Workbook COM safeguard is inert: OneDrive AutoSave persisted Q51 after the script aborted.</li>
+<li><b>OI-345</b> (HIGH): Scheduled read-only sessions continue into interactive blast-radius merges with no real review (PRs #347-349, #243, ora-pm #43/44/46).</li>
+<li><b>OI-346</b>: Digests publish stale facts from stores nobody re-checks: the forward-calendar store, OI tracker rows, and a Master Workbook Notion mirror 15 days stale with a 0-second "successful" ingest.</li>
+<li><b>OI-347</b>: A resume cannot run its catch-up unattended, so Monday-only tasks skip a full cycle to 09-28 (health-guard, workbook-ingest, lease-snapshot, pm-daily-crons).</li>
+</ul>
+<p style="font-size:12px">Existing items referenced rather than duplicated: OI-258 and OI-183 (Mirror Deploy kills: 0xC000013A recurred 5 times from 09-19 to 09-22), OI-323 (fleet dead-man red since 09-04), OI-324 ("Daily"/"Weekday" descriptions on Monday-only crons, the root cause of the pause-resume misstatement), OI-288 (Notion block quota).</p>
+
+<h3 style="font-size:14px">Also surfaced (report-only)</h3>
+<ul style="font-size:12px">
+<li>Master Workbook "Insurance Renewals" row 25 (3034 Westerville) still holds the 2025-26 term. The bound 26-27 renewal ($7,522, deductible $25K) is on file. The next monitor run will falsely escalate EXPIRED.</li>
+<li>LoopNet Banwick now lists suite "208", likely a mis-keyed 2808 (the tenant vacates 1/31). Next Monday's loopnet PR would carry that label.</li>
+<li>Uncommitted state that should land: <code>notion-publish-degraded.json</code> clearing (git still says active:true); the people.md PM rows (09-18); the PR #250 merge-forward fix on the shared <code>~/.claude</code> HEAD.</li>
+<li>A verifier left a stray <code>fomc.htm</code> in <code>_state/ground-truth/</code>. It was moved to <code>_state/ground-truth/archive/</code>, not deleted.</li>
+</ul>
+</body></html>

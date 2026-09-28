@@ -1,0 +1,134 @@
+<div style="font-family:Calibri,Arial,sans-serif;color:#1B2A4A;max-width:900px">
+<h2 style="border-bottom:2px solid #1B2A4A">ORA Ground-Truth Audit — 2026-09-13</h2>
+<p>This audit started at 08:58 ET, right after the Sunday catch-up burst. The machine had woken 211 minutes late.</p>
+<p><b>13 CONTRADICTED claims survived the refuter pass, across 7 runs.</b> 9 are new; 4 were already reported in yesterday's digest. Nothing was sent or applied.</p>
+<p>Top items:</p>
+<ul>
+<li>The Daily Brief went to Eric with two wrong portfolio figures.</li>
+<li>The eval-harness scheduler is running a SKILL.md whose companion branch was never pushed.</li>
+<li>The ora-pm late-fee decision (OI-278) is still open.</li>
+</ul>
+
+<h3>1. Runs audited</h3>
+<p><b>Total: 12 runs</b>: 11 CC/MCP, 1 LAMS/Cowork.</p>
+<p><b>Window:</b> default 24h (window_reason: "default 24h window (no widen condition met)").</p>
+<p><b>side_effect_stats (verbatim):</b> <code>12 runs: 12 to verifier, 0 stamped clean</code>. That is 12 verifiers: Fable ×6, Opus ×2, Sonnet ×4. The Fable floor was applied to health-guard, pm-ledger, doctrine-integrity-guard, am-brief, eval-harness and pm-daily-crons, because they touch financial, governor or portfolio data. After that came 9 refuters, plus 1 re-dispatch after an agent-type error.</p>
+<p><b>Join-rate floor: PASS on both fleets.</b></p>
+<ul>
+<li>cc: "11/11 joined (100%) against a 90% floor for a 24.0h window (widen_kind=none)"</li>
+<li>lams: "1/1 joined (100%) against a 90% floor for a 24.0h window (widen_kind=none)"</li>
+</ul>
+<p>Stage 0 exited 0. There were no unjoined runs, and no run was skipped entirely.</p>
+<p><b>Already audited yesterday.</b> 5 of these 12 runs were also in yesterday's index: pm-ledger, doctrine-integrity-guard, eval-harness, pm-daily-crons (all 09-12), and aaos-publish-contracts. Their repeat findings are marked "previously reported" below (OI-296).</p>
+<p><b>In progress when the audit began:</b> health-guard, task-integrity-guard and am-brief. All three were re-read after they completed.</p>
+<p><b>Recorded skips</b> (context only; every one is <code>global_limit</code>, and almost all fall inside the 09-06 to 09-13 pause and catch-up period):</p>
+<ul>
+<li>memory-commit-sweep 93 (09-06 to 09-07)</li>
+<li>am-brief 66</li>
+<li>pm-daily-crons 64</li>
+<li>aaos-expire-leases 60</li>
+<li>eval-harness 60</li>
+<li>aaos-publish-contracts 59</li>
+<li>task-integrity-guard 19</li>
+<li>health-guard 12</li>
+<li>doctrine-integrity-guard 9</li>
+<li>cowork-heartbeat 6 (09-07)</li>
+<li>pm-ledger and checkout-merge-forward: none</li>
+</ul>
+
+<table style="border-collapse:collapse;font-size:12px" border="1" cellpadding="4">
+<tr style="background:#1B2A4A;color:#fff"><th>run_id</th><th>Idempotency</th><th>Claims (post-refuter)</th><th>Notes</th></tr>
+<tr><td>cc:ora-health-guard:2026-09-13T09:15:00.000Z</td><td>PASS</td><td>2 CONTRADICTED; 2 UNVERIFIABLE</td><td>One email per subject and one beacon block. LIDACTION=1 FAIL remains open; the host is on battery.</td></tr>
+<tr><td>cc:ora-task-integrity-guard:2026-09-13T11:05:00.000Z</td><td>PASS</td><td>0 CONTRADICTED (1 dropped for F-id, 1 downgraded)</td><td>Counts all tie to engine logs. The "9th uncommitted file" is a disabled one-time task, excluded by the engine's design.</td></tr>
+<tr><td>cc:ora-pm-ledger:2026-09-12T19:00:00.000Z</td><td>PASS</td><td>4 CONTRADICTED (3 previously reported); 2 downgraded</td><td>SKILL.md was modified, uncommitted, at 16:50 ET inside the run window, with no provenance record.</td></tr>
+<tr><td>cc:ora-doctrine-integrity-guard:2026-09-12T16:55:00.000Z</td><td>PASS</td><td>1 CONTRADICTED (previously reported, OI-287 closed)</td><td>Two Notion create attempts produced 0 pages. The later file edits were Gabriel-directed, not the unattended guard. DSCR 1.25 / LTV 40 checked at source.</td></tr>
+<tr><td>cc:ora-aaos-expire-leases:2026-09-13T11:20:00.000Z</td><td>PASS</td><td>no published claims</td><td>Empty lock queue since 08-16. This daily sweep has been a no-op for about 4 weeks.</td></tr>
+<tr><td>cc:ora-aaos-publish-contracts:2026-09-12T13:15:00.000Z</td><td>PASS</td><td>all SUPPORTED</td><td>13 files byte-identical to cc8fbc6. The "-dirty" stamp comes only from an untracked .claude/.</td></tr>
+<tr><td>cc:ora-am-brief:2026-09-13T10:00:00.000Z</td><td>PASS</td><td>2 CONTRADICTED; 1 downgraded; 3 UNVERIFIABLE</td><td>About 40 figures checked; rates tie to FRED. Notion failed on quota again, so it went out as a failure email cc Eric.</td></tr>
+<tr><td>cc:ora-acquisition-underwriting-eval-harness:2026-09-12T16:14:00.000Z</td><td>PASS</td><td>1 CONTRADICTED; 2 UNVERIFIABLE</td><td>92 tests pass. Goldens were rebaselined in-turn. state.json is superseded, so the next poll will RUN. The session ended on the spend limit.</td></tr>
+<tr><td>cc:ora-memory-commit-sweep:2026-09-12T23:00:00.000Z</td><td>PASS</td><td>all SUPPORTED</td><td>One commit, de80c61 (5 new / 10 modified), local only. SKILL.md says "retries 15 min later", but the cron is daily.</td></tr>
+<tr><td>cc:ora-pm-daily-crons:2026-09-12T13:40:00.000Z</td><td>PASS (see note)</td><td>2 CONTRADICTED (commit-message detail)</td><td>delinquency-check ran twice on 09-12 (laptop at 20:33Z, manual GH dispatch at 23:36Z). Late fees posted on 09-12: 0, per Supabase. Freshness alarm owed but not fired: payments table has 0 rows ever (OI-278).</td></tr>
+<tr><td>cc:ora-checkout-merge-forward:2026-09-12T20:45:00.000Z</td><td>PASS</td><td>0 CONTRADICTED (1 downgraded)</td><td>BLOCKED_DIRTY_OVERLAP, so no merge happened on 09-12. The session then ran about 16h of in-turn development that produced PRs #193 and #196, merged 09-13 (OI-298).</td></tr>
+<tr><td>lams:ora-cowork-heartbeat:2026-09-13T09:50:00.000Z</td><td>PASS</td><td>1 CONTRADICTED; 1 dropped for F-id</td><td>Heartbeat text timestamp is 7h35m after Notion's edit time (OI-297). The watchdog reads last_edited_time, so detection is unaffected.</td></tr>
+</table>
+
+<p><b>F-id discipline drops: 2.</b></p>
+<ol type="a">
+<li>cowork-heartbeat "16h threshold" is page prose this run did not write. The threshold is really 30h since d5264342; that is carried as a staleness note.</li>
+<li>task-integrity-guard "_state/ path prefix". The auditor re-read the Sent Items body: the email used bare filenames, so F-18 cites a claim the source never made.</li>
+</ol>
+<p><b>Refuter downgrades to UNVERIFIABLE: 5.</b></p>
+<ul>
+<li>task-integrity-guard 8-id list: the engine skips disabled entries by design.</li>
+<li>pm-ledger "only 2 emails" / "all 4 sent items": both were counts taken at a specific moment during the run.</li>
+<li>am-brief "no disabled/stuck tasks": the only disabled entry is a spent one-time task.</li>
+<li>checkout-merge-forward override scope: the out-of-scope commits belong to sessions fd011007 and b708ef7f and to the memory sweep.</li>
+</ul>
+
+<h3>2. CONTRADICTED claims (post-refuter: 13)</h3>
+<p>Drafts are under <code>C:\Users\Owner\.claude\maintenance\_state\ground-truth-pending-approval\2026-09-13\</code>. <b>None has been sent or applied.</b></p>
+
+<p><b>cc:ora-am-brief:2026-09-13</b> (original cc'd egoldberg) → <code>cc_ora-am-brief_2026-09-13T10_00_00.000Z\correction-email.html</code></p>
+<ul>
+<li>§4b "43 deals stuck since 03-27". Live HubSpot shows <b>37</b> in appointmentscheduled, 36 of them created 03-27. The cited memory note had withdrawn "43" on 09-02. [F-10]</li>
+<li>§4c 07-15 AR subset lists P.U.P.S and Apet Inc, and omits Atomic Auto Salon. portfolio.json <code>arBalances[]</code> and <code>tenantArrears{}</code> date both of those tenants 08-21, and put Atomic Auto Salon at 07-15. [F-11]</li>
+</ul>
+
+<p><b>cc:ora-health-guard:2026-09-13</b> → <code>cc_ora-health-guard_2026-09-13T09_15_00.000Z\correction-email.html</code> (includes a proposed beacon edit)</p>
+<ul>
+<li>Pre-Flight mirror says <code>missed_sessions 6 / unexplained 2</code>, counting 09-07. 09-07 was Labor Day, which Block A skips by rule (SKILL.md line 253), so the correct figure is 5 / 1. The run fixed this in its [ACTION] email but not in the mirror that daily-brief parses. [F-20, F-8]</li>
+<li>"09-12 Daily Brief absence may be search-index lag". Wrong: publication failed on the Notion free-block ceiling. That was already emailed 09-12 at 20:36Z and is tracked as OI-288. [F-10]</li>
+</ul>
+
+<p><b>lams:ora-cowork-heartbeat:2026-09-13</b> → <code>lams_ora-cowork-heartbeat_2026-09-13T09_50_00.000Z\page-edit.md</code> (page edit, content not inlined)</p>
+<ul><li>"Last heartbeat: 2026-09-13T20:22:00Z". Notion page_last_edited_at is 12:46:33Z, 7h35m earlier; the auditor re-read this itself. [F-3, F-10]</li></ul>
+
+<p><b>cc:ora-acquisition-underwriting-eval-harness:2026-09-12</b> → <code>cc_ora-acquisition-underwriting-eval-harness_2026-09-12T16_14_00.000Z\pr54-and-live-skill.md</code></p>
+<ul><li>The PR #54 body names a companion branch, <code>ZeOoba/ora-claude-config fix/eval-harness-poll-skip-gate</code>, which was never pushed. There is no ref, the SHA returns 422, and there is no push event. The live scheduler SKILL.md already runs that unpushed commit 14757e9, uncommitted. [F-12, F-13]</li></ul>
+
+<p><b>cc:ora-pm-ledger:2026-09-12</b> → existing <code>2026-09-12\cc_ora-pm-ledger_…\correction-email.html</code> plus a new <code>2026-09-13\cc_ora-pm-ledger_…\correction-addendum.md</code></p>
+<ul>
+<li><b>NEW:</b> Scoreboard "1 created · 17 edited". The state diff shows 11 created / 6 edited, and the headline contradicts its own "Section A: 11 created, 6 edited". [F-12]</li>
+<li><i>Previously reported 09-12:</i> the lease-expiry zero (6 leases at 49–79 days; OI-284), the 9050 Red Branch insurance omission (true count 7), and "19:05 ET" (actually 15:05 ET). The addendum removes the 2/4-email item from yesterday's draft, since today's refuter downgraded it.</li>
+</ul>
+
+<p><b>cc:ora-pm-daily-crons:2026-09-12</b>: commit messages cannot be edited, so no draft.</p>
+<ul>
+<li>ora-pm f756687 / PR #25 says "12-case no-network test". The script has 13 cases, and running it prints 13 PASS lines. [F-10]</li>
+<li>ora-skills squash a44abdb is titled "register-scheduled-task v2.23", but its merged tree is v2.24; PR #53 took v2.23 for OI-273. [F-15]</li>
+</ul>
+
+<p><b>cc:ora-doctrine-integrity-guard:2026-09-12</b>: <i>previously reported</i>. The follow-up "create retire-pending.json" was unsafe because the file exists; it was fixed in-session (OI-287, closed). Existing draft: <code>2026-09-12\cc_ora-doctrine-integrity-guard_…\correction-note.md</code>. No new draft.</p>
+
+<h3>3. Duplicate side effects</h3>
+<p><b>None at any target.</b> Stage 0 duplicate_flags was empty, and all 12 verifiers found exactly one email, page, commit or state write per logical cycle. Near-misses, none of which produced duplicate output:</p>
+<ul>
+<li><b>doctrine-integrity-guard:</b> two <code>notion-create-pages</code> calls 12s apart. Both failed on quota, so 0 pages exist. <i>Remediation:</i> none needed now. When the quota clears, retries need a title-exists check first (OI-281/288).</li>
+<li><b>pm-daily-crons:</b> <code>/api/cron/delinquency-check</code> ran twice on 09-12 (20:33Z laptop, 23:36Z manual workflow_dispatch). The source of record shows 0 late-fee rows dated 09-12. <i>Remediation:</i> none to data. Rule on whether manually dispatching a money-moving endpoint after a same-day laptop run is allowed; the monthly-billing frontmatter forbids it for that endpoint.</li>
+<li><b>eval-harness:</b> identical content in e087d3e and 09d5f00. This is a documented mirror onto a divergent local main, not a double-fire. <i>Remediation:</i> none.</li>
+</ul>
+
+<h3>4. Open items filed</h3>
+<ul>
+<li><b>OI-296</b>: The run index re-audits runs covered by the prior day's digest (5 of 12 today). Dedup against prior digest run_ids.</li>
+<li><b>OI-297</b>: cowork-heartbeat writes a model-computed timestamp, 7h35m off Notion's edit time. Derive now_utc from a clock call. The page still carries stale 16h / KNOWN GAP prose after OI-280.</li>
+<li><b>OI-298</b>: Scheduled-task sessions turn into multi-hour interactive development: merge-forward about 16h, plus pm-daily-crons, eval-harness and doctrine guard. This blurs SKILL.md authority, the model pin (Opus trailers on Sonnet/Fable-pinned tasks) and audit attribution, and left an unpushed companion branch.</li>
+<li><b>OI-299</b>: daily-brief portfolio sections carry forward withdrawn or unverified figures (43 vs 37 deals; invented AR subset). This is the second straight day of mis-sourced brief content.</li>
+<li><b>OI-300</b>: health-guard B.2(C) blames "search-index lag" instead of reading PUBLICATION FAILED / OI-288, and in-run corrections are not re-issued to the Pre-Flight mirror.</li>
+</ul>
+<p><b>Still-open items this run re-confirmed (not re-filed):</b></p>
+<ul>
+<li><b>OI-278:</b> The ora-pm payments table has 0 rows ever. 68 fees posted 09-02/09-07 on that basis remain untouched with no decision. The guard now suppresses new fees.</li>
+<li><b>OI-281/288:</b> The Notion free-block quota is still exhausted. am-brief, pm-ledger and doctrine guard are all email-only.</li>
+<li><b>OI-280:</b> The watchdog threshold is fixed at 30h, but the heartbeat page and SKILL.md prose still say 16h.</li>
+<li><b>Master Workbook mirror:</b> portfolio.json is as-of 2026-09-06, which is 7 days old today and at the STALE threshold. The workbook itself was re-saved 09-12 18:44 ET.</li>
+</ul>
+
+<p style="font-size:11px;color:#666">All verifiers and refuters ran READ-ONLY.</p>
+<ul style="font-size:11px;color:#666">
+<li>One pm-daily-crons verifier made service-role SELECT queries to ora-pm Supabase.</li>
+<li>One pm-ledger verifier made a read-only Notion REST query with the token from oxford-command-center/.env.</li>
+<li>One am-brief verifier found that the workbook-write-guard hook blocked a read-only stat on the Master Workbook.</li>
+</ul>
+<p style="font-size:11px;color:#666">ora-ground-truth-auditor excluded itself from its own index. Its own 09-12 run record shows "failed" (spend limit) after it sent that digest.</p>
+</div>
