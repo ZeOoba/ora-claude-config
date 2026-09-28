@@ -29,6 +29,14 @@
 - **Validity signal (found via county-sales-monitor pilot, 2026-08-15):** the GIS parcel layer's `VALID` field
   exists in the live schema but was null on 100% of a 205-parcel industrial pull — not usable. The Transfer*.txt
   files carry an `IsValid` field ('T'/'F') that IS well-populated and is the usable non-arms-length signal.
+- **⚠ CORRECTION 2026-09-18 — `IsValid` is NOT usable; never filter arms-length sales on it.** The bullet above
+  is wrong and is superseded. On the 2026-09-18 ring-screen pull `IsValid` reads **'F' on 98 of 129 primary rows,
+  including plainly arm's-length recorded deeds** (e.g. a $1,160,000 warranty deed) — so it is well-populated but
+  NOT a valid arms-length gate. Use the skill's own **$25,000 nominal-transfer rule** instead (step 5: sub-$25K
+  transfer = UNKNOWN-HOLD, 16 pts). Same pull re-confirmed the GIS layer's own `VALID` field, and its in-layer
+  delinquency fields `TOTPRVTXTOD` / `TOTCNTTXOD`, are **100% null across all 600 ring parcels** — delinquency
+  must come from the bulk TaxDetail file. Source: `2026-09-18_RingScreen-FranklinOH_Summary_v01.md`,
+  §5 "Data gaps and honest limits" item 5.
 - **Bulk-file recording lag (same pilot):** the live GIS layer's SALEDATE can run ~1 month ahead of the newest
   Tax Accounting transfer-file drop (e.g. GIS showed sales through 08-14 while the newest Transfer* folder was
   still the 07-15 drop) — a windowed pull against Transfer*.txt alone will miss the most recent weeks' deeds
@@ -137,6 +145,64 @@
   28 parcels caught by the mail-address screen; without it they rank A (F8). SDATWEBADR per-parcel SDAT
   Real Property page is WAF/session-gated (403 to urllib AND WebFetch) — Stage-2 BROWSER task for owner names.
 - Delinquency: no public Howard feed pulled; Stage 2 = Howard County tax-sale list.
+- **HOLD PERIOD IS AVAILABLE — the 2026-09-18 ring run's "no transfer date" finding was a RUN
+  DEFECT, not a data gap (corrected 2026-09-18).** That run reported 16 of 20 scored rows as
+  UNKNOWN-HOLD and concluded "MdProperty View publishes no transfer date at all", recommending
+  deed-by-deed mdlandrec work to close it. Re-queried live the same day against the same layer:
+
+      JURSCODE='HOWA' AND LU='I'                                      ->   786 parcels
+        ... AND TRADATE IS NOT NULL AND TRADATE<>''                   ->   708  (90.1%)
+      JURSCODE='HOWA' AND LU='I' AND SQFTSTRC BETWEEN 10000 AND 80000 ->   279 parcels
+        ... AND TRADATE IS NOT NULL AND TRADATE<>''                   ->   255  (91.4%)
+        ... AND CONVEY1=1 (arms-length improved)                      ->   150  (53.8%)
+
+  A 40-row sample returned `TRADATE` on 38, each with `CONSIDR1`, `CONVEY1` and
+  `DR1LIBER`/`DR1FOLIO` — e.g. `1401159305` TRADATE 19861009 (a 40-year hold),
+  `1401165852` TRADATE 20130926 / CONSIDR1 null / CONVEY1 4 (a re-titling, NOT a purchase).
+  **`TRADATE` is the transfer date. `SDATDATE` (2026MAY) and `MDPVDATE` (2026MAR) are extract
+  VINTAGE stamps and `LASTASSD` is the assessment cycle — reading any of those three as the
+  transfer date is the trap that produced the false gap.** The field was already documented in
+  the Anne Arundel section above ("Same field set") and applies to every MD county.
+- **MD hold-scoring recipe:** years held = today − `TRADATE`, but ONLY where `CONVEY1` indicates
+  an arms-length transfer (`CONVEY1=1` is arms-length improved; `=4` correlates strongly with
+  null consideration — see the Baltimore Co note). Where segment 1 is non-arms-length, walk back
+  to the prior segment rather than declaring UNKNOWN: the **Socrata copy carries THREE sale
+  segments plus grantor names**, which the GIS layer does not.
+  `https://opendata.maryland.gov/resource/ed4q-f8tm.json` ("Maryland Real Property Assessments",
+  2.44M rows statewide, free, no key), fields
+  `sales_segment_{1,2,3}_transfer_date_*`, `..._consideration_*`, `..._how_conveyed_*` (arrives
+  **pre-decoded as text**, e.g. "Private arms-length transfer, Improved (1)" — no code table
+  needed) and `sales_segment_1_grantor_name_*`. Join on `acctid` = layer `ACCTID`.
+  **Caveat:** the portal sits behind a Cloudflare WAF that rejects `IS NOT NULL` in `$where`
+  (reads as SQLi) and very long `$select` lists — use range predicates and short selects.
+  Per-county views exist (Howard `9t52-zebk`, Montgomery `kb22-is2w`, BACO `jpfc-qkxp`,
+  Anne Arundel `3w75-7rie`); field dictionary `w8th-47fz`.
+  Statewide `TRADATE` population sampled 2026-09-18: PRIN 98.4 · ANNE 97.6 · BACO 96.9 ·
+  HARF 96.5 · HOWA 96.2 · FRED 94.7 · CARR 94.7 · MONT 93.5 · WASH 92.6 · ALLE 91.7 · BACI 88.3.
+  Still apply the **~4-month recording lag** warning in the Baltimore Co section.
+- **Better county-level layers where they exist:** Harford `hcggis.harfordcountymd.gov/public/rest/
+  services/Planning/Cadastral/MapServer/0` carries `TRANS_DATE` (native date) at **100%** plus
+  `CON_AMT`, `GRANTOR_1`, `GR_LIBER_1`; Anne Arundel `gis.aacounty.org/arcgis/rest/services/
+  OpenData/Planning_OpenData/MapServer/34` carries `ASST_TRANSFER_DATE` at 95.4% (no
+  consideration $). **Howard publishes NO own sale date** — its GeoServer WFS
+  (`hcgeoserver.howardcountymd.gov:8443/geoserver/general/ows`) serves geometry only
+  (`METRO_PROPERTY_GEOMETRY` = Shape + Last_Edit_Date, zero CAMA attributes); Baltimore Co
+  `Property/MapServer/1` has `DEED_REF` but no date; Carroll's layer is a join-key stub.
+  Use the statewide layer for those.
+- **CONFIRMED PERMANENTLY ABSENT for Maryland (do not re-investigate):** (a) **mdlandrec.net**
+  (now `landrec.msa.maryland.gov`) is free but registration-gated, session-authenticated, deed
+  image repository — **manual, deed-by-deed, no API and no bulk export**, and it only
+  reconstructs what SDAT already publishes in structured form. (b) **No free bulk or searchable
+  transfer/recordation-tax roll** exists at state or county level — counties publish rate
+  schedules only, the Comptroller publishes aggregates, and the per-parcel record lives on the
+  recorded deed. Both are moot now that `TRADATE` + `CONSIDR1` are confirmed available.
+  (c) Montgomery County is NOT a data exception: its rich open-data portal's Real Property Tax
+  series is a tax-bill extract with **zero date fields**, and `mcatlas.org/arcgis/rest/services`
+  404s. (d) The retired `mdpgis.mdp.state.md.us/.../Property_Sales/MapServer` is gone (404).
+- **MD land-use filter correction:** `LU` is ALPHABETIC, not numeric — Howard's distinct values
+  are `A, C, CA, CC, CR, E, EC, I, M, R, RC, TH, U`. Industrial is `LU='I'`; a `LU LIKE '4%'`
+  filter (an Ohio-DTE reflex) returns **zero rows silently**. Prefer the product `CIUSE` codes
+  listed in the Anne Arundel section over bare `LU='I'`, which over-pulls vacant/yard.
 
 ## Baltimore County, MD (Baltimore metro)  [v01 RUN 2026-06-09] — NAMES RECOVERABLE
 - mdgeodata MD_PropertyData service, JURSCODE='BACO'. *** KEY: unlike the name-scrubbed state extract,
@@ -205,6 +271,13 @@ Columbus/Cincinnati estate lists for the same contamination on next pass.
   CRITICAL QUIRK: attribute queries on table 2 FAIL ('Unable to perform query operation') unless
   orderByFields=OBJECTID is supplied. returnIdsOnly also fails. Distinct/count queries work without it.
   maxRecordCount 2000 (pull 1000/page to be safe).
+- **⚠ PAGING QUIRK, layer 1 (geometry) — added 2026-09-18. PAGE ON THE FLAG, NOT THE ROW COUNT.**
+  `…/ParcelsAscendRelate/FeatureServer/1` can return **999 rows on a 1,000-row page while still setting
+  `exceededTransferLimit=true`**. A loop that stops when "rows returned < page size" — the obvious idiom —
+  therefore **silently truncates with no error: observed 2,999 of 4,666 parcels, a 36% undercount.** Continue
+  paging while `exceededTransferLimit` is true, and advance the offset by the ACTUAL row count returned, not by
+  the page size. Caught on the 2026-09-18 ring screen only because a `returnCountOnly` control query was run —
+  run that control query and reconcile against it. Source: `2026-09-18_RingScreen-JacksonMO_Summary_v01.md` §2.
 - Fields: parcel_number ('29-320-30-03-00-0-00-000' 23-char dashed), property_id, situs_address/_city/_zip,
   landuse_cd/_descr, total_sqft (= LAND SF, NOT building — verified), year_built (0% for commercial),
   Market_Value_Total + 4 past years (Ascend pastyr1-4), Comm_Impr/Comm_Land, Assessed_Val_*,
