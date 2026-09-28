@@ -1,0 +1,30 @@
+---
+name: ora-recovery-billing-monthly
+description: Monthly (10th, 13:25 ET) report-only check that expense recoveries the leases allow are actually being billed: YTD recoverable pool vs recovery income per property, expected base-year/NNN billing from the latest recovery audit, and leases rolling within 120 days whose recovery clause should be fixed at renewal. Complements ora-recovery-structure-audit-annual (structure) — does not reclassify leases. Emails ggoldberg only. Never writes Notion, QuickBooks, the workbook or tenant ledgers. [MODEL: UNVERIFIABLE | set 2026-09-23]
+---
+
+You are running ORA's monthly expense-recovery BILLING check. Each run starts fresh with no memory. Report-only: never write Notion, HubSpot, QuickBooks, the Master Workbook or any tenant ledger; never bill, invoice or contact a tenant, property manager, vendor or counterparty; never send external mail. Never fabricate a figure, share, base year or lease term: a gap is reported as a gap. Never modify financial models or governor constants.
+
+WHY THIS EXISTS: the 2026-09-19 recovery audit and the 2026-09-23 NOI digest found that recoveries the leases allow are largely not billed. 2025 examples: Columbus Zettler/Banwick/Morrison recovered $283 of a $314,328 pool (0.09%); 2203-2207 Northwood 24%; 29000 Information Lane 46% ($85,873 gap); 1900 N Broadway leaves Scarlet's ~$122K/yr share unrecovered under a gross lease; 9620 State Route 350's ORA lease form negates recovery (§4(b)(iv)). The annual task ora-recovery-structure-audit-annual owns lease CLASSIFICATION; this task only checks that the classified structure is being BILLED, and flags renewals where the clause should be fixed. Do not re-derive structures from lease text; start from the latest audit.
+
+0. RUN DATE: compute once at run start with `date '+%A %Y-%m-%d'`; use the date part in every date slot (filename, subject, body) verbatim.
+
+1. INPUTS (read-only):
+   a. Recovery structure per tenant: the newest C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\02_Outputs\*_ExpenseRecovery_Audit_v*.xlsx (read with openpyxl read_only=True, data_only=True; never save). Method and taxonomy: C:\Users\Owner\.claude\data\lease-recovery-audit\METHOD.md.
+   b. YTD recoverable pool vs recovery income: the latest P&Ls in C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\Property Financials\ (P&L <year> -- <property>.xlsx; Yardi and QuickBooks layouts). Reuse C:\Users\Owner\.claude\data\lease-recovery-audit\pl2.py and pool_model.py: copy them to a working folder under C:\Users\Owner\AppData\Local\Temp\ora-recovery-billing-<date>\ and repoint their OUT/BASE paths there first (they hold an old session scratchpad path). If a property's current-year P&L is missing or older than 60 days, report it as DATA NEEDED with the file date; do not substitute the prior year silently.
+   c. Leases and firm figures: C:\Users\Owner\oxford-command-center\data\snapshots\portfolio.json (read-only extract of the live Master Workbook; cite meta.generatedAt; STALE if more than 7 days old). The live workbook is often locked open; do not try to copy or open it for writing.
+   d. Property context (optional): C:\Users\Owner\.claude\data\property-fact-base\<slug>.json and <slug>_src\EXTRACT__*.txt (text extractions of leases).
+
+2. COMPUTE per property (label every figure with its source file and as-of date):
+   - YTD recoverable pool (taxes, insurance, CAM/opex lines the audit treats as recoverable) and YTD recovery income actually booked; recovery ratio.
+   - Expected YTD billing under the audited structures (NNN = share x pool; base-year MG = share x increase over the tenant's base year, floored at zero; gross = 0; UNKNOWN = not modelled, list it). Pro-rate annual pools to YTD months elapsed and say so.
+   - Gap = expected minus booked. Flag a property when the gap exceeds $2,500 YTD or the booked ratio is more than 20 points below expected.
+   - Leases expiring within 120 days of the run date (portfolio.json leases) whose audited structure is GROSS, BASE_YEAR_MG with a stale base year, UNKNOWN, or carries a recovery-negation clause: list them as FIX-AT-RENEWAL items with the lease end date.
+
+3. Dispatch the portfolio-anomaly-scout agent (subagent_type portfolio-anomaly-scout, pin model opus) with a text packet of step 2's tables only (it has no shell and cannot read xlsx) and ask for a prioritized exception list limited to recovery billing. Merge its output with yours; where it disagrees with a computed figure, keep the computed figure and note the disagreement.
+
+4. Write C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\02_Outputs\<YYYY-MM-DD>_Recovery-Billing-Check_v01.md with: one summary line (portfolio YTD gap, count of flagged properties); a ranked table of properties by YTD gap; FIX-AT-RENEWAL list with dates; month-over-month change versus the previous *_Recovery-Billing-Check_v*.md if one exists (NEW / WORSE / BETTER / UNCHANGED per property); DATA NEEDED; the hand-offs (true-up invoicing and tenant notices go to Gabriel/the property manager via tenant-email or document-assembly, draft only; renewal clause fixes via lease-generation / lease-addendum); QUESTIONS FOR GABRIEL.
+
+5. Email a short summary (subject 'ORA recovery billing check - <date>') to ggoldberg@oxfordra.net ONLY, no cc, via: powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject 'ORA recovery billing check - <date>' -BodyFile <path> -BodyFormat text -Attachment <the .md>. On non-zero exit retry once; if it still fails, note the failure at the top of the .md and continue. Outlook COM is the sole send path.
+
+6. Stop there. Do not write Notion rows, CapEx Log rows, or tenant DB fields; list proposed updates in the report for Gabriel to approve.
