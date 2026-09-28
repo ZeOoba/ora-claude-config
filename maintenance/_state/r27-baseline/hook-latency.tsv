@@ -1,0 +1,6 @@
+event	matcher	async	cmd_tail	median_ms	max_ms	rcs
+PreToolUse	Bash	False	e "C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py" --chain bash	538.2116000000678	792.056300000695	[0]
+PostToolUse	Bash	False	3/python.exe "C:/Users/Owner/ora-skills/tools/catch_up_main.py" --hook	377.3028499999782	488.00459999984014	[0]
+PostToolUse	Bash	False	WARNING: oxfordra.net returned HTTP $STATUS after deploy" >&2; fi; fi'	139.31109999975888	206.07919999929436	[1]
+PostToolUse	Bash|Task|TaskCreate|TaskUpdate|Edit|Write|MultiEdit	True	hon313/python.exe "C:/Users/Owner/.claude/hooks/fleet-session-hook.py"	352.5447500005612	487.8259999986767	[0]
+PostToolUse	Bash	False	thon313/python.exe "C:/Users/Owner/.claude/hooks/eos-gate-sentinel.py"	267.84494999992603	347.84339999896474	[0]

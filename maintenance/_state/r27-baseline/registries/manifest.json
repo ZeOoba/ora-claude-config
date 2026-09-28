@@ -1,0 +1,18 @@
+[
+  {
+    "fleet": "claude-code-sessions",
+    "src": "C:\\Users\\Owner\\AppData\\Roaming\\Claude\\claude-code-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json",
+    "copy": "C:\\Users\\Owner/.claude/maintenance/_state/r27-baseline\\registries\\claude-code-sessions-04158b23b9f6.json",
+    "sha12": "04158b23b9f6",
+    "tasks": 55,
+    "enabled": 6
+  },
+  {
+    "fleet": "local-agent-mode-sessions",
+    "src": "C:\\Users\\Owner\\AppData\\Roaming\\Claude\\local-agent-mode-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json",
+    "copy": "C:\\Users\\Owner/.claude/maintenance/_state/r27-baseline\\registries\\local-agent-mode-sessions-5228859cff1a.json",
+    "sha12": "5228859cff1a",
+    "tasks": 29,
+    "enabled": 1
+  }
+]

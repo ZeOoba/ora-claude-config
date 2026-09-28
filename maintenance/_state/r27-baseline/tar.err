@@ -1,0 +1,11 @@
+tar: scheduled-tasks/ora-754-flaute-escalation-check/SKILL.md: Cannot stat: No such file or directory
+tar: scheduled-tasks/ora-resume-0921-attend-reminder/SKILL.md: Cannot stat: No such file or directory
+tar: scheduled-tasks/ora-routine-pause-resume-09-21/SKILL.md: Cannot stat: No such file or directory
+tar: skills/_archive_2026-09-06_qodo_retired/README.md: Cannot stat: No such file or directory
+tar: skills/_archive_2026-09-06_qodo_retired/qodo-codebase-wisdom/SKILL.md: Cannot stat: No such file or directory
+tar: skills/_archive_2026-09-06_qodo_retired/qodo-get-rules/SKILL.md: Cannot stat: No such file or directory
+tar: skills/_archive_2026-09-06_qodo_retired/qodo-manage-standards/SKILL.md: Cannot stat: No such file or directory
+tar: skills/_archive_2026-09-06_qodo_retired/qodo-review-resolver/SKILL.md: Cannot stat: No such file or directory
+tar: skills/_archive_2026-09-06_qodo_retired/qodo-review/SKILL.md: Cannot stat: No such file or directory
+tar: maintenance/_state/r27-baseline/claude-dirty-snapshot.tgz: file changed as we read it
+tar: Exiting with failure status due to previous errors

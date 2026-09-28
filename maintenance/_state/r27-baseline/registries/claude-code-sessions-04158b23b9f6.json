@@ -1,0 +1,772 @@
+{
+  "scheduledTasks": [
+    {
+      "id": "ora-master-workbook-ingest",
+      "cronExpression": "45 5 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-master-workbook-ingest\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439130936,
+      "lastRunAt": "2026-09-14T13:56:16.305Z",
+      "lastScheduledFor": "2026-09-14T09:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:06.818Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-financial-code-integrity-sweep",
+      "cronExpression": "30 13 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-financial-code-integrity-sweep\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439232788,
+      "lastRunAt": "2026-09-21T17:41:54.404Z",
+      "lastScheduledFor": "2026-09-21T17:30:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:09.605Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-monthly-portfolio-briefing",
+      "cronExpression": "45 7 1 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-monthly-portfolio-briefing\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439235178,
+      "lastRunAt": "2026-09-02T09:34:15.466Z",
+      "lastScheduledFor": "2026-09-01T11:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:11.880Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-health-guard",
+      "cronExpression": "15 5 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-health-guard\\SKILL.md",
+      "createdAt": 1783439237365,
+      "lastRunAt": "2026-09-14T13:56:16.276Z",
+      "lastScheduledFor": "2026-09-14T09:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:14.264Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-task-integrity-guard",
+      "cronExpression": "5 7 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-task-integrity-guard\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439239213,
+      "lastRunAt": "2026-09-14T13:56:16.322Z",
+      "lastScheduledFor": "2026-09-14T11:05:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:16.500Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-weekly-hygiene",
+      "cronExpression": "15 20 * * 0",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-weekly-hygiene\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439240565,
+      "lastRunAt": "2026-09-14T14:03:33.040Z",
+      "lastScheduledFor": "2026-09-14T00:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:18.629Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-deal-sourcing-scan",
+      "cronExpression": "45 10 * * 2",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-deal-sourcing-scan\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439403003,
+      "lastRunAt": "2026-09-05T17:28:02.006Z",
+      "lastScheduledFor": "2026-09-01T14:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:20.126Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-pm-ledger",
+      "cronExpression": "0 15 * * 5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-pm-ledger\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783439404427,
+      "lastRunAt": "2026-09-13T19:09:48.621Z",
+      "lastScheduledFor": "2026-09-13T19:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:22.020Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-doctrine-integrity-guard",
+      "cronExpression": "55 12 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-doctrine-integrity-guard\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783561809498,
+      "lastRunAt": "2026-09-14T18:36:18.883Z",
+      "lastScheduledFor": "2026-09-14T16:55:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:23.516Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false,
+      "notifySessionId": "local_72a29385-9036-4c81-b5f7-c442d881c7fc"
+    },
+    {
+      "id": "ora-open-sessions-board",
+      "cronExpression": "0 17 * * 5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-open-sessions-board\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783619858406,
+      "lastRunAt": "2026-09-11T21:08:38.717Z",
+      "lastScheduledFor": "2026-09-11T21:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:27.559Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-command-center-mirror-drift-check",
+      "cronExpression": "40 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-command-center-mirror-drift-check\\SKILL.md",
+      "createdAt": 1783629422889,
+      "lastRunAt": "2026-09-14T14:44:29.207Z",
+      "lastScheduledFor": "2026-09-14T14:40:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:29.447Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_a19fbd21-dad1-4d90-aeec-e4827ed6bd2e"
+    },
+    {
+      "id": "ora-site-exposure-probe",
+      "cronExpression": "50 9 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-site-exposure-probe\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783698639104,
+      "lastRunAt": "2026-09-05T18:55:26.497Z",
+      "lastScheduledFor": "2026-09-02T13:50:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:31.135Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false,
+      "notifySessionId": "local_e210c9c4-f6cc-4214-86c3-d5c910f2a928"
+    },
+    {
+      "id": "ora-aaos-expire-leases",
+      "cronExpression": "20 7 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-aaos-expire-leases\\SKILL.md",
+      "createdAt": 1783704972510,
+      "lastRunAt": "2026-09-14T14:03:33.097Z",
+      "lastScheduledFor": "2026-09-14T11:20:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:32.829Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-aaos-publish-contracts",
+      "cronExpression": "15 9 * * 2",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-aaos-publish-contracts\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783704974555,
+      "lastRunAt": "2026-09-22T13:34:16.312Z",
+      "lastScheduledFor": "2026-09-22T13:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:34.215Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-model-release-watch",
+      "cronExpression": "20 11 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-model-release-watch\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783713123951,
+      "lastRunAt": "2026-09-21T15:27:26.535Z",
+      "lastScheduledFor": "2026-09-21T15:20:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:35.607Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-calibration-snapshot",
+      "cronExpression": "30 15 1 1,4,7,10 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-calibration-snapshot\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783782941022,
+      "lastRunAt": "2026-07-22T22:01:55.033Z",
+      "missedRunScanFloor": "2026-09-21T15:17:37.398Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-entry-market-scan",
+      "cronExpression": "45 11 * * 2",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-entry-market-scan\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783782942490,
+      "lastRunAt": "2026-09-07T15:50:57.578Z",
+      "lastScheduledFor": "2026-09-07T15:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:39.044Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-cc-schematic-refresh",
+      "cronExpression": "15 14 * * 4",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-cc-schematic-refresh\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783876579166,
+      "lastRunAt": "2026-09-14T18:36:18.857Z",
+      "lastScheduledFor": "2026-09-14T18:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:40.643Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-sofr-direct-prefetch",
+      "cronExpression": "10 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-sofr-direct-prefetch\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1784125070730,
+      "lastRunAt": "2026-09-14T14:18:25.342Z",
+      "lastScheduledFor": "2026-09-14T14:10:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:43.350Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-broker-touch-cadence",
+      "cronExpression": "40 13 2 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-broker-touch-cadence\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1784225027244,
+      "lastRunAt": "2026-09-05T19:34:59.694Z",
+      "lastScheduledFor": "2026-09-02T17:40:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:44.846Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false,
+      "notifySessionId": "local_5dbb7768-142b-45ee-a9b0-b81388d472b4"
+    },
+    {
+      "id": "ora-am-brief",
+      "cronExpression": "0 6 * * *",
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-am-brief\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1784242460598,
+      "lastRunAt": "2026-09-22T13:34:16.268Z",
+      "lastScheduledFor": "2026-09-22T10:00:00.000Z",
+      "missedRunScanFloor": "2026-09-22T20:13:49.294Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false,
+      "notifySessionId": "local_9e9e81e5-c945-4c3d-9dbd-e69196750e01"
+    },
+    {
+      "id": "ora-deal-command-board",
+      "cronExpression": "50 9 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-deal-command-board\\SKILL.md",
+      "createdAt": 1784308453355,
+      "lastRunAt": "2026-09-14T14:05:40.214Z",
+      "lastScheduledFor": "2026-09-14T13:50:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:46.665Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-deal-aging-sla",
+      "cronExpression": "25 9 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-deal-aging-sla\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1784408538714,
+      "lastRunAt": "2026-09-14T14:08:25.472Z",
+      "lastScheduledFor": "2026-09-14T13:25:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:56.577Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false,
+      "notifySessionId": "local_a67aca7d-c811-4966-b230-b67fb363de70"
+    },
+    {
+      "id": "ora-appsec-sweep",
+      "cronExpression": "30 13 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-appsec-sweep\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1784604623276,
+      "lastRunAt": "2026-09-05T19:40:59.525Z",
+      "lastScheduledFor": "2026-09-02T17:30:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:17:58.224Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false,
+      "notifySessionId": "local_8b0d2298-ec93-4fba-a13e-f5463f97e265"
+    },
+    {
+      "id": "ora-tenant-hubspot-reconciliation",
+      "cronExpression": "15 8 1 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-tenant-hubspot-reconciliation\\SKILL.md",
+      "createdAt": 1784652474604,
+      "lastRunAt": "2026-09-05T19:48:59.193Z",
+      "lastScheduledFor": "2026-09-01T12:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:00.060Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_6aa566a3-84ed-403e-b313-5df97f9583a2"
+    },
+    {
+      "id": "ora-cc-snapshot-refresh",
+      "cronExpression": "15 6 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-cc-snapshot-refresh\\SKILL.md",
+      "createdAt": 1784677176943,
+      "lastRunAt": "2026-09-14T14:20:24.892Z",
+      "lastScheduledFor": "2026-09-14T10:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:14.017Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_dc3f4b65-0e18-49ca-9589-f7889f77f8ce"
+    },
+    {
+      "id": "ora-lease-snapshot-refresh",
+      "cronExpression": "40 7 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-lease-snapshot-refresh\\SKILL.md",
+      "createdAt": 1784936226838,
+      "lastRunAt": "2026-09-14T14:21:29.385Z",
+      "lastScheduledFor": "2026-09-14T11:40:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:15.667Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_12a9e2c1-0fcf-41ca-806f-b5fbe3581234"
+    },
+    {
+      "id": "ora-psa-drift-watch",
+      "cronExpression": "45 13 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-psa-drift-watch\\SKILL.md",
+      "createdAt": 1786572208695,
+      "lastRunAt": "2026-09-05T20:39:00.041Z",
+      "lastScheduledFor": "2026-09-02T17:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:18.454Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-claude-setup-audit",
+      "cronExpression": "0 10 1 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-claude-setup-audit\\SKILL.md",
+      "createdAt": 1786665132353,
+      "lastRunAt": "2026-09-05T20:46:14.520Z",
+      "lastScheduledFor": "2026-09-01T14:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:24.965Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-acquisition-underwriting-eval-harness",
+      "cronExpression": "14 12 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-acquisition-underwriting-eval-harness\\SKILL.md",
+      "createdAt": 1786743159650,
+      "lastRunAt": "2026-09-14T16:23:44.024Z",
+      "lastScheduledFor": "2026-09-14T16:14:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:26.577Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-county-sales-monitor",
+      "cronExpression": "25 10 15 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-county-sales-monitor\\SKILL.md",
+      "createdAt": 1786836959685,
+      "missedRunScanFloor": "2026-09-21T15:18:28.230Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_1bd91b9a-b2dc-4f53-a599-1d64f5c62739"
+    },
+    {
+      "id": "ora-passed-deal-tracker",
+      "cronExpression": "30 6 15 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-passed-deal-tracker\\SKILL.md",
+      "createdAt": 1786842046052,
+      "missedRunScanFloor": "2026-09-21T15:18:29.876Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-memory-commit-sweep",
+      "cronExpression": "0 19 * * 5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-memory-commit-sweep\\SKILL.md",
+      "createdAt": 1786930225810,
+      "lastRunAt": "2026-09-14T14:27:25.006Z",
+      "lastScheduledFor": "2026-09-13T23:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:31.480Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "useWorktree": false
+    },
+    {
+      "id": "ora-ar-feed-sweep",
+      "cronExpression": "20 8 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-ar-feed-sweep\\SKILL.md",
+      "createdAt": 1786975430383,
+      "lastRunAt": "2026-09-14T14:28:24.570Z",
+      "lastScheduledFor": "2026-09-14T12:20:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:33.029Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_bd6f4916-1177-498b-96d1-f255df19f2ab"
+    },
+    {
+      "id": "ora-pm-daily-crons",
+      "cronExpression": "40 9 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-pm-daily-crons\\SKILL.md",
+      "createdAt": 1788717553353,
+      "lastRunAt": "2026-09-14T14:29:24.753Z",
+      "lastScheduledFor": "2026-09-14T13:40:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:35.124Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-pm-monthly-billing",
+      "cronExpression": "10 11 1 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-pm-monthly-billing\\SKILL.md",
+      "createdAt": 1788717634248,
+      "missedRunScanFloor": "2026-09-21T15:18:37.862Z",
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners"
+    },
+    {
+      "id": "ora-checkout-merge-forward",
+      "displayName": "Checkout merge-forward sync",
+      "cronExpression": "45 16 * * 5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-checkout-merge-forward\\SKILL.md",
+      "createdAt": 1788997729456,
+      "lastRunAt": "2026-09-21T20:47:07.349Z",
+      "lastScheduledFor": "2026-09-21T20:45:00.000Z",
+      "missedRunScanFloor": "2026-09-22T20:31:17.903Z",
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_c5d71770-4d42-4084-bc13-68c77b162bf2"
+    },
+    {
+      "id": "ora-ground-truth-auditor",
+      "cronExpression": "0 4 * * 2",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-ground-truth-auditor\\SKILL.md",
+      "createdAt": 1789086394381,
+      "lastRunAt": "2026-09-22T13:34:16.509Z",
+      "lastScheduledFor": "2026-09-22T08:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:18:45.272Z",
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_8e6fc103-5949-48ad-bc83-d368c27b6eac"
+    },
+    {
+      "id": "ora-prepush-gate-sweep",
+      "displayName": "Pre-push gate sweep (weekly)",
+      "cronExpression": "0 11 * * 4",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-prepush-gate-sweep\\SKILL.md",
+      "createdAt": 1789679075178,
+      "cwd": "C:\\Users\\Owner"
+    },
+    {
+      "id": "ora-excess-usage-sweep",
+      "displayName": "Weekly excess-usage sweep (Fri 3-4pm)",
+      "cronExpression": "0 15 * * 5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-excess-usage-sweep\\SKILL.md",
+      "createdAt": 1789748616682,
+      "lastRunAt": "2026-09-18T19:02:30.819Z",
+      "lastScheduledFor": "2026-09-18T19:00:00.000Z",
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_3accf511-aa8d-4888-98e8-bd2814afcdbc"
+    },
+    {
+      "id": "ora-notion-trial-expiry-reminder",
+      "displayName": "Reminder: Notion trial ends ~2026-10-02",
+      "fireAt": 1790690400000,
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-notion-trial-expiry-reminder\\SKILL.md",
+      "createdAt": 1789749331425,
+      "cwd": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners",
+      "notifySessionId": "local_54a9cc52-8583-4b7f-bbb2-57e4182d45dd"
+    },
+    {
+      "id": "ora-renewal-hubspot-reconcile",
+      "displayName": "Renewal pipeline reconcile (weekly)",
+      "cronExpression": "20 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-renewal-hubspot-reconcile\\SKILL.md",
+      "createdAt": 1789751050765,
+      "lastRunAt": "2026-09-21T15:18:36.898Z",
+      "lastScheduledFor": "2026-09-21T14:20:00.000Z",
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_8d443cb7-7b28-4f31-ac01-5fe24423fd8a"
+    },
+    {
+      "id": "ora-forward-calendar-digest",
+      "displayName": "Forward Calendar digest (weekly)",
+      "cronExpression": "10 12 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-forward-calendar-digest\\SKILL.md",
+      "createdAt": 1789760945527,
+      "lastRunAt": "2026-09-21T16:19:44.477Z",
+      "lastScheduledFor": "2026-09-21T16:10:00.000Z",
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_bce6709d-d034-4f1f-963b-39e77acae17f"
+    },
+    {
+      "id": "ora-vacancy-aging-report",
+      "displayName": "Vacancy aging report (weekly)",
+      "cronExpression": "20 8 * * 2",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-vacancy-aging-report\\SKILL.md",
+      "createdAt": 1789762653460,
+      "lastRunAt": "2026-09-22T13:36:07.125Z",
+      "lastScheduledFor": "2026-09-22T12:20:00.000Z",
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_8d443cb7-7b28-4f31-ac01-5fe24423fd8a"
+    },
+    {
+      "id": "ora-audit-log-sweep",
+      "displayName": "Monthly audit.jsonl reclaim",
+      "cronExpression": "10 14 3 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-audit-log-sweep\\SKILL.md",
+      "createdAt": 1789764972097,
+      "lastRunAt": "2026-09-18T21:05:03.092Z",
+      "cwd": "C:\\Users\\Owner"
+    },
+    {
+      "id": "ora-loopnet-listings-sync",
+      "displayName": "LoopNet → Available Space sync (weekly)",
+      "cronExpression": "40 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-loopnet-listings-sync\\SKILL.md",
+      "createdAt": 1789765137466,
+      "lastRunAt": "2026-09-21T15:21:35.811Z",
+      "lastScheduledFor": "2026-09-21T14:40:00.000Z",
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_147003e5-3fd7-4e84-a95f-bf9438c3cd9e"
+    },
+    {
+      "id": "ora-wicomico-reassessment-reminder",
+      "displayName": "Reminder: Wicomico reassessment notice (Northwood)",
+      "fireAt": 1799420700000,
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-wicomico-reassessment-reminder\\SKILL.md",
+      "createdAt": 1789842747801,
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_8d443cb7-7b28-4f31-ac01-5fe24423fd8a"
+    },
+    {
+      "id": "ora-jackson-boe-prep-reminder",
+      "displayName": "Reminder: Jackson County MO reassessment / BOE prep",
+      "fireAt": 1813068300000,
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-jackson-boe-prep-reminder\\SKILL.md",
+      "createdAt": 1789842760476,
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_8d443cb7-7b28-4f31-ac01-5fe24423fd8a"
+    },
+    {
+      "id": "ora-hubspot-renewal-closeout-tasks",
+      "displayName": "HubSpot renewal close-out tasks",
+      "cronExpression": "50 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-hubspot-renewal-closeout-tasks\\SKILL.md",
+      "createdAt": 1789844721202,
+      "lastRunAt": "2026-09-21T15:29:35.469Z",
+      "lastScheduledFor": "2026-09-21T14:50:00.000Z",
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_c2ad7d48-ed43-4936-ac1d-f4540dcf1ff5",
+      "missedRunScanFloor": "2026-09-22T20:31:13.903Z"
+    },
+    {
+      "id": "ora-incentive-registry-refresh",
+      "displayName": "ORA incentive registry refresh (quarterly)",
+      "cronExpression": "20 13 2 1,4,7,10 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-incentive-registry-refresh\\SKILL.md",
+      "createdAt": 1789851987002,
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_725bacb4-802a-401b-b1fa-9420a4de7101"
+    },
+    {
+      "id": "ora-noi-opportunity-digest",
+      "displayName": "ORA NOI opportunity digest (monthly)",
+      "cronExpression": "40 13 3 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-noi-opportunity-digest\\SKILL.md",
+      "createdAt": 1789851995640,
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_725bacb4-802a-401b-b1fa-9420a4de7101"
+    },
+    {
+      "id": "ora-recovery-structure-audit-annual",
+      "displayName": "ORA lease recovery-structure audit (annual)",
+      "cronExpression": "0 14 5 1 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-recovery-structure-audit-annual\\SKILL.md",
+      "createdAt": 1789852005420,
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_725bacb4-802a-401b-b1fa-9420a4de7101"
+    },
+    {
+      "id": "ora-loan-balance-check",
+      "cronExpression": "35 11 21 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-loan-balance-check\\SKILL.md",
+      "createdAt": 1790021551485,
+      "cwd": "C:\\Users\\Owner",
+      "notifySessionId": "local_725bacb4-802a-401b-b1fa-9420a4de7101"
+    },
+    {
+      "id": "ora-routine-pause-resume-09-28",
+      "displayName": "Resume CC routines (paused 09-22 → 09-28)",
+      "fireAt": 1790604000000,
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-routine-pause-resume-09-28\\SKILL.md",
+      "createdAt": 1790088153957,
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_7a0c1a75-598b-4c94-bafd-4a2c28b66136"
+    },
+    {
+      "id": "ora-resume-0928-attend-reminder",
+      "displayName": "Reminder: attend the 10:00 resume (09-28)",
+      "fireAt": 1790602200000,
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\.claude\\scheduled-tasks\\ora-resume-0928-attend-reminder\\SKILL.md",
+      "createdAt": 1790088157859,
+      "cwd": "C:\\Users\\Owner\\website-canonical",
+      "notifySessionId": "local_7a0c1a75-598b-4c94-bafd-4a2c28b66136"
+    }
+  ],
+  "recordedSkips": {
+    "ora-renewal-hubspot-reconcile": [
+      {
+        "at": 1790003675220,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003734136,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003794161,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003854159,
+        "reason": "global_limit"
+      }
+    ],
+    "ora-loopnet-listings-sync": [
+      {
+        "at": 1790003675246,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003734140,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003794166,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003854165,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003914192,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003974255,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004034179,
+        "reason": "global_limit"
+      }
+    ],
+    "ora-hubspot-renewal-closeout-tasks": [
+      {
+        "at": 1790003675258,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003734141,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003794170,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003854167,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003914198,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790003974257,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004034180,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004094186,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004154181,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004214780,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004274439,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004334429,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004394426,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004454439,
+        "reason": "global_limit"
+      },
+      {
+        "at": 1790004514442,
+        "reason": "global_limit"
+      }
+    ],
+    "ora-vacancy-aging-report": [
+      {
+        "at": 1790084054306,
+        "reason": "global_limit"
+      }
+    ]
+  },
+  "sundayAliasBoundaryStamped": true,
+  "dayFieldsOrBoundaryStamped": true
+}

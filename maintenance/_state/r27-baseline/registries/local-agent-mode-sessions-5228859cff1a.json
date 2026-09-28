@@ -1,0 +1,1189 @@
+{
+  "scheduledTasks": [
+    {
+      "id": "ora-consolidate-memory-monthly",
+      "cronExpression": "0 5 2 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-consolidate-memory-monthly\\SKILL.md",
+      "createdAt": 1783439855469,
+      "lastRunAt": "2026-09-02T09:35:05.760Z",
+      "lastScheduledFor": "2026-09-02T09:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T15:26:35.508Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_process_output"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402"
+    },
+    {
+      "id": "ora-skill-store-drift-check",
+      "cronExpression": "10 12 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-skill-store-drift-check\\SKILL.md",
+      "createdAt": 1783440345310,
+      "lastRunAt": "2026-09-14T16:17:40.624Z",
+      "lastScheduledFor": "2026-09-14T16:10:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:12:56.194Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-comment"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__force_terminate"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402",
+      "observedToolUse": {
+        "promptHash": "d760359be10b23a77bb2d9b86c1388f015fc205f676df03316f9bdb9335515de",
+        "promptSalt": "0211070423d59bcf6504a604662e11d9",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788798208382,
+        "firstRunAt": 1788798265807,
+        "lastRunAt": 1789402710063
+      }
+    },
+    {
+      "id": "ora-skill-text-audit",
+      "cronExpression": "45 9 15 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-skill-text-audit\\SKILL.md",
+      "createdAt": 1783440346863,
+      "lastRunAt": "2026-09-15T14:44:05.278Z",
+      "lastScheduledFor": "2026-09-15T13:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:13:39.570Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_process_output"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402",
+      "observedToolUse": {
+        "promptHash": "dfe7ae3d21214da3c02bc0dcdcb35f4c41a51a83783de6de52063aaab481ba0f",
+        "promptSalt": "c24fd138111788022477b189e4ed397e",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789484339771,
+        "firstRunAt": 1789484357557,
+        "lastRunAt": 1789484357557
+      }
+    },
+    {
+      "id": "ora-om-intake-ocr",
+      "cronExpression": "15 6 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-om-intake-ocr\\SKILL.md",
+      "createdAt": 1783440406076,
+      "lastRunAt": "2026-09-05T17:32:00.046Z",
+      "lastScheduledFor": "2026-09-02T10:15:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:13:31.488Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__interact_with_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402",
+      "observedToolUse": {
+        "promptHash": "675b855342c8eea0aedb1180e19125822561fc5f21c2d67c8576039de8ff37b2",
+        "promptSalt": "7ce717fbd633ac28e6aa6a64405b9184",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788344167219,
+        "firstRunAt": 1788344184003,
+        "lastRunAt": 1788344184003
+      }
+    },
+    {
+      "id": "ora-owner-outreach-queue-refresh",
+      "cronExpression": "55 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-owner-outreach-queue-refresh\\SKILL.md",
+      "createdAt": 1783440407718,
+      "lastRunAt": "2026-09-14T15:46:19.416Z",
+      "lastScheduledFor": "2026-09-14T14:55:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:13:49.978Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__Desktop_Commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402",
+      "observedToolUse": {
+        "promptHash": "05dc232ba0292d38e81252334140a55920f82c1b442229c01d380cf401d97f01",
+        "promptSalt": "4c8d3dec205200d3ded741f3c5893b4c",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 2,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789401212927,
+        "firstRunAt": 1788794942632,
+        "lastRunAt": 1789401243784
+      }
+    },
+    {
+      "id": "ora-replacement-cost-refresh",
+      "cronExpression": "10 6 9 3,6,9,12 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-replacement-cost-refresh\\SKILL.md",
+      "createdAt": 1783449250858,
+      "lastRunAt": "2026-07-12T17:05:08.454Z",
+      "missedRunScanFloor": "2026-09-11T20:34:53.556Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__move_file"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402"
+    },
+    {
+      "id": "ora-bearmode-refresh",
+      "cronExpression": "25 6 9 3,6,9,12 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-bearmode-refresh\\SKILL.md",
+      "createdAt": 1783449252310,
+      "lastRunAt": "2026-07-12T17:04:37.752Z",
+      "missedRunScanFloor": "2026-09-21T17:13:45.504Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        }
+      ],
+      "notifySessionId": "local_4ba522cd-e5b2-447e-9bb0-d07d4186c402"
+    },
+    {
+      "id": "ora-friday-closeout",
+      "cronExpression": "30 16 * * 5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-friday-closeout\\SKILL.md",
+      "createdAt": 1783536727239,
+      "lastRunAt": "2026-09-05T17:32:00.068Z",
+      "lastScheduledFor": "2026-09-04T20:30:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:13:57.674Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        }
+      ],
+      "notifySessionId": "local_cb493734-f722-4128-b956-b91ff7551070"
+    },
+    {
+      "id": "ora-lease-expiration-brief",
+      "cronExpression": "45 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-lease-expiration-brief\\SKILL.md",
+      "createdAt": 1783537777406,
+      "lastRunAt": "2026-09-14T14:50:32.180Z",
+      "lastScheduledFor": "2026-09-14T14:45:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:15:54.407Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__Desktop_Commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_process_output"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "Read",
+          "ruleContent": "//c/Users/Owner/**"
+        }
+      ],
+      "notifySessionId": "local_cb493734-f722-4128-b956-b91ff7551070",
+      "observedToolUse": {
+        "promptHash": "9072c2cef9c0625ad35bca77ea6ef4521ebc2e71a22282bee1682f4febbba425",
+        "promptSalt": "5cf10f02d79c8ead1022e5ad9dac78af",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788795061919,
+        "firstRunAt": 1788795131094,
+        "lastRunAt": 1788795131094
+      }
+    },
+    {
+      "id": "ora-monday-sync",
+      "cronExpression": "35 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-monday-sync\\SKILL.md",
+      "createdAt": 1783537780249,
+      "lastRunAt": "2026-09-14T14:44:27.377Z",
+      "lastScheduledFor": "2026-09-14T14:35:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:14:04.772Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__Desktop_Commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        }
+      ],
+      "notifySessionId": "local_cb493734-f722-4128-b956-b91ff7551070",
+      "observedToolUse": {
+        "promptHash": "f7ffbb86f90638ec180f21f866b1bc2e343b7fde5f7771fb52c71cf3f17bb82e",
+        "promptSalt": "627282f1e81b85a14ded2a6efdac7347",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 2,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789397667983,
+        "firstRunAt": 1788795107391,
+        "lastRunAt": 1789397683436
+      }
+    },
+    {
+      "id": "automation-health-monitor",
+      "cronExpression": "5 11 * * 1-5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\automation-health-monitor\\SKILL.md",
+      "model": "claude-sonnet-5",
+      "createdAt": 1783537999843,
+      "lastRunAt": "2026-09-15T15:14:55.180Z",
+      "lastScheduledFor": "2026-09-15T15:05:00.000Z",
+      "missedRunScanFloor": "2026-08-21T21:10:36.388Z",
+      "userSelectedFiles": [],
+      "permissionMode": "bypassPermissions",
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__Desktop_Commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_multiple_files"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "notifySessionId": "local_cb493734-f722-4128-b956-b91ff7551070",
+      "observedToolUse": {
+        "promptHash": "f867142c0739327122b5eeee3e42701ac4e2b1f72e26d44bf50a0399e4f6ff57",
+        "promptSalt": "52458eee7ad1bb33d69f3512fa22b94e",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 2,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789485682070,
+        "firstRunAt": 1789401675157,
+        "lastRunAt": 1789485699693
+      }
+    },
+    {
+      "id": "ora-stale-pipeline-nudge",
+      "cronExpression": "15 10 * * 4",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-stale-pipeline-nudge\\SKILL.md",
+      "createdAt": 1783546761598,
+      "lastRunAt": "2026-09-05T17:38:54.872Z",
+      "lastScheduledFor": "2026-09-03T14:15:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:34:57.268Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-comment"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_process_output"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        }
+      ],
+      "notifySessionId": "local_f8ac1d13-682a-475f-8fef-ffa0d4deebcd",
+      "observedToolUse": {
+        "promptHash": "283f478567949c3eb7635983b20ce9cbb82858e86c7e99cbf3f0975f9a761d61",
+        "promptSalt": "a183f5f03f394019af220a0f1da57e3f",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788425902328,
+        "firstRunAt": 1788425935851,
+        "lastRunAt": 1788425935851
+      }
+    },
+    {
+      "id": "ora-ar-export-freshness-nudge",
+      "cronExpression": "30 11 1,15 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-ar-export-freshness-nudge\\SKILL.md",
+      "createdAt": 1783546833857,
+      "lastRunAt": "2026-09-15T15:44:05.548Z",
+      "lastScheduledFor": "2026-09-15T15:30:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:34:59.172Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-comment"
+        }
+      ],
+      "notifySessionId": "local_f8ac1d13-682a-475f-8fef-ffa0d4deebcd",
+      "observedToolUse": {
+        "promptHash": "1c3d449b76f0577cf61ef3912c56653946908fcb839eb68d864c8c366a0498ea",
+        "promptSalt": "d241951894b723f1eddc2fe4623b64d7",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789487370244,
+        "firstRunAt": 1789487521795,
+        "lastRunAt": 1789487521795
+      }
+    },
+    {
+      "id": "ora-session-sweep",
+      "cronExpression": "0 20 * * 0",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-session-sweep\\SKILL.md",
+      "createdAt": 1783728577769,
+      "lastRunAt": "2026-09-14T14:06:28.412Z",
+      "lastScheduledFor": "2026-09-14T00:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:15:48.420Z",
+      "userSelectedFolders": [
+        "C:\\Users\\Owner\\Obsidian\\BrainVault"
+      ],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_multiple_files"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        }
+      ],
+      "notifySessionId": "local_6be6740d-aebe-44e9-bbb4-b82ef94159bb",
+      "observedToolUse": {
+        "promptHash": "a2ec25a19b6047d2c430ef1931c998b12b3a6f386df58036442efd14b095a70f",
+        "promptSalt": "f2b784964b329eadf8e47c93d5c42e6f",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 0,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 1,
+        "lastLocalToolAt": 1788795135835,
+        "firstRunAt": 1788796183837,
+        "lastRunAt": 1788796183837
+      }
+    },
+    {
+      "id": "ora-gis-endpoint-liveping",
+      "cronExpression": "35 6 9 3,6,9,12 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-gis-endpoint-liveping\\SKILL.md",
+      "createdAt": 1783882897552,
+      "missedRunScanFloor": "2026-09-11T20:35:00.851Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "notifySessionId": "local_83ec2d1e-8f95-43e2-b283-1e63a4411534"
+    },
+    {
+      "id": "ora-ic-memo-pipeline-reconciliation",
+      "cronExpression": "30 10 * * 2",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-ic-memo-pipeline-reconciliation\\SKILL.md",
+      "createdAt": 1784124311736,
+      "lastRunAt": "2026-09-22T14:30:53.447Z",
+      "lastScheduledFor": "2026-09-22T14:30:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:15:43.167Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "notifySessionId": "local_1ae3a9d0-73b4-4cfc-a882-697dba3de1ba",
+      "observedToolUse": {
+        "promptHash": "fa01c4d4497287217e834fcb9dc74b8309de16ba0336cedadaab736d17194bda",
+        "promptSalt": "0bac4ab4778834a16d325a90fa9bdac4",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 2,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1790087554230,
+        "firstRunAt": 1789483746057,
+        "lastRunAt": 1790087576038
+      }
+    },
+    {
+      "id": "ora-underwrite-doctrine-staleness-check",
+      "migratedFromSpaceId": "40169763-c71e-4675-996f-60568612dde2",
+      "cronExpression": "0 13 * * 3",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-underwrite-doctrine-staleness-check\\SKILL.md",
+      "createdAt": 1784574870766,
+      "lastRunAt": "2026-09-05T18:55:23.853Z",
+      "lastScheduledFor": "2026-09-02T17:00:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:16:07.649Z",
+      "userSelectedFolders": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Business\\754 Old State"
+      ],
+      "userSelectedProjectUuids": [
+        "01a0a586-4f8f-7148-9645-b75d75683094"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_config"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        }
+      ],
+      "notifySessionId": "local_d863a67f-8c79-4ff2-91c0-a57bbc9fe256",
+      "observedToolUse": {
+        "promptHash": "f16b1b8d1ae3b6e25d176a8f7da1428dc51b6fe1d464ef63fea151c94d63b809",
+        "promptSalt": "a0a8ad90e967b55a6c509ff7581bea0e",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 0,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "firstRunAt": 1788347410811,
+        "lastRunAt": 1788347410811
+      }
+    },
+    {
+      "id": "ora-cowork-heartbeat",
+      "cronExpression": "50 5 * * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-cowork-heartbeat\\SKILL.md",
+      "createdAt": 1784671845864,
+      "lastRunAt": "2026-09-15T14:50:04.486Z",
+      "lastScheduledFor": "2026-09-15T09:50:00.000Z",
+      "missedRunScanFloor": "2026-08-21T21:10:35.214Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "notifySessionId": "local_ae7ef681-aa8c-4575-9416-b03ad1760328",
+      "observedToolUse": {
+        "promptHash": "fbae24cd99fe2a8263138cb9912e3431deef36197981202ef518ce0ff0a5fe02",
+        "promptSalt": "64b0ce83959cecfd642ef004912886e3",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789394832914,
+        "firstRunAt": 1789394849332,
+        "lastRunAt": 1789483859263
+      }
+    },
+    {
+      "id": "ora-exit-cap-spotcheck",
+      "migratedFromSpaceId": "dbbb08d2-fa48-4da3-aeb5-2cda3367134e",
+      "cronExpression": "45 6 9 3,6,9,12 *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-exit-cap-spotcheck\\SKILL.md",
+      "createdAt": 1785004252792,
+      "missedRunScanFloor": "2026-09-21T17:15:59.689Z",
+      "userSelectedFolders": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Investment Candidates -- 2026"
+      ],
+      "userSelectedProjectUuids": [
+        "01a0a6c7-d7fa-7611-a159-132397d36379"
+      ],
+      "notifySessionId": "local_5ca5281b-cdc6-4b8c-8f14-bf0a78248c3d"
+    },
+    {
+      "id": "ora-critical-deadlines-scan",
+      "cronExpression": "5 9 * * 4",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-critical-deadlines-scan\\SKILL.md",
+      "createdAt": 1785092384324,
+      "lastRunAt": "2026-09-05T18:55:25.228Z",
+      "lastScheduledFor": "2026-09-03T13:05:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:35:07.135Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Business\\9050 Red Branch Rd\\Leases\\Solar lease Change Order -- 9050 Red Branch Road King Energy 03-2026.pdf",
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Business\\9050 Red Branch Rd\\Leases\\Solar lease -- 9050 Red Branch Road King Energy 03-2025.pdf",
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Business\\2203-2207 Northwood\\Leases\\King Energy Lease Memorandum 5.15.2026 -- 2203- 2207 Northwood Drive.pdf",
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Business\\2203-2207 Northwood\\Leases\\Solar Roof King Energy Lease  +Order Form 03.11.2026 -- 2203-2207 Northwood Drive.pdf"
+      ],
+      "userSelectedProjectUuids": [
+        "019f9faa-92df-738e-b4bc-f8ba9915bf61"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__create_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_process_output"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "notifySessionId": "local_6f036795-d440-467e-8675-86c9e2d1fad5",
+      "observedToolUse": {
+        "promptHash": "e913d1a6277eff6ea0d806c9f4380d457e783cb5c94f59ab0a2301e26ab31d68",
+        "promptSalt": "33918e258a32b88f08fc9c5ae7560737",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788425497910,
+        "firstRunAt": 1788425517867,
+        "lastRunAt": 1788425517867
+      }
+    },
+    {
+      "id": "ora-capex-idea-stage-nudge",
+      "cronExpression": "15 12 1 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-capex-idea-stage-nudge\\SKILL.md",
+      "createdAt": 1785098021210,
+      "lastRunAt": "2026-09-02T09:38:06.904Z",
+      "lastScheduledFor": "2026-09-01T16:15:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:35:09.902Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "notifySessionId": "local_78af242b-b60b-4f93-9b83-c8fc11da0892"
+    },
+    {
+      "id": "ora-tenant-contact-gap-sweep",
+      "cronExpression": "50 10 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-tenant-contact-gap-sweep\\SKILL.md",
+      "createdAt": 1785167879370,
+      "lastRunAt": "2026-09-14T15:46:21.968Z",
+      "lastScheduledFor": "2026-09-14T14:50:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:14:16.989Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-lease-expiration-brief\\SKILL.md"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__interact_with_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_process_output"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "observedToolUse": {
+        "promptHash": "49a5b4438ad3d4699ee72e8bdb2d32facd059eeac90ebffe57e06181fc75a7b0",
+        "promptSalt": "6d68ffb3008f09dd618cd4b1554ddd0a",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 0,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "firstRunAt": 1788795361417,
+        "lastRunAt": 1789401374160
+      }
+    },
+    {
+      "id": "ora-health-guard-fail-aging-nudge",
+      "cronExpression": "0 9 * * 1-5",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-health-guard-fail-aging-nudge\\SKILL.md",
+      "createdAt": 1785168288900,
+      "lastRunAt": "2026-09-15T14:44:04.610Z",
+      "lastScheduledFor": "2026-09-15T13:00:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:35:12.640Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-monday-sync\\SKILL.md"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "observedToolUse": {
+        "promptHash": "8c72bc7d79be9ad1799a1f09fd266f8f7a951c5fbbce2af5bc75cbf7eb97758c",
+        "promptSalt": "8fed33c618bf7b08716e025a0263262e",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789483749261,
+        "firstRunAt": 1789395010839,
+        "lastRunAt": 1789483762265
+      }
+    },
+    {
+      "id": "ora-dd-critical-tracker",
+      "cronExpression": "35 9 * * 4",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-dd-critical-tracker\\SKILL.md",
+      "createdAt": 1785168330593,
+      "lastRunAt": "2026-09-05T19:06:55.886Z",
+      "lastScheduledFor": "2026-09-03T13:35:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:35:14.422Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-monday-sync\\SKILL.md"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        }
+      ],
+      "observedToolUse": {
+        "promptHash": "3ecb4f964b9b4cc46c54c04dceed155d8f334e90c33c6d56e11dd0b9f22c5d34",
+        "promptSalt": "aa9d596673d6e0fcf95364f2ecc46986",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 2,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788635511516,
+        "firstRunAt": 1788425685616,
+        "lastRunAt": 1788635525691
+      }
+    },
+    {
+      "id": "ora-insurance-renewal-monitor",
+      "cronExpression": "40 11 * * 1",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-insurance-renewal-monitor\\SKILL.md",
+      "createdAt": 1785298403635,
+      "lastRunAt": "2026-09-14T15:54:17.613Z",
+      "lastScheduledFor": "2026-09-14T15:40:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:35:15.678Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "userSelectedProjectUuids": [
+        "019fabb0-4f75-76f1-873e-b67900116e1e"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_search"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_more_search_results"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__get_file_info"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__create_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        }
+      ],
+      "notifySessionId": "local_55b4e50f-9767-4993-bff6-3fc48f5d13b3",
+      "observedToolUse": {
+        "promptHash": "3212137e036c79b115d4400c803e396fc508e74a9fe29b235cc1f620fb1c8368",
+        "promptSalt": "2ecb3680a3d8ef434aa0d8fcc1f4a5f3",
+        "observedToolsVersion": 2,
+        "runsObserved": 2,
+        "localMcpRuns": 2,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1789402045664,
+        "firstRunAt": 1788796318718,
+        "lastRunAt": 1789402099385
+      }
+    },
+    {
+      "id": "ora-counsel-review-standard-positions-2027",
+      "fireAt": 1817211600000,
+      "enabled": true,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-counsel-review-standard-positions-2027\\SKILL.md",
+      "createdAt": 1785786070384,
+      "userSelectedFolders": []
+    },
+    {
+      "id": "ora-loan-terms-reconciliation",
+      "cronExpression": "20 13 6 * *",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-loan-terms-reconciliation\\SKILL.md",
+      "createdAt": 1787002516455,
+      "lastRunAt": "2026-09-06T17:21:06.791Z",
+      "lastScheduledFor": "2026-09-06T17:20:00.000Z",
+      "missedRunScanFloor": "2026-09-21T17:14:11.343Z",
+      "userSelectedFolders": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        }
+      ],
+      "notifySessionId": "local_bdd6b957-603d-40c2-b10c-64a906fc2c44",
+      "observedToolUse": {
+        "promptHash": "484f5b259152bb4e2bbed4242ff680aae1d2cb79c3058704de3e4d47710d9b81",
+        "promptSalt": "a0d94fc78cf460da775e590f183e67c5",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 1,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "lastLocalToolAt": 1788717040537,
+        "firstRunAt": 1788717565441,
+        "lastRunAt": 1788717565441
+      }
+    },
+    {
+      "id": "ora-hubspot-notion-contact-sync",
+      "cronExpression": "45 13 * * 4",
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-hubspot-notion-contact-sync\\SKILL.md",
+      "createdAt": 1787586091895,
+      "lastRunAt": "2026-09-05T19:06:58.716Z",
+      "lastScheduledFor": "2026-09-03T17:45:00.000Z",
+      "missedRunScanFloor": "2026-09-11T20:35:18.956Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-lease-expiration-brief\\SKILL.md",
+        "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-tenant-contact-gap-sweep\\SKILL.md"
+      ],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "Read",
+          "ruleContent": "//c/Users/Owner/**"
+        },
+        {
+          "toolName": "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__manage_crm_objects"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__list_directory"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__move_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__start_process"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__edit_block"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        }
+      ],
+      "observedToolUse": {
+        "promptHash": "18df591a5c51eee9984de31221d0701b6eb8ca71d540f68c4d9da3f80a15af9c",
+        "promptSalt": "fcdd7a6929e8fd31fd1e693169f30861",
+        "observedToolsVersion": 2,
+        "runsObserved": 1,
+        "localMcpRuns": 0,
+        "chromeRuns": 0,
+        "computerUseRuns": 0,
+        "requestFolderAccessRuns": 0,
+        "firstRunAt": 1788635499137,
+        "lastRunAt": 1788635499137
+      }
+    },
+    {
+      "id": "ora-lams-fleet-resume-20260911",
+      "displayName": "LAMS fleet bounded-pause resume (2026-09-11 16:01 ET)",
+      "fireAt": 1789156860000,
+      "enabled": false,
+      "filePath": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-lams-fleet-resume-20260911\\SKILL.md",
+      "createdAt": 1788801166078,
+      "lastRunAt": "2026-09-11T20:01:37.879Z",
+      "lastScheduledFor": "2026-09-11T20:01:00.000Z",
+      "userSelectedFolders": [],
+      "userSelectedFiles": [],
+      "approvedPermissions": [
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__read_file"
+        },
+        {
+          "toolName": "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages"
+        },
+        {
+          "toolName": "mcp__plugin_desktop-commander_desktop-commander__write_file"
+        }
+      ],
+      "notifySessionId": "local_da265f88-878f-4460-b85d-3df92a6f4e9b"
+    }
+  ],
+  "recordedSkips": {},
+  "sundayAliasBoundaryStamped": true,
+  "dayFieldsOrBoundaryStamped": true
+}

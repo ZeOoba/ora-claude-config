@@ -1,0 +1,118 @@
+ORA FLEET STATUS  (DUAL-FLEET: cc = claude-code-sessions/MCP Â· lams = local-agent-mode-sessions/Cowork)
+generated_at: 2026-09-22T16:40:58
+host_clock: Eastern Daylight Time (UTC-04:00); Eastern now -04:00
+registry[cc]: C:\Users\Owner\AppData\Roaming\Claude\claude-code-sessions\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\583f08bc-0123-4111-8158-8fe3d927e350\scheduled-tasks.json
+registry[lams]: C:\Users\Owner\AppData\Roaming\Claude\local-agent-mode-sessions\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\583f08bc-0123-4111-8158-8fe3d927e350\scheduled-tasks.json
+====================================================================================
+!! SNAPSHOT, NOT LIVE STATE: task enabled/lastRunAt can change within minutes, especially during an AM catch-up burst (throttle-delayed fires + auto-disable on completion). Re-run this script (or list_scheduled_tasks) immediately before acting on any flagged item -- do not act on a forwarded/pasted copy of this output.
+====================================================================================
+TASK                                       FLEET CRON             EN   SKIP  LAST RUN
+------------------------------------------------------------------------------------
+ora-aaos-expire-leases                     cc    20 7 * * 1       OFF  0     2026-09-14T14:03:33
+ora-aaos-publish-contracts                 cc    15 9 * * 2       OFF  0     2026-09-22T13:34:16
+ora-acquisition-underwriting-eval-harness  cc    14 12 * * 3      OFF  0     2026-09-14T16:23:44
+ora-am-brief                               cc    0 6 * * *        on   0     2026-09-22T13:34:16
+ora-appsec-sweep                           cc    30 13 * * 3      OFF  0     2026-09-05T19:40:59
+ora-ar-feed-sweep                          cc    20 8 * * 1       OFF  0     2026-09-14T14:28:24
+ora-audit-log-sweep                        cc    10 14 3 * *      OFF  0     2026-09-18T21:05:03
+ora-broker-touch-cadence                   cc    40 13 2 * *      OFF  0     2026-09-05T19:34:59
+ora-calibration-snapshot                   cc    30 15 1 1,4,7,10 OFF  0     2026-07-22T22:01:55
+ora-cc-schematic-refresh                   cc    15 14 * * 4      OFF  0     2026-09-14T18:36:18
+ora-cc-snapshot-refresh                    cc    15 6 * * 1       OFF  0     2026-09-14T14:20:24
+ora-checkout-merge-forward                 cc    45 16 * * 5      OFF  0     2026-09-21T20:47:07
+ora-claude-setup-audit                     cc    0 10 1 * *       OFF  0     2026-09-05T20:46:14
+ora-command-center-mirror-drift-check      cc    40 10 * * 1      OFF  0     2026-09-14T14:44:29
+ora-county-sales-monitor                   cc    25 10 15 * *     OFF  0     NEVER (registered 37d ago, 2026-08-16)
+ora-deal-aging-sla                         cc    25 9 * * 1       OFF  0     2026-09-14T14:08:25
+ora-deal-command-board                     cc    50 9 * * 1       OFF  0     2026-09-14T14:05:40
+ora-deal-sourcing-scan                     cc    45 10 * * 2      OFF  0     2026-09-05T17:28:02
+ora-doctrine-integrity-guard               cc    55 12 * * 3      OFF  0     2026-09-14T18:36:18
+ora-entry-market-scan                      cc    45 11 * * 2      OFF  0     2026-09-07T15:50:57
+ora-excess-usage-sweep                     cc    0 15 * * 5       OFF  0     2026-09-18T19:02:30
+ora-financial-code-integrity-sweep         cc    30 13 * * 1      OFF  0     2026-09-21T17:41:54
+ora-forward-calendar-digest                cc    10 12 * * 1      OFF  0     2026-09-21T16:19:44
+ora-ground-truth-auditor                   cc    0 4 * * 2        OFF  0     2026-09-22T13:34:16
+ora-health-guard                           cc    15 5 * * 1       OFF  0     2026-09-14T13:56:16
+ora-hubspot-renewal-closeout-tasks         cc    50 10 * * 1      OFF  15    2026-09-21T15:29:35
+ora-incentive-registry-refresh             cc    20 13 2 1,4,7,10 OFF  0     NEVER
+ora-jackson-boe-prep-reminder              cc    @2027-06-15      on   0     NEVER
+ora-lease-snapshot-refresh                 cc    40 7 * * 1       OFF  0     2026-09-14T14:21:29
+ora-loan-balance-check                     cc    35 11 21 * *     OFF  0     NEVER
+ora-loopnet-listings-sync                  cc    40 10 * * 1      OFF  7     2026-09-21T15:21:35
+ora-master-workbook-ingest                 cc    45 5 * * 1       OFF  0     2026-09-14T13:56:16
+ora-memory-commit-sweep                    cc    0 19 * * 5       OFF  0     2026-09-14T14:27:25
+ora-model-release-watch                    cc    20 11 * * 1      OFF  0     2026-09-21T15:27:26
+ora-monthly-portfolio-briefing             cc    45 7 1 * *       OFF  0     2026-09-02T09:34:15
+ora-noi-opportunity-digest                 cc    40 13 3 * *      OFF  0     NEVER
+ora-notion-trial-expiry-reminder           cc    @2026-09-29      on   0     NEVER
+ora-open-sessions-board                    cc    0 17 * * 5       OFF  0     2026-09-11T21:08:38
+ora-passed-deal-tracker                    cc    30 6 15 * *      OFF  0     NEVER (registered 37d ago, 2026-08-16)
+ora-pm-daily-crons                         cc    40 9 * * 1       OFF  0     2026-09-14T14:29:24
+ora-pm-ledger                              cc    0 15 * * 5       OFF  0     2026-09-13T19:09:48
+ora-pm-monthly-billing                     cc    10 11 1 * *      OFF  0     NEVER (registered 31d ago, 2026-08-22)
+ora-prepush-gate-sweep                     cc    0 11 * * 4       OFF  0     NEVER
+ora-psa-drift-watch                        cc    45 13 * * 3      OFF  0     2026-09-05T20:39:00
+ora-recovery-structure-audit-annual        cc    0 14 5 1 *       OFF  0     NEVER
+ora-renewal-hubspot-reconcile              cc    20 10 * * 1      OFF  4     2026-09-21T15:18:36
+ora-resume-0928-attend-reminder            cc    @2026-09-28      on   0     NEVER
+ora-routine-pause-resume-09-28             cc    @2026-09-28      on   0     NEVER
+ora-site-exposure-probe                    cc    50 9 * * 3       OFF  0     2026-09-05T18:55:26
+ora-sofr-direct-prefetch                   cc    10 10 * * 1      OFF  0     2026-09-14T14:18:25
+ora-task-integrity-guard                   cc    5 7 * * 1        OFF  0     2026-09-14T13:56:16
+ora-tenant-hubspot-reconciliation          cc    15 8 1 * *       OFF  0     2026-09-05T19:48:59
+ora-vacancy-aging-report                   cc    20 8 * * 2       OFF  1     2026-09-22T13:36:07
+ora-weekly-hygiene                         cc    15 20 * * 0      OFF  0     2026-09-14T14:03:33
+ora-wicomico-reassessment-reminder         cc    @2027-01-08      on   0     NEVER
+automation-health-monitor                  lams  5 11 * * 1-5     OFF  0     2026-09-15T15:14:55
+ora-ar-export-freshness-nudge              lams  30 11 1,15 * *   OFF  0     2026-09-15T15:44:05
+ora-bearmode-refresh                       lams  25 6 9 3,6,9,12  OFF  0     2026-07-12T17:04:37
+ora-capex-idea-stage-nudge                 lams  15 12 1 * *      OFF  0     2026-09-02T09:38:06
+ora-consolidate-memory-monthly             lams  0 5 2 * *        OFF  0     2026-09-02T09:35:05
+ora-counsel-review-standard-positions-2027 lams  @2027-08-02      on   0     NEVER
+ora-cowork-heartbeat                       lams  50 5 * * *       OFF  0     2026-09-15T14:50:04
+ora-critical-deadlines-scan                lams  5 9 * * 4        OFF  0     2026-09-05T18:55:25
+ora-dd-critical-tracker                    lams  35 9 * * 4       OFF  0     2026-09-05T19:06:55
+ora-exit-cap-spotcheck                     lams  45 6 9 3,6,9,12  OFF  0     NEVER (registered 58d ago, 2026-07-26)
+ora-friday-closeout                        lams  30 16 * * 5      OFF  0     2026-09-05T17:32:00
+ora-gis-endpoint-liveping                  lams  35 6 9 3,6,9,12  OFF  0     NEVER (registered 68d ago, 2026-07-16)
+ora-health-guard-fail-aging-nudge          lams  0 9 * * 1-5      OFF  0     2026-09-15T14:44:04
+ora-hubspot-notion-contact-sync            lams  45 13 * * 4      OFF  0     2026-09-05T19:06:58
+ora-ic-memo-pipeline-reconciliation        lams  30 10 * * 2      OFF  0     2026-09-22T14:30:53
+ora-insurance-renewal-monitor              lams  40 11 * * 1      OFF  0     2026-09-14T15:54:17
+ora-lams-fleet-resume-20260911             lams  EXPIRED@2026-09-11 OFF  0     2026-09-11T20:01:37
+ora-lease-expiration-brief                 lams  45 10 * * 1      OFF  0     2026-09-14T14:50:32
+ora-loan-terms-reconciliation              lams  20 13 6 * *      OFF  0     2026-09-06T17:21:06
+ora-monday-sync                            lams  35 10 * * 1      OFF  0     2026-09-14T14:44:27
+ora-om-intake-ocr                          lams  15 6 * * 3       OFF  0     2026-09-05T17:32:00
+ora-owner-outreach-queue-refresh           lams  55 10 * * 1      OFF  0     2026-09-14T15:46:19
+ora-replacement-cost-refresh               lams  10 6 9 3,6,9,12  OFF  0     2026-07-12T17:05:08
+ora-session-sweep                          lams  0 20 * * 0       OFF  0     2026-09-14T14:06:28
+ora-skill-store-drift-check                lams  10 12 * * 1      OFF  0     2026-09-14T16:17:40
+ora-skill-text-audit                       lams  45 9 15 * *      OFF  0     2026-09-15T14:44:05
+ora-stale-pipeline-nudge                   lams  15 10 * * 4      OFF  0     2026-09-05T17:38:54
+ora-tenant-contact-gap-sweep               lams  50 10 * * 1      OFF  0     2026-09-14T15:46:21
+ora-underwrite-doctrine-staleness-check    lams  0 13 * * 3       OFF  0     2026-09-05T18:55:23
+------------------------------------------------------------------------------------
+
+HEALTH SUMMARY
+  total tasks ........ 84   (enabled 7 / disabled 77)  per-fleet enabled: cc=6, lams=1
+  never-ran .......... 16   ora-counsel-review-standard-positions-2027, ora-county-sales-monitor, ora-exit-cap-spotcheck, ora-gis-endpoint-liveping, ora-incentive-registry-refresh, ora-jackson-boe-prep-reminder, ora-loan-balance-check, ora-noi-opportunity-digest, ora-notion-trial-expiry-reminder, ora-passed-deal-tracker, ora-pm-monthly-billing, ora-prepush-gate-sweep, ora-recovery-structure-audit-annual, ora-resume-0928-attend-reminder, ora-routine-pause-resume-09-28, ora-wicomico-reassessment-reminder
+      of which overdue  4   ora-county-sales-monitor [cc] (first slot 2026-09-15T14:25Z elapsed >24h unfired), ora-passed-deal-tracker [cc] (first slot 2026-09-15T10:30Z elapsed >24h unfired), ora-exit-cap-spotcheck [lams] (first slot 2026-09-09T10:45Z elapsed >24h unfired), ora-gis-endpoint-liveping [lams] (first slot 2026-09-09T10:35Z elapsed >24h unfired)
+  one-time fireAt .... 7   ora-counsel-review-standard-positions-2027, ora-jackson-boe-prep-reminder, ora-lams-fleet-resume-20260911, ora-notion-trial-expiry-reminder, ora-resume-0928-attend-reminder, ora-routine-pause-resume-09-28, ora-wicomico-reassessment-reminder
+  EXPIRED one-time ... 1   ora-lams-fleet-resume-20260911
+      of which missed/stuck 0   - (normal completions)
+  missed single cycle (currently open) 0   -
+      NOTE: point-in-time only -- a gap that already self-healed (task fired again since) is invisible here; see OI-070 and the scheduler's own run log for history.
+  pause-explained (NOT missed) 0   -
+      pause record: 2 recorded window(s)  (_state/fleet-pause-windows.json; advisory, never a FAIL)
+  throttle skips ..... 27 events across 4 tasks (all-time)
+                       top: ora-hubspot-renewal-closeout-tasks=15, ora-loopnet-listings-sync=7, ora-renewal-hubspot-reconcile=4, ora-vacancy-aging-report=1
+      of which last 24h 1   ora-vacancy-aging-report=1
+  same-time collisions 4   10:40:{ora-command-center-mirror-drift-check,ora-loopnet-listings-sync}; 10:50:{ora-hubspot-renewal-closeout-tasks,ora-tenant-contact-gap-sweep}; 12:10:{ora-forward-calendar-digest,ora-skill-store-drift-check}; 15:00:{ora-pm-ledger,ora-excess-usage-sweep}
+  duplicate registrations 0 -
+  AM pileup (05-0930). 23 tasks
+
+  VERDICT: ATTENTION -- 4 never-ran past their expected cadence; 1 throttle skip(s) in the last 24h; 4 schedule collisions
+  !! ATTENTION snapshot at 2026-09-22T16:40:58 -- SNAPSHOT, NOT LIVE STATE: task enabled/lastRunAt can change within minutes, especially during an AM catch-up burst (throttle-delayed fires + auto-disable on completion). Re-run this script (or list_scheduled_tasks) immediately before acting on any flagged item -- do not act on a forwarded/pasted copy of this output.
+
+--stderr--
