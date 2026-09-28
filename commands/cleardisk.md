@@ -16,3 +16,6 @@ Then tell the user, in one line: "A window is opening — it will close this GUI
 - `clear-disk` clears the npm content cache and deletes non-core `_npx` CLI dirs, while PRESERVING the Outlook/`mcp-remote` bridge so it is not re-downloaded.
 - Removed CLI tools (netlify, supabase, wrangler, etc.) simply re-fetch on next use — nothing breaks.
 - This GUI session will end when the detached window quits it — that is expected.
+
+## See also
+For the LAMS/Cowork session-store's own disk growth (`audit.jsonl`, unrelated to the npm/CLI caches above and safe to run alongside live work, no GUI quit needed), use `/cleardisk-sessions` instead.
