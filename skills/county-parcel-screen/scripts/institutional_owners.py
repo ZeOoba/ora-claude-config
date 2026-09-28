@@ -20,10 +20,10 @@ adjudicate before outreach (the DUKE COMBINED lesson: never silently drop on a w
 ORA-SELF (per Gabriel 2026-06-10): KEEP + flag ORA-AFFILIATED, never drop — 'OXFORD CAMPUS
 I LLC' mail-name FP showed drops lose real prospects. NEVER-CALL (deal counterparties) = drop.
 """
+import datetime
 import json
 import os
 import re
-import sys
 
 def _norm(s):
     s = re.sub(r'[^A-Z0-9& ]', ' ', str(s or '').upper())
@@ -99,23 +99,84 @@ _ST_SUFFIX = r'(RD|ROAD|DR|DRIVE|ST|STREET|AVE|AVENUE|LN|LANE|BLVD|CT|COURT|CIR|
 # ---- ORA self / never-call ----
 # Counterparty patterns live in the UNTRACKED data/pipeline-guard.local.json
 # (externalized 2026-06-11 — deal counterparty names never live in this tracked
-# file). Missing file -> ORA-self-only floor + loud warning, never a silent skip.
-_GUARD_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           '..', 'data', 'pipeline-guard.local.json')
+# file). It is gitignored on purpose and exists in exactly ONE place on this
+# machine, under ~/.claude/skills/ — NOT in the ora-skills repo checkout and NOT
+# in the AppData plugin bundle.
+#
+# FAIL-LOUD, hardened 2026-09-18. This used to resolve the guard RELATIVE to
+# __file__ and, on failure, warn and fall back to an ORA-self-only floor. That
+# relative path resolves to nothing whenever the skill executes from any copy
+# other than ~/.claude/skills/, so the fallback fired in normal use and its
+# warning went unacted-on: the 2026-09-18 Jackson MO ring screen shipped a call
+# list screened against ORA-self patterns only (…JacksonMO_Summary_v01.md, the
+# 'honest limits' item on the degraded floor), and the same-day
+# Howard MD run recorded that the relative path "resolves into the plugin cache,
+# where the file does not exist, and would have degraded the floor silently".
+# A degraded floor is no longer an allowed run mode: "no match" from a degraded
+# screen is not the same as screened. Load the CANONICAL ABSOLUTE PATH or raise.
+_GUARD_FILE = os.environ.get(
+    'ORA_PIPELINE_GUARD',
+    r'C:\Users\Owner\.claude\skills\county-parcel-screen\data\pipeline-guard.local.json')
+
+
+class PipelineGuardUnavailable(RuntimeError):
+    """The never-call counterparty floor could not be loaded. STOP the run."""
+
+
+def guard_evidence():
+    """Path / mtime (UTC) / entry counts, for the workbook README and run summary.
+
+    Every deliverable must record this as proof the floor was actually applied
+    (SKILL.md 'Counterparty floor' rule 4). Reports BOTH counts: never_call_names
+    is what callers pass to the workflow, never_call_patterns is what THIS module
+    actually screens on — they are not the same list and a deliverable that cites
+    only the former can look screened while the pattern list is empty.
+
+    mtime is UTC ISO-8601 with a trailing Z, matching test-pipeline-match.mjs, so
+    the same guard file reads identically whichever consumer recorded it.
+    """
+    try:
+        st = os.stat(_GUARD_FILE)
+    except OSError as e:
+        raise PipelineGuardUnavailable(
+            'guard %r vanished after load (%s) -- STOP; do not ship a deliverable '
+            'whose floor cannot be evidenced.' % (_GUARD_FILE, e))
+    return {
+        'path': os.path.abspath(_GUARD_FILE),
+        'modified': datetime.datetime.fromtimestamp(
+            st.st_mtime, datetime.timezone.utc).isoformat(timespec='milliseconds'
+                                                          ).replace('+00:00', 'Z'),
+        'never_call_names': len(_GUARD_RAW.get('never_call_names', [])),
+        'never_call_patterns': len(_GUARD_RAW.get('never_call_patterns', [])),
+    }
 
 
 def _load_guard():
     try:
         with open(_GUARD_FILE, encoding='utf-8') as f:
             g = json.load(f)
-        return (list(g.get('ora_self_patterns', [])),
-                [tuple(x) for x in g.get('never_call_patterns', [])],
-                g)
     except Exception as e:
-        sys.stderr.write('WARN institutional_owners: pipeline-guard.local.json '
-                         'unreadable (%s) -- never-call screening DEGRADED to '
-                         'ORA-self only.\n' % e)
-        return ([r'\bOXFORD\b', r'\bGOLDBERG\b'], [], {})
+        raise PipelineGuardUnavailable(
+            'never-call counterparty floor UNAVAILABLE -- cannot load %r (%s).\n'
+            'This is a STOP, not a warning: do not score, rank, or produce any '
+            'call list, workbook or summary. The guard file is untracked and '
+            'lives only at the canonical absolute path above; set '
+            'ORA_PIPELINE_GUARD to override. Degraded ORA-self-only screening '
+            'was removed 2026-09-18 (Jackson MO run shipped a degraded list).'
+            % (_GUARD_FILE, e))
+    # Gate on BOTH lists. never_call_patterns is what ora_never_call() below
+    # actually screens on; never_call_names is what callers hand to
+    # parcel-screen-fanout.js. A guard carrying one but not the other passes a
+    # single-key check while screening nothing on the other path.
+    missing = [k for k in ('never_call_names', 'never_call_patterns') if not g.get(k)]
+    if missing:
+        raise PipelineGuardUnavailable(
+            'never-call counterparty floor INCOMPLETE in %r -- empty or absent: %s. '
+            'A guard missing either list screens nothing on that path. STOP the run.'
+            % (_GUARD_FILE, ', '.join(missing)))
+    return (list(g.get('ora_self_patterns', [])),
+            [tuple(x) for x in g.get('never_call_patterns', [])],
+            g)
 
 
 ORA_SELF, NEVER_CALL, _GUARD_RAW = _load_guard()
@@ -189,10 +250,16 @@ if __name__ == '__main__':
         bad += (not ok)
         print(f'{"OK " if ok else "FAIL"} MAIL {t!r:42} -> {got} ({canon})')
     # owner_test_cases come from the local guard file (counterparty names never
-    # live in this tracked file); absent file -> cases skipped loudly above.
+    # live in this tracked file). As of 2026-09-18 an absent/empty guard raises
+    # PipelineGuardUnavailable at import, so reaching here means it loaded.
+    ev = guard_evidence()
+    # This line is the template a run copies into its workbook README / summary,
+    # so it carries BOTH counts (SKILL.md rule 4).
+    print('GUARD %(path)s  modified=%(modified)s  never_call_names=%(never_call_names)d'
+          '  never_call_patterns=%(never_call_patterns)d' % ev)
     o_cases = [tuple(c) for c in _GUARD_RAW.get('owner_test_cases', [])]
     if not o_cases:
-        print('NOTE: owner_test_cases skipped (pipeline-guard.local.json absent)')
+        print('NOTE: guard loaded but carries no owner_test_cases')
     for t, want in o_cases:
         got, m = ora_never_call(t)
         ok = got == want
