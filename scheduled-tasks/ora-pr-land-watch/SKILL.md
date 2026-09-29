@@ -9,22 +9,31 @@ Compute the run date ONCE: `date '+%A %Y-%m-%d'`. Reuse it everywhere, with its 
 
 ## Step 0: double-fire guard (before ANY other step)
 The scheduler fires missed slots in a CATCH-UP BURST when the Desktop app reopens. This guard makes that burst, or an overlapping manual run, a no-op after the first run. Without it, the same queue would be polled twice and the summary sent twice.
-- SLOT is the latest cron slot at or before now (ET): `09`, `12`, `15`, `18` or `21` (a slot counts once its HH:35 has passed). Before 09:35 ET, SLOT is `pre09`. All runs of one burst compute the same SLOT, so only the first proceeds.
+- The block is the latest cron slot at or before now (ET). The sentinel works it out inside the claim, from the same clock reading as the date. Never do timezone math in the shell: Git Bash on this machine ignores `TZ=America/New_York` and silently returns UTC, which claimed the wrong slot on 2026-09-24.
 - RUN_ID: `date +%s` (compute once).
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-pr-land-watch --block slot-<slot> --run-id <run_id> --ttl-min 120
+```
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-pr-land-watch --slot-times 09:35,12:35,15:35,18:35,21:35 --run-id <run_id> --ttl-min 120
+```
 
+Take `<block>` VERBATIM from the claim output's `block` field (`slot-09` through `slot-21`, or `slot-pre09` before 09:35 ET) and reuse it for complete and fail. Never recompute it. All runs of one burst resolve the same block, so only the first proceeds.
+
+- Exit 2, or no `block` in the output → the guard is broken. Do not guess a slot and do not call complete or fail. Send the Step 4 failure email (subject `[pr-land-watch] guard failure — <run date>`) with the command output, then stop. This alerts rather than fails silently, because the same fault would recur on every run.
 - Exit 10 → this slot's run already completed. End the run silently: no poll, no email. This is a normal skip, not a miss.
 - Exit 11 → another run holds this slot. Stand down in the same way.
 - Exit 0 → proceed to Step 1.
 
 When the run ends normally (the silent stop in Step 2, or after the Step 4 email):
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-pr-land-watch --block slot-<slot> --run-id <run_id>
+```
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-pr-land-watch --block <block> --run-id <run_id>
+```
 
 If the run aborts instead:
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-pr-land-watch --block slot-<slot> --run-id <run_id> --error "<what broke>"
+```
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-pr-land-watch --block <block> --run-id <run_id> --error "<what broke>"
+```
 
 - ONLY the run holding the claim may call `complete` or `fail`. A run that stood down (exit 10 or 11) calls NEITHER.
 - The watcher's own in-flight window (150 min per due payload) separately stops one payload from running twice. This guard only dedupes the run itself.
@@ -59,10 +68,10 @@ Each due entry carries `id`, `repo`, `pr`, `mergeSha`, `attempt` and `payloadTex
   An unmarked due watch re-fires about 2.5h later, up to 3 attempts. Payloads are written to be idempotent.
 - Do NOT run `poll` again during this run: each poll spends attempts. For a read-only look at the queue, use `list`.
 
-## Step 4: one summary email (only when needsAttention was true, or Step 1 failed)
+## Step 4: one summary email (only when needsAttention was true, Step 1 failed, or the Step 0 guard failed)
 Send through Outlook COM, the SOLE send path:
 ```
-powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"
+powershell -File C:/Users/Owner/.claude/scheduled-tasks/_shared/send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"
 ```
 - Send to ggoldberg@oxfordra.net ONLY, with no cc.
 - On a nonzero exit, retry once, then flag it loudly in the run summary. Do not halt.
