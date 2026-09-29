@@ -18,9 +18,13 @@ export const meta = {
 //   args may also be a bare string[] of counties.
 //   Optional args.pipelineGuard = { deals:[{name,address}], counterparties:[...] }
 //     supplies the exclusion list directly and SKIPS the Phase-0 Notion fetch.
-//   args.neverCallNames (string[]) = the counterparty FLOOR — load it from
-//     data/pipeline-guard.local.json (UNTRACKED) before invoking; this tracked
-//     file deliberately carries no deal counterparty names (2026-06-11).
+//   args.neverCallNames (string[]) = the counterparty FLOOR — REQUIRED. Load it
+//     before invoking from the CANONICAL ABSOLUTE PATH (2026-09-18; this tracked
+//     file deliberately carries no deal counterparty names, 2026-06-11):
+//       C:\Users\Owner\.claude\skills\county-parcel-screen\data\pipeline-guard.local.json
+//     NEVER from a path relative to whichever copy of the skill is executing —
+//     the file is untracked and absent from both the ora-skills repo checkout
+//     and the AppData plugin bundle. Omitting it now THROWS; it used to degrade.
 //
 // PIPELINE GUARD (v2): the Notion Acquisition Pipeline Tracker (bcfe4a03) is
 //   DEAL-level, not parcel-level — there is no parcel-ID to join on. So the
@@ -57,14 +61,37 @@ if (!counties.length) {
 }
 
 // ---- pipeline-conflict matcher (pure; mirrored in test-pipeline-match.mjs) ----
-// Never-call floor is SUPPLIED via args.neverCallNames (the invoking session loads it
-// from data/pipeline-guard.local.json — counterparty names never live in this tracked
-// file; externalized 2026-06-11). Missing -> ORA-self-only floor + loud warning.
-const NEVER_CALL_NAMES = (cfg.neverCallNames && cfg.neverCallNames.length)
-  ? cfg.neverCallNames : ['OXFORD', 'GOLDBERG']
+// Never-call floor is SUPPLIED via args.neverCallNames. The invoking session loads it
+// from the CANONICAL ABSOLUTE PATH (counterparty names never live in this tracked file;
+// externalized 2026-06-11):
+//   C:\Users\Owner\.claude\skills\county-parcel-screen\data\pipeline-guard.local.json
+// FAIL-LOUD since 2026-09-18: an omitted floor used to degrade to ORA-self-only with a
+// warning. The same degraded-fallback shape in institutional_owners.py is what let the
+// 2026-09-18 Jackson MO ring screen ship a call list screened on ORA-self patterns only.
+// A degraded floor is no longer an allowed run mode here either — throw instead.
+const GUARD_PATH =
+  'C:\\Users\\Owner\\.claude\\skills\\county-parcel-screen\\data\\pipeline-guard.local.json'
+const STOP_HINT =
+  'Load never_call_names from ' + GUARD_PATH + ' (absolute path — NOT relative to ' +
+  'whichever copy of this skill is executing; it is absent from the repo checkout and ' +
+  'the plugin bundle) and pass it as args.neverCallNames. Record the guard path, UTC ' +
+  'mtime and BOTH entry counts (never_call_names and never_call_patterns) in the ' +
+  'deliverable. Degraded screening was removed 2026-09-18.'
 if (!cfg.neverCallNames || !cfg.neverCallNames.length) {
-  log('⚠ args.neverCallNames not supplied — counterparty floor DEGRADED to ORA-self only; load data/pipeline-guard.local.json and pass never_call_names.')
+  throw new Error(
+    'STOP: args.neverCallNames not supplied — the never-call counterparty floor is ' +
+    'UNAVAILABLE, so no call list may be produced. ' + STOP_HINT)
 }
+// The floor must come FROM THE GUARD FILE, never from the removed ORA-self pair.
+// Mirrors the regression in test-pipeline-match.mjs so the production path is held
+// to the same bar as the test harness.
+if (cfg.neverCallNames.length <= 2
+    && cfg.neverCallNames.every((n) => ['OXFORD', 'GOLDBERG'].includes(String(n).toUpperCase()))) {
+  throw new Error(
+    'STOP: args.neverCallNames is the degraded ORA-self pair — the removed fallback ' +
+    'has returned, so this run would screen no counterparty at all. ' + STOP_HINT)
+}
+const NEVER_CALL_NAMES = cfg.neverCallNames
 
 function norm(s) {
   return String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()

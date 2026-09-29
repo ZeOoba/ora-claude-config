@@ -3,23 +3,44 @@
 // import local modules, so they live inline there). KEEP IN SYNC.
 // Run:  node test-pipeline-match.mjs
 //
-// Counterparty/deal fixtures live in the UNTRACKED data/pipeline-guard.local.json
-// (externalized 2026-06-11 — deal names never live in this tracked file). If the
-// file is absent, deal-specific cases are SKIPPED loudly and the floor degrades.
+// Counterparty/deal fixtures live in the UNTRACKED pipeline-guard.local.json
+// (externalized 2026-06-11 — deal names never live in this tracked file).
+//
+// FAIL-LOUD, hardened 2026-09-18. This used to resolve the guard RELATIVE to this
+// file and, when absent, skip the deal cases and let the suite pass on a degraded
+// ORA-self floor — so the suite went green on exactly the installs where the floor
+// was broken. It now loads the CANONICAL ABSOLUTE PATH and exits non-zero if the
+// guard is missing or empty. Set ORA_PIPELINE_GUARD to override the path.
 
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readFileSync, statSync } from 'node:fs'
+import { env, exit } from 'node:process'
+
+const GUARD_FILE = env.ORA_PIPELINE_GUARD
+  ?? 'C:\\Users\\Owner\\.claude\\skills\\county-parcel-screen\\data\\pipeline-guard.local.json'
 
 let G = null
 try {
-  G = JSON.parse(readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'pipeline-guard.local.json'),
-    'utf8'))
-} catch {
-  console.log('⚠ data/pipeline-guard.local.json missing — deal-specific cases SKIPPED; floor degraded to ORA-self.')
+  G = JSON.parse(readFileSync(GUARD_FILE, 'utf8'))
+} catch (e) {
+  console.error(`FAIL  never-call counterparty floor UNAVAILABLE — cannot load ${GUARD_FILE}\n      ${e.message}`)
+  console.error('      The guard is untracked and lives ONLY at the canonical absolute path above;')
+  console.error('      it is absent from the ora-skills repo checkout and the AppData plugin bundle.')
+  console.error('      Degraded ORA-self-only screening was removed 2026-09-18 — this is a STOP.')
+  exit(1)
 }
-const NEVER_CALL_NAMES = G?.never_call_names ?? ['OXFORD', 'GOLDBERG']
+const NEVER_CALL_NAMES = G.never_call_names ?? []
+if (!NEVER_CALL_NAMES.length) {
+  console.error(`FAIL  guard ${GUARD_FILE} carries zero never_call_names — it screens nothing. STOP.`)
+  exit(1)
+}
+// Guard evidence, as every deliverable must record it (SKILL.md rule 4): path,
+// UTC mtime, and BOTH counts. never_call_names is what this workflow screens on;
+// never_call_patterns is what institutional_owners.py screens on — different
+// lists, so citing only one can look screened while the other is empty. Matches
+// institutional_owners.guard_evidence() byte for byte on the same file.
+console.log(`GUARD ${GUARD_FILE}  modified=${statSync(GUARD_FILE).mtime.toISOString()}`
+  + `  never_call_names=${NEVER_CALL_NAMES.length}`
+  + `  never_call_patterns=${(G.never_call_patterns ?? []).length}\n`)
 
 function norm(s) {
   return String(s || '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -54,13 +75,23 @@ function pipelineMatch(c, guard) {
 
 // Live pipeline shape (deal-level addresses + counterparty floor), as the Phase-0 guard returns it.
 const guard = {
-  deals: G?.test_deals ?? [],
+  deals: G.test_deals ?? [],
   counterparties: NEVER_CALL_NAMES,
+}
+
+// Regression for the 2026-09-18 fail-loud hardening: the floor must come from the
+// guard file, never from the old hardcoded ORA-self pair. If these two are all we
+// have, the degraded fallback is back and every "no match" below is meaningless.
+const degraded = NEVER_CALL_NAMES.length <= 2
+  && NEVER_CALL_NAMES.every((n) => ['OXFORD', 'GOLDBERG'].includes(String(n).toUpperCase()))
+if (degraded) {
+  console.error('FAIL  counterparty floor is the degraded ORA-self pair — the removed fallback has returned. STOP.')
+  exit(1)
 }
 
 // Deal-specific cases come from the local guard file; generic cases stay inline.
 const cases = [
-  ...(G?.mjs_guard_cases ?? []),
+  ...(G.mjs_guard_cases ?? []),
   ['Self-owned Oxford entity → hard drop',
     { owner: 'OXFORD INDUSTRIAL HOLDINGS LLC', siteAddress: '9 Anywhere Dr, Carlisle OH' }, 'counterparty'],
   ['Clean unrelated industrial parcel → no match',

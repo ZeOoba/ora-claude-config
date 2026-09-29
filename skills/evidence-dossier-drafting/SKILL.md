@@ -1,6 +1,6 @@
 ---
 name: evidence-dossier-drafting
-description: Multi-agent drafting pipeline that prevents plausible-but-wrong output - compile a numbered facts dossier (F-ids) from verified evidence, require every drafted claim to cite an F-id inline, then have an adversarial refuter kill uncited or mis-cited claims before anything publishes. Use when orchestrating 2+ subagent drafters producing documents, artifacts, reports, or memos whose factual claims must be verifiable (artifact refreshes, audit reports, closeout matrices, IC-adjacent summaries). Not needed for single-agent prose or pure-opinion content.
+description: Use when orchestrating 2+ subagent drafters producing documents, artifacts, reports, or memos whose factual claims must be verifiable (artifact refreshes, audit reports, closeout matrices, IC-adjacent summaries) — a facts dossier with inline F-id citations and an adversarial refuter pass that prevents plausible-but-wrong output. Not needed for single-agent prose or pure-opinion content.
 ---
 
 # Evidence-Dossier Drafting (F-id pipeline)
