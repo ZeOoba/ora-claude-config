@@ -172,6 +172,12 @@ UNGUARDED_BACKLOG = {
     "ora-recovery-billing-monthly",              # emails a billing-check summary
     "ora-recovery-structure-audit-annual",       # emails an annual summary
     "ora-wicomico-reassessment-reminder",        # one-time reminder email
+    # Added 2026-09-29. Registered (disabled, monthly, day 3) but its spec and script are
+    # deliberately NOT tracked: held out of PR #285 for OI-360 (archive overwrite, in-repo
+    # scanner-blind archive folder). The spec is untracked in the live checkout, so the
+    # ratchet saw it only there. Emails on errors / skipped_locked. Remove this entry in the
+    # same change that lands the task with a block-sentinel claim (OI-360, OI-363).
+    "ora-audit-log-sweep",
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
