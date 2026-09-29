@@ -121,7 +121,9 @@ STEP_LINE = re.compile(r"^\s{0,3}(?:\*\*)?(?:\d+[.)]|[A-Z]\.\d+|Step\s+\d+)", re
 
 # Flags `claim` accepts that `complete`/`fail` reject -- stripped when the same
 # parsed argv is reused to close the claim (a stray --ttl-min exits 2).
-CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0}
+# --slot-times (2026-09-24): claim resolves the block itself; the spec then closes
+# with the `block` claim emitted, which finalize_argv appends via `resolved_block`.
+CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0, "--slot-times": 1}
 
 # Frozen 2026-09-10. Side effects, no run guard. The documented per-task adoption
 # backlog (README-DOUBLE-FIRE-GUARD.md: "adoption is proven per-task, not
@@ -158,6 +160,18 @@ UNGUARDED_BACKLOG = {
     # live working tree -- which is how it reached a push gate as a surprise. Inert once
     # the task fires and its folder is archived.
     "ora-routine-pause-resume-09-21",
+    # Added 2026-09-28 (dirty-tree-triage, PR #284). Registered after the 2026-09-10
+    # inventory and UNTRACKED until that PR, so this suite passed at every commit and
+    # failed only in the live working tree. Each has a real side effect and no run guard;
+    # adopt the guard per task (README-DOUBLE-FIRE-GUARD.md) and remove the entry then.
+    "ora-hubspot-renewal-closeout-tasks",        # creates HubSpot tasks (manage_crm_objects)
+    "ora-incentive-registry-refresh",            # emails a summary
+    "ora-jackson-boe-prep-reminder",             # one-time reminder email
+    "ora-loopnet-listings-sync",                 # git push
+    "ora-noi-opportunity-digest",                # emails the monthly digest
+    "ora-recovery-billing-monthly",              # emails a billing-check summary
+    "ora-recovery-structure-audit-annual",       # emails an annual summary
+    "ora-wicomico-reassessment-reminder",        # one-time reminder email
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
@@ -172,6 +186,10 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-09-28: the sole claim is the STEP 0 line at :11, the run's first
+    # action. Step 1 only READS Notion and writes a %TEMP% json; the side effects all
+    # follow: COM send :32, Ops Hub Notion row :35.
+    "ora-loan-balance-check": "claim@11 precedes send@32, Ops Hub write@35",
     # Read by hand 2026-09-23 (v1.8 guard landed from the live file): the sole claim is
     # the fenced STEP 0-B block at :33. STEP 0-A (:18-24) runs first but only exits
     # silently. Side effects all follow: Deal Sourcing Log creates :96, COM send :125,
@@ -337,16 +355,25 @@ def flag_value(argv, flag, default=None):
     return default
 
 
-def finalize_argv(claim_argv, verb):
-    """Turn a parsed `claim ...` argv into the matching `complete`/`fail` argv."""
+def finalize_argv(claim_argv, verb, resolved_block=None):
+    """Turn a parsed `claim ...` argv into the matching `complete`/`fail` argv.
+
+    A `claim --slot-times` spec closes with the `block` the claim emitted (the
+    spec tells the run to reuse it verbatim), so pass it as `resolved_block`; it
+    replaces any literal --block."""
     out, i = [verb], 1
     while i < len(claim_argv):
         tok = claim_argv[i]
         if tok in CLAIM_ONLY_FLAGS:
             i += 1 + CLAIM_ONLY_FLAGS[tok]
             continue
+        if resolved_block and tok == "--block":
+            i += 2
+            continue
         out.append(tok)
         i += 1
+    if resolved_block:
+        out += ["--block", resolved_block]
     return out
 
 
@@ -543,7 +570,13 @@ def test_second_invocation_in_same_cycle_is_a_noop():
                     check("%s :: fire #1 claims" % label, False,
                           "exit %s %s" % (rc1, out1))
                     continue
-                rc, _ = run_sentinel(finalize_argv(argv, "complete"), state)
+                resolved = out1.get("block") if "--slot-times" in argv else None
+                if "--slot-times" in argv and not resolved:
+                    check("%s :: fire #1 emits a resolved block" % label, False, str(out1))
+                    continue
+                if resolved:
+                    label = "%s/%s" % (task, resolved)
+                rc, _ = run_sentinel(finalize_argv(argv, "complete", resolved), state)
                 if rc != 0:
                     check("%s :: fire #1 completes" % label, False, "exit %s" % rc)
                     continue

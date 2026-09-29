@@ -1,22 +1,20 @@
 ---
 name: county-sales-monitor
 description: >
-  ORA recurring industrial sales/transfer digest. Pulls recently RECORDED
-  industrial sales (bldg SF <150,000) from county-parcel-screen's endpoint
-  registry on a trailing 30-day window, flags non-arms-length/nominal
-  transfers, and writes each transaction into a queryable Notion comps
-  database with $/SF where derivable. Trigger on: recent industrial sales,
-  county sales tracker, sales digest, transaction monitor, comp tracking,
-  recent county transfers, industrial sales this month, what traded, who's
-  buying or selling industrial in a market, new comps since [date], set up a
-  sales feed — Franklin OH / Baltimore Co MD / Polk IA at launch, other ORA
-  markets are a documented next phase. MARKET INTELLIGENCE, not sourcing: does
-  NOT replace county-parcel-screen (off-market owner call lists, motivated
-  sellers, delinquent-tax/estate leads). Single-property comp grids route to
-  acquisition-underwriting COMPS mode. v0.5 — changelog in body.
+  Use when Gabriel wants a recurring digest of recently RECORDED industrial
+  sales and transfers (bldg SF <150,000) across ORA target-market counties, or
+  new comps for the Notion comps database. Trigger on: recent industrial
+  sales, county sales tracker, sales digest, transaction monitor, comp
+  tracking, recent county transfers, industrial sales this month, what traded,
+  who's buying or selling industrial in a market, new comps since [date], set
+  up a sales feed — Franklin OH / Baltimore Co MD / Polk IA at launch, other
+  ORA markets are a documented next phase. MARKET INTELLIGENCE, not sourcing:
+  does NOT replace county-parcel-screen (off-market owner call lists,
+  motivated sellers, delinquent-tax/estate leads). Single-property comp grids
+  route to acquisition-underwriting COMPS mode.
 ---
 
-# county-sales-monitor
+# county-sales-monitor (v0.5)
 
 Produce a recurring digest of recently recorded industrial sales and transfers
 across ORA's target-market counties, so Gabriel sees what actually traded — at
