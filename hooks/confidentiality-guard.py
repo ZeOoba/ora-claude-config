@@ -9,6 +9,8 @@ confidential-terms.json) from crossing any EXTERNAL egress boundary:
   * /outputs/ artifacts               (.pptx .docx .pdf .html .htm .csv)
   * Notion create/update tool calls   (mcp__*notion-(create|update|append|duplicate|move|comment)*)
   * Outlook send/draft/forward calls  (mcp__*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)*)
+  * live M365 / HubSpot send surfaces (outlook mail + calendar, Teams, SharePoint uploads,
+                                       HubSpot content writes -- MCP_SEND_SURFACES, 2026-09-30)
   * egress shell commands             (git push / curl / wget / scp / rsync-remote / Invoke-WebRequest)
 
 The deal legitimately exists INSIDE the brain, so INTERNAL reads/writes/commands are
@@ -45,7 +47,7 @@ repo) when this checkout's own copy is missing or unreadable and no explicit
 CONFIDENTIAL_TERMS_FILE_OVERRIDE is set. Still fail-closed if the file is unreadable in BOTH
 places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 """
-import sys, os, json, re, datetime, subprocess
+import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(HOOK_DIR, "lib")
@@ -71,7 +73,186 @@ ARTIFACT_EXT = (".pptx", ".docx", ".pdf", ".html", ".htm", ".csv")
 BUILD_MARKERS = ("/dist/", "\\dist\\", "/outputs/", "\\outputs\\", "mirror")
 
 NOTION_WRITE = re.compile(r"notion[-_]?(create|update|append|duplicate|move|comment)", re.I)
+# Composio-era pattern, kept verbatim so every name it ever matched still classifies.
 OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)", re.I)
+
+# --- Live M365 / HubSpot send surfaces (2026-09-30) ----------------------------------------------
+# Composio is gone; the live connector's tools are lowercase (mcp__<uuid>__outlook_send_mail ...),
+# and OUTLOOK_SEND above missed the reply drafts, update_draft and every calendar/Teams/SharePoint/
+# HubSpot write. Rule for inclusion: the tool carries free text that leaves the machine for a
+# recipient or a service outside the brain. Per tool:
+#   INCLUDED
+#   outlook_send_mail / send_draft / forward_mail ........ outbound mail (send_draft and forward_mail
+#       carry an id plus an optional note; the body they send is NOT in the payload -- see RESIDUAL)
+#   outlook_create_draft / create_reply_draft / create_reply_all_draft / update_draft
+#       ........ draft content that one send_draft call puts on the wire
+#   outlook_set_vacation ....... the auto-reply text goes to every external sender (externalAudience)
+#   outlook_create_event / update_event ........ an invite with attendees IS a send (subject, body,
+#       location reach every attendee)
+#   outlook_respond_to_event ... the optional comment is mailed to the organizer
+#   teams_send_chat_message / send_channel_message / reply_channel_message ........ outbound messages
+#   teams_create_chat .......... the group topic is shown to every member
+#   sharepoint_upload_file / update_file ........ file content written to a shareable library
+#   HubSpot manage_crm_objects . CRM records in a third-party SaaS
+#   HubSpot manage_blog_post / manage_landing_page / manage_website_page ........ PUBLIC web content
+#   HubSpot manage_campaign_objects / manage_segment ........ free-text names, notes, audiences,
+#       filter expressions stored in the SaaS
+#   HubSpot manage_aeo_prompts . CREATE sends promptTexts to external AI assistants
+#   Notion notion-send-message-to-session / notion-spawn-session ........ message / initial_message
+#       text goes to a Notion Custom Agent (NOTION_WRITE predates these and misses them)
+#   EXCLUDED
+#   Notion notion-upload-skill ........ payload is ids + a checksum; the archive bytes go by an
+#       out-of-band PUT (a Bash curl, which EGRESS_BASH scans as command text only)
+#   outlook_email_search / calendar_search / find_available_time, teams_list_*, chat_message_search,
+#       sharepoint_search / folder_search, read_resource, search_people, get_me, HubSpot get_* /
+#       search_* / query_crm_data ........ reads: a term there is a query, not egress
+#   HubSpot manage_saved_reports (LIST/FETCH only), manage_aeo_recommendations (LIST/DETAIL;
+#       START_ACTION is a documented no-op), manage_onboarding (enum goal) ........ no free text out
+#   outlook_create_filter / create_label / update_label / modify_* / trash / delete_* ........ mailbox
+#       housekeeping; the live filter tool cannot forward or redirect
+#   sharepoint_rename_item / create_folder / copy_item / move_item / delete_item ........ names and
+#       ids inside the tenant, no content (see RESIDUAL: a name is still text)
+#   import-claude-design-from-url (HubSpot, Netlify) ........ content by reference only (a URL)
+# RESIDUAL (not closable from a payload scan): outlook_send_draft / forward_mail and reply drafts put
+# text on the wire that is not in the payload (the stored draft, the forwarded/quoted original);
+# SharePoint names via rename/create_folder; binary uploads that are neither text nor zip (PDF
+# streams are compressed) are scanned only as raw bytes.
+#
+# MATCHER CONTRACT: the settings.json PreToolUse matcher for this hook must contain, verbatim, the
+# alternative "mcp__.*<pattern>.*" for EVERY pattern below (test-confidentiality-guard.py asserts
+# it, and generates tool names from each pattern's alternatives to check routing). The patterns
+# added 2026-09-30 are case-SENSITIVE, like the matcher, so the two agree exactly; NOTION_WRITE and
+# OUTLOOK_SEND keep their historical re.I (the matcher routes their lowercase forms and the
+# Composio-era uppercase OUTLOOK_* forms; other case mixes are classified here but not routed).
+OUTLOOK_MAIL = re.compile(
+    r"outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|"
+    r"create_reply_all_draft|update_draft|set_vacation)")
+OUTLOOK_CALENDAR = re.compile(r"outlook_(create_event|update_event|respond_to_event)")
+TEAMS_SEND = re.compile(
+    r"teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)")
+SHAREPOINT_WRITE = re.compile(r"sharepoint_(upload_file|update_file)")
+HUBSPOT_WRITE = re.compile(
+    r"__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
+    r"aeo_prompts)")
+NOTION_AGENT = re.compile(r"notion-(send-message-to-session|spawn-session)")
+
+# Order is the old if/elif order (Notion, then Outlook) followed by the new surfaces; the first match
+# names the surface in the block message. Every one scans the WHOLE tool_input.
+MCP_SEND_SURFACES = (
+    (NOTION_WRITE, "Notion write"),
+    (OUTLOOK_SEND, "Outlook send/draft"),
+    (OUTLOOK_MAIL, "Outlook send/draft"),
+    (OUTLOOK_CALENDAR, "Outlook calendar invite/response"),
+    (TEAMS_SEND, "Teams message"),
+    (SHAREPOINT_WRITE, "SharePoint content write"),
+    (HUBSPOT_WRITE, "HubSpot write"),
+    (NOTION_AGENT, "Notion agent message"),
+)
+FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def classify_tool(tool):
+    """Surface label for a tool whose WHOLE payload is bound for an external service, else None.
+    File tools and Bash are classified by their target / command in main(), never here."""
+    if not isinstance(tool, str) or tool in FILE_TOOLS or tool == "Bash":
+        return None
+    for rx, label in MCP_SEND_SURFACES:
+        if rx.search(tool):
+            return "%s (%s)" % (label, tool)
+    return None
+
+
+# What the recipient sees is not always the raw payload string: an HTML body is rendered (an empty
+# tag can split a name, an entity can spell one of its letters), an upload arrives base64-encoded,
+# and an Office file is a zip of XML whose runs split words at arbitrary points. Each view is added
+# to the scan, never substituted for the raw text, so this can only add hits.
+_TAG = re.compile(r"<[^<>]*>")
+_BETWEEN_TAGS = re.compile(r">\s+<")
+_WS = re.compile(r"\s+")  # str patterns: also matches U+00A0, which &nbsp; decodes to
+# Exact field names (lowercased) that carry base64 file bytes on the live connectors: SharePoint
+# upload/update `contentBase64`, Graph attachment `contentBytes`. Exact, not a substring: a flag
+# such as isBase64 / useBase64 is not content and must not be decoded (review finding 2026-09-30).
+_B64_FIELDS = ("contentbase64", "contentbytes")
+_DATA_URI = re.compile(r"^data:[^,]*;base64,", re.I)
+ZIP_MAX_MEMBERS = 5000
+# Total bytes decoded across ALL blobs and zip members of one call. Past it the call BLOCKS: the
+# harness's hook timeout does not block, so an unbounded decode would be a fail-open by timeout.
+SCAN_MAX_DECODED_BYTES = 32 * 1024 * 1024
+
+
+def _rendered_views(text):
+    """How a renderer shows `text`: tags dropped, entities decoded, whitespace runs collapsed -- once
+    as is, and once with whitespace BETWEEN tags removed (pretty-printed XML runs that split a
+    word)."""
+    loose = _WS.sub(" ", html.unescape(_TAG.sub("", text)))
+    tight = _WS.sub(" ", html.unescape(_TAG.sub("", _BETWEEN_TAGS.sub("><", text))))
+    return (loose, tight) if tight != loose else (loose,)
+
+
+def _b64decode(value):
+    """Decode base64 the way a lenient sender might have produced it: data: URI prefix, line
+    wrapping, URL-safe alphabet, missing padding. RAISES if it still is not base64."""
+    s = _WS.sub("", _DATA_URI.sub("", value.strip()))
+    s = s.replace("-", "+").replace("_", "/")
+    s += "=" * (-len(s) % 4)
+    return base64.b64decode(s, validate=True)
+
+
+def _blobs(obj, out):
+    """Decode every base64 content field (see _B64_FIELDS) into `out`.
+    RAISES on a value that is not base64 -- the caller fails closed on that."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str) and isinstance(k, str) and k.lower() in _B64_FIELDS:
+                out.append(_b64decode(v))
+            else:
+                _blobs(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _blobs(v, out)
+    return out
+
+
+def _blob_texts(blob, budget):
+    """Readable text of a decoded blob: the bytes as UTF-8 (and UTF-16 by BOM), plus every member of
+    a zip container (docx/xlsx/pptx). `budget` is a one-item list of bytes still allowed to decode.
+    RAISES past the budget or member cap, or on a member that cannot be read (e.g. encrypted) --
+    the caller fails closed on that."""
+    budget[0] -= len(blob)
+    if budget[0] < 0:
+        raise ValueError("payload too large to scan")
+    texts = [blob.decode("utf-8", "ignore")]
+    if blob[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        texts.append(blob.decode("utf-16", "ignore"))
+    buf = io.BytesIO(blob)
+    if zipfile.is_zipfile(buf):
+        with zipfile.ZipFile(buf) as z:
+            infos = z.infolist()
+            if len(infos) > ZIP_MAX_MEMBERS or sum(i.file_size for i in infos) > budget[0]:
+                raise ValueError("zip container too large to scan")
+            for info in infos:
+                # Bounded read: a header's declared size can lie, the decompressed stream cannot.
+                with z.open(info) as fh:
+                    data = fh.read(budget[0] + 1)
+                budget[0] -= len(data)
+                if budget[0] < 0:
+                    raise ValueError("zip container too large to scan")
+                texts.append(data.decode("utf-8", "ignore"))
+    return texts
+
+
+def mcp_scan_text(ti):
+    """Everything an MCP send surface's payload can put in front of a recipient, as one string.
+    RAISES when part of it cannot be read; main() blocks on that (fail closed)."""
+    base = collect_text(ti)
+    views = [base]
+    views.extend(_rendered_views(base))
+    budget = [SCAN_MAX_DECODED_BYTES]
+    for blob in _blobs(ti, []):
+        for t in _blob_texts(blob, budget):
+            views.append(t)
+            views.extend(_rendered_views(t))
+    return "\n".join(v for v in views if v)
 EGRESS_BASH = re.compile(
     r"\bgit\s+push\b|\bcurl\b|\bwget\b|\bscp\b|\brsync\b\s+\S+::|"
     r"invoke-webrequest|invoke-restmethod|\bnetlify\b.*\bdeploy\b|\bwrangler\b.*\b(deploy|publish)\b|"
@@ -488,22 +669,22 @@ def main():
                 # egress write we cannot read -> fail closed
                 block("write to %s but content could not be extracted." % surface)
 
-    # Notion writes: the whole payload is bound for Notion.
-    elif NOTION_WRITE.search(tool):
-        surface = "Notion write (%s)" % tool
-        scan_text = collect_text(ti)
-
-    # Outlook send/draft/forward/reply: the whole payload is bound for email.
-    elif OUTLOOK_SEND.search(tool):
-        surface = "Outlook send/draft (%s)" % tool
-        scan_text = collect_text(ti)
-
     # Shell: only egress commands are scanned (internal commands may reference the deal).
     elif tool == "Bash":
         cmd = ti.get("command", "") or ""
         if EGRESS_BASH.search(cmd):
             surface = "egress shell command"
             scan_text = cmd
+
+    # Notion / Outlook / Teams / SharePoint / HubSpot writes: the whole payload is bound for an
+    # external service (see MCP_SEND_SURFACES for what is in and out, and why).
+    else:
+        surface = classify_tool(tool)
+        if surface:
+            try:
+                scan_text = mcp_scan_text(ti)
+            except Exception as e:
+                block("payload for %s could not be fully decoded for scanning (%s)." % (surface, e))
 
     # Not an egress surface -> allow.
     if surface is None:

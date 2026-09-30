@@ -772,6 +772,339 @@ for _label, _payload, _want in [
 expect("BLOCK Write with no content key at all", 2,
        run({"tool_name": "Write", "tool_input": {"file_path": SITE}})[0])
 
+# --- Live M365 / HubSpot send surfaces (2026-09-30) ------------------------------------------
+# The Outlook entry in settings.json was written for the Composio era (OUTLOOK_SEND_EMAIL etc.,
+# UPPERCASE). Composio is gone; the live connector's tools are lowercase, and the guard's own
+# OUTLOOK_SEND regex missed the reply drafts, update_draft and the calendar tools. Every payload
+# below is shaped like the live tool's schema, with the term in a field the tool actually sends.
+import base64, re, zipfile  # noqa: E402 -- section-local, keeps the diff to this block
+
+
+def expect_eq(label, want, got):
+    """expect() for non-exit-code values (its failure line formats with %d)."""
+    ok = (got == want)
+    results.append((ok, label))
+    if not ok:
+        print("  FAIL: %s  (expected %r, got %r)" % (label, want, got))
+
+
+M365 = "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__"
+HUBSPOT = "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__"
+_WHEN = {"dateTime": "2026-10-01T10:00:00", "timeZone": "Eastern Standard Time"}
+SEND_TOOLS = {
+    M365 + "outlook_send_mail": lambda t: {"to": ["broker@example.com"], "subject": "Update", "body": t},
+    # send_draft carries only an id (content-by-reference, see residual risk in the guard); the
+    # case proves the payload IS routed through the scan, whatever field a term arrives in.
+    M365 + "outlook_send_draft": lambda t: {"messageId": "AAMkAD1", "note": t},
+    M365 + "outlook_forward_mail": lambda t: {"messageId": "AAMkAD1", "to": ["b@example.com"], "comment": t},
+    M365 + "outlook_create_draft": lambda t: {"to": ["b@example.com"], "subject": t, "body": "see below"},
+    M365 + "outlook_create_reply_draft": lambda t: {"messageId": "AAMkAD1", "body": "<p>%s</p>" % t,
+                                                    "bodyType": "html"},
+    M365 + "outlook_create_reply_all_draft": lambda t: {"messageId": "AAMkAD1", "comment": t},
+    M365 + "outlook_update_draft": lambda t: {"messageId": "AAMkAD1", "body": t, "bodyType": "text"},
+    M365 + "outlook_create_event": lambda t: {"subject": "Site tour", "start": _WHEN, "end": _WHEN,
+                                              "attendees": [{"email": "b@example.com"}], "body": t},
+    M365 + "outlook_update_event": lambda t: {"eventId": "AAMkAD1", "location": t},
+    M365 + "outlook_respond_to_event": lambda t: {"eventId": "AAMkAD1", "response": "decline", "comment": t},
+    M365 + "outlook_set_vacation": lambda t: {"status": "alwaysEnabled", "internalReplyMessage": "Away",
+                                              "externalAudience": "all", "externalReplyMessage": t},
+    M365 + "teams_send_chat_message": lambda t: {"chatId": "19:abc@thread.v2", "body": t},
+    M365 + "teams_send_channel_message": lambda t: {"teamId": "g1", "channelId": "19:c@thread.tacv2", "body": t},
+    M365 + "teams_reply_channel_message": lambda t: {"teamId": "g1", "channelId": "19:c@thread.tacv2",
+                                                     "messageId": "1", "body": t},
+    M365 + "teams_create_chat": lambda t: {"chatType": "group", "members": ["a@example.com", "b@example.com"],
+                                           "topic": t},
+    M365 + "sharepoint_upload_file": lambda t: {"driveId": "b!x", "filename": "memo.txt", "content": t},
+    M365 + "sharepoint_update_file": lambda t: {"driveId": "b!x", "itemId": "01AB", "content": t},
+    HUBSPOT + "manage_crm_objects": lambda t: {"objectType": "deals", "operations": [
+        {"operationType": "UPDATE", "properties": {"dealname": t}}]},
+    HUBSPOT + "manage_blog_post": lambda t: {"operation": {"postBody": "<p>%s</p>" % t}},
+    HUBSPOT + "manage_landing_page": lambda t: {"operation": {"htmlTitle": t}},
+    HUBSPOT + "manage_website_page": lambda t: {"operation": {"htmlTitle": t}},
+    HUBSPOT + "manage_campaign_objects": lambda t: {"operationType": "CAMPAIGN_CREATE",
+                                                    "createRequest": {"displayName": t}},
+    HUBSPOT + "manage_segment": lambda t: {"operation": {"type": "CreateStaticSegmentOperation",
+                                                         "name": t, "objectType": "CONTACT"}},
+    HUBSPOT + "manage_aeo_prompts": lambda t: {"operation": {"_operationType": "CREATE", "businessUnitId": 1,
+                                                             "promptTexts": [t]}},
+    "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-send-message-to-session":
+        lambda t: {"session_url": "session://s1", "message": t},
+    "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-spawn-session":
+        lambda t: {"agent_url": "agent://w/a1", "initial_message": t},
+}
+for i, (tool, mk) in enumerate(sorted(SEND_TOOLS.items())):
+    short = tool.rsplit("__", 1)[1]
+    v = VARIANTS[i % len(VARIANTS)]
+    code, err = run({"tool_name": tool, "tool_input": mk("Re: " + v + " next steps")})
+    expect("BLOCK live send surface %s :: variant#%d" % (short, i % len(VARIANTS)), 2, code, err)
+    code, err = run({"tool_name": tool, "tool_input": mk("Columbus flex portfolio update")})
+    expect("ALLOW live send surface %s, clean payload" % short, 0, code, err)
+
+# Read-only / non-content tools: a term in their payload is a QUERY, not egress. They must not be
+# classified as send surfaces, and a payload carrying a term must pass.
+READ_ONLY_TOOLS = {
+    M365 + "outlook_email_search": {"query": None},
+    M365 + "outlook_calendar_search": {"query": None},
+    M365 + "teams_list_chats": {"filter": None},
+    M365 + "teams_list_channels": {"teamId": None},
+    M365 + "teams_list_channel_messages": {"teamId": "g1", "channelId": None},
+    M365 + "chat_message_search": {"query": None},
+    M365 + "sharepoint_search": {"query": None},
+    M365 + "sharepoint_folder_search": {"query": None},
+    M365 + "read_resource": {"uri": None},
+    HUBSPOT + "get_crm_objects": {"objectType": "deals", "query": None},
+    HUBSPOT + "query_crm_data": {"query": None},
+    HUBSPOT + "search_crm_objects": {"query": None},
+    HUBSPOT + "manage_saved_reports": {"action": "LIST", "search": None},
+    HUBSPOT + "manage_aeo_recommendations": {"operation": {"_operationType": "LIST", "q": None}},
+    HUBSPOT + "manage_onboarding": {"action": None},
+}
+_guard_mod = _load_guard_module()
+for tool, shape in sorted(READ_ONLY_TOOLS.items()):
+    short = tool.rsplit("__", 1)[1]
+    ti = json.loads(json.dumps(shape).replace("null", json.dumps(A1)))
+    expect("ALLOW read-only %s carrying a term (not an egress surface)" % short, 0,
+           *run({"tool_name": tool, "tool_input": ti}))
+    expect_eq("read-only %s is NOT classified as a send surface" % short, None,
+           _guard_mod.classify_tool(tool) if hasattr(_guard_mod, "classify_tool") else "no classify_tool")
+for tool in sorted(SEND_TOOLS):
+    expect_eq("%s IS classified as a send surface" % tool.rsplit("__", 1)[1], True,
+           bool(getattr(_guard_mod, "classify_tool", lambda _t: None)(tool)))
+# Content-bearing but EXCLUDED by design (content travels by reference or out of band; see the
+# comment above MCP_SEND_SURFACES). Pinned so a change to these decisions is deliberate.
+EXCLUDED_BY_DESIGN = [
+    "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-upload-skill",
+    HUBSPOT + "import-claude-design-from-url",
+    M365 + "outlook_create_filter",
+    M365 + "sharepoint_rename_item",
+    M365 + "sharepoint_create_folder",
+]
+for tool in EXCLUDED_BY_DESIGN:
+    expect_eq("excluded-by-design %s is not classified" % tool.rsplit("__", 1)[1], None,
+              getattr(_guard_mod, "classify_tool", lambda _t: None)(tool))
+
+# Obfuscation that the receiving service undoes: HTML bodies are rendered (tags split a name,
+# entities spell it), attachments / uploads arrive base64-encoded, and Office files are zips of XML
+# whose runs split a name mid-word. The scan has to see what the RECIPIENT sees.
+_mid = max(1, len(A1) // 2)
+code, err = run({"tool_name": M365 + "outlook_send_mail", "tool_input": {
+    "to": ["b@example.com"], "subject": "Update", "bodyType": "html",
+    "body": "<p>%s<b></b>%s</p>" % (A1[:_mid], A1[_mid:])}})
+expect("BLOCK outlook_send_mail: term split by an empty HTML tag", 2, code, err)
+code, err = run({"tool_name": M365 + "teams_send_chat_message", "tool_input": {
+    "chatId": "19:a@thread.v2", "bodyType": "html", "body": "&#%d;%s" % (ord(A1[0]), A1[1:])}})
+expect("BLOCK teams_send_chat_message: first character spelled as an HTML entity", 2, code, err)
+code, err = run({"tool_name": M365 + "sharepoint_upload_file", "tool_input": {
+    "driveId": "b!x", "filename": "memo.txt",
+    "contentBase64": base64.b64encode(("Memo: %s closing" % A1).encode("utf-8")).decode("ascii")}})
+expect("BLOCK sharepoint_upload_file: term inside contentBase64", 2, code, err)
+_zbuf = io.BytesIO()
+with zipfile.ZipFile(_zbuf, "w") as _z:
+    _z.writestr("[Content_Types].xml", "<Types/>")
+    _z.writestr("word/document.xml", "<w:document><w:p><w:r><w:t>%s</w:t></w:r><w:r><w:t>%s</w:t></w:r>"
+                "</w:p></w:document>" % (A1[:_mid], A1[_mid:]))
+code, err = run({"tool_name": M365 + "sharepoint_update_file", "tool_input": {
+    "driveId": "b!x", "itemId": "01AB", "contentBase64": base64.b64encode(_zbuf.getvalue()).decode("ascii")}})
+expect("BLOCK sharepoint_update_file: .docx whose runs split the term", 2, code, err)
+_zclean = io.BytesIO()
+with zipfile.ZipFile(_zclean, "w") as _z:
+    _z.writestr("word/document.xml", "<w:document><w:t>Columbus flex portfolio</w:t></w:document>")
+expect("ALLOW sharepoint_update_file: clean .docx", 0, *run({"tool_name": M365 + "sharepoint_update_file",
+       "tool_input": {"driveId": "b!x", "itemId": "01AB",
+                      "contentBase64": base64.b64encode(_zclean.getvalue()).decode("ascii")}}))
+expect("BLOCK sharepoint_upload_file: contentBase64 that is not base64 (cannot be read)", 2,
+       *run({"tool_name": M365 + "sharepoint_upload_file", "tool_input": {
+           "driveId": "b!x", "filename": "a.bin", "contentBase64": "%%% not base64 %%%"}}))
+# The legacy Composio names stay covered exactly as before.
+expect("BLOCK legacy OUTLOOK_SEND_EMAIL still scanned", 2,
+       *run(outlook_payload(OUTLOOK, "FYI: " + A1)))
+# Base64 as senders actually produce it (review finding 2026-09-30): wrapped, URL-safe, data: URI,
+# unpadded. Each carries the term and must block; flag-like keys that merely mention base64 are not
+# content and must not be decoded (they used to fail closed on every call).
+_b = base64.b64encode(("Memo: %s closing ~~??>>" % A1).encode("utf-8")).decode("ascii")
+_b64_forms = [
+    ("line-wrapped", "\r\n".join(_b[i:i + 20] for i in range(0, len(_b), 20))),
+    ("URL-safe", base64.urlsafe_b64encode(("Memo: %s closing ~~??>>" % A1).encode("utf-8")).decode("ascii")),
+    ("data: URI", "data:text/plain;base64," + _b),
+    ("unpadded", _b.rstrip("=")),
+]
+for _lbl, _val in _b64_forms:
+    expect("BLOCK sharepoint_upload_file: term in %s contentBase64" % _lbl, 2,
+           *run({"tool_name": M365 + "sharepoint_upload_file", "tool_input": {
+               "driveId": "b!x", "filename": "m.txt", "contentBase64": _val}}))
+# The clean counterparts must ALLOW -- otherwise the cases above would pass on a guard that simply
+# fails closed on every non-strict encoding.
+_c = "Columbus flex portfolio update ~~??>> " * 3
+_cb = base64.b64encode(_c.encode("utf-8")).decode("ascii")
+for _lbl, _val in [("line-wrapped", "\r\n".join(_cb[i:i + 20] for i in range(0, len(_cb), 20))),
+                   ("URL-safe", base64.urlsafe_b64encode(_c.encode("utf-8")).decode("ascii")),
+                   ("data: URI", "data:text/plain;base64," + _cb),
+                   ("unpadded", base64.b64encode((_c + "x").encode("utf-8")).decode("ascii").rstrip("="))]:
+    expect("ALLOW sharepoint_upload_file: clean %s contentBase64" % _lbl, 0,
+           *run({"tool_name": M365 + "sharepoint_upload_file", "tool_input": {
+               "driveId": "b!x", "filename": "m.txt", "contentBase64": _val}}))
+expect("ALLOW Outlook draft whose flag fields merely mention base64 (not content)", 0,
+       *run({"tool_name": M365 + "outlook_create_draft", "tool_input": {
+           "to": ["b@example.com"], "subject": "Update", "body": "Columbus flex update",
+           "isBase64": "false", "useBase64": "yes"}}))
+expect("ALLOW Graph-style attachment contentBytes, clean", 0,
+       *run({"tool_name": M365 + "outlook_create_draft", "tool_input": {
+           "to": ["b@example.com"], "subject": "Update", "body": "see attached",
+           "attachments": [{"name": "a.txt", "contentBytes": base64.b64encode(b"clean text").decode()}]}}))
+expect("BLOCK Graph-style attachment contentBytes carrying the term", 2,
+       *run({"tool_name": M365 + "outlook_create_draft", "tool_input": {
+           "to": ["b@example.com"], "subject": "Update", "body": "see attached",
+           "attachments": [{"name": "a.txt", "contentBytes": base64.b64encode(A1.encode("utf-8")).decode()}]}}))
+# Rendering: &nbsp; is a space to the reader; so is a whitespace run between block tags.
+if " " in A1:
+    expect("BLOCK teams message: a space in the term written as &nbsp;", 2,
+           *run({"tool_name": M365 + "teams_send_chat_message", "tool_input": {
+               "chatId": "19:a@thread.v2", "bodyType": "html", "body": A1.replace(" ", "&nbsp;", 1)}}))
+    _sp = A1.index(" ")
+    expect("BLOCK outlook_send_mail: term split across two block tags with a newline between", 2,
+           *run({"tool_name": M365 + "outlook_send_mail", "tool_input": {
+               "to": ["b@example.com"], "subject": "Update", "bodyType": "html",
+               "body": "<div>%s</div>\n   <div>%s</div>" % (A1[:_sp], A1[_sp + 1:])}}))
+_zpp = io.BytesIO()
+with zipfile.ZipFile(_zpp, "w") as _z:
+    _z.writestr("word/document.xml", "<w:document>\n  <w:r>\n    <w:t>%s</w:t>\n  </w:r>\n  <w:r>\n"
+                "    <w:t>%s</w:t>\n  </w:r>\n</w:document>" % (A1[:_mid], A1[_mid:]))
+expect("BLOCK sharepoint_update_file: pretty-printed .docx XML splitting the term mid-word", 2,
+       *run({"tool_name": M365 + "sharepoint_update_file", "tool_input": {
+           "driveId": "b!x", "itemId": "01AB", "contentBase64": base64.b64encode(_zpp.getvalue()).decode()}}))
+# Aggregate decode cap: several individually-small bombs must block, not run the hook into the
+# harness timeout (a timed-out hook does not block).
+_bomb = io.BytesIO()
+with zipfile.ZipFile(_bomb, "w", zipfile.ZIP_DEFLATED) as _z:
+    _z.writestr("x.xml", b"\0" * (12 * 1024 * 1024))
+_bomb_b64 = base64.b64encode(_bomb.getvalue()).decode()
+expect("BLOCK three 12MB-decompressing zips in one call (aggregate decode cap)", 2,
+       *run({"tool_name": M365 + "outlook_create_draft", "tool_input": {
+           "to": ["b@example.com"], "subject": "x", "body": "x",
+           "attachments": [{"name": "a%d.docx" % i, "contentBytes": _bomb_b64} for i in range(3)]}}))
+expect("ALLOW one 12MB-decompressing clean zip (under the cap)", 0,
+       *run({"tool_name": M365 + "sharepoint_update_file", "tool_input": {
+           "driveId": "b!x", "itemId": "01AB", "contentBase64": _bomb_b64}}))
+
+# --- settings.json matcher vs guard classification (2026-09-30) --------------------------------
+# A guard that classifies a tool is only as good as the PreToolUse matcher that routes that tool
+# to it. Claude Code matcher semantics are assumed to be the STRICTEST plausible reading:
+# ^(?:matcher)$, case-sensitive. A tool that passes under that reading also passes under an
+# unanchored or case-insensitive one, so the assumption can only over-report a gap, never hide one.
+OLD_LIVE_MATCHER = ("NotebookEdit|mcp__.*notion-(create|update|append|duplicate|move|comment)|"
+                    "mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)")
+# One "mcp__.*<pattern>.*" alternative per guard pattern (MATCHER CONTRACT in the guard), plus
+# the Composio-era uppercase Outlook alternative kept from the old string.
+PROPOSED_MATCHER = (
+    "NotebookEdit"
+    "|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY).*"
+    "|mcp__.*notion[-_]?(create|update|append|duplicate|move|comment).*"
+    "|mcp__.*outlook_(send|create_draft|send_draft|forward|reply).*"
+    "|mcp__.*outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|"
+    "create_reply_all_draft|update_draft|set_vacation).*"
+    "|mcp__.*outlook_(create_event|update_event|respond_to_event).*"
+    "|mcp__.*teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat).*"
+    "|mcp__.*sharepoint_(upload_file|update_file).*"
+    "|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
+    "aeo_prompts).*"
+    "|mcp__.*notion-(send-message-to-session|spawn-session).*"
+)
+NOTION_LIVE = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__"
+_CLASSIFY_UNIVERSE = sorted(set(SEND_TOOLS) | set(READ_ONLY_TOOLS) | {
+    OUTLOOK, OUTLOOK_DRAFT, NOTION, NOTION_UPD,
+    NOTION_LIVE + "notion-create-comment", NOTION_LIVE + "notion-move-pages",
+    NOTION_LIVE + "notion-duplicate-page", NOTION_LIVE + "notion-update-data-source",
+    NOTION_LIVE + "notion-fetch", NOTION_LIVE + "notion-search",
+    M365 + "outlook_create_filter", M365 + "outlook_create_label", M365 + "outlook_trash_thread",
+    M365 + "sharepoint_rename_item", M365 + "sharepoint_create_folder", M365 + "sharepoint_move_item",
+})
+
+
+def _full(matcher, name):
+    return re.fullmatch("(?:%s)" % matcher, name) is not None
+
+
+_classify = getattr(_guard_mod, "classify_tool", lambda _t: None)
+# DERIVED FROM THE GUARD, not from a hand list (review finding 2026-09-30: a fixed list let a new
+# guard branch go unrouted with the suite green). (1) Every guard pattern appears verbatim as a
+# matcher alternative. (2) Tool names are generated from each pattern's own alternatives, with a
+# server prefix and suffix drift, and every generated name the guard classifies must be routed.
+_surfaces = getattr(_guard_mod, "MCP_SEND_SURFACES", ())
+expect_eq("guard exposes MCP_SEND_SURFACES", True, len(_surfaces) >= 8)
+for _rx, _lbl in _surfaces:
+    expect_eq("matcher carries the guard pattern %r verbatim" % _rx.pattern, True,
+              ("mcp__.*%s.*" % _rx.pattern) in PROPOSED_MATCHER)
+_generated = []
+for _rx, _lbl in _surfaces:
+    _m = re.fullmatch(r"(?P<pre>.*?)\((?P<alts>[^()]*)\)", _rx.pattern)
+    expect_eq("guard pattern %r has the prefix(alt|alt) shape the generator expects" % _rx.pattern,
+              True, _m is not None)
+    if not _m:
+        continue
+    _pres = [_m.group("pre").replace("[-_]?", s) for s in ("-", "_", "")] \
+        if "[-_]?" in _m.group("pre") else [_m.group("pre")]
+    for _pre in _pres:
+        for _alt in _m.group("alts").split("|"):
+            for _suffix in ("", "-pages", "_v2"):
+                # A pattern anchored on "__" (HubSpot) supplies that separator itself.
+                _generated.append("mcp__srv9" + ("" if _pre.startswith("__") else "__") + _pre + _alt + _suffix)
+                if _rx.flags & re.I and _pre.startswith("outlook_"):
+                    _generated.append("mcp__srv9__" + (_pre + _alt + _suffix).upper())
+for t in _generated:
+    expect_eq("generated %s is classified by the guard" % t, True, bool(_classify(t)))
+    expect_eq("generated %s is routed by the proposed matcher (anchored)" % t, True, _full(PROPOSED_MATCHER, t))
+_classified = [t for t in _CLASSIFY_UNIVERSE if _classify(t)]
+for t in _classified:
+    expect_eq("proposed matcher routes classified send surface %s" % t.rsplit("__", 1)[1], True,
+           _full(PROPOSED_MATCHER, t))
+for t in READ_ONLY_TOOLS:
+    expect_eq("proposed matcher does not route read-only %s" % t.rsplit("__", 1)[1], False,
+           _full(PROPOSED_MATCHER, t))
+# Demo (and regression pin): the pre-2026-09-30 live matcher routes NONE of the live lowercase
+# tools, under the documented reading (JS RegExp.test: unanchored, case-sensitive) as well as the
+# anchored one. (hooks.md: a matcher with regex characters is "JavaScript regular expression,
+# unanchored"; case sensitivity is not stated -- JS default is case-sensitive.)
+def _search(matcher, name):
+    return re.search(matcher, name) is not None
+
+
+expect_eq("OLD live matcher misses outlook_send_mail (anchored reading)", False,
+          _full(OLD_LIVE_MATCHER, M365 + "outlook_send_mail"))
+expect_eq("OLD live matcher misses outlook_send_mail (documented unanchored reading)", False,
+          _search(OLD_LIVE_MATCHER, M365 + "outlook_send_mail"))
+for t in _classified:
+    expect_eq("proposed matcher routes %s under the unanchored reading too" % t.rsplit("__", 1)[1], True,
+              _search(PROPOSED_MATCHER, t))
+_md = os.path.join(os.path.dirname(HOOK_DIR), "_proposed", "confguard-matcher.md")
+if os.path.exists(_md):  # _proposed/ is gitignored: checked when present, never required
+    with open(_md, encoding="utf-8") as f:
+        _m = re.search(r"<!-- new-matcher -->\s*```[a-z]*\n(.+?)\n```", f.read(), re.S)
+    expect_eq("_proposed/confguard-matcher.md carries exactly PROPOSED_MATCHER", PROPOSED_MATCHER,
+           _m.group(1).strip() if _m else None)
+# The repo's own settings.json: while it still carries the old string the gap is REPORTED (the
+# settings change is a separate, gated step); once anyone changes that entry it must be complete.
+_settings = os.path.join(os.path.dirname(HOOK_DIR), "settings.json")
+try:
+    with open(_settings, encoding="utf-8") as f:
+        _entries = json.load(f).get("hooks", {}).get("PreToolUse", [])
+    _live = [e.get("matcher", "") for e in _entries
+             if any("confidentiality-guard.py" in (h.get("command") or "") for h in e.get("hooks", []))
+             and e.get("matcher", "") != "Edit|Write|MultiEdit"]
+except Exception:
+    _live = None
+if _live:
+    _gaps = [t for t in _classified if not any(_full(m, t) for m in _live)]
+    if _live == [OLD_LIVE_MATCHER]:
+        _doc_gaps = [t for t in _classified if not any(_search(m, t) for m in _live)]
+        if _doc_gaps:
+            print("  ADVISORY: settings.json confidentiality-guard matcher is the pre-2026-09-30 string; "
+                  "%d classified send surfaces are NOT routed to the guard under the documented "
+                  "(unanchored, case-sensitive) reading -- apply _proposed/confguard-matcher.md: %s"
+                  % (len(_doc_gaps), ", ".join(t.rsplit("__", 1)[1] for t in _doc_gaps)))
+    else:
+        expect_eq("settings.json confidentiality-guard matcher routes every classified send surface "
+               "(gaps: %s)" % ", ".join(t.rsplit("__", 1)[1] for t in _gaps), [], _gaps)
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 total = len(results)
