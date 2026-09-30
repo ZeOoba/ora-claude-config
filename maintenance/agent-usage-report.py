@@ -99,20 +99,24 @@ def count_dispatches(projects_dir, names, since_epoch):
                     content = msg.get("content") if isinstance(msg, dict) else None
                     if not isinstance(content, list):
                         continue
-                    raw_ts = obj.get("timestamp") or ""
+                    raw_ts = obj.get("timestamp")
+                    raw_ts = raw_ts if isinstance(raw_ts, str) else ""
                     # The mtime check above is only a fast pre-filter: a recently touched
                     # transcript can still hold old dispatches, so bound by each dispatch's
                     # own timestamp too (unparseable/absent -> keep, fail open).
-                    if since_epoch and _ts_epoch(raw_ts) is not None \
-                            and _ts_epoch(raw_ts) < since_epoch:
+                    line_epoch = _ts_epoch(raw_ts)
+                    if since_epoch and line_epoch is not None and line_epoch < since_epoch:
                         continue
                     ts = raw_ts[:10]
                     for block in content:
                         if (isinstance(block, dict) and block.get("type") == "tool_use"
                                 and block.get("name") in ("Agent", "Task")):
-                            st = (block.get("input") or {}).get("subagent_type")
-                            if st in found:
-                                found[st].add(block.get("id") or (path, line[:40]))
+                            inp = block.get("input")
+                            st = inp.get("subagent_type") if isinstance(inp, dict) else None
+                            if isinstance(st, str) and st in found:
+                                tid = block.get("id")
+                                found[st].add(tid if isinstance(tid, str) and tid
+                                              else (path, line[:40]))
                                 if ts and (oldest is None or ts < oldest):
                                     oldest = ts
         except OSError:

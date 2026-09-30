@@ -1678,6 +1678,28 @@ def test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool():
 
 
 
+def test_agent_body_lint_round2_edges():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings
+    # repeated identical claim -> one warning (dedupe)
+    assert len(w("x.md", "Use WebSearch for comps. Later, use WebSearch again.", "Read")) == 1
+    # a prohibition on the bare Outlook MCP token is a prohibition, not a claim
+    assert w("x.md", "Never call mcp__srv__outlook_email_search.", "Read") == []
+    # conditionals without a comma must not look like prohibitions
+    assert len(w("x.md", "If not found use WebSearch for comps.", "Read")) == 1
+    assert len(w("x.md", "If no OM use WebFetch on the listing.", "Read")) == 1
+    # curly apostrophes negate too
+    assert w("x.md", "Don’t use WebSearch.", "Read") == []
+    # a token glued to a double dash does not swallow the dash text
+    assert w("x.md", "Search via mcp__srv__outlook_email_search--then summarize.",
+             "Read, mcp__srv__outlook_email_search") == []
+    # single-hyphen MCP tool names are still whole tokens
+    assert w("x.md", "Call mcp__srv__notion-search.", "Read, mcp__srv__notion-search") == []
+    assert len(w("x.md", "Call mcp__srv__notion-search.", "Read")) == 1
+    print("  PASS test_agent_body_lint_round2_edges")
+
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_dated_archive_dirs_pruned_from_skill_scan()
@@ -1768,6 +1790,7 @@ def main():
     test_agent_body_lint_star_wildcard_grants_everything()
     test_agent_body_lint_negation_is_word_bounded_and_adjacent()
     test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool()
+    test_agent_body_lint_round2_edges()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
