@@ -283,9 +283,10 @@ def test_workflow_runs_are_counted_by_script_reference_within_window():
         _wf_file(pr, "s1", "wf_a", "await agent('x', { agentType:'alpha', label:'a' })", 2)
         _wf_file(pr, "s1", "wf_b", 'agent(p, {agentType: "alpha"}); agent(q,{agentType:"beta"})', 3)
         _wf_file(pr, "s1", "wf_old", "agent(p, {agentType:'alpha'})", 90)        # out of window
-        _wf_file(pr, "s2", "wf_a", "agent(p, {agentType:'alpha'})", 2, "copy.json")  # same runId
+        _wf_file(pr, "s2", "wf_a", "agent(p, {agentType:'alpha'})", 2, "wf_copy.json")  # same runId
         _wf_file(pr, "s1", "wf_c", "agent(p, {agentType:'alpha-extra'})", 2)     # not 'alpha'
         _wf_file(pr, "s1", "wf_none", "agent(p, {label:'no type'})", 2)
+        _wf_file(pr, "s1", "wf_d", "const myagentType:'alpha'", 2)               # needs a word boundary
         runs = m.count_workflow_runs(pr, ["alpha", "beta"], since)
     assert runs["alpha"] == {"wf_a", "wf_b"}, runs
     assert runs["beta"] == {"wf_b"}, runs
@@ -344,6 +345,43 @@ def test_main_counts_workflow_runs_end_to_end():
 
 
 
+def test_sort_order_is_dispatches_then_workflow_runs_then_name():
+    m = _load()
+    now = time.time()
+    agents = {n: now - 90 * 86400 for n in ("a", "b", "c", "d")}
+    found = {"a": set(), "b": set(), "c": {"x"}, "d": set()}
+    wf = {"a": {"r1"}, "b": {"r1", "r2"}, "c": set(), "d": {"r1"}}
+    order = [r["agent"] for r in m.build_report(agents, found, 30, 30, now, wf)]
+    # c leads on dispatches; b beats a and d on workflow runs (alphabetical would put a first);
+    # a and d tie on both and fall back to name.
+    assert order == ["c", "b", "a", "d"], order
+    print("  PASS test_sort_order_is_dispatches_then_workflow_runs_then_name")
+
+
+def test_pathological_json_does_not_crash_either_counter_and_bom_files_are_read():
+    m = _load()
+    deep = "[" * 100000 + "]" * 100000
+    with tempfile.TemporaryDirectory() as d:
+        pr = os.path.join(d, "projects")
+        wd = os.path.join(pr, "p", "s", "workflows")
+        os.makedirs(wd)
+        with open(os.path.join(wd, "wf_deep.json"), "w", encoding="utf-8") as f:
+            f.write(deep)
+        with open(os.path.join(wd, "wf_bom.json"), "w", encoding="utf-8-sig") as f:
+            json.dump({"runId": "wf_bom", "timestamp": _iso(1),
+                       "script": "agent(p, {agentType:'alpha'})"}, f)
+        _wf_file(pr, "s", "wf_ok", "agent(p, {agentType:'alpha'})", 1)
+        runs = m.count_workflow_runs(pr, ["alpha"], 0)
+        with open(os.path.join(pr, "p", "a.jsonl"), "w", encoding="utf-8") as f:
+            f.write('{"subagent_type": ' + deep + "}\n")
+            f.write(_line("ok1", "alpha") + "\n")
+        found, _, _ = m.count_dispatches(pr, ["alpha"], 0)
+    assert runs["alpha"] == {"wf_ok", "wf_bom"}, runs
+    assert found["alpha"] == {"ok1"}, found
+    print("  PASS test_pathological_json_does_not_crash_either_counter_and_bom_files_are_read")
+
+
+
 def main():
     test_counts_unique_ids_and_ignores_unknown_and_non_tool_lines()
     test_flags_zero_use_old_agents_review_and_young_agents_young()
@@ -361,6 +399,8 @@ def main():
     test_workflow_counter_fails_open_on_bad_files_and_missing_dirs()
     test_workflow_use_clears_the_review_flag_and_is_shown_in_the_report()
     test_main_counts_workflow_runs_end_to_end()
+    test_sort_order_is_dispatches_then_workflow_runs_then_name()
+    test_pathological_json_does_not_crash_either_counter_and_bom_files_are_read()
     print("ALL AGENT-USAGE-REPORT TESTS PASS")
 
 

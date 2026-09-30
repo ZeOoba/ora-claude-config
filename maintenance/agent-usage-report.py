@@ -95,7 +95,7 @@ def count_dispatches(projects_dir, names, since_epoch):
                         continue
                     try:
                         obj = json.loads(line)
-                    except ValueError:
+                    except (ValueError, RecursionError):
                         continue
                     if not isinstance(obj, dict):
                         continue
@@ -128,7 +128,7 @@ def count_dispatches(projects_dir, names, since_epoch):
     return found, scanned, oldest
 
 
-_WF_AGENT_TYPE_RE = re.compile(r"""agentType\s*:\s*['"]([A-Za-z0-9:_-]+)['"]""")
+_WF_AGENT_TYPE_RE = re.compile(r"""\bagentType\s*:\s*['"]([A-Za-z0-9:_-]+)['"]""")
 
 
 def count_workflow_runs(projects_dir, names, since_epoch):
@@ -147,9 +147,11 @@ def count_workflow_runs(projects_dir, names, since_epoch):
     pattern = os.path.join(projects_dir, "**", "workflows", "wf_*.json")
     for path in glob.glob(pattern, recursive=True):
         try:
-            with open(path, encoding="utf-8", errors="ignore") as fh:
+            # utf-8-sig: a BOM must not make a valid run invisible. RecursionError: a
+            # pathologically nested file must not abort the whole report.
+            with open(path, encoding="utf-8-sig", errors="ignore") as fh:
                 obj = json.load(fh)
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             continue
         if not isinstance(obj, dict) or not isinstance(obj.get("script"), str):
             continue
