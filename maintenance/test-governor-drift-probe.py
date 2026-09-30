@@ -484,6 +484,173 @@ def test_scan_code_direction_and_inversion_flags_unit():
     print("  PASS test_scan_code_direction_and_inversion_flags_unit")
 
 
+_POSITIVITY_CANON = "\n".join([
+    "  if (next.dscrFloor < 1.25) { throw new Error('DSCR floor below hard invariant'); }",
+    "  if (next.ltvCeiling > 0.40) { throw new Error('LTV ceiling above hard invariant'); }",
+])
+_DSCR_POS = "  if (!(Number.isFinite(next.dscrFloor) && next.dscrFloor > 0)) { throw new Error('must be > 0'); }"
+_LTV_POS = "  if (!(Number.isFinite(next.ltvCeiling) && next.ltvCeiling > 0)) { throw new Error('must be > 0'); }"
+
+
+def test_scan_code_positivity_guard_clean_when_canonical_guard_present_unit():
+    """capital-config.ts carries fail-closed `> 0` positivity guards beside the real floor/ceiling
+    guards (a zero ceiling would turn the DSCR proxy into Infinity). Those are NOT a relaxed floor:
+    the real guards are still present. Regression for the 2026-09-30 pre-push block."""
+    m = _load_probe_module()
+    code = "\n".join([_POSITIVITY_CANON, _LTV_POS, _DSCR_POS])
+    assert m.scan_code(code) == [], "positivity guards beside canonical guards must be clean; got %r" % m.scan_code(code)
+    print("  PASS test_scan_code_positivity_guard_clean_when_canonical_guard_present_unit")
+
+
+def test_scan_code_positivity_guard_flags_when_canonical_guard_missing_unit():
+    """The exemption is conditional: if the REAL guard is gone (replaced by a `> 0` check, or
+    deleted), the `> 0` line must flag again -- otherwise the exemption would hide exactly the
+    drift this probe exists to catch."""
+    m = _load_probe_module()
+    assert any("DSCR" in r for _, r, _ in m.scan_code(_DSCR_POS)), "lone dscr `> 0` must still flag"
+    assert any("LTV" in r for _, r, _ in m.scan_code(_LTV_POS)), "lone ltv `> 0` must still flag"
+    dscr_canon_only = "  if (next.dscrFloor < 1.25) { throw new Error('x'); }"
+    assert any("LTV" in r for _, r, _ in m.scan_code("\n".join([dscr_canon_only, _LTV_POS]))), \
+        "ltv `> 0` must flag when only the DSCR canonical guard is present"
+    ltv_canon_only = "  if (next.ltvCeiling > 0.40) { throw new Error('x'); }"
+    assert any("DSCR" in r for _, r, _ in m.scan_code("\n".join([ltv_canon_only, _DSCR_POS]))), \
+        "dscr `> 0` must flag when only the LTV canonical guard is present"
+    commented = "\n".join(["  // if (next.dscrFloor < 1.25) { throw new Error('x'); }", _DSCR_POS])
+    assert any("DSCR" in r for _, r, _ in m.scan_code(commented)), \
+        "a COMMENTED-OUT canonical guard must not license the `> 0` exemption"
+    print("  PASS test_scan_code_positivity_guard_flags_when_canonical_guard_missing_unit")
+
+
+_RATIFIED_CANON = "\n".join([
+    "  if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor) { throw new Error('below'); }",
+    "  if (next.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling) { throw new Error('above'); }",
+])
+
+
+def test_scan_code_ratified_variable_guard_licenses_positivity_exemption_unit():
+    """Since oxford-command-center PR 386 the real guards compare against RATIFIED_GOVERNORS, not a
+    literal. That variable form must license the `> 0` exemption (this is the real capital-config
+    shape), and a commented-out or flipped variable guard must not."""
+    m = _load_probe_module()
+    real_shape = "\n".join([_RATIFIED_CANON, _LTV_POS, _DSCR_POS])
+    assert m.scan_code(real_shape) == [], "real capital-config shape must be clean; got %r" % m.scan_code(real_shape)
+    commented = "\n".join(["  // if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor) {}", _DSCR_POS])
+    assert any("DSCR" in r for _, r, _ in m.scan_code(commented)), "commented variable guard must not license"
+    flipped = "\n".join(["  if (next.dscrFloor > RATIFIED_GOVERNORS.dscrFloor) {}", _DSCR_POS])
+    assert any("DSCR" in r for _, r, _ in m.scan_code(flipped)), "flipped variable guard must not license"
+    ltv_flipped = "\n".join(["  if (next.ltvCeiling < RATIFIED_GOVERNORS.ltvCeiling) {}", _LTV_POS])
+    assert any("LTV" in r for _, r, _ in m.scan_code(ltv_flipped)), "flipped ltv variable guard must not license"
+    # Evasions found in the 2026-09-30 adversarial review: each keeps the `> 0` line and neuters the
+    # real guard while it still textually resembles one. All must flag (fail closed).
+    neutered = [
+        "  /* if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor) {} */",
+        "  const s = 'if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor)';",
+        "  if (prev.dscrFloor < RATIFIED_GOVERNORS.dscrFloor) {}",
+        "  if (false && next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor) {}",
+        "  if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor && !OVERRIDE) {}",
+        "  if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor - 0.15) {}",
+    ]
+    for guard in neutered:
+        assert any("DSCR" in r for _, r, _ in m.scan_code("\n".join([guard, _DSCR_POS]))), \
+            "neutered dscr guard must not license the exemption: %r" % guard
+    # Second-pass review evasions: tokenizer desync cases. The guard text appears only inside a
+    # literal/comment (or mid-line), never as a whole line outside them.
+    G = "if (next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor)"
+    desync = [
+        "  const a = '/*'; const b = \"*/ " + G + " \";",           # fake comment opener inside a string
+        "  const t = `${\"`\"} " + G + " `;",                          # backtick nested in a template
+        "  const r = /'/; // ' " + G,                                # quote inside a regex literal
+        "  /* never closed\n  " + G + " {}",                         # unterminated block comment
+        "  const s = 'x'; " + G + " {}",                             # guard mid-line, not at line start
+    ]
+    for guard in desync:
+        assert any("DSCR" in r for _, r, _ in m.scan_code("\n".join([guard, _DSCR_POS]))), \
+            "desync/mid-line guard must not license the exemption: %r" % guard
+    ltv_desync = [
+        "  const t = `${\"`\"} if (next.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling) `;",
+        "  const r = /'/; // ' if (next.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling)",
+    ]
+    for guard in ltv_desync:
+        assert any("LTV" in r for _, r, _ in m.scan_code("\n".join([guard, _LTV_POS]))), \
+            "ltv desync guard must not license the exemption: %r" % guard
+    # Third-pass review evasions: the guard on its OWN line inside a multi-line template whose `${...}`
+    # holds a backtick, so the tokenizer closes the template early. Must flag; plain `${ident}` must not.
+    tmpl_inner = ["\"`\"", "'`'", "/`/.source", "/*`*/0"]
+    for inner in tmpl_inner:
+        body = "  const t = `${" + inner + "}\n  " + G + " { throw new Error('x'); }\n  `;"
+        assert any("DSCR" in r for _, r, _ in m.scan_code("\n".join([body, _DSCR_POS]))), \
+            "multi-line template with complex ${%s} must not license the dscr exemption" % inner
+        ltv_body = ("  const t = `${" + inner + "}\n  if (next.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling) { }\n  `;")
+        assert any("LTV" in r for _, r, _ in m.scan_code("\n".join([ltv_body, _LTV_POS]))), \
+            "multi-line template with complex ${%s} must not license the ltv exemption" % inner
+    # Fourth-pass review: a regex literal holding a backtick opens a fake template that closes on the
+    # REAL template's opening backtick, exposing the template body as live code. The unbalanced form
+    # leaves a backtick after tokenizing and must flag. (A deliberately balanced form is an accepted,
+    # documented residual.)
+    regex_desync = "\n".join([
+        "  const r = /`/;",
+        "  const doc = `",
+        "  " + G + " { throw new Error('x'); }",
+        "  `;",
+    ])
+    assert any("DSCR" in r for _, r, _ in m.scan_code("\n".join([regex_desync, _DSCR_POS]))), \
+        "unbalanced regex-literal desync must fail closed"
+    # Performance: `${` with no closing brace was quadratic (29s at 160KB) -- must be linear now.
+    import time as _t
+    adversarial = "${" * 200_000  # 400KB
+    t0 = _t.time()
+    m.scan_code("\n".join([_DSCR_POS, adversarial]))
+    elapsed = _t.time() - t0
+    assert elapsed < 3.0, "scan_code on 400KB of unterminated `${` took %.1fs (quadratic regression?)" % elapsed
+    # Fifth-pass review: unclosed quotes/backticks made the tokenizer quadratic (~2.4s at 32KB).
+    for unclosed in ("'\\\"" * 40_000, "\"`\\\"" * 40_000, "`\\\"" * 40_000):  # ~100-120KB each
+        t0 = _t.time()
+        m.scan_code("\n".join([_DSCR_POS, unclosed]))
+        assert _t.time() - t0 < 3.0, "tokenizer quadratic on unclosed literals (%d chars)" % len(unclosed)
+    # An unterminated literal swallows a following line-start guard, so it must not license either.
+    assert any("DSCR" in r for _, r, _ in m.scan_code("\n".join(["  const s = 'never closed", "  " + G + " {}", _DSCR_POS]))), \
+        "a guard swallowed by an unterminated literal must not license the exemption"
+    simple_tmpl = "  throw new Error(`DSCR floor ${next.dscrFloor} below ${RATIFIED_GOVERNORS.dscrFloor}`);"
+    assert m.scan_code("\n".join([_RATIFIED_CANON, simple_tmpl, _LTV_POS, _DSCR_POS])) == [], \
+        "plain identifier interpolation must not disable the exemption (real capital-config shape)"
+    ltv_neutered = [
+        "  /* if (next.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling) {} */",
+        "  if (next.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling + 0.25) {}",
+        "  if (prev.ltvCeiling > RATIFIED_GOVERNORS.ltvCeiling) {}",
+    ]
+    for guard in ltv_neutered:
+        assert any("LTV" in r for _, r, _ in m.scan_code("\n".join([guard, _LTV_POS]))), \
+            "neutered ltv guard must not license the exemption: %r" % guard
+    print("  PASS test_scan_code_ratified_variable_guard_licenses_positivity_exemption_unit")
+
+
+def test_governor_constants_file_is_routed_to_scan_code_unit():
+    """PR 386 moved the ratified literals into governor-constants.ts. It must be in the routed set,
+    and a weakened literal there must flag while the canonical pair stays clean."""
+    m = _load_probe_module()
+    assert "governor-constants.ts" in m.GOVERNOR_CODE_FILES, "governor-constants.ts must be routed to scan_code"
+    assert "capital-config.ts" in m.GOVERNOR_CODE_FILES, "capital-config.ts must remain routed"
+    canon = "export const RATIFIED_GOVERNORS = {\n  dscrFloor: 1.25,\n  ltvCeiling: 0.40,\n} as const;"
+    assert m.scan_code(canon) == [], "canonical governor-constants literals must be clean"
+    assert any("DSCR" in r for _, r, _ in m.scan_code(canon.replace("1.25", "1.10"))), "weakened dscr literal must flag"
+    assert any("LTV" in r for _, r, _ in m.scan_code(canon.replace("0.40", "0.65"))), "weakened ltv literal must flag"
+    print("  PASS test_governor_constants_file_is_routed_to_scan_code_unit")
+
+
+def test_scan_code_positivity_guard_exemption_is_strictly_greater_than_zero_unit():
+    """Only `> 0` is exempt, and only with its canonical guard present. `>= 0`, `> 0.5` and a
+    drifted canonical constant stay flagged even when canonical guards exist elsewhere."""
+    m = _load_probe_module()
+    base = _POSITIVITY_CANON
+    assert m.scan_code("\n".join([base, "  if (next.dscrFloor >= 0) {}"])), "dscr `>= 0` must flag"
+    assert m.scan_code("\n".join([base, "  if (next.ltvCeiling >= 0) {}"])), "ltv `>= 0` must flag"
+    assert m.scan_code("\n".join([base, "  if (next.dscrFloor > 0.5) {}"])), "dscr `> 0.5` must flag"
+    assert m.scan_code("\n".join([base, "  if (next.ltvCeiling > 0.50) {}"])), "ltv `> 0.50` must flag"
+    assert m.scan_code("\n".join(["  if (next.dscrFloor < 1.10) {}", _DSCR_POS])), \
+        "a drifted dscr canonical (1.10) must not license the `> 0` exemption"
+    print("  PASS test_scan_code_positivity_guard_exemption_is_strictly_greater_than_zero_unit")
+
+
 def test_scan_code_ignores_deal_values_unit():
     """scan_code keys ONLY on the enforcement identifiers (dscrFloor / ltvCeiling), so per-deal
     dscr/ltv VALUES -- the latent JSON-sentinel FP (a deal at exactly 1.75) -- never flag."""
@@ -2815,6 +2982,11 @@ def main():
     test_scan_code_canonical_clean_unit()
     test_scan_code_constant_drift_flags_unit()
     test_scan_code_direction_and_inversion_flags_unit()
+    test_scan_code_positivity_guard_clean_when_canonical_guard_present_unit()
+    test_scan_code_positivity_guard_flags_when_canonical_guard_missing_unit()
+    test_scan_code_positivity_guard_exemption_is_strictly_greater_than_zero_unit()
+    test_scan_code_ratified_variable_guard_licenses_positivity_exemption_unit()
+    test_governor_constants_file_is_routed_to_scan_code_unit()
     test_scan_code_ignores_deal_values_unit()
     test_scan_code_seed_literal_drift_flags_unit()
     test_scan_code_presence_regexes_unit()
