@@ -706,6 +706,45 @@ AGENT_BUILTIN_TOOLS = {
 }
 
 
+# Tool/body mismatch lint (2026-09-30). deal-flow-triage shipped saying "Use the Outlook
+# search" while its tools: line was Read, Grep, Glob -- it could not do its job and sat at
+# zero dispatches. WARN only (never a hard failure): the patterns are heuristics, and this
+# probe runs inside the pre-push gate. An absent tools: line means the agent inherits every
+# tool, so there is nothing to mismatch.
+_AGENT_BODY_OUTLOOK_RE = re.compile(
+    r"\b(?:use|via)\s+(?:the\s+)?outlook(?:[ _]email)?[ _]search\b|outlook_email_search", re.I)
+_AGENT_BODY_WEB_RE = re.compile(
+    r"\b(?:use|run|via|with)\s+(?:the\s+)?(web[ _]?search|web[ _]?fetch)\b", re.I)
+_AGENT_BODY_MCP_TOKEN_RE = re.compile(r"\bmcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+")
+
+
+def agent_body_tool_warnings(fn, body, tools_raw):
+    """Return WARN strings for capabilities an agent body claims but its tools: lacks."""
+    if not isinstance(tools_raw, str):
+        return []
+    granted = [t.strip().lower() for t in tools_raw.split(",") if t.strip()]
+    if "*" in granted:
+        return []
+    warns = []
+    if _AGENT_BODY_OUTLOOK_RE.search(body) and not any("outlook" in t for t in granted):
+        warns.append("%s: body says to use Outlook search but tools: grants no outlook tool "
+                     "-- the agent cannot do this" % ascii_safe(fn))
+    for m in _AGENT_BODY_WEB_RE.finditer(body):
+        lead = body[max(0, m.start() - 25):m.start()].lower()
+        if any(neg in lead for neg in ("never", "not ", "n't", "no ")):
+            continue  # a prohibition is not a capability claim
+        tool = m.group(1).lower().replace(" ", "").replace("_", "")
+        if tool not in granted:
+            warns.append("%s: body says to use %s but tools: does not grant it"
+                         % (ascii_safe(fn), ascii_safe(m.group(1))))
+            break
+    named = {t.lower() for t in _AGENT_BODY_MCP_TOKEN_RE.findall(body)}
+    for tok in sorted(named - set(granted)):
+        warns.append("%s: body names MCP tool %s but tools: does not grant it"
+                     % (ascii_safe(fn), ascii_safe(tok)))
+    return warns
+
+
 def check_agent_definitions(agents_dir):
     """Strict-validate every agents/*.md definition. Returns (hard_failures, warnings).
 
@@ -810,6 +849,7 @@ def check_agent_definitions(agents_dir):
                     warnings.append("%s: grants unrecognised tool '%s' (allowlist may "
                                     "simply be stale -- verify before acting)"
                                     % (fn, ascii_safe(tool)))
+            warnings.extend(agent_body_tool_warnings(fn, text[end + 4:], tools_raw))
 
     return failures, warnings
 
