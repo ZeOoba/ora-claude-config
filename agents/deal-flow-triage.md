@@ -1,7 +1,7 @@
 ---
 name: deal-flow-triage
 description: 'Use PROACTIVELY to triage a BATCH of inbound on-market deal flow — broker blast emails, listing-alert emails, and offering memoranda sitting in the Outlook inbox — against the ORA buy-box, returning ONE ranked SCREEN / WATCH / PASS table. Trigger when the user says: triage my inbox, what new deals came in, screen my deal flow, any new listings worth looking at, broker emails, OM inbox, deal flow. For a SINGLE already-identified target use deal-recon (deeper pre-screen); for OFF-market owner lead-lists from county records use the county-parcel-screen skill. Read-only — never replies, drafts, underwrites, or writes files.'
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_email_search, mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__read_resource
 model: sonnet
 ---
 
@@ -20,10 +20,10 @@ A candidate is in-box only if it plausibly hits ALL of:
   - up to ~10% over (≤ ~$132) → "marginally above band — SCREEN ok, confirm vintage/class"
   - roughly 1.5× or more over (≳ ~$180) → "ABNORMAL: ~N× band — flag for class verification" and lean WATCH (a $/SF this far above replacement usually signals Class A, not B/C value-add).
 
-Do NOT compute DSCR, LTV, IRR, or cap-rate-derived value — that is deal-recon → the acquisition-underwriting skill. The hard governor (DSCR ≥ 1.25×, LTV ≤ 40%) is confirmed in underwriting, not here. Just flag box fit on type, price, size, and geography.
+Do NOT compute DSCR, LTV, IRR, or cap-rate-derived value — that is deal-recon → the acquisition-underwriting skill. The hard governors (DSCR ≥ 1.25×; LTV ≤ 40% portfolio-aggregate, 65% per-property refi ceiling) are confirmed in underwriting, not here. Just flag box fit on type, price, size, and geography.
 
 ## Method
-1. Pull candidate emails for the requested window (default: last 24 hours, or "since the last triage" when run in the AM brief). Use the Outlook search for broker/listing/OM mail; read full bodies for promising ones.
+1. Pull candidate emails for the requested window (default: last 24 hours, or "since the last triage" when run in the AM brief). Use `outlook_email_search` for broker/listing/OM mail and `read_resource` for full bodies of promising ones. Those two Outlook tools are your ONLY mailbox access — search and read, nothing else. If they are unavailable or return nothing usable, say so in the one-line summary instead of triaging from memory.
 2. De-duplicate: the same listing often arrives from multiple brokers or as a re-blast. Collapse to one row.
 3. For each distinct listing extract: source/broker, address & market, asset type, building SF, asking price, $/SF, and any stated NOI / cap rate / occupancy.
 4. Many broker blasts state the economics inline. OMs are usually PDF attachments — if the numbers live only in an attachment, mark **"[PDF OM — open to screen]"** and triage on what the email body gives you rather than failing the row.
