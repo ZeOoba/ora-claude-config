@@ -1579,6 +1579,65 @@ def test_live_probe_reports_worktree_baseref_ok():
     print("  PASS test_live_probe_reports_worktree_baseref_ok")
 
 
+def test_agent_body_tool_mismatch_flags_outlook_without_tool():
+    """deal-flow-triage shipped saying 'Use the Outlook search' with tools = Read, Grep,
+    Glob -- it could not do its job. The lint WARNS (never hard-fails)."""
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings(
+        "x.md", "Method: 1. Use the Outlook search for broker mail.", "Read, Grep, Glob")
+    assert len(w) == 1 and "outlook" in w[0].lower(), w
+    print("  PASS test_agent_body_tool_mismatch_flags_outlook_without_tool")
+
+
+def test_agent_body_tool_mismatch_quiet_when_tool_granted():
+    m = _load_probe_module()
+    tools = "Read, mcp__srv__outlook_email_search"
+    assert m.agent_body_tool_warnings(
+        "x.md", "Use the Outlook search for mail.", tools) == []
+    print("  PASS test_agent_body_tool_mismatch_quiet_when_tool_granted")
+
+
+def test_agent_body_tool_mismatch_flags_web_tools_not_granted():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings("x.md", "Use WebSearch to find comps.", "Read, Grep")
+    assert len(w) == 1 and "websearch" in w[0].lower(), w
+    assert m.agent_body_tool_warnings(
+        "x.md", "Use WebSearch to find comps.", "Read, WebSearch") == []
+    print("  PASS test_agent_body_tool_mismatch_flags_web_tools_not_granted")
+
+
+def test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted():
+    m = _load_probe_module()
+    body = "Call mcp__srv__read_thing then mcp__srv__other_thing."
+    w = m.agent_body_tool_warnings("x.md", body, "Read, mcp__srv__read_thing")
+    assert len(w) == 1 and "mcp__srv__other_thing" in w[0], w
+    print("  PASS test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted")
+
+
+def test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated():
+    """No tools: line = the agent inherits everything -> nothing to mismatch. A body that
+    says never use WebSearch is not a capability claim."""
+    m = _load_probe_module()
+    assert m.agent_body_tool_warnings("x.md", "Use the Outlook search.", None) == []
+    assert m.agent_body_tool_warnings(
+        "x.md", "Never use WebSearch here.", "Read, Grep") == []
+    print("  PASS test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated")
+
+
+def test_check_agent_definitions_reports_mismatch_as_warning_not_failure():
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "zz-mismatch.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: zz-mismatch\ndescription: x\ntools: Read, Grep\n---\n"
+                    "Use the Outlook search for mail.\n")
+        failures, warnings = m.check_agent_definitions(d)
+    assert failures == [], failures
+    assert any("zz-mismatch.md" in w and "outlook" in w.lower() for w in warnings), warnings
+    print("  PASS test_check_agent_definitions_reports_mismatch_as_warning_not_failure")
+
+
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_dated_archive_dirs_pruned_from_skill_scan()
@@ -1659,6 +1718,12 @@ def main():
     test_skill_version_changelog_drift_quiet_when_aligned()
     test_skill_version_changelog_drift_quiet_when_no_changelog_section()
     test_live_probe_wires_skill_version_changelog_drift_check()
+    test_agent_body_tool_mismatch_flags_outlook_without_tool()
+    test_agent_body_tool_mismatch_quiet_when_tool_granted()
+    test_agent_body_tool_mismatch_flags_web_tools_not_granted()
+    test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted()
+    test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated()
+    test_check_agent_definitions_reports_mismatch_as_warning_not_failure()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
