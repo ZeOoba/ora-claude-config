@@ -155,7 +155,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "^(Bash|mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*)$",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
