@@ -53,9 +53,8 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
    * Tool names that change (e.g. a renamed "..._v2") are not matched; the tests pin the
      current connector's names.
 
-Exit 2 = block (stderr is shown to the model). Unparseable input fails open so a hook
-malfunction never bricks every tool call -- EXCEPT an unparseable payload that still names a
-gated MCP tool (a send, a CMS write, a Netlify write), which fails closed (see GATE 1b/1c/3).
+Exit 2 = block (stderr is shown to the model). Unparseable input (not a JSON object,
+including RecursionError/oversized-int/invalid-UTF-8 on direct invocation) fails CLOSED -- see main().
 
 OVERRIDE TOKENS (hardened 2026-07-16, Gabriel-ratified; shared contract since 2026-07-17)
 -----------------------------------------------------------------------------------------
@@ -198,8 +197,8 @@ ROUND 3 FIXES (final gauntlet round, 2026-07-17):
      what the real harness uses) would not. Fixed: `sys.stdin.reconfigure(encoding="utf-8",
      errors="strict")` before reading, same pattern as git-prepush-doctrine-gate.py's
      stdout/stderr reconfigure. `errors="strict"` deliberately, not "replace" -- a genuinely
-     malformed (non-UTF-8) byte sequence should raise and hit the existing, already-documented
-     fail-open-on-unparseable-input path, not get silently replaced with U+FFFD (which could
+     malformed (non-UTF-8) byte sequence should raise and hit the unparseable-input path (now
+     fail-CLOSED, 2026-09-30), not get silently replaced with U+FFFD (which could
      reintroduce the same class of spurious-character corruption this fix closes).
 
 2026-09-18 -- check_file_write ONLY: Claude-managed slug-directory exemption.
@@ -263,7 +262,7 @@ try:
     from site_markers import SITE_PATH_MARKERS  # noqa: E402
 except Exception:
     # Fallback matches site_markers.py's current value. This hook's own stated
-    # philosophy is fail-open-on-malfunction, so a missing/broken shared module
+    # philosophy is fail-open-on-MODULE-malfunction (payload parsing fails closed, see main()), so a missing/broken shared module
     # should not crash it -- but a hardcoded fallback keeps Gate 2 functional
     # rather than silently disabling it entirely.
     SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
@@ -870,15 +869,6 @@ _HUBSPOT_CMS_READS = {
 # Operations that take mode="PREVIEW", which the connector documents as writing nothing.
 _HUBSPOT_PREVIEWABLE = frozenset(("PUBLISH", "REMOVE", "REMOVE_SECTION", "RESTORE_REVISION",
                                   "NAV_SET_ITEM", "NAV_REPLACE_MENU", "NAV_REMOVE_ITEM"))
-# Used ONLY when the hook payload cannot be parsed (see main()). json.loads raises
-# RecursionError on deeply nested input, which a caller can induce by padding an unknown extra
-# key; failing open there let a live send or publish through with no token (review finding C8).
-# Anything unparseable that still names a gated tool is refused. Built from the same sets the
-# gate uses so the list cannot drift.
-_GATED_NAME_MARKER = re.compile(
-    "|".join(sorted(re.escape(n) for n in (_MS365_EMAIL_SENDS | _MS365_TEAMS_SENDS
-                                             | frozenset(_HUBSPOT_CMS_READS))))
-    + r"|mcp__[\w\-]*netlify", re.IGNORECASE)
 
 
 def _nonblank(value):
@@ -1003,27 +993,29 @@ def main():
         sys.stdin.reconfigure(encoding="utf-8", errors="strict")  # type: ignore[attr-defined]
     except Exception:
         pass
-    # ONLY an unparseable hook payload fails open -- blocking every tool call system-wide
-    # when we cannot even read the hook input would brick the session; that availability
-    # tradeoff is deliberate. Once we HAVE a parsed payload naming a gated tool, any
-    # anomaly in it fails CLOSED (below): a false positive costs a retry, a false negative
-    # publishes to the live site.
+    # Anything that is not a parseable JSON OBJECT fails CLOSED (review finding C8 and its
+    # generalization). json.loads raises RecursionError on ~3000-deep nesting and ValueError on
+    # a >4300-digit integer -- both inducible by padding an unknown key in tool_input -- and
+    # this used to exit 0, disarming every gate below. A raw-text scan for gated names was
+    # rejected: the Bash command is model-controlled, so a JSON \uXXXX escape hides the marker
+    # from it. The brick risk that earlier argued for fail-open is disproven: this gate is only
+    # invoked for its own matchers, and Bash/Edit/Write reach it through pretooluse-dispatcher
+    # where confidentiality-guard already refuses every payload json cannot parse (exit 2,
+    # verified 2026-09-30 on garbage, padded, big-int and invalid-UTF-8 input). Newly blocked:
+    # NotebookEdit and the gated MCP tools on all such input, and on every path empty or
+    # non-object stdin (confidentiality-guard passes or crashes on those). The harness always
+    # sends a JSON object, so none of this occurs on legitimate traffic.
     try:
         raw = sys.stdin.read()
-    except Exception:
-        return
-    try:
         payload = json.loads(raw)
-    except Exception:  # includes RecursionError from pathologically nested input
-        if _GATED_NAME_MARKER.search(raw):
-            sys.stderr.write(
-                "BLOCKED by ORA autonomy gate: the hook payload could not be parsed but it "
-                "names a gated tool (send / publish / Netlify write). A payload that cannot be "
-                "evaluated for a gated tool fails closed (hard invariant 1/2).\n")
-            sys.exit(2)
-        return
+    except Exception:  # includes RecursionError, UnicodeDecodeError (strict stdin)
+        payload = None
     if not isinstance(payload, dict):
-        return  # a non-object payload names no tool we can evaluate -> fail open
+        sys.stderr.write(
+            "BLOCKED by ORA autonomy gate: the hook payload could not be parsed into a JSON "
+            "object, so it cannot be evaluated for a send / publish / site write. Unparseable "
+            "input fails closed (hard invariant 1/2).\n")
+        sys.exit(2)
 
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {})
