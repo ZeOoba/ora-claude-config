@@ -18,9 +18,44 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            Reads and preview deploys pass untouched.
            Overrides: allow-website-write   (scope website-write,  60 min, multi-use) -> b, c
                       allow-website-deploy  (scope website-deploy,  5 min, SINGLE-USE) -> a, d
+  GATE 1b — ms365 MCP email sends (outlook_send_mail / outlook_forward_mail /
+           outlook_send_draft): blocked unless EVERY recipient is strictly @oxfordra.net
+           (full-string match: lookalike domains, display-name forms, and a list smuggled into
+           one string all count as external). outlook_send_draft carries no recipients, so it
+           always needs a token, and the token must name `draft:<messageId>`.
+           Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 1c — Teams MCP sends (teams_send_chat_message / teams_send_channel_message /
+           teams_reply_channel_message): always blocked without a token naming the destination
+           (`teams:<chatId>` or `teams:<teamId>/<channelId>`).
+           Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 3 — HubSpot CMS MCP writes (manage_blog_post / manage_landing_page /
+           manage_website_page): an exact-case ALLOWLIST of read actions passes; every other
+           action, an unknown action, BATCH, or a malformed input is a write and blocks. A
+           website-page PUBLISH/REMOVE/RESTORE/NAV_* with an explicit mode="PREVIEW" writes
+           nothing and passes. Override: allow-hubspot-cms-write (scope hubspot-cms-write,
+           10 min, multi-use: a page edit is several calls ending in a publish).
+  Gates 1b/1c/3 match on the tool-name SUFFIX after the last "__", so a reinstalled
+  connector with a new id stays gated. They fail CLOSED on any anomaly once a gated tool is
+  named, including a payload too malformed to parse. This gate covers Claude Code sessions
+  and the CC/MCP scheduled fleet only; hooks do not run inside Cowork (LAMS) sessions.
+
+  KNOWN RESIDUALS (adversarial review, 2026-09-30 -- accepted, not silently ignored):
+   * A draft-send token names the DRAFT, not its contents. outlook_update_draft /
+     outlook_create_draft are deliberately ungated (drafting is the normal Outlook-pane
+     workflow), so a draft can be re-pointed at a new recipient after Gabriel approves its id.
+     The window is the token TTL (5 min, single-use). Approve a draft only after reading its
+     final recipients.
+   * NOT covered: outlook_create_event / update_event / delete_event / respond_to_event (they
+     email invitees or cancel with a comment) and outlook_set_vacation (free-text auto-replies
+     to outside senders), plus outlook_create_filter. Follow-up.
+   * The confidentiality-guard matcher in settings.json names the retired Composio tools
+     (OUTLOOK_SEND...), so ms365 sends get no confidential-term scan. Separate fix.
+   * Tool names that change (e.g. a renamed "..._v2") are not matched; the tests pin the
+     current connector's names.
 
 Exit 2 = block (stderr is shown to the model). Unparseable input fails open so a hook
-malfunction never bricks every tool call.
+malfunction never bricks every tool call -- EXCEPT an unparseable payload that still names a
+gated MCP tool (a send, a CMS write, a Netlify write), which fails closed (see GATE 1b/1c/3).
 
 OVERRIDE TOKENS (hardened 2026-07-16, Gabriel-ratified; shared contract since 2026-07-17)
 -----------------------------------------------------------------------------------------
@@ -352,6 +387,10 @@ except Exception:
         return False  # no validator -> no grant, ever (mirrors token_grants above)
 
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
+# HubSpot CMS pages/posts are public-facing content (CLAUDE.md: publishing or modifying public
+# content needs explicit permission). Multi-use on purpose: a page edit is several calls that
+# end in a publish, and each call would otherwise need its own approval.
+HUBSPOT_CMS_WRITE = Tier("allow-hubspot-cms-write", "hubspot-cms-write", 600)
 
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs
@@ -774,7 +813,7 @@ def check_file_write(file_path, session_id):
             block("write to oxfordra.net site tree: %s" % file_path, WEBSITE_WRITE, session_id)
 
 
-def check_mcp(tool_name, session_id):
+def check_mcp(tool_name, session_id, tool_input=None):
     """GATE 2c — Netlify MCP mutating tools. The deploy/project/extension *-updater
     tools push to prod / change live project config + CSP/headers with no Bash and no
     prompt; under bypassPermissions nothing else stops them. This gate stands in for
@@ -792,6 +831,156 @@ def check_mcp(tool_name, session_id):
     if "netlify" in lowered and not lowered.endswith("-reader"):
         if not override_active(session_id, WEBSITE_DEPLOY):
             block("Netlify MCP mutating call (%s)" % tool_name, WEBSITE_DEPLOY, session_id)
+    # Gates 1b/1c/3. Once a payload names one of these tools, ANY anomaly fails closed, same
+    # as Bash/file tools: an exception here would exit 1, which PreToolUse treats as
+    # non-blocking, i.e. the send or publish would proceed.
+    short = lowered.rsplit("__", 1)[-1]
+    if short in _MS365_EMAIL_SENDS or short in _MS365_TEAMS_SENDS or short in _HUBSPOT_CMS_READS:
+        try:
+            _check_send_and_cms(short, tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
+
+
+_MS365_EMAIL_SENDS = frozenset(("outlook_send_mail", "outlook_forward_mail", "outlook_send_draft"))
+_MS365_TEAMS_SENDS = frozenset(("teams_send_chat_message", "teams_send_channel_message",
+                                "teams_reply_channel_message"))
+# Full-string match. Anything that is not exactly one plain address at the internal domain
+# is external: "a@oxfordra.net.evil.com", "Name <x@evil.com>", "evil@x.com,ceo@oxfordra.net",
+# a trailing space/newline/zero-width character, a non-ASCII homoglyph in the domain.
+_INTERNAL_ADDRESS = re.compile(r"[A-Za-z0-9._+\-]+@oxfordra\.net", re.IGNORECASE | re.ASCII)
+# The only parameters the ms365 send tools document. A recipient-bearing key this gate does not
+# know about (replyTo, a differently-cased "To", a field added later) fails closed instead of
+# being silently ignored.
+_EMAIL_SEND_KEYS = frozenset(("to", "cc", "bcc", "subject", "body", "bodyType", "comment", "messageId"))
+_DRAFT_SEND_KEYS = frozenset(("messageId",))
+
+_HUBSPOT_PAGE_READS = frozenset(("MODULES", "MODULE_TYPES", "MODULE_DEF", "MODULE_STYLES",
+                                 "MODULE_GUIDE", "REVISIONS", "TEMPLATES", "FORMS", "BRAND_KIT"))
+# tool suffix -> (input field holding the action, exact-case set of READ actions). Allowlist
+# by design: an action added to the connector later is a write until someone reads it.
+_HUBSPOT_CMS_READS = {
+    "manage_blog_post": ("action", frozenset(("GET_POST", "GET_AUTHOR", "LIST_BLOGS",
+                                              "LIST_BLOG_POSTS", "LIST_TAGS", "GET_BRAND_KIT"))),
+    "manage_landing_page": ("action", _HUBSPOT_PAGE_READS),
+    "manage_website_page": ("operation", _HUBSPOT_PAGE_READS | frozenset(("NAV_GET_MENU",))),
+}
+# Operations that take mode="PREVIEW", which the connector documents as writing nothing.
+_HUBSPOT_PREVIEWABLE = frozenset(("PUBLISH", "REMOVE", "REMOVE_SECTION", "RESTORE_REVISION",
+                                  "NAV_SET_ITEM", "NAV_REPLACE_MENU", "NAV_REMOVE_ITEM"))
+# Used ONLY when the hook payload cannot be parsed (see main()). json.loads raises
+# RecursionError on deeply nested input, which a caller can induce by padding an unknown extra
+# key; failing open there let a live send or publish through with no token (review finding C8).
+# Anything unparseable that still names a gated tool is refused. Built from the same sets the
+# gate uses so the list cannot drift.
+_GATED_NAME_MARKER = re.compile(
+    "|".join(sorted(re.escape(n) for n in (_MS365_EMAIL_SENDS | _MS365_TEAMS_SENDS
+                                             | frozenset(_HUBSPOT_CMS_READS))))
+    + r"|mcp__[\w\-]*netlify", re.IGNORECASE)
+
+
+def _nonblank(value):
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _email_recipients(tool_input):
+    """Every to/cc/bcc entry, UNSTRIPPED (a padded address is not provably internal). None
+    when the shape is unusable or there is no recipient at all."""
+    if not isinstance(tool_input, dict):
+        return None
+    found = []
+    for key in ("to", "cc", "bcc"):
+        value = tool_input.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return None
+        for address in value:
+            if not isinstance(address, str):
+                return None
+            found.append(address)
+    return found or None
+
+
+def _teams_destination(short, tool_input):
+    if not isinstance(tool_input, dict):
+        return None
+    if short == "teams_send_chat_message":
+        chat = tool_input.get("chatId")
+        return "teams:" + chat.strip() if _nonblank(chat) else None
+    team, channel = tool_input.get("teamId"), tool_input.get("channelId")
+    if _nonblank(team) and _nonblank(channel):
+        return "teams:%s/%s" % (team.strip(), channel.strip())
+    return None
+
+
+def _hubspot_cms_is_read(short, tool_input):
+    if not isinstance(tool_input, dict):
+        return False
+    field, reads = _HUBSPOT_CMS_READS[short]
+    value = tool_input.get(field)
+    if field == "action":
+        return isinstance(value, str) and value in reads
+    if not isinstance(value, dict):
+        return False
+    kind = value.get("_type")
+    if not isinstance(kind, str):
+        return False
+    if kind in reads:
+        return True
+    if kind in _HUBSPOT_PREVIEWABLE:
+        # Explicit only: the connector's own default for NAV_* is PREVIEW, but an omitted or
+        # odd mode is not something this gate should bet a live site menu on.
+        return value.get("mode") == "PREVIEW" and not value.get("confirmNavChange")
+    return False
+
+
+def _check_send_and_cms(short, tool_name, tool_input, session_id):
+    if short in _HUBSPOT_CMS_READS:
+        if _hubspot_cms_is_read(short, tool_input):
+            return
+        detail = ""
+        if isinstance(tool_input, dict):
+            probe = tool_input.get("action") or (tool_input.get("operation") or {})
+            probe = probe.get("_type") if isinstance(probe, dict) else probe
+            detail = " " + probe[:40] if isinstance(probe, str) else ""
+        if not override_active(session_id, HUBSPOT_CMS_WRITE):
+            block("HubSpot CMS write (%s%s) -- public-facing content" % (short, detail),
+                  HUBSPOT_CMS_WRITE, session_id)
+        return
+    if short in _MS365_TEAMS_SENDS:
+        destination = _teams_destination(short, tool_input)
+        if destination is None:
+            block_shape(tool_name, session_id)
+        external = [destination]
+        reason = "Teams message send (%s)" % short
+        hint = "Name the destination in `recipients:` exactly: %s\n" % destination
+    elif short == "outlook_send_draft":
+        message_id = tool_input.get("messageId") if isinstance(tool_input, dict) else None
+        if not _nonblank(message_id) or set(tool_input) - _DRAFT_SEND_KEYS:
+            block_shape(tool_name, session_id)
+        external = ["draft:" + message_id.strip()]
+        reason = "Outlook draft send (%s)" % short
+        hint = ("outlook_send_draft carries no recipient list, so the token must name the "
+                "draft itself in `recipients:`: %s\n" % external[0])
+    else:
+        recipients = _email_recipients(tool_input)
+        if recipients is None or set(tool_input) - _EMAIL_SEND_KEYS:
+            block_shape(tool_name, session_id)
+        external = [a for a in recipients if not _INTERNAL_ADDRESS.fullmatch(a)]
+        if not external:
+            return  # internal-only: parity with Gate 1, which also leaves internal sends alone
+        reason = "external email recipient(s) via MCP (%s): %s" % (short, ", ".join(external))
+        hint = ""
+    # consume=True (default): this is the ONLY enforcement point for these tools, so it must
+    # be the one that spends the single-use grant (see override_active's docstring).
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("%s: %s" % (reason, ", ".join(external)) if hint else reason,
+              EXTERNAL_SEND, session_id, extra=hint)
 
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -820,8 +1009,18 @@ def main():
     # anomaly in it fails CLOSED (below): a false positive costs a retry, a false negative
     # publishes to the live site.
     try:
-        payload = json.load(sys.stdin)
+        raw = sys.stdin.read()
     except Exception:
+        return
+    try:
+        payload = json.loads(raw)
+    except Exception:  # includes RecursionError from pathologically nested input
+        if _GATED_NAME_MARKER.search(raw):
+            sys.stderr.write(
+                "BLOCKED by ORA autonomy gate: the hook payload could not be parsed but it "
+                "names a gated tool (send / publish / Netlify write). A payload that cannot be "
+                "evaluated for a gated tool fails closed (hard invariant 1/2).\n")
+            sys.exit(2)
         return
     if not isinstance(payload, dict):
         return  # a non-object payload names no tool we can evaluate -> fail open
@@ -859,8 +1058,9 @@ def main():
             block_shape(tool_name, session_id)
         check_file_write(file_path, session_id)
     elif isinstance(tool_name, str) and tool_name.startswith("mcp__"):
-        # check_mcp reads only tool_name, so a malformed tool_input cannot affect it.
-        check_mcp(tool_name, session_id)
+        # The Netlify gate reads only tool_name; Gates 1b/1c/3 also read tool_input and fail
+        # closed on any shape they cannot evaluate.
+        check_mcp(tool_name, session_id, tool_input)
 
 
 if __name__ == "__main__":
