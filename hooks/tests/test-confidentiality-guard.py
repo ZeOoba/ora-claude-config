@@ -906,6 +906,17 @@ with zipfile.ZipFile(_zbuf, "w") as _z:
 code, err = run({"tool_name": M365 + "sharepoint_update_file", "tool_input": {
     "driveId": "b!x", "itemId": "01AB", "contentBase64": base64.b64encode(_zbuf.getvalue()).decode("ascii")}})
 expect("BLOCK sharepoint_update_file: .docx whose runs split the term", 2, code, err)
+# Real Office files are DEFLATED, so the XML is not readable in the raw bytes -- only unpacking the
+# container finds the term (the STORED case above would pass on raw bytes alone).
+_zdef = io.BytesIO()
+with zipfile.ZipFile(_zdef, "w", zipfile.ZIP_DEFLATED) as _z:
+    _z.writestr("word/document.xml", "<w:document><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:document>" % A1)
+expect("DEFLATED .docx really hides the term from a raw-bytes scan (fixture sanity)", 0,
+       int(A1.lower().encode("utf-8") in _zdef.getvalue().lower()))
+expect("BLOCK sharepoint_upload_file: DEFLATED .docx carrying the term", 2,
+       *run({"tool_name": M365 + "sharepoint_upload_file", "tool_input": {
+           "driveId": "b!x", "filename": "memo.docx",
+           "contentBase64": base64.b64encode(_zdef.getvalue()).decode("ascii")}}))
 _zclean = io.BytesIO()
 with zipfile.ZipFile(_zclean, "w") as _z:
     _z.writestr("word/document.xml", "<w:document><w:t>Columbus flex portfolio</w:t></w:document>")
