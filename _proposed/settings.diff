@@ -1,0 +1,150 @@
+--- a/settings.json (live, 1370b41)
++++ b/settings.json (_proposed)
+@@ -155,30 +155,12 @@
+     ],
+     "PostToolUse": [
+       {
+-        "matcher": "Bash",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/ora-skills/tools/catch_up_main.py\" --hook",
++        "matcher": "^(Bash|mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*)$",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/posttooluse-dispatcher.py\"",
+             "timeout": 360
+-          }
+-        ]
+-      },
+-      {
+-        "matcher": "Bash",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "bash -c 'INPUT=$(cat); CMD=$(echo \"$INPUT\" | grep -o \"deploy\" || true); if [ -n \"$CMD\" ]; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after deploy\" >&2; fi; fi'"
+-          }
+-        ]
+-      },
+-      {
+-        "matcher": "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "bash -c 'INPUT=$(cat); TOOL=$(echo \"$INPUT\" | C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_name\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$TOOL\" | grep -qE \"updater$\"; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after Netlify MCP $TOOL\" >&2; fi; fi'"
+           }
+         ]
+       },
+@@ -202,57 +184,48 @@
+         ]
+       },
+       {
++        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-provenance-recorder.py\""
++          }
++        ]
++      },
++      {
++        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-nag-correction.py\""
++          }
++        ]
++      },
++      {
++        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-postguard.py\""
++          }
++        ]
++      }
++    ],
++    "PreToolUse": [
++      {
++        "matcher": "Edit|Write|MultiEdit",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\""
++          }
++        ]
++      },
++      {
+         "matcher": "Bash",
+         "hooks": [
+           {
+             "type": "command",
+-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-gate-sentinel.py\""
+-          }
+-        ]
+-      },
+-      {
+-        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-provenance-recorder.py\""
+-          }
+-        ]
+-      },
+-      {
+-        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-nag-correction.py\""
+-          }
+-        ]
+-      },
+-      {
+-        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-postguard.py\""
+-          }
+-        ]
+-      }
+-    ],
+-    "PreToolUse": [
+-      {
+-        "matcher": "Edit|Write|MultiEdit",
+-        "hooks": [
+-          {
+-            "type": "command",
+-            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\""
+-          }
+-        ]
+-      },
+-      {
+-        "matcher": "Bash",
+-        "hooks": [
+-          {
+-            "type": "command",
+             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\" --chain bash"
+           }
+         ]
+@@ -290,6 +263,15 @@
+           {
+             "type": "command",
+             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/registry-write-guard.py\""
++          }
++        ]
++      },
++      {
++        "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
++        "hooks": [
++          {
++            "type": "command",
++            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/ascii-only-guard.py\""
+           }
+         ]
+       },

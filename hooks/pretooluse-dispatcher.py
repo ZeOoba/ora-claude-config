@@ -90,6 +90,25 @@ needing Bash goes in BASH_GUARD_CHAIN. `--selfcheck` validates both.
 LANDING ORDER: this file must reach the live hooks dir BEFORE a settings.json
 that passes `--chain bash`. A dispatcher without the selector ignores argv and
 would silently run the Edit/Write chain on Bash.
+
+=============================================================================
+PER-GUARD TELEMETRY (2026-09-30, hooks-audit)
+=============================================================================
+Every guard execution appends one record to hooks/_state/guard-telemetry.jsonl
+via hooks/lib/guard_telemetry.py: {ts, chain, guard, tool_name, session_id,
+exit_code, ms, path_taken}. NO command text, file path, stderr or payload
+content is ever written -- that module has no free-text field, and the two
+payload-derived identifiers pass an allowlist shape check. Records are buffered
+and written ONCE per dispatcher run (one file append per tool call), inside a
+try/except that can never change a guard decision or this process's exit code.
+Kill switch: ORA_GUARD_TELEMETRY=0. Read it with hooks/guard-telemetry-summary.py.
+
+ascii-only-guard ADDED to GUARD_CHAIN 2026-09-30 (last position: a style rail
+must never pre-empt a security guard's block message). Its Desktop Commander
+coverage is a SEPARATE settings.json entry, per that guard's own wiring plan.
+Measured before wiring: over 10,333 real Edit/Write/DC-write calls in the last
+30 days of transcripts it would have blocked 5, all on adversarial-fixture
+test files or on ascii-only-guard.py itself; non-.py targets are never gated.
 """
 import io
 import importlib.util
@@ -97,8 +116,18 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Telemetry is optional plumbing. A broken or missing lib must degrade to "no
+# telemetry", never to an import-time crash (which would exit 1 -- NON-blocking
+# -- and silently disable every guard in the chain).
+try:
+    sys.path.insert(0, os.path.join(HOOKS_DIR, "lib"))
+    import guard_telemetry as _telemetry  # noqa: E402
+except Exception:  # noqa: BLE001
+    _telemetry = None
 
 # settings.json PreToolUse order for the Edit|Write|MultiEdit matchers.
 # (The inline bash sensitive-file-blocker stays inline in settings.json -- it is
@@ -115,6 +144,9 @@ GUARD_CHAIN = [
     "rules-md-guard",
     "lint-config-guard",  # OI-148, 2026-08-13 -- Edit/Write/MultiEdit into an
     # existing oxford-command-center lint/format/typecheck config
+    "ascii-only-guard",  # 2026-09-30 -- non-ASCII into a .py whose module
+    # docstring declares ASCII-only. LAST on purpose (style rail, not security).
+    # DC write_file/edit_block twins need their OWN settings.json entry.
 ]
 
 # settings.json PreToolUse order for the Bash matchers (OI-176, 2026-08-16).
@@ -256,12 +288,59 @@ def run_guard(name, raw):
         return 0, "", "", "failed"
 
 
-def main(chain=None):
+def _chain_label(chain):
+    for label, members in CHAINS.items():
+        if members is chain:
+            return label
+    return "custom"
+
+
+def _record(records, label, guard, ids, rc, ms, path_taken):
+    """Buffer one telemetry record. Never raises, never alters rc."""
+    if _telemetry is None:
+        return
+    try:
+        records.append(_telemetry.make_record(
+            label, guard, ids[0], ids[1], rc, ms, path_taken))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _flush(records):
+    if _telemetry is None or not records:
+        return
+    try:
+        _telemetry.flush(records)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_MODE_TO_PATH = {"inprocess": "inprocess", "subprocess": "subprocess",
+                 "failed": "failopen"}
+
+
+def main(chain=None, label=None):
     chain = GUARD_CHAIN if chain is None else chain
+    label = label or _chain_label(chain)
     try:
         raw = sys.stdin.buffer.read()
     except Exception:
         return 0
+    records = []
+    ids = ("", "")
+    if _telemetry is not None:
+        try:
+            if _telemetry.enabled():
+                ids = _telemetry.payload_ids(raw)
+        except Exception:  # noqa: BLE001
+            ids = ("", "")
+    try:
+        return _dispatch(chain, raw, label, ids, records)
+    finally:
+        _flush(records)
+
+
+def _dispatch(chain, raw, label, ids, records):
 
     # NO pre-parse / early-out on malformed input. An earlier revision of this
     # dispatcher short-circuited to 0 when the payload would not json.loads(),
@@ -285,11 +364,17 @@ def main(chain=None):
               "Restore the file(s) or correct the guard chain, then re-run "
               "`python hooks/pretooluse-dispatcher.py --selfcheck`."
               % (HOOKS_DIR, ", ".join(missing)), file=sys.stderr)
+        for n in missing:
+            _record(records, label, n, ids, 2, 0.0, "failclosed")
         return 2
 
     stdouts = []
     for name in chain:
-        rc, out, err, _mode = run_guard(name, raw)
+        t0 = time.perf_counter()
+        rc, out, err, mode = run_guard(name, raw)
+        _record(records, label, name, ids, rc,
+                (time.perf_counter() - t0) * 1000.0,
+                _MODE_TO_PATH.get(mode, "failopen"))
         if out and out.strip():
             stdouts.append(out)
         if err:
@@ -367,7 +452,22 @@ def selfcheck():
             continue
         print("chain %r OK -- %d guards present, order:" % (label, len(chain)))
         for i, n in enumerate(chain, 1):
-            print("  %d. %s" % (i, n))
+            # Presence alone does not prove the guard runs IN-PROCESS: one that
+            # cannot be imported (or has no callable main) silently degrades to
+            # the subprocess fallback on every call -- still enforced, but paying
+            # the startup cost this file exists to remove. Reported, not failed.
+            try:
+                loadable = callable(getattr(_load(n), "main", None))
+            except Exception:  # noqa: BLE001
+                loadable = False
+            print("  %d. %s%s" % (i, n, "" if loadable else
+                                  "   WARN: not in-process loadable -> subprocess fallback"))
+    if _telemetry is None:
+        print("telemetry: UNAVAILABLE (hooks/lib/guard_telemetry.py did not import)")
+    else:
+        print("telemetry: %s -> %s" % (
+            "enabled" if _telemetry.enabled() else "DISABLED (ORA_GUARD_TELEMETRY=0)",
+            _telemetry.log_path()))
     return rc
 
 
@@ -393,4 +493,4 @@ if __name__ == "__main__":
               "missing name; known chains: %s.\nRefusing to guess which guard "
               "set applies." % ", ".join(sorted(CHAINS)), file=sys.stderr)
         sys.exit(2)
-    sys.exit(main(_chain))
+    sys.exit(main(_chain, _chain_label(_chain)))
