@@ -264,6 +264,86 @@ def test_wrongly_typed_fields_in_a_line_do_not_lose_the_valid_dispatches():
 
 
 
+def _wf_file(projects, session, run_id, script, days_ago, fname=None):
+    d = os.path.join(projects, "p", session, "workflows")
+    os.makedirs(d, exist_ok=True)
+    body = {"runId": run_id, "timestamp": _iso(days_ago), "script": script,
+            "status": "completed", "workflowProgress": []}
+    with open(os.path.join(d, fname or (run_id + ".json")), "w", encoding="utf-8") as f:
+        json.dump(body, f)
+
+
+def test_workflow_runs_are_counted_by_script_reference_within_window():
+    """Workflow scripts dispatch with agent(prompt, {agentType: 'name'}); the run JSON keeps
+    the script, so a run that references an agent is evidence the agent is in use."""
+    m = _load()
+    since = time.time() - 30 * 86400
+    with tempfile.TemporaryDirectory() as d:
+        pr = os.path.join(d, "projects")
+        _wf_file(pr, "s1", "wf_a", "await agent('x', { agentType:'alpha', label:'a' })", 2)
+        _wf_file(pr, "s1", "wf_b", 'agent(p, {agentType: "alpha"}); agent(q,{agentType:"beta"})', 3)
+        _wf_file(pr, "s1", "wf_old", "agent(p, {agentType:'alpha'})", 90)        # out of window
+        _wf_file(pr, "s2", "wf_a", "agent(p, {agentType:'alpha'})", 2, "copy.json")  # same runId
+        _wf_file(pr, "s1", "wf_c", "agent(p, {agentType:'alpha-extra'})", 2)     # not 'alpha'
+        _wf_file(pr, "s1", "wf_none", "agent(p, {label:'no type'})", 2)
+        runs = m.count_workflow_runs(pr, ["alpha", "beta"], since)
+    assert runs["alpha"] == {"wf_a", "wf_b"}, runs
+    assert runs["beta"] == {"wf_b"}, runs
+    print("  PASS test_workflow_runs_are_counted_by_script_reference_within_window")
+
+
+def test_workflow_counter_fails_open_on_bad_files_and_missing_dirs():
+    m = _load()
+    with tempfile.TemporaryDirectory() as d:
+        pr = os.path.join(d, "projects")
+        wd = os.path.join(pr, "p", "s", "workflows")
+        os.makedirs(wd)
+        with open(os.path.join(wd, "wf_bad.json"), "w", encoding="utf-8") as f:
+            f.write("{not json")
+        with open(os.path.join(wd, "wf_list.json"), "w", encoding="utf-8") as f:
+            f.write("[1, 2]")
+        _wf_file(pr, "s", "wf_ok", "agent(p, {agentType:'alpha'})", 1)
+        runs = m.count_workflow_runs(pr, ["alpha"], 0)
+    assert runs == {"alpha": {"wf_ok"}}, runs
+    assert m.count_workflow_runs(os.path.join(HERE, "zz-nope"), ["a"], 0) == {"a": set()}
+    print("  PASS test_workflow_counter_fails_open_on_bad_files_and_missing_dirs")
+
+
+def test_workflow_use_clears_the_review_flag_and_is_shown_in_the_report():
+    m = _load()
+    now = time.time()
+    agents = {"wfonly": now - 90 * 86400, "idle": now - 90 * 86400}
+    found = {"wfonly": set(), "idle": set()}
+    wf = {"wfonly": {"wf_1", "wf_2"}, "idle": set()}
+    rows = {r["agent"]: r for r in m.build_report(agents, found, 30, 30, now, wf)}
+    assert rows["wfonly"]["flag"] == "ok" and rows["wfonly"]["workflow_runs"] == 2, rows
+    assert rows["idle"]["flag"] == "REVIEW" and rows["idle"]["workflow_runs"] == 0, rows
+    out = m.render(list(rows.values()), 30, 10, None, "2026-10-01")
+    assert "Workflow runs" in out and "runs, not dispatches" in out, out
+    print("  PASS test_workflow_use_clears_the_review_flag_and_is_shown_in_the_report")
+
+
+def test_main_counts_workflow_runs_end_to_end():
+    m = _load()
+    with tempfile.TemporaryDirectory() as d:
+        agents = os.path.join(d, "agents")
+        os.makedirs(agents)
+        for name in ("alpha", "beta"):
+            with open(os.path.join(agents, name + ".md"), "w", encoding="utf-8") as f:
+                f.write("x\n")
+        pr = os.path.join(d, "projects")
+        _wf_file(pr, "s", "wf_1", "agent(p, {agentType:'alpha'})", 2)
+        out = os.path.join(d, "out.json")
+        rc = m.main(["--days", "30", "--agents-dir", agents, "--projects-dir", pr,
+                     "--json", "--out", out])
+        rows = {r["agent"]: r for r in json.load(open(out, encoding="utf-8"))}
+    assert rc == 0
+    assert rows["alpha"]["workflow_runs"] == 1 and rows["alpha"]["flag"] == "ok", rows
+    assert rows["beta"]["workflow_runs"] == 0, rows
+    print("  PASS test_main_counts_workflow_runs_end_to_end")
+
+
+
 def main():
     test_counts_unique_ids_and_ignores_unknown_and_non_tool_lines()
     test_flags_zero_use_old_agents_review_and_young_agents_young()
@@ -277,6 +357,10 @@ def main():
     test_main_honours_days_window_and_timestampless_dispatch_fails_open()
     test_ts_epoch_parses_z_offsets_and_treats_naive_as_utc()
     test_wrongly_typed_fields_in_a_line_do_not_lose_the_valid_dispatches()
+    test_workflow_runs_are_counted_by_script_reference_within_window()
+    test_workflow_counter_fails_open_on_bad_files_and_missing_dirs()
+    test_workflow_use_clears_the_review_flag_and_is_shown_in_the_report()
+    test_main_counts_workflow_runs_end_to_end()
     print("ALL AGENT-USAGE-REPORT TESTS PASS")
 
 

@@ -117,7 +117,7 @@ def test_agent_and_workflow_references_resolve():
 
     The 'Skill precedence' block names orchestration primitives that are not SKILL.md
     skills: agents (CLAUDE.md literally says "the bare `deal-recon` agent", "the
-    `lease-sweep` agent", "the `portfolio-anomaly-scout` agent") resolve at
+    `portfolio-anomaly-scout` agent"; `lease-sweep` was named too until retired) resolve at
     ~/.claude/agents/<name>.md; verified-deal-recon is workflow-backed at
     ~/.claude/workflows/<name>.js. Before this fix they were false MISSING.
 
@@ -1700,6 +1700,26 @@ def test_agent_body_lint_round2_edges():
 
 
 
+def test_agent_body_lint_more_prohibition_forms_and_explicit_opt_out():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings
+    for body in ("You must not use WebSearch.", "Do not ever use WebSearch.",
+                 "Do NOT directly use WebSearch here.", "You shouldn’t use WebSearch.",
+                 "It mustn't use WebFetch.", "We won't use the Outlook search.",
+                 "Never ever use WebSearch.", "Please do not just use WebSearch."):
+        assert w("x.md", body, "Read") == [], body
+    # real claims that merely contain a negator elsewhere still warn
+    for body in ("You must use WebSearch.", "Not only read the file but use WebSearch too.",
+                 "We cannot proceed without comps, so use WebSearch."):
+        assert len(w("x.md", body, "Read")) == 1, body
+    # explicit opt-out for a body the heuristic misreads
+    marked = "<!-- agent-lint: ignore tools-body -->\nUse WebSearch when the caller grants it."
+    assert w("x.md", marked, "Read") == []
+    assert len(w("x.md", "Use WebSearch when the caller grants it.", "Read")) == 1
+    print("  PASS test_agent_body_lint_more_prohibition_forms_and_explicit_opt_out")
+
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_dated_archive_dirs_pruned_from_skill_scan()
@@ -1791,6 +1811,7 @@ def main():
     test_agent_body_lint_negation_is_word_bounded_and_adjacent()
     test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool()
     test_agent_body_lint_round2_edges()
+    test_agent_body_lint_more_prohibition_forms_and_explicit_opt_out()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 

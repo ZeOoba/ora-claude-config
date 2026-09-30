@@ -10,14 +10,18 @@ Usage:
 
 Zero-use rule: an agent with 0 dispatches in the window AND a definition older than
 --min-age-days is flagged REVIEW (retire, rewire, or fix). Younger agents are YOUNG.
-Caveats printed in the report: Workflow-internal dispatches may not appear as tool_use
-lines, and transcript retention bounds the window.
+Workflow scripts dispatch with agent(prompt, {agentType: '<name>'}) and never emit the Agent
+tool's subagent_type, so they are counted separately: each persisted
+<session>/workflows/wf_*.json run whose script names the agent counts as one Workflow run
+(runs, not calls). Either kind of evidence clears the zero-use flag. Caveat printed in the
+report: transcript and workflow-run retention bound the window.
 """
 import argparse
 import datetime
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -124,19 +128,62 @@ def count_dispatches(projects_dir, names, since_epoch):
     return found, scanned, oldest
 
 
-def build_report(agents, found, days, min_age_days, now):
+_WF_AGENT_TYPE_RE = re.compile(r"""agentType\s*:\s*['"]([A-Za-z0-9:_-]+)['"]""")
+
+
+def count_workflow_runs(projects_dir, names, since_epoch):
+    """Return {name: set(runId)} of Workflow runs whose script names the agent.
+
+    Workflow scripts dispatch with agent(prompt, {agentType: '<name>'}) and never emit the
+    Agent tool's subagent_type, so count_dispatches cannot see them. Each run is persisted
+    as <session>/workflows/wf_*.json with its script, runId and timestamp; a run whose
+    script references the agent is evidence the agent is in use. This counts RUNS, not
+    calls: per-agent call counts inside a run are not recorded. Fails open on bad files.
+    """
+    runs = {n: set() for n in names}
+    wanted = set(names)
+    if not os.path.isdir(projects_dir):
+        return runs
+    pattern = os.path.join(projects_dir, "**", "workflows", "wf_*.json")
+    for path in glob.glob(pattern, recursive=True):
+        try:
+            with open(path, encoding="utf-8", errors="ignore") as fh:
+                obj = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(obj, dict) or not isinstance(obj.get("script"), str):
+            continue
+        epoch = _ts_epoch(obj.get("timestamp"))
+        if epoch is None:
+            try:
+                epoch = os.path.getmtime(path)
+            except OSError:
+                continue
+        if since_epoch and epoch < since_epoch:
+            continue
+        run_id = obj.get("runId")
+        run_id = run_id if isinstance(run_id, str) and run_id else os.path.basename(path)
+        for agent_type in set(_WF_AGENT_TYPE_RE.findall(obj["script"])):
+            if agent_type in wanted:
+                runs[agent_type].add(run_id)
+    return runs
+
+
+def build_report(agents, found, days, min_age_days, now, wf=None):
     rows = []
     for name in sorted(agents):
         n = len(found.get(name, ()))
+        w = len((wf or {}).get(name, ()))
         age_days = int((now - agents[name]) / 86400)
-        if n > 0:
+        if n > 0 or w > 0:
             flag = "ok"
         elif age_days >= min_age_days:
             flag = "REVIEW"
         else:
             flag = "YOUNG"
-        rows.append({"agent": name, "dispatches": n, "def_age_days": age_days, "flag": flag})
-    rows.sort(key=lambda r: (-r["dispatches"], r["agent"]))
+        rows.append({"agent": name, "dispatches": n, "workflow_runs": w,
+                     "def_age_days": age_days, "flag": flag})
+    rows.sort(key=lambda r: (-r["dispatches"], -r["workflow_runs"], r["agent"]))
     return rows
 
 
@@ -145,18 +192,23 @@ def render(rows, days, scanned, oldest, today):
     review = [r["agent"] for r in rows if r["flag"] == "REVIEW"]
     young = [r["agent"] for r in rows if r["flag"] == "YOUNG"]
     lines.append("%d agents - %d used - %d REVIEW (zero use, definition older than the age floor) - %d YOUNG"
-                 % (len(rows), sum(1 for r in rows if r["dispatches"]), len(review), len(young)))
+                 % (len(rows), sum(1 for r in rows if r["dispatches"] or r.get("workflow_runs")),
+                    len(review), len(young)))
     lines.append("")
-    lines.append("| Agent | Dispatches | Definition age (d) | Flag |")
-    lines.append("|---|---:|---:|---|")
+    lines.append("| Agent | Dispatches | Workflow runs | Definition age (d) | Flag |")
+    lines.append("|---|---:|---:|---:|---|")
     for r in rows:
-        lines.append("| %s | %d | %d | %s |" % (r["agent"], r["dispatches"], r["def_age_days"], r["flag"]))
+        lines.append("| %s | %d | %d | %d | %s |" % (
+            r["agent"], r["dispatches"], r.get("workflow_runs", 0), r["def_age_days"], r["flag"]))
     lines.append("")
     if review:
         lines.append("REVIEW: " + ", ".join(review) + " - retire, rewire to a caller, or fix (check tools vs body).")
     lines.append("Scanned %d transcripts; oldest matching dispatch seen: %s." % (scanned, oldest or "none"))
-    lines.append("Caveats: dispatches made inside Workflow runs may not appear as tool_use lines; "
-                 "transcript retention bounds the window; definition age = first git commit of the file (mtime if untracked).")
+    lines.append("Dispatches = Agent/Task tool calls. Workflow runs = persisted Workflow runs whose script "
+                 "names the agent (runs, not dispatches: call counts inside a run are not recorded); "
+                 "either counts as use.")
+    lines.append("Caveats: transcript and workflow-run retention bound the window; "
+                 "definition age = first git commit of the file (mtime if untracked).")
     return "\n".join(lines) + "\n"
 
 
@@ -174,7 +226,8 @@ def main(argv=None):
     agents = list_agents(args.agents_dir)
     found, scanned, oldest = count_dispatches(
         args.projects_dir, list(agents), now - args.days * 86400)
-    rows = build_report(agents, found, args.days, args.min_age_days, now)
+    wf = count_workflow_runs(args.projects_dir, list(agents), now - args.days * 86400)
+    rows = build_report(agents, found, args.days, args.min_age_days, now, wf)
     today = datetime.date.today().isoformat()
     text = json.dumps(rows, indent=2) if args.json else render(rows, args.days, scanned, oldest, today)
     if args.out:

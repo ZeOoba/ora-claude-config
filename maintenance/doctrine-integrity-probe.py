@@ -375,8 +375,9 @@ PLUGIN_SKILL_ALLOWLIST: set[str] = {"morning", "schedule"}
 # The "Skill precedence" block names orchestration primitives that are NOT SKILL.md
 # skills and must resolve against their own homes, else they false-positive as MISSING:
 #   * AGENTS    -> ~/.claude/agents/<name>.md. CLAUDE.md literally labels these "agent"
-#                  ("the bare `deal-recon` agent", "the `lease-sweep` agent", "the
-#                  `portfolio-anomaly-scout` agent").
+#                  ("the bare `deal-recon` agent", "the `portfolio-anomaly-scout` agent";
+#                  "the `lease-sweep` agent" was also named until it left the tie-breaks
+#                  in 2026-06 and was retired 2026-09-30).
 #   * WORKFLOWS -> ~/.claude/workflows/<name>.js (e.g. `verified-deal-recon`, the live
 #                  DEFAULT pre-screen skill, is workflow-backed -- no SKILL.md dir).
 # These live under ~/.claude (local), so they are NOT subject to the OneDrive
@@ -724,8 +725,14 @@ _AGENT_BODY_MCP_TOKEN_RE = re.compile(
 # on a wider window suppressed real claims ("if X is not attached, use WebSearch"; "casino"),
 # and an any-word gap still let "if not found use WebSearch" through.
 _AGENT_BODY_NEGATOR_RE = re.compile(
-    r"\b(?:never|not|no|cannot|can['’]t|don['’]t|do not)\s+"
+    r"\b(?:never(?:\s+ever)?|not|no|cannot|can['’]t|don['’]t|mustn['’]t|shouldn['’]t|"
+    r"shan['’]t|won['’]t)\s+"
+    r"(?:(?:ever|directly|also|just|simply|really)\s+)?"
     r"(?:(?:use|call|run|invoke|try)\s+)?$", re.I)
+# Escape hatch for a body the heuristic misreads: put this marker anywhere in the agent
+# body (an HTML comment keeps it out of the rendered prompt's prose). Warn-only lint, so
+# the cost of a false positive is noise; the marker makes that noise removable per agent.
+_AGENT_BODY_LINT_OPT_OUT_RE = re.compile(r"agent-lint:\s*ignore\s+tools-body", re.I)
 
 
 def _agent_body_negated(body, start):
@@ -735,6 +742,8 @@ def _agent_body_negated(body, start):
 def agent_body_tool_warnings(fn, body, tools_raw):
     """Return WARN strings for capabilities an agent body claims but its tools: lacks."""
     if not isinstance(tools_raw, str):
+        return []
+    if _AGENT_BODY_LINT_OPT_OUT_RE.search(body):
         return []
     granted = [t.strip().lower() for t in tools_raw.split(",") if t.strip()]
     if "*" in granted:
