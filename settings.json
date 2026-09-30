@@ -258,7 +258,7 @@
         ]
       },
       {
-        "matcher": "NotebookEdit|mcp__.*netlify.*-updater",
+        "matcher": "NotebookEdit|mcp__.*netlify.*-updater|mcp__.*__(outlook_(send_mail|send_draft|forward_mail)|teams_(send_chat_message|send_channel_message|reply_channel_message)|manage_(blog_post|landing_page|website_page))",
         "hooks": [
           {
             "type": "command",
