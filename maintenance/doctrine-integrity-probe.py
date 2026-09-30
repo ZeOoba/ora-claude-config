@@ -716,6 +716,15 @@ _AGENT_BODY_OUTLOOK_RE = re.compile(
 _AGENT_BODY_WEB_RE = re.compile(
     r"\b(?:use|run|via|with)\s+(?:the\s+)?(web[ _]?search|web[ _]?fetch)\b", re.I)
 _AGENT_BODY_MCP_TOKEN_RE = re.compile(r"\bmcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+")
+# A prohibition is not a capability claim, but only when the negator sits directly before
+# the claim (optionally one word between, e.g. "never call mcp__x"). A substring test on a
+# wider window suppressed real claims ("if X is not attached, use WebSearch"; "casino").
+_AGENT_BODY_NEGATOR_RE = re.compile(
+    r"\b(?:never|not|no|cannot|can't|don't|do not)\s+(?:\w+\s+)?$", re.I)
+
+
+def _agent_body_negated(body, start):
+    return bool(_AGENT_BODY_NEGATOR_RE.search(body[max(0, start - 30):start]))
 
 
 def agent_body_tool_warnings(fn, body, tools_raw):
@@ -726,19 +735,26 @@ def agent_body_tool_warnings(fn, body, tools_raw):
     if "*" in granted:
         return []
     warns = []
-    if _AGENT_BODY_OUTLOOK_RE.search(body) and not any("outlook" in t for t in granted):
-        warns.append("%s: body says to use Outlook search but tools: grants no outlook tool "
-                     "-- the agent cannot do this" % ascii_safe(fn))
+    # Outlook search: a draft/send/label tool does not satisfy "use the Outlook search".
+    if not any(t.endswith("outlook_email_search") for t in granted):
+        for m in _AGENT_BODY_OUTLOOK_RE.finditer(body):
+            if not _agent_body_negated(body, m.start()):
+                warns.append("%s: body says to use Outlook search but tools: grants no "
+                             "outlook_email_search tool -- the agent cannot do this"
+                             % ascii_safe(fn))
+                break
+    reported = set()
     for m in _AGENT_BODY_WEB_RE.finditer(body):
-        lead = body[max(0, m.start() - 25):m.start()].lower()
-        if any(neg in lead for neg in ("never", "not ", "n't", "no ")):
-            continue  # a prohibition is not a capability claim
         tool = m.group(1).lower().replace(" ", "").replace("_", "")
-        if tool not in granted:
-            warns.append("%s: body says to use %s but tools: does not grant it"
-                         % (ascii_safe(fn), ascii_safe(m.group(1))))
-            break
-    named = {t.lower() for t in _AGENT_BODY_MCP_TOKEN_RE.findall(body)}
+        if tool in granted or tool in reported or _agent_body_negated(body, m.start()):
+            continue
+        reported.add(tool)
+        warns.append("%s: body says to use %s but tools: does not grant it"
+                     % (ascii_safe(fn), ascii_safe(m.group(1))))
+    named = set()
+    for m in _AGENT_BODY_MCP_TOKEN_RE.finditer(body):
+        if not _agent_body_negated(body, m.start()):
+            named.add(m.group(0).lower())
     for tok in sorted(named - set(granted)):
         warns.append("%s: body names MCP tool %s but tools: does not grant it"
                      % (ascii_safe(fn), ascii_safe(tok)))

@@ -53,8 +53,24 @@ def list_agents(agents_dir):
     for fn in os.listdir(agents_dir):
         if fn.lower().endswith(".md"):
             path = os.path.join(agents_dir, fn)
-            out[fn[:-3]] = _first_commit_epoch(path) or os.path.getmtime(path)
+            try:
+                out[fn[:-3]] = _first_commit_epoch(path) or os.path.getmtime(path)
+            except OSError:
+                continue  # moved/archived by another session mid-run: skip, don't abort
     return out
+
+
+def _ts_epoch(raw):
+    """Epoch for an ISO-8601 transcript timestamp, or None if absent/unparseable."""
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        dt = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.timestamp()
 
 
 def count_dispatches(projects_dir, names, since_epoch):
@@ -77,10 +93,20 @@ def count_dispatches(projects_dir, names, since_epoch):
                         obj = json.loads(line)
                     except ValueError:
                         continue
-                    content = (obj.get("message") or {}).get("content")
+                    if not isinstance(obj, dict):
+                        continue
+                    msg = obj.get("message")
+                    content = msg.get("content") if isinstance(msg, dict) else None
                     if not isinstance(content, list):
                         continue
-                    ts = (obj.get("timestamp") or "")[:10]
+                    raw_ts = obj.get("timestamp") or ""
+                    # The mtime check above is only a fast pre-filter: a recently touched
+                    # transcript can still hold old dispatches, so bound by each dispatch's
+                    # own timestamp too (unparseable/absent -> keep, fail open).
+                    if since_epoch and _ts_epoch(raw_ts) is not None \
+                            and _ts_epoch(raw_ts) < since_epoch:
+                        continue
+                    ts = raw_ts[:10]
                     for block in content:
                         if (isinstance(block, dict) and block.get("type") == "tool_use"
                                 and block.get("name") in ("Agent", "Task")):
