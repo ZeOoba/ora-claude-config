@@ -1638,6 +1638,46 @@ def test_check_agent_definitions_reports_mismatch_as_warning_not_failure():
 
 
 
+def test_agent_body_lint_reports_every_missing_web_tool_and_webfetch():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings(
+        "x.md", "Use WebSearch to find comps. Then use WebFetch to open each listing.", "Read, Grep")
+    assert len(w) == 2, w
+    w = m.agent_body_tool_warnings("x.md", "Use WebFetch to pull the OM.", "Read")
+    assert len(w) == 1 and "webfetch" in w[0].lower(), w
+    print("  PASS test_agent_body_lint_reports_every_missing_web_tool_and_webfetch")
+
+
+def test_agent_body_lint_star_wildcard_grants_everything():
+    m = _load_probe_module()
+    assert m.agent_body_tool_warnings("x.md", "Use WebSearch. Use the Outlook search.", "*") == []
+    assert m.agent_body_tool_warnings("x.md", "Use WebSearch.", "Read, *") == []
+    print("  PASS test_agent_body_lint_star_wildcard_grants_everything")
+
+
+def test_agent_body_lint_negation_is_word_bounded_and_adjacent():
+    """'not' earlier in the sentence, or 'no' inside another word ('casino'), must not
+    suppress a real capability claim; a prohibition directly before the verb must."""
+    m = _load_probe_module()
+    for body in ("If the rent roll is not attached, use WebSearch for comps.",
+                 "For the casino use WebSearch."):
+        assert len(m.agent_body_tool_warnings("x.md", body, "Read, Grep")) == 1, body
+    for body in ("Never use WebSearch here.", "Do not use WebSearch.",
+                 "Never use the Outlook search; work only from the pasted text.",
+                 "Never call mcp__srv__send_mail."):
+        assert m.agent_body_tool_warnings("x.md", body, "Read, Grep") == [], body
+    print("  PASS test_agent_body_lint_negation_is_word_bounded_and_adjacent")
+
+
+def test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings(
+        "x.md", "Use the Outlook search for broker mail.", "Read, mcp__srv__outlook_create_draft")
+    assert len(w) == 1, w
+    print("  PASS test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool")
+
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_dated_archive_dirs_pruned_from_skill_scan()
@@ -1724,6 +1764,10 @@ def main():
     test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted()
     test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated()
     test_check_agent_definitions_reports_mismatch_as_warning_not_failure()
+    test_agent_body_lint_reports_every_missing_web_tool_and_webfetch()
+    test_agent_body_lint_star_wildcard_grants_everything()
+    test_agent_body_lint_negation_is_word_bounded_and_adjacent()
+    test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
