@@ -28,6 +28,11 @@
 !/agents/
 !/skills/
 !/maintenance/
+# Reviewable settings.json proposals awaiting an explicit apply (hooks-audit
+# 2026-09-30; see _proposed/APPLY.md). Tracked so a proposal survives its
+# worktree and ships with the branch; archived once applied. Tests never read it
+# as a stand-in for settings.json (hooks/tests/lib/settings_proposal.py).
+!/_proposed/
 !/docs/
 !/ora-ops-plugin/
 !/.github/
@@ -176,6 +181,13 @@ hooks/active-work/
 # above (per-machine, ever-growing, read only to compute a rolling-window count) --
 # tracking it would churn a commit on every override use for no reader.
 hooks/_state/override-usage-log.jsonl
+# Per-guard dispatcher telemetry (hooks/lib/guard_telemetry.py, 2026-09-30) -- one
+# append per tool call from every session, rotated at ~5 MB to .1. Same class as the
+# override-usage log above: per-machine, ever-growing, read only by
+# hooks/guard-telemetry-summary.py. Tracking it would churn a commit on every call.
+hooks/_state/guard-telemetry.jsonl
+hooks/_state/guard-telemetry.jsonl.1
+hooks/_state/guard-telemetry.jsonl.rotate.lock
 # Human-authorization override sentinels (allow-external-send / allow-website-change /
 # allow-doctrine-drift). NEVER track one: the gates validate a sentinel by mtime age, and
 # git stamps a checked-out file with CHECKOUT time -- so a tracked token is re-minted with
