@@ -30,8 +30,10 @@ import sys
 
 PY = "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe"
 HOOKS = "C:/Users/Owner/.claude/hooks/"
+# Still needed to RECOGNIZE the folded (deleted) inline Netlify-updater entry;
+# the dispatcher itself no longer runs any Netlify check (Gabriel, 2026-09-30).
 NETLIFY_MATCHER = "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*"
-POST_DISPATCHER_MATCHER = "^(Bash|" + NETLIFY_MATCHER + ")$"
+POST_DISPATCHER_MATCHER = "Bash"
 POST_DISPATCHER_CMD = PY + ' "' + HOOKS + 'posttooluse-dispatcher.py"'
 ASCII_CMD = PY + ' "' + HOOKS + 'ascii-only-guard.py"'
 # sha256 of settings.json at 1370b41 (the file the proposal was authored

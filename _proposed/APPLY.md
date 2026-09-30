@@ -19,10 +19,12 @@ NOT change `settings.json`. The proposal is applied as a separate, explicit step
 PostToolUse (9 entries become 6):
 - **Removed:** the Bash `catch_up_main.py --hook` entry, the inline Bash deploy-grep
   curl, the inline Netlify-updater curl, and the Bash `eos-gate-sentinel.py` entry.
-- **Added** as the first entry: `^(Bash|mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*)$`
-  runs `hooks/posttooluse-dispatcher.py` with `timeout: 360`. It runs catch_up (only on
-  `gh pr merge`), eos-gate-sentinel and the Netlify check, each under its original
-  matcher.
+- **Added** as the first entry: matcher `Bash` runs `hooks/posttooluse-dispatcher.py`
+  with `timeout: 360`. It runs catch_up (only on `gh pr merge`) and eos-gate-sentinel,
+  each under its original matcher. The inline Netlify-updater curl hook is deleted,
+  not folded (Gabriel, 2026-09-30). All three `*-updater` tools are in
+  `permissions.deny`, so it could never fire, and no Netlify tool gains a
+  PostToolUse hook.
 - **Unchanged:** fleet-session-hook (matcher still
   `Bash|Task|TaskCreate|TaskUpdate|Edit|Write|MultiEdit`, async; Task 2c was withheld),
   eos-plan-marker, commit-provenance-recorder, memory-nag-correction and
@@ -45,7 +47,6 @@ never name a hook that the live hooks dir does not have yet.
 2. **Land the hook files in the live checkout.** Pull or fast-forward main in
    `~/.claude` so these files exist in the live `hooks/`:
    - `hooks/posttooluse-dispatcher.py`
-   - `hooks/lib/netlify_updater_check.py`
    - `hooks/lib/guard_telemetry.py`
    - `hooks/guard-telemetry-summary.py`
    - `hooks/pretooluse-dispatcher.py` (adds ascii-only-guard to GUARD_CHAIN, plus

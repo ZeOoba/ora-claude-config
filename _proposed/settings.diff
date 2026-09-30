@@ -1,18 +1,10 @@
 --- a/settings.json (live, 1370b41)
 +++ b/settings.json (_proposed)
-@@ -155,30 +155,12 @@
-     ],
-     "PostToolUse": [
-       {
--        "matcher": "Bash",
--        "hooks": [
--          {
--            "type": "command",
+@@ -159,26 +159,8 @@
+         "hooks": [
+           {
+             "type": "command",
 -            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/ora-skills/tools/catch_up_main.py\" --hook",
-+        "matcher": "^(Bash|mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*)$",
-+        "hooks": [
-+          {
-+            "type": "command",
 +            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/posttooluse-dispatcher.py\"",
              "timeout": 360
 -          }

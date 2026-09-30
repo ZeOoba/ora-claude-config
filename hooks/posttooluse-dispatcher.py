@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-"""Run the PostToolUse Bash-side hooks in ONE process instead of four
+"""Run the PostToolUse Bash-side hooks in ONE process instead of three
 (hooks-audit 2026-09-30, Task 5).
 
 WHAT IT REPLACES (live settings.json PostToolUse at 1370b41):
 
   matcher Bash                        catch_up_main.py --hook   (timeout 360)
   matcher Bash                        inline bash deploy-grep + curl  [DELETED]
-  matcher mcp__a66aaa4a-...__.*       inline bash Netlify updater curl
+  matcher mcp__a66aaa4a-...__.*       inline bash Netlify updater curl  [DELETED]
   matcher Bash                        eos-gate-sentinel.py
 
-with ONE entry, matcher `^(Bash|mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*)$`,
-timeout 360. Every hook keeps its OWN original matcher (POST_HOOKS below) and
+with ONE entry, matcher `Bash`, timeout 360. Every hook keeps its OWN original
+matcher (POST_HOOKS below) and
 is run only when that matcher matches the tool -- so no tool gains or loses a
 hook; hooks/tests/test-posttooluse-dispatcher.py proves per-tool equivalence
 against a frozen copy of the pre-change PostToolUse block. The inline
 deploy-grep hook is deleted, not folded (Task 2a): it grepped the WHOLE payload
 for the word "deploy" (false-firing on any output mentioning it), reported on
 stderr under exit 0 (invisible), and /ship already verifies real deploys.
+The inline Netlify-updater curl hook is deleted too (Gabriel, 2026-09-30): all
+three netlify *-updater tools are in settings.json permissions.deny, so it
+could never fire; no Netlify tool gains any PostToolUse hook from this file.
 
 WHY A SEPARATE FILE, NOT `pretooluse-dispatcher.py --chain post`. The two
 dispatchers have OPPOSITE failure semantics, and sharing a code path would let
@@ -44,7 +47,6 @@ EXECUTION PATHS, per hook:
     command matched the test regex either way). Cost: a payload whose JSON is
     malformed makes the sentinel raise in-process and pays one fallback
     subprocess (the old per-call cost), still ending in exit 0.
-  * netlify-updater-check -- in-process function (hooks/lib/netlify_updater_check.py).
   * catch-up-main -- stays a SUBPROCESS (it does a real fetch+merge into the
     shared ora-skills checkout; isolating it costs nothing because it now runs
     only when needed). It is spawned only when a cheap prefilter sees
@@ -75,9 +77,9 @@ report), so it still fires on Bash|Task|TaskCreate|TaskUpdate|Edit|Write|
 MultiEdit, and it is registered async. Folding its Bash slice in would turn an
 async hook synchronous on every Bash call. eos-plan-marker,
 commit-provenance-recorder, memory-nag-correction and
-scheduled-task-update-postguard stay separate too: none of them fires on Bash
-or the Netlify tools, so folding them would widen this entry's matcher for no
-process saved on the Bash path.
+scheduled-task-update-postguard stay separate too: none of them fires on Bash,
+so folding them would widen this entry's matcher for no process saved on the
+Bash path.
 
 Telemetry: one record per hook run, chain "post", via hooks/lib/guard_telemetry.py
 (same confidentiality contract as the pre dispatcher; path_taken "skipped" when
@@ -101,23 +103,17 @@ try:
     import guard_telemetry as _telemetry  # noqa: E402
 except Exception:  # noqa: BLE001
     _telemetry = None
-try:
-    import netlify_updater_check as _netlify  # noqa: E402
-except Exception:  # noqa: BLE001
-    _netlify = None
 
 CATCH_UP_SCRIPT = "C:/Users/Owner/ora-skills/tools/catch_up_main.py"
 CATCH_UP_TIMEOUT_S = 350
 SUBPROCESS_TIMEOUT_S = 60
-
-NETLIFY_MATCHER = "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*"
 
 
 class PostHook(object):
     def __init__(self, name, matcher, kind, prefilter=None):
         self.name = name
         self.matcher = matcher  # the hook's ORIGINAL settings.json matcher
-        self.kind = kind        # "module" | "netlify" | "catchup"
+        self.kind = kind        # "module" | "catchup"
         self.prefilter = prefilter
 
 
@@ -159,18 +155,15 @@ def gh_pr_merge_prefilter(payload):
 # catch-up timeout can never cost the other hooks their run.
 POST_HOOKS = (
     PostHook("eos-gate-sentinel", "Bash", "module"),
-    PostHook("netlify-updater-check", NETLIFY_MATCHER, "netlify"),
     PostHook("catch-up-main", "Bash", "catchup", prefilter=gh_pr_merge_prefilter),
 )
 
 # The settings.json matcher for this dispatcher's single entry: the union of
-# every POST_HOOKS matcher, EXPLICITLY ANCHORED. Any matcher containing regex
-# characters is tested by the harness UNANCHORED (JavaScript
-# RegExp.prototype.test -- code.claude.com/docs/en/hooks, "Regex Behavior"),
-# so an unanchored `Bash|mcp__...` would also fire the dispatcher for any tool
-# whose name merely CONTAINS "Bash". Anchoring makes the entry match exactly
-# the union; test-posttooluse-dispatcher.py asserts the live entry spells this.
-DISPATCHER_MATCHER = "^(Bash|" + NETLIFY_MATCHER + ")$"
+# every POST_HOOKS matcher. Every remaining hook is `Bash`, and a matcher made
+# only of name characters is an EXACT-name match in the harness
+# (code.claude.com/docs/en/hooks), so the plain spelling needs no anchoring;
+# test-posttooluse-dispatcher.py asserts the live entry spells this.
+DISPATCHER_MATCHER = "Bash"
 
 # Documented harness semantics (same page): a matcher made ONLY of letters,
 # digits, `_`, `-`, spaces, `,` and `|` is an exact name or a list of exact
@@ -291,16 +284,6 @@ def _run_catch_up(raw):
                        "(%s)\n" % type(e).__name__), "failopen"
 
 
-def _run_netlify(payload):
-    if _netlify is None:
-        return 0, "", "posttooluse-dispatcher: netlify check unavailable\n", "failopen"
-    ctx = _netlify.check(payload)
-    if not ctx:
-        return 0, "", "", "inprocess"
-    return 0, json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PostToolUse", "additionalContext": ctx}}), "", "inprocess"
-
-
 def run_hook(hook, raw, payload):
     """(rc, out, err, path_taken) for one hook. Never raises."""
     try:
@@ -308,8 +291,6 @@ def run_hook(hook, raw, payload):
             return 0, "", "", "skipped"
         if hook.kind == "module":
             return _run_module_hook(hook.name, raw)
-        if hook.kind == "netlify":
-            return _run_netlify(payload)
         if hook.kind == "catchup":
             return _run_catch_up(raw)
         return 0, "", "", "failopen"
