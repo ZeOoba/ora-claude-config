@@ -712,15 +712,20 @@ AGENT_BUILTIN_TOOLS = {
 # probe runs inside the pre-push gate. An absent tools: line means the agent inherits every
 # tool, so there is nothing to mismatch.
 _AGENT_BODY_OUTLOOK_RE = re.compile(
-    r"\b(?:use|via)\s+(?:the\s+)?outlook(?:[ _]email)?[ _]search\b|outlook_email_search", re.I)
+    r"\b(?:use|via)\s+(?:the\s+)?outlook(?:[ _]email)?[ _]search\b"
+    r"|(?:\bmcp__[A-Za-z0-9_-]+?__)?outlook_email_search", re.I)
 _AGENT_BODY_WEB_RE = re.compile(
     r"\b(?:use|run|via|with)\s+(?:the\s+)?(web[ _]?search|web[ _]?fetch)\b", re.I)
-_AGENT_BODY_MCP_TOKEN_RE = re.compile(r"\bmcp__[A-Za-z0-9_-]+__[A-Za-z0-9_-]+")
+# Tool names may contain single hyphens (notion-search) but a double dash is prose punctuation.
+_AGENT_BODY_MCP_TOKEN_RE = re.compile(
+    r"\bmcp__[A-Za-z0-9_-]+?__[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*")
 # A prohibition is not a capability claim, but only when the negator sits directly before
-# the claim (optionally one word between, e.g. "never call mcp__x"). A substring test on a
-# wider window suppressed real claims ("if X is not attached, use WebSearch"; "casino").
+# the claim (optionally one call-verb between, e.g. "never call mcp__x"). A substring test
+# on a wider window suppressed real claims ("if X is not attached, use WebSearch"; "casino"),
+# and an any-word gap still let "if not found use WebSearch" through.
 _AGENT_BODY_NEGATOR_RE = re.compile(
-    r"\b(?:never|not|no|cannot|can't|don't|do not)\s+(?:\w+\s+)?$", re.I)
+    r"\b(?:never|not|no|cannot|can['’]t|don['’]t|do not)\s+"
+    r"(?:(?:use|call|run|invoke|try)\s+)?$", re.I)
 
 
 def _agent_body_negated(body, start):
