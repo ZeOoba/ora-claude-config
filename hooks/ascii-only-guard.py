@@ -115,10 +115,19 @@ TEST SEAM: the lib's ORA_OVERRIDE_SESSIONS_DIR only. TEST ONLY -- setting it in
 settings.json or a scheduled task would redirect an override lookup to an
 arbitrary directory.
 
-NOT WIRED YET -- AND WIRING IT TAKES *TWO* ENTRIES, NOT ONE. As shipped this
-guard runs only via --check / --repair; pretooluse-dispatcher.py's GUARD_CHAIN
-was owned by a concurrent session when this landed, so the entry was deferred
-rather than spliced. Whoever wires it:
+WIRED 2026-09-30 (hooks-audit branch feat/hooks-audit-0930) by exactly the
+three steps below: step 1 in pretooluse-dispatcher.py's GUARD_CHAIN (last
+position), step 2 as a separate settings.json PreToolUse entry whose matcher
+is registry-write-guard's DC spelling, step 3 as the ascii-only-guard
+assertions in hooks/tests/test-write-guard-coverage.py and
+hooks/tests/test-matcher-coverage.py. False-positive risk was MEASURED first:
+replaying 10,333 real Edit/Write/DC-write calls from the last 30 days of local
+transcripts through this guard's own predicates, 5 would have blocked (2 on
+test-ora-autonomy-gate.py, 1 each on test-tool-call-paths.py,
+test-always-on-linear-redirect-exempt.py and this file) -- every one an
+adversarial fixture or this guard's own prose; the 3,866 non-ASCII writes to
+.md/.ts/.json/SKILL.md and other non-.py targets are structurally ungated.
+The wiring plan, kept for the record -- it TAKES *TWO* ENTRIES, NOT ONE:
 
   1. Add "ascii-only-guard" to GUARD_CHAIN in pretooluse-dispatcher.py -- NOT
      as a new settings.json PreToolUse entry. That file's header is explicit:
@@ -650,7 +659,10 @@ def _evaluate():
         "must reproduce real doctrine bytes, a separator set matched against "
         "real files), then the file's ASCII-only claim is the thing that is "
         "wrong -- drop that claim from its docstring, or write the character "
-        "as a \\uXXXX escape so the SOURCE stays ASCII.\n"
+        "as a \\uXXXX escape so the SOURCE stays ASCII. Dropping the claim "
+        "takes TWO calls: this guard reads the file's CURRENT docstring, so a "
+        "single Write that removes the claim AND adds the character is still "
+        "blocked -- first Edit the claim out, then make the write.\n"
         "  3. Sweep an existing file to ASCII mechanically:\n"
         "     python \"%s\" --repair <path>\n"
         "  4. To override this write deliberately, mint:\n"
