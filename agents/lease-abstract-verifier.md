@@ -1,6 +1,6 @@
 ---
 name: lease-abstract-verifier
-description: 'Use PROACTIVELY after any lease abstract is produced, before it feeds the rent roll, a CAM reconciliation, a renewal, a lender package or an underwrite. Independently re-derives the economic and date fields from the source lease documents, with no knowledge of how the abstract was built, and reports every field that does not tie. Trigger on: verify the abstracts, check the lease abstract, does the abstract match the lease, audit the rent roll against the leases, abstract QC, spot-check the abstracts. Complements lease-abstraction-pipeline and lease-sweep, which produce abstracts. Read-only, never edits the abstract or the rent roll.'
+description: 'Use PROACTIVELY after any lease abstract is produced, before it feeds the rent roll, a CAM reconciliation, a renewal, a lender package or an underwrite. Independently re-derives the economic and date fields from the source lease documents, with no knowledge of how the abstract was built, and reports every field that does not tie. Trigger on: verify the abstracts, check the lease abstract, does the abstract match the lease, audit the rent roll against the leases, abstract QC, spot-check the abstracts. Complements lease-abstraction-pipeline, which produces abstracts. Read-only, never edits the abstract or the rent roll.'
 tools: Read, Grep, Glob
 model: opus
 ---

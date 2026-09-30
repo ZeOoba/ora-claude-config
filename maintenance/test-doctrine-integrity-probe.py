@@ -1579,6 +1579,127 @@ def test_live_probe_reports_worktree_baseref_ok():
     print("  PASS test_live_probe_reports_worktree_baseref_ok")
 
 
+def test_agent_body_tool_mismatch_flags_outlook_without_tool():
+    """deal-flow-triage shipped saying 'Use the Outlook search' with tools = Read, Grep,
+    Glob -- it could not do its job. The lint WARNS (never hard-fails)."""
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings(
+        "x.md", "Method: 1. Use the Outlook search for broker mail.", "Read, Grep, Glob")
+    assert len(w) == 1 and "outlook" in w[0].lower(), w
+    print("  PASS test_agent_body_tool_mismatch_flags_outlook_without_tool")
+
+
+def test_agent_body_tool_mismatch_quiet_when_tool_granted():
+    m = _load_probe_module()
+    tools = "Read, mcp__srv__outlook_email_search"
+    assert m.agent_body_tool_warnings(
+        "x.md", "Use the Outlook search for mail.", tools) == []
+    print("  PASS test_agent_body_tool_mismatch_quiet_when_tool_granted")
+
+
+def test_agent_body_tool_mismatch_flags_web_tools_not_granted():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings("x.md", "Use WebSearch to find comps.", "Read, Grep")
+    assert len(w) == 1 and "websearch" in w[0].lower(), w
+    assert m.agent_body_tool_warnings(
+        "x.md", "Use WebSearch to find comps.", "Read, WebSearch") == []
+    print("  PASS test_agent_body_tool_mismatch_flags_web_tools_not_granted")
+
+
+def test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted():
+    m = _load_probe_module()
+    body = "Call mcp__srv__read_thing then mcp__srv__other_thing."
+    w = m.agent_body_tool_warnings("x.md", body, "Read, mcp__srv__read_thing")
+    assert len(w) == 1 and "mcp__srv__other_thing" in w[0], w
+    print("  PASS test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted")
+
+
+def test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated():
+    """No tools: line = the agent inherits everything -> nothing to mismatch. A body that
+    says never use WebSearch is not a capability claim."""
+    m = _load_probe_module()
+    assert m.agent_body_tool_warnings("x.md", "Use the Outlook search.", None) == []
+    assert m.agent_body_tool_warnings(
+        "x.md", "Never use WebSearch here.", "Read, Grep") == []
+    print("  PASS test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated")
+
+
+def test_check_agent_definitions_reports_mismatch_as_warning_not_failure():
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "zz-mismatch.md"), "w", encoding="utf-8") as f:
+            f.write("---\nname: zz-mismatch\ndescription: x\ntools: Read, Grep\n---\n"
+                    "Use the Outlook search for mail.\n")
+        failures, warnings = m.check_agent_definitions(d)
+    assert failures == [], failures
+    assert any("zz-mismatch.md" in w and "outlook" in w.lower() for w in warnings), warnings
+    print("  PASS test_check_agent_definitions_reports_mismatch_as_warning_not_failure")
+
+
+
+
+def test_agent_body_lint_reports_every_missing_web_tool_and_webfetch():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings(
+        "x.md", "Use WebSearch to find comps. Then use WebFetch to open each listing.", "Read, Grep")
+    assert len(w) == 2, w
+    w = m.agent_body_tool_warnings("x.md", "Use WebFetch to pull the OM.", "Read")
+    assert len(w) == 1 and "webfetch" in w[0].lower(), w
+    print("  PASS test_agent_body_lint_reports_every_missing_web_tool_and_webfetch")
+
+
+def test_agent_body_lint_star_wildcard_grants_everything():
+    m = _load_probe_module()
+    assert m.agent_body_tool_warnings("x.md", "Use WebSearch. Use the Outlook search.", "*") == []
+    assert m.agent_body_tool_warnings("x.md", "Use WebSearch.", "Read, *") == []
+    print("  PASS test_agent_body_lint_star_wildcard_grants_everything")
+
+
+def test_agent_body_lint_negation_is_word_bounded_and_adjacent():
+    """'not' earlier in the sentence, or 'no' inside another word ('casino'), must not
+    suppress a real capability claim; a prohibition directly before the verb must."""
+    m = _load_probe_module()
+    for body in ("If the rent roll is not attached, use WebSearch for comps.",
+                 "For the casino use WebSearch."):
+        assert len(m.agent_body_tool_warnings("x.md", body, "Read, Grep")) == 1, body
+    for body in ("Never use WebSearch here.", "Do not use WebSearch.",
+                 "Never use the Outlook search; work only from the pasted text.",
+                 "Never call mcp__srv__send_mail."):
+        assert m.agent_body_tool_warnings("x.md", body, "Read, Grep") == [], body
+    print("  PASS test_agent_body_lint_negation_is_word_bounded_and_adjacent")
+
+
+def test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings(
+        "x.md", "Use the Outlook search for broker mail.", "Read, mcp__srv__outlook_create_draft")
+    assert len(w) == 1, w
+    print("  PASS test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool")
+
+
+
+def test_agent_body_lint_round2_edges():
+    m = _load_probe_module()
+    w = m.agent_body_tool_warnings
+    # repeated identical claim -> one warning (dedupe)
+    assert len(w("x.md", "Use WebSearch for comps. Later, use WebSearch again.", "Read")) == 1
+    # a prohibition on the bare Outlook MCP token is a prohibition, not a claim
+    assert w("x.md", "Never call mcp__srv__outlook_email_search.", "Read") == []
+    # conditionals without a comma must not look like prohibitions
+    assert len(w("x.md", "If not found use WebSearch for comps.", "Read")) == 1
+    assert len(w("x.md", "If no OM use WebFetch on the listing.", "Read")) == 1
+    # curly apostrophes negate too
+    assert w("x.md", "Don’t use WebSearch.", "Read") == []
+    # a token glued to a double dash does not swallow the dash text
+    assert w("x.md", "Search via mcp__srv__outlook_email_search--then summarize.",
+             "Read, mcp__srv__outlook_email_search") == []
+    # single-hyphen MCP tool names are still whole tokens
+    assert w("x.md", "Call mcp__srv__notion-search.", "Read, mcp__srv__notion-search") == []
+    assert len(w("x.md", "Call mcp__srv__notion-search.", "Read")) == 1
+    print("  PASS test_agent_body_lint_round2_edges")
+
+
+
 def main():
     assert os.path.isfile(REAL_CLAUDE_MD), "real CLAUDE.md not found: %s" % REAL_CLAUDE_MD
     test_dated_archive_dirs_pruned_from_skill_scan()
@@ -1659,6 +1780,17 @@ def main():
     test_skill_version_changelog_drift_quiet_when_aligned()
     test_skill_version_changelog_drift_quiet_when_no_changelog_section()
     test_live_probe_wires_skill_version_changelog_drift_check()
+    test_agent_body_tool_mismatch_flags_outlook_without_tool()
+    test_agent_body_tool_mismatch_quiet_when_tool_granted()
+    test_agent_body_tool_mismatch_flags_web_tools_not_granted()
+    test_agent_body_tool_mismatch_flags_named_mcp_tool_not_granted()
+    test_agent_body_tool_mismatch_quiet_when_tools_inherited_or_negated()
+    test_check_agent_definitions_reports_mismatch_as_warning_not_failure()
+    test_agent_body_lint_reports_every_missing_web_tool_and_webfetch()
+    test_agent_body_lint_star_wildcard_grants_everything()
+    test_agent_body_lint_negation_is_word_bounded_and_adjacent()
+    test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool()
+    test_agent_body_lint_round2_edges()
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
