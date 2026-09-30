@@ -727,7 +727,7 @@ _AGENT_BODY_MCP_TOKEN_RE = re.compile(
 _AGENT_BODY_NEGATOR_RE = re.compile(
     r"\b(?:never(?:\s+ever)?|not|no|cannot|can['’]t|don['’]t|mustn['’]t|shouldn['’]t|"
     r"shan['’]t|won['’]t)\s+"
-    r"(?:(?:ever|directly|also|just|simply|really)\s+)?"
+    r"(?:(?:ever|directly|also|really)\s+)?"
     r"(?:(?:use|call|run|invoke|try)\s+)?$", re.I)
 # Escape hatch for a body the heuristic misreads: put this marker anywhere in the agent
 # body (an HTML comment keeps it out of the rendered prompt's prose). Warn-only lint, so

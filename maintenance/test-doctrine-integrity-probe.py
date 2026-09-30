@@ -1706,16 +1706,23 @@ def test_agent_body_lint_more_prohibition_forms_and_explicit_opt_out():
     for body in ("You must not use WebSearch.", "Do not ever use WebSearch.",
                  "Do NOT directly use WebSearch here.", "You shouldn’t use WebSearch.",
                  "It mustn't use WebFetch.", "We won't use the Outlook search.",
-                 "Never ever use WebSearch.", "Please do not just use WebSearch."):
+                 "Never ever use WebSearch.", "Please do not also use WebSearch."):
         assert w("x.md", body, "Read") == [], body
     # real claims that merely contain a negator elsewhere still warn
     for body in ("You must use WebSearch.", "Not only read the file but use WebSearch too.",
-                 "We cannot proceed without comps, so use WebSearch."):
+                 "We cannot proceed without comps, so use WebSearch.",
+                 "Don't simply use WebSearch -- cross-check it.",
+                 "Not just use WebSearch but also Read the filing."):
         assert len(w("x.md", body, "Read")) == 1, body
+    # "do not just use A; also verify with B" still claims both tools
+    assert len(w("x.md", "Do not just use WebSearch; also verify with WebFetch.", "Read")) == 2
     # explicit opt-out for a body the heuristic misreads
     marked = "<!-- agent-lint: ignore tools-body -->\nUse WebSearch when the caller grants it."
     assert w("x.md", marked, "Read") == []
     assert len(w("x.md", "Use WebSearch when the caller grants it.", "Read")) == 1
+    # near-misses of the marker must NOT opt out
+    assert len(w("x.md", "<!-- agent-lint: ignore tools -->\nUse WebSearch.", "Read")) == 1
+    assert len(w("x.md", "<!-- agent-lint: allow tools-body -->\nUse WebSearch.", "Read")) == 1
     print("  PASS test_agent_body_lint_more_prohibition_forms_and_explicit_opt_out")
 
 
