@@ -18,8 +18,10 @@ checkout before the apply, and after it; it never reads _proposed/.
 Also pinned: the catch-up prefilter is a SUPERSET of catch_up_main's own
 matcher (fuzzed over its positive corpus), catch_up is not spawned for
 ordinary Bash, its timeout terminates the child without costing the other
-hooks, per-hook failure isolation, output merging, the Netlify probe's
-model-visible delivery, and exit 0 on garbage.
+hooks, per-hook failure isolation, output merging, and exit 0 on garbage.
+The inline Netlify-updater hook is DELETED (Gabriel 2026-09-30: all three
+*-updater tools are permission-denied), so no Netlify tool is covered by any
+hook this change adds (E1).
 
 Stdlib only. ASCII-only. Windows (`python`).
 """
@@ -96,7 +98,7 @@ FROZEN_BASELINE_POST = [
     (DC_WRITES, "memory-nag-correction"),
     ("mcp__scheduled-tasks__update_scheduled_task", "scheduled-task-update-postguard"),
 ]
-DELETED = {"deploy-grep-curl"}
+DELETED = {"deploy-grep-curl", "netlify-updater-check"}
 FOLDED = {"catch-up-main", "deploy-grep-curl", "netlify-updater-check",
           "eos-gate-sentinel"}
 
@@ -578,56 +580,12 @@ def test_merge_outputs():
     check("O3 nothing to say -> empty output", disp.merge_outputs(["", "  "]) == "")
 
 
-def test_netlify_check():
-    lib = _load(os.path.join(HOOKS_DIR, "lib", "netlify_updater_check.py"), "_nuc")
-    upd = "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-deploy-services-updater"
-    rdr = "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-deploy-services-reader"
-    calls = []
-
-    def fetch(code):
-        def _f(url):
-            calls.append(url)
-            return code
-        return _f
-    check("N1 updater + non-200 -> warning with status and tool",
-          lib.check({"tool_name": upd}, fetch("503")) ==
-          "WARNING: oxfordra.net returned HTTP 503 after Netlify MCP " + upd)
-    check("N2 updater + 200 -> silent", lib.check({"tool_name": upd}, fetch("200")) is None)
-    n = len(calls)
-    check("N3 reader tool never probes the site",
-          lib.check({"tool_name": rdr}, fetch("503")) is None and len(calls) == n)
-    check("N4 malformed payload -> None", lib.check("x", fetch("503")) is None)
-
-    def boom(url):
-        raise OSError("down")
-    check("N5 fetch raising -> None (never raises)", lib.check({"tool_name": upd}, boom) is None)
-
-    r = Rig()
-    try:
-        r.disp._netlify.http_status = lambda url=None: "000"
-        rc, out, err = r.run({"session_id": "n1", "tool_name": upd, "tool_input": {}})
-        try:
-            obj = json.loads(out)
-        except ValueError:
-            obj = {}
-        hso = obj.get("hookSpecificOutput", {})
-        check("N6 dispatcher delivers it MODEL-VISIBLY (PostToolUse additionalContext)",
-              rc == 0 and hso.get("hookEventName") == "PostToolUse"
-              and "HTTP 000" in hso.get("additionalContext", ""), out[:200])
-        check("N7 and not merely on stderr", "WARNING" not in err)
-        rc, out, _ = r.run({"session_id": "n1", "tool_name": rdr, "tool_input": {}})
-        check("N8 reader tool: silent", rc == 0 and out == "")
-    finally:
-        r.cleanup()
-
-
 if __name__ == "__main__":
     for t in (test_frozen_baseline_matches_tracked_settings, test_coverage_equivalence,
               test_prefilter_is_superset, test_prefilter_filters,
               test_catch_up_only_on_merge, test_eos_gate_sentinel_still_fires,
               test_timeout_isolated, test_failure_isolation,
-              test_malformed_input_exit_zero_subprocess, test_merge_outputs,
-              test_netlify_check):
+              test_malformed_input_exit_zero_subprocess, test_merge_outputs):
         t()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures[:12])))
