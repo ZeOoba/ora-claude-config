@@ -2722,6 +2722,134 @@ def test_settings_matcher_registers_update_draft():
     print("PASS test_settings_matcher_registers_update_draft")
 
 
+# ---------------------------------------------------------------------------------------
+# Live-schema golden fixtures (2026-10-01). The input schemas of the ms365 write tools were read
+# from the live connector (additionalProperties:false on all of them) and pinned here as valid
+# payloads, so Gate 1d / 1e are tested against what the connector really accepts rather than
+# against Graph-shaped guesses. Reply drafts take only messageId/body/bodyType/comment -- their
+# recipients derive from the source message and cannot be set, so there is nothing to gate.
+# ---------------------------------------------------------------------------------------
+_EID = "AAMkAGEventOne"
+_LIVE_START = {"dateTime": "2026-10-02T10:00:00", "timeZone": "Eastern Standard Time"}
+_LIVE_END = {"dateTime": "2026-10-02T11:00:00", "timeZone": "Eastern Standard Time"}
+
+
+def _event_token(recipients):
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=recipients)
+    return d
+
+
+def test_live_schema_create_event_full_payload():
+    internal = [{"email": "ggoldberg@oxfordra.net", "name": "Gabriel", "type": "required"},
+                {"email": "egoldberg@oxfordra.net", "type": "optional"}]
+    full = dict(subject="Sync", start=_LIVE_START, end=_LIVE_END, body="<p>agenda</p>", bodyType="html",
+                location="Conference Room 2", calendarId="", importance="high", sensitivity="private",
+                showAs="busy", responseRequested=True, isOnlineMeeting=True)
+    rc, _, err = run_hook(cal("outlook_create_event", attendees=internal, **full))
+    assert rc == 0, "internal-only invite with every live key must pass, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_create_event", **full))
+    assert rc == 0, "an event with no attendees sends nothing and must pass, got %s (%s)" % (rc, err)
+    ext = [{"email": "tenant@example.com", "name": "Tenant", "type": "required"}]
+    rc, _, err = run_hook(cal("outlook_create_event", attendees=ext, **full))
+    assert rc == 2, "an external invitee must block, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_create_event", attendees=ext, **full),
+                          sessions_dir=_event_token(["tenant@example.com"]))
+    assert rc == 0, "a token naming the invitee must authorize, got %s (%s)" % (rc, err)
+    print("PASS test_live_schema_create_event_full_payload")
+
+
+def test_live_schema_update_delete_event_need_the_event_token():
+    upd_ev = dict(eventId=_EID, subject="s", start=_LIVE_START, end=_LIVE_END, body="b", bodyType="text",
+                  location="HQ", importance="low", sensitivity="normal", showAs="free",
+                  responseRequested=False, isOnlineMeeting=True,
+                  attendees=[{"email": "ggoldberg@oxfordra.net", "name": "G", "type": "resource"}])
+    delete_ev = dict(eventId=_EID, comment="Cancelled: room unavailable")
+    for tool, payload in (("outlook_update_event", upd_ev), ("outlook_delete_event", delete_ev)):
+        rc, _, err = run_hook(cal(tool, **payload))
+        assert rc == 2 and "event:" + _EID in err, "%s must need the event token, got %s (%s)" % (tool, rc, err)
+        assert "uninspectable input shape" not in err, "%s: a live-schema payload must not be a shape error" % tool
+        rc, _, err = run_hook(cal(tool, **payload), sessions_dir=_event_token(["event:" + _EID]))
+        assert rc == 0, "%s with the event token must pass, got %s (%s)" % (tool, rc, err)
+    print("PASS test_live_schema_update_delete_event_need_the_event_token")
+
+
+def test_live_schema_respond_to_event_all_keys_are_authorizable():
+    """sendResponse and proposedNewTime are live keys. Before this fix they were unknown keys, so a
+    legitimate decline-with-a-new-time failed closed with NO token able to authorize it."""
+    base = dict(eventId=_EID, response="decline")
+    variants = (
+        dict(base),
+        dict(base, comment="can't make it", sendResponse=True),
+        dict(base, sendResponse=False),
+        dict(base, response="tentative", comment="maybe", sendResponse=True,
+             proposedNewTime={"start": _LIVE_START, "end": _LIVE_END}),
+        dict(eventId=_EID, response="accept", sendResponse=False),
+    )
+    for payload in variants:
+        rc, _, err = run_hook(cal("outlook_respond_to_event", **payload))
+        assert rc == 2 and "event:" + _EID in err, "must need the event token, got %s (%s)" % (rc, err)
+        assert "uninspectable input shape" not in err, "%r is a valid live payload, not a shape error" % (payload,)
+        rc, _, err = run_hook(cal("outlook_respond_to_event", **payload),
+                              sessions_dir=_event_token(["event:" + _EID]))
+        assert rc == 0, "%r with the event token must pass, got %s (%s)" % (payload, rc, err)
+    rc, _, err = run_hook(cal("outlook_respond_to_event", eventId=_EID, response="accept", replyTo="x@evil.com"))
+    assert rc == 2 and "uninspectable input shape" in err, "an unknown key must still fail closed, got %s (%s)" % (rc, err)
+    print("PASS test_live_schema_respond_to_event_all_keys_are_authorizable")
+
+
+def test_live_schema_set_vacation_payloads():
+    msg = "I am away."
+    cases = (
+        (dict(status="disabled"), 0),
+        (dict(status="alwaysEnabled", internalReplyMessage=msg, externalAudience="none"), 0),
+        (dict(status="alwaysEnabled", internalReplyMessage=msg), 2),  # audience omitted: still gated
+        (dict(status="alwaysEnabled", internalReplyMessage=msg, externalAudience="contactsOnly",
+              externalReplyMessage=msg), 2),
+        (dict(status="scheduled", internalReplyMessage=msg, externalAudience="all", externalReplyMessage=msg,
+              startDateTime="2026-10-05T00:00:00Z", endDateTime="2026-10-12T00:00:00Z"), 2),
+    )
+    for payload, want in cases:
+        rc, _, err = run_hook(cal("outlook_set_vacation", **payload))
+        assert rc == want, "%r: expected %s, got %s (%s)" % (payload, want, rc, err)
+        assert "uninspectable input shape" not in err, "%r is a valid live payload, not a shape error" % (payload,)
+    print("PASS test_live_schema_set_vacation_payloads")
+
+
+def test_live_schema_create_filter_payload_needs_its_own_token():
+    payload = dict(displayName="Archive newsletters", isEnabled=True, sequence=5,
+                   conditions={"fromAddresses": ["news@example.com"], "subjectContains": ["weekly"],
+                               "hasAttachments": True, "importance": "low"},
+                   actions={"moveToFolderId": "AAMkFolder1", "assignCategories": ["Newsletters"],
+                            "markAsRead": True, "markImportance": "low"})
+    rc, _, err = run_hook(cal("outlook_create_filter", **payload))
+    assert rc == 2 and _filter_dest(payload) in err, "a filter must need its own digest token, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_create_filter", **payload), sessions_dir=_event_token([_filter_dest(payload)]))
+    assert rc == 0, "the token naming this exact rule must authorize, got %s (%s)" % (rc, err)
+    other = dict(payload, actions={"markAsRead": True})
+    rc, _, err = run_hook(cal("outlook_create_filter", **other), sessions_dir=_event_token([_filter_dest(payload)]))
+    assert rc == 2, "a token for one rule must not authorize a different rule, got %s (%s)" % (rc, err)
+    print("PASS test_live_schema_create_filter_payload_needs_its_own_token")
+
+
+def test_reply_drafts_stay_ungated_and_unrouted():
+    import re
+    payloads = ({"messageId": "AAMkMsg1", "body": "<p>Thanks</p>", "bodyType": "html"},
+                {"messageId": "AAMkMsg1", "comment": "Thanks"}, {"messageId": "AAMkMsg1"})
+    for prefix in (MS365, "mcp__ms365__"):
+        for tool in ("outlook_create_reply_draft", "outlook_create_reply_all_draft"):
+            for ti in payloads:
+                rc, _, err = run_hook(tool_payload(prefix + tool, ti))
+                assert rc == 0, "%s%s is draft-only with no settable recipient and must pass, got %s (%s)" % (prefix, tool, rc, err)
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    matchers = [e.get("matcher", "") for e in cfg.get("hooks", {}).get("PreToolUse", [])
+                for h in e.get("hooks", []) if "ora-autonomy-gate.py" in h.get("command", "")]
+    for tool in ("outlook_create_reply_draft", "outlook_create_reply_all_draft"):
+        assert not any(re.fullmatch(m, MS365 + tool) for m in matchers), "%s must not be routed to the gate" % tool
+    print("PASS test_reply_drafts_stay_ungated_and_unrouted")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     try:
