@@ -22,7 +22,7 @@ twice on those tools (see the dispatcher's module docstring).
 
 <!-- new-matcher -->
 ```text
-NotebookEdit|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY).*|mcp__.*notion[-_]?(create|update|append|duplicate|move|comment).*|mcp__.*outlook_(send|create_draft|send_draft|forward|reply).*|mcp__.*outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|create_reply_all_draft|update_draft|set_vacation).*|mcp__.*outlook_(create_event|update_event|respond_to_event).*|mcp__.*teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat).*|mcp__.*sharepoint_(upload_file|update_file).*|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|aeo_prompts).*|mcp__.*notion-(send-message-to-session|spawn-session).*
+NotebookEdit|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY).*|mcp__.*notion[-_]?(create|update|append|duplicate|move|comment).*|mcp__.*outlook_(send|create_draft|send_draft|forward|reply).*|mcp__.*outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|create_reply_all_draft|update_draft|set_vacation).*|mcp__.*outlook_(create_event|update_event|respond_to_event|delete_event).*|mcp__.*teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat).*|mcp__.*sharepoint_(upload_file|update_file).*|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|aeo_prompts).*|mcp__.*notion-(send-message-to-session|spawn-session).*
 ```
 
 The same string is `PROPOSED_MATCHER` in `hooks/tests/test-confidentiality-guard.py`; the suite
