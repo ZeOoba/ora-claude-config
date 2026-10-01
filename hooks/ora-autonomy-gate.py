@@ -45,9 +45,13 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
      workflow), so a draft can be re-pointed at a new recipient after Gabriel approves its id.
      The window is the token TTL (5 min, single-use). Approve a draft only after reading its
      final recipients.
-   * NOT covered: outlook_create_event / update_event / delete_event / respond_to_event (they
-     email invitees or cancel with a comment) and outlook_set_vacation (free-text auto-replies
-     to outside senders), plus outlook_create_filter. Follow-up.
+   * GATE 1d -- ms365 outlook_create_event / update_event / delete_event / respond_to_event /
+     set_vacation / create_filter. create_event: external attendee needs an external-send token
+     naming it. update/delete/respond: always (existing attendees are invisible to the hook);
+     token names event:<eventId>. set_vacation: unless externalAudience is exactly "none" (or the
+     call disables auto-replies); token names vacation:<audience>. create_filter: always (standing
+     rule); token names filter:<sha256[:16] of the input>. Input keys follow Graph, UNVERIFIED against the live
+     connector; unknown keys fail closed.
    * The confidentiality-guard matcher in settings.json names the retired Composio tools
      (OUTLOOK_SEND...), so ms365 sends get no confidential-term scan. Separate fix.
    * Tool names that change (e.g. a renamed "..._v2") are not matched; the tests pin the
@@ -248,6 +252,7 @@ and stays untouched. Today's fixes are the opposite direction (WIDENING detectio
 false negatives elsewhere), which is a different risk profile, not a re-litigation of that
 finding.
 """
+import hashlib
 import inspect
 import json
 import os
@@ -841,6 +846,14 @@ def check_mcp(tool_name, session_id, tool_input=None):
             raise
         except Exception:
             block_shape(tool_name, session_id)
+    # Gate 1d: same fail-closed wrapper, its own try so a bug in one check cannot mask the other.
+    if short in _MS365_CALENDAR:
+        try:
+            _check_calendar(short, tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
 
 
 _MS365_EMAIL_SENDS = frozenset(("outlook_send_mail", "outlook_forward_mail", "outlook_send_draft"))
@@ -855,6 +868,30 @@ _INTERNAL_ADDRESS = re.compile(r"[A-Za-z0-9._+\-]+@oxfordra\.net", re.IGNORECASE
 # being silently ignored.
 _EMAIL_SEND_KEYS = frozenset(("to", "cc", "bcc", "subject", "body", "bodyType", "comment", "messageId"))
 _DRAFT_SEND_KEYS = frozenset(("messageId",))
+
+# Gate 1d. SCHEMAS UNVERIFIED: the mutating ms365 tools were not exposed to the session that wrote
+# this, so the key names below follow Microsoft Graph, not the live connector. Safe direction:
+# a key outside the allowlist fails closed, so a wrong name over-blocks (the call needs a token),
+# it never lets a call through. Verify against the connector before relying on the ungated paths.
+_MS365_CALENDAR = frozenset(("outlook_create_event", "outlook_update_event", "outlook_delete_event",
+                             "outlook_respond_to_event", "outlook_set_vacation",
+                             "outlook_create_filter"))
+_EVENT_ATTENDEE_KEYS = ("attendees", "requiredAttendees", "optionalAttendees")
+_EVENT_BODY_KEYS = frozenset((
+    "subject", "body", "bodyType", "start", "end", "timeZone", "location", "isAllDay",
+    "isOnlineMeeting", "recurrence", "reminderMinutesBeforeStart", "showAs", "importance",
+    "sensitivity", "categories", "calendarId", "allowNewTimeProposals", "responseRequested",
+) + _EVENT_ATTENDEE_KEYS)
+_EVENT_CREATE_KEYS = _EVENT_BODY_KEYS
+_EVENT_UPDATE_KEYS = _EVENT_BODY_KEYS | {"eventId"}
+_EVENT_DELETE_KEYS = frozenset(("eventId", "calendarId", "comment"))
+_EVENT_RESPOND_KEYS = frozenset(("eventId", "calendarId", "response", "comment"))
+_ATTENDEE_OBJECT_KEYS = frozenset(("email", "address", "emailAddress", "name", "type", "status"))
+_ATTENDEE_ADDRESS_KEYS = frozenset(("address", "name"))
+_VACATION_KEYS = frozenset((
+    "enabled", "status", "externalAudience", "internalReplyMessage", "externalReplyMessage",
+    "message", "startDateTime", "endDateTime", "scheduledStartDateTime", "scheduledEndDateTime",
+    "timeZone"))
 
 _HUBSPOT_PAGE_READS = frozenset(("MODULES", "MODULE_TYPES", "MODULE_DEF", "MODULE_STYLES",
                                  "MODULE_GUIDE", "REVISIONS", "TEMPLATES", "FORMS", "BRAND_KIT"))
@@ -971,6 +1008,155 @@ def _check_send_and_cms(short, tool_name, tool_input, session_id):
     if not override_active(session_id, EXTERNAL_SEND, external):
         block("%s: %s" % (reason, ", ".join(external)) if hint else reason,
               EXTERNAL_SEND, session_id, extra=hint)
+
+
+def _attendee_addresses(tool_input):
+    """Every address in attendees / requiredAttendees / optionalAttendees, UNSTRIPPED. Accepts a
+    plain string, or an object carrying exactly one of email / address / emailAddress (the last
+    either a string or {address, name}). Returns None on ANY other shape -- callers fail closed;
+    [] when there are no attendees."""
+    found = []
+    for key in _EVENT_ATTENDEE_KEYS:
+        if key not in tool_input or tool_input[key] is None:
+            continue
+        entries = tool_input[key]
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if isinstance(entry, dict):
+                if set(entry) - _ATTENDEE_OBJECT_KEYS:
+                    return None
+                holders = [k for k in ("email", "address", "emailAddress") if k in entry]
+                if len(holders) != 1:
+                    return None
+                entry = entry[holders[0]]
+                if isinstance(entry, dict):
+                    if set(entry) - _ATTENDEE_ADDRESS_KEYS:
+                        return None
+                    entry = entry.get("address")
+            if not isinstance(entry, str):
+                return None
+            found.append(entry)
+    return found
+
+
+# Prose fields: an address typed into the text of a body or subject is not a recipient.
+_EVENT_PROSE_KEYS = frozenset(("body", "subject", "bodyType"))
+
+
+def _stray_addresses(value, _top=True):
+    """Every string anywhere in an event payload outside the prose fields that contains an "@"
+    and is not, IN FULL, one plain internal address -- location objects, categories, recurrence,
+    attendee `name`/`type`, dict keys, whatever an allowlisted key carries. The attendee scan
+    alone let `location.locationEmailAddress` through (adversarial review finding 4), and an
+    extractor that pulls address-shaped substrings missed `a@oxfordra.net@evil.com`, a quoted
+    local part and an IP-literal domain (re-review finding 1), so the test is "has an @ and is
+    not provably internal", after NFKC (folds the fullwidth at-sign). The whole string is the
+    token target. Over-blocks text like "Meet @ HQ": the accepted direction."""
+    found = []
+    if isinstance(value, str):
+        folded = unicodedata.normalize("NFKC", value)
+        if "@" in folded and not _INTERNAL_ADDRESS.fullmatch(folded):
+            found.append(folded)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if _top and k in _EVENT_PROSE_KEYS:
+                continue
+            found += _stray_addresses(k, False) + _stray_addresses(v, False)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            found += _stray_addresses(v, False)
+    return found
+
+
+def _dedupe(items):
+    seen, out = set(), []
+    for item in items:
+        if item.lower() not in seen:
+            seen.add(item.lower())
+            out.append(item)
+    return out
+
+
+def _vacation_is_disabled(tool_input):
+    """Turning auto-replies OFF sends nothing. Only when the input says so unambiguously: a
+    contradictory pair (enabled=True + status=disabled) is treated as enabled. The fast-path also
+    requires that NOTHING else is in the call: if the connector ignores `enabled`/`status` (the
+    key names are unverified), a call that still carries an audience, message or schedule would
+    otherwise switch replies on with no token (adversarial review C9)."""
+    if set(tool_input) - {"enabled", "status"}:
+        return False
+    enabled, status = tool_input.get("enabled"), tool_input.get("status")
+    if enabled is False and status in (None, "disabled"):
+        return True
+    return status == "disabled" and enabled in (None, False)
+
+
+def _check_calendar(short, tool_name, tool_input, session_id):
+    """GATE 1d -- ms365 calendar / vacation / filter tools that email or auto-reply to outside
+    parties or install a standing rule. Same token tier and recipient binding as Gate 1b.
+
+    The hook sees only the call, never the stored event, so update/delete/respond are gated on
+    every call: an update or cancellation notifies the event's EXISTING attendees, which the
+    input does not list. The token names `event:<eventId>` (plus any external attendee address)."""
+    if short == "outlook_create_filter":
+        # A filter is a standing rule (CLAUDE.md: forwarding/auto-reply/filter rules need explicit
+        # permission). Its body is irrelevant: gated on every call, whatever the shape.
+        # The token names a digest of the WHOLE input, so approving one rule (move to Archive)
+        # cannot authorize a different one (forward to an outside address) -- adversarial review
+        # C6a. Schema-independent: it binds to whatever the call says, whatever the keys are.
+        blob = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        external = ["filter:" + hashlib.sha256(blob.encode("ascii")).hexdigest()[:16]]
+        reason = "Outlook filter rule creation (standing rule)"
+        hint = "Name this exact rule in `recipients:` exactly: %s\n" % external[0]
+    else:
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        keys = set(tool_input)
+        if short == "outlook_create_event":
+            attendees = _attendee_addresses(tool_input) if not keys - _EVENT_CREATE_KEYS else None
+            if attendees is None:
+                block_shape(tool_name, session_id)
+            external = _dedupe([a for a in attendees if not _INTERNAL_ADDRESS.fullmatch(a)]
+                               + _stray_addresses(tool_input))
+            if not external:
+                return  # no attendee, or internal only: no mail leaves the firm
+            reason = "calendar invitation to external attendee(s) via MCP (%s)" % short
+            hint = ""
+        elif short in ("outlook_update_event", "outlook_delete_event", "outlook_respond_to_event"):
+            allowed = {"outlook_update_event": _EVENT_UPDATE_KEYS,
+                       "outlook_delete_event": _EVENT_DELETE_KEYS,
+                       "outlook_respond_to_event": _EVENT_RESPOND_KEYS}[short]
+            event_id = tool_input.get("eventId")
+            if keys - allowed or not _nonblank(event_id):
+                block_shape(tool_name, session_id)
+            external = ["event:" + event_id.strip()]
+            if short == "outlook_update_event":
+                attendees = _attendee_addresses(tool_input)
+                if attendees is None:
+                    block_shape(tool_name, session_id)
+                external = _dedupe(external
+                                   + [a for a in attendees if not _INTERNAL_ADDRESS.fullmatch(a)]
+                                   + _stray_addresses(tool_input))
+            reason = ("%s notifies the event's attendees (existing ones are not in the input)"
+                      % short)
+            hint = "Name the event in `recipients:` exactly: %s\n" % external[0]
+        else:  # outlook_set_vacation
+            if keys - _VACATION_KEYS:
+                block_shape(tool_name, session_id)
+            if _vacation_is_disabled(tool_input):
+                return
+            audience = tool_input.get("externalAudience", "")
+            if audience == "none":
+                return  # exact-case: Graph's own "no external replies" value
+            if not isinstance(audience, str):
+                block_shape(tool_name, session_id)
+            external = ["vacation:" + (audience.strip() or "unspecified")]
+            reason = "Outlook auto-reply to external senders (externalAudience=%r)" % audience
+            hint = ("An omitted externalAudience is not \"none\"; name the audience in "
+                    "`recipients:` exactly: %s\n" % external[0])
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("%s: %s" % (reason, ", ".join(external)), EXTERNAL_SEND, session_id, extra=hint)
 
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
