@@ -24,6 +24,12 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            one string all count as external). outlook_send_draft carries no recipients, so it
            always needs a token, and the token must name `draft:<messageId>`.
            Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 1e — ms365 outlook_update_draft: same recipient rule as GATE 1b applied to the
+           to/cc/bcc the update SETS. Any entry that is not one plain @oxfordra.net address needs
+           an external-send token naming each such address; an update with no recipient, only
+           internal ones, or empty arrays passes. Keys outside the verified schema, non-array
+           recipient fields, non-string entries and a blank messageId fail closed.
+           Override: allow-external-send (same tier and binding as GATE 1).
   GATE 1c — Teams MCP sends (teams_send_chat_message / teams_send_channel_message /
            teams_reply_channel_message): always blocked without a token naming the destination
            (`teams:<chatId>` or `teams:<teamId>/<channelId>`).
@@ -40,11 +46,19 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
   and the CC/MCP scheduled fleet only; hooks do not run inside Cowork (LAMS) sessions.
 
   KNOWN RESIDUALS (adversarial review, 2026-09-30 -- accepted, not silently ignored):
-   * A draft-send token names the DRAFT, not its contents. outlook_update_draft /
-     outlook_create_draft are deliberately ungated (drafting is the normal Outlook-pane
-     workflow), so a draft can be re-pointed at a new recipient after Gabriel approves its id.
-     The window is the token TTL (5 min, single-use). Approve a draft only after reading its
-     final recipients.
+   * A draft-send token names the DRAFT, not its contents. GATE 1e closes the recipient re-point
+     (outlook_update_draft with an external to/cc/bcc needs its own token), but subject, body and
+     any other field of an approved draft can still be rewritten before the send, and
+     outlook_create_draft stays deliberately ungated (drafting is the normal Outlook-pane
+     workflow). Approve a draft only after reading its final content. The window is the token
+     TTL (5 min, single-use).
+   * Other draft-creating ms365 tools (create_reply_draft / create_reply_all_draft, named in
+     confidentiality-guard.py) are not gated and their live schemas were not read; if they accept
+     `to`/`cc`/`bcc`, a reply draft can be created with an outside recipient and sent on a
+     `draft:<id>` token naming only the id. Same mitigation: read the final recipients first.
+   * HOOKS DO NOT RUN IN COWORK (LAMS) sessions, where the same ms365 tools are exposed
+     (as mcp__ms365__*). Every gate in this file, 1e included, protects Claude Code sessions
+     and the CC/MCP scheduled fleet only.
    * GATE 1d -- ms365 outlook_create_event / update_event / delete_event / respond_to_event /
      set_vacation / create_filter. create_event: external attendee needs an external-send token
      naming it. update/delete/respond: always (existing attendees are invisible to the hook);
@@ -854,6 +868,14 @@ def check_mcp(tool_name, session_id, tool_input=None):
             raise
         except Exception:
             block_shape(tool_name, session_id)
+    # Gate 1e: same fail-closed wrapper, its own try.
+    if short == _MS365_DRAFT_UPDATE:
+        try:
+            _check_draft_update(tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
 
 
 _MS365_EMAIL_SENDS = frozenset(("outlook_send_mail", "outlook_forward_mail", "outlook_send_draft"))
@@ -868,6 +890,11 @@ _INTERNAL_ADDRESS = re.compile(r"[A-Za-z0-9._+\-]+@oxfordra\.net", re.IGNORECASE
 # being silently ignored.
 _EMAIL_SEND_KEYS = frozenset(("to", "cc", "bcc", "subject", "body", "bodyType", "comment", "messageId"))
 _DRAFT_SEND_KEYS = frozenset(("messageId",))
+# Gate 1e. Schema verified 2026-10-01 against the live connector (additionalProperties false):
+# messageId (required) plus to/cc/bcc as arrays of plain email strings, subject, body, bodyType.
+# Any other key, or any other recipient shape, fails closed.
+_MS365_DRAFT_UPDATE = "outlook_update_draft"
+_DRAFT_UPDATE_KEYS = frozenset(("messageId", "to", "cc", "bcc", "subject", "body", "bodyType"))
 
 # Gate 1d. SCHEMAS UNVERIFIED: the mutating ms365 tools were not exposed to the session that wrote
 # this, so the key names below follow Microsoft Graph, not the live connector. Safe direction:
@@ -931,6 +958,36 @@ def _email_recipients(tool_input):
                 return None
             found.append(address)
     return found or None
+
+
+def _check_draft_update(tool_name, tool_input, session_id):
+    """GATE 1e -- outlook_update_draft. A send_draft token names the draft id, not its contents,
+    so an ungated update could re-point an approved draft at a new recipient (adversarial review
+    of #292). Same rule as Gate 1b: any to/cc/bcc entry that is not one plain @oxfordra.net
+    address needs an external-send token naming it. An update that supplies no recipient (or only
+    internal ones, or empty arrays that clear the list) passes; the draft's EXISTING recipients
+    are not in the payload and stay governed by the send_draft token. create_draft is ungated."""
+    if not isinstance(tool_input, dict) or set(tool_input) - _DRAFT_UPDATE_KEYS:
+        block_shape(tool_name, session_id)
+    if not _nonblank(tool_input.get("messageId")):
+        block_shape(tool_name, session_id)
+    external = []
+    for key in ("to", "cc", "bcc"):
+        if key not in tool_input:
+            continue
+        value = tool_input[key]
+        if not isinstance(value, list) or not all(isinstance(a, str) for a in value):
+            block_shape(tool_name, session_id)
+        external += [a for a in value if not _INTERNAL_ADDRESS.fullmatch(a)]
+    if not external:
+        return
+    external = _dedupe(external)
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("outlook_update_draft sets external recipient(s): %s" % ", ".join(external),
+              EXTERNAL_SEND, session_id,
+              extra="A draft-send token names the draft, not its recipients, so the update that "
+                    "re-points a draft needs its own token naming each external recipient in "
+                    "`recipients:`: %s\n" % ", ".join(external))
 
 
 def _teams_destination(short, tool_input):
