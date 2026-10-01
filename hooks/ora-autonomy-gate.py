@@ -52,10 +52,12 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
      outlook_create_draft stays deliberately ungated (drafting is the normal Outlook-pane
      workflow). Approve a draft only after reading its final content. The window is the token
      TTL (5 min, single-use).
-   * Other draft-creating ms365 tools (create_reply_draft / create_reply_all_draft, named in
-     confidentiality-guard.py) are not gated and their live schemas were not read; if they accept
-     `to`/`cc`/`bcc`, a reply draft can be created with an outside recipient and sent on a
-     `draft:<id>` token naming only the id. Same mitigation: read the final recipients first.
+   * create_reply_draft / create_reply_all_draft are ungated, and the live schemas (read
+     2026-10-01) show no recipient parameter: only messageId/body/bodyType/comment, with
+     recipients derived from the source message (reply-all expands to every original recipient).
+     So a reply draft cannot be pointed at an arbitrary address and the update_draft gate covers
+     any later change; the residual is that a draft's derived recipients are not in any payload,
+     so read them before approving a send.
    * HOOKS DO NOT RUN IN COWORK (LAMS) sessions, where the same ms365 tools are exposed
      (as mcp__ms365__*). Every gate in this file, 1e included, protects Claude Code sessions
      and the CC/MCP scheduled fleet only.
@@ -64,8 +66,9 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
      naming it. update/delete/respond: always (existing attendees are invisible to the hook);
      token names event:<eventId>. set_vacation: unless externalAudience is exactly "none" (or the
      call disables auto-replies); token names vacation:<audience>. create_filter: always (standing
-     rule); token names filter:<sha256[:16] of the input>. Input keys follow Graph, UNVERIFIED against the live
-     connector; unknown keys fail closed.
+     rule); token names filter:<sha256[:16] of the input>. Input keys VERIFIED 2026-10-01 against the live
+     connector schemas (all additionalProperties:false); unknown keys fail closed. Live-schema
+     fixtures are pinned in the test suite (test_live_schema_*).
    * The confidentiality-guard matcher in settings.json names the retired Composio tools
      (OUTLOOK_SEND...), so ms365 sends get no confidential-term scan. Separate fix.
    * Tool names that change (e.g. a renamed "..._v2") are not matched; the tests pin the
@@ -896,10 +899,11 @@ _DRAFT_SEND_KEYS = frozenset(("messageId",))
 _MS365_DRAFT_UPDATE = "outlook_update_draft"
 _DRAFT_UPDATE_KEYS = frozenset(("messageId", "to", "cc", "bcc", "subject", "body", "bodyType"))
 
-# Gate 1d. SCHEMAS UNVERIFIED: the mutating ms365 tools were not exposed to the session that wrote
-# this, so the key names below follow Microsoft Graph, not the live connector. Safe direction:
-# a key outside the allowlist fails closed, so a wrong name over-blocks (the call needs a token),
-# it never lets a call through. Verify against the connector before relying on the ungated paths.
+# Gate 1d. Key names verified 2026-10-01 against the live connector's input schemas. Safe direction
+# regardless: a key outside the allowlist fails closed, so a wrong name over-blocks (the call needs
+# a token), it never lets a call through. Allowlists are a superset of the live keys: Graph-style
+# extras that the live connector rejects (additionalProperties:false) -- e.g. `enabled`, `isAllDay`,
+# `recurrence` -- are harmless surplus, since the server refuses them.
 _MS365_CALENDAR = frozenset(("outlook_create_event", "outlook_update_event", "outlook_delete_event",
                              "outlook_respond_to_event", "outlook_set_vacation",
                              "outlook_create_filter"))
@@ -912,7 +916,8 @@ _EVENT_BODY_KEYS = frozenset((
 _EVENT_CREATE_KEYS = _EVENT_BODY_KEYS
 _EVENT_UPDATE_KEYS = _EVENT_BODY_KEYS | {"eventId"}
 _EVENT_DELETE_KEYS = frozenset(("eventId", "calendarId", "comment"))
-_EVENT_RESPOND_KEYS = frozenset(("eventId", "calendarId", "response", "comment"))
+_EVENT_RESPOND_KEYS = frozenset(("eventId", "calendarId", "response", "comment",
+                                 "sendResponse", "proposedNewTime"))
 _ATTENDEE_OBJECT_KEYS = frozenset(("email", "address", "emailAddress", "name", "type", "status"))
 _ATTENDEE_ADDRESS_KEYS = frozenset(("address", "name"))
 _VACATION_KEYS = frozenset((
@@ -1138,9 +1143,9 @@ def _dedupe(items):
 def _vacation_is_disabled(tool_input):
     """Turning auto-replies OFF sends nothing. Only when the input says so unambiguously: a
     contradictory pair (enabled=True + status=disabled) is treated as enabled. The fast-path also
-    requires that NOTHING else is in the call: if the connector ignores `enabled`/`status` (the
-    key names are unverified), a call that still carries an audience, message or schedule would
-    otherwise switch replies on with no token (adversarial review C9)."""
+    requires that NOTHING else is in the call, so a call that still carries an audience, message
+    or schedule can never ride it (adversarial review C9). The live schema's disable call is
+    exactly {"status": "disabled"} (other fields must be omitted); `enabled` is not a live key."""
     if set(tool_input) - {"enabled", "status"}:
         return False
     enabled, status = tool_input.get("enabled"), tool_input.get("status")
