@@ -139,7 +139,9 @@ DC = ("mcp__Desktop_Commander__", "mcp__plugin_desktop-commander_desktop-command
 
 M365_SEND_FIXTURES = [M365 + n for n in (
     "outlook_send_mail", "outlook_send_draft", "outlook_forward_mail",
-    "teams_send_chat_message", "teams_send_channel_message")]
+    "teams_send_chat_message", "teams_send_channel_message",
+    "outlook_create_event", "outlook_update_event", "outlook_respond_to_event",
+    "outlook_delete_event")]
 NOTION_WRITE_FIXTURES = [NOTION + n for n in (
     "notion-create-pages", "notion-update-page", "notion-create-comment",
     "notion-duplicate-page", "notion-move-pages")]
@@ -381,8 +383,9 @@ def test_notion_writes_reach_confidentiality():
     for tool in NOTION_WRITE_FIXTURES:
         check("C1[documented] %s reaches confidentiality-guard" % tool,
               "confidentiality-guard" in routed(settings, chains, tool, anchored=False))
-    skip("C2[anchored] Notion write tools reach confidentiality-guard",
-         PENDING_TASK1 + "; the notion alternative lacks a trailing .*")
+    for tool in NOTION_WRITE_FIXTURES:
+        check("C2[anchored] %s reaches confidentiality-guard" % tool,
+              "confidentiality-guard" in routed(settings, chains, tool, anchored=True))
 
 
 def m365_assertion(matcher, report):
@@ -400,8 +403,13 @@ def m365_assertion(matcher, report):
 
 
 def test_m365_sends_reach_confidentiality():
-    skip("test_m365_sends_reach_confidentiality (5 lowercase outlook_/teams_ "
-         "send tools)", PENDING_TASK1)
+    path, settings = load_settings()
+    chains = load_chains()
+    for anchored in (True, False):
+        sem = "anchored" if anchored else "documented"
+        for tool in M365_SEND_FIXTURES:
+            check("M365[%s] %s reaches confidentiality-guard (settings.json)" % (sem, tool),
+                  "confidentiality-guard" in routed(settings, chains, tool, anchored=anchored))
 
 
 def demo_live_confidentiality_gap():
