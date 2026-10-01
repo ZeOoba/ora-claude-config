@@ -90,6 +90,8 @@ OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)
 #   outlook_create_event / update_event ........ an invite with attendees IS a send (subject, body,
 #       location reach every attendee)
 #   outlook_respond_to_event ... the optional comment is mailed to the organizer
+#   outlook_delete_event ....... the optional comment (max 1024, plain text) is INCLUDED IN THE
+#       CANCELLATION EMAIL to attendees when the user is the organizer (live schema, 2026-10-01)
 #   teams_send_chat_message / send_channel_message / reply_channel_message ........ outbound messages
 #   teams_create_chat .......... the group topic is shown to every member
 #   sharepoint_upload_file / update_file ........ file content written to a shareable library
@@ -108,8 +110,9 @@ OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)
 #       search_* / query_crm_data ........ reads: a term there is a query, not egress
 #   HubSpot manage_saved_reports (LIST/FETCH only), manage_aeo_recommendations (LIST/DETAIL;
 #       START_ACTION is a documented no-op), manage_onboarding (enum goal) ........ no free text out
-#   outlook_create_filter / create_label / update_label / modify_* / trash / delete_* ........ mailbox
-#       housekeeping; the live filter tool cannot forward or redirect
+#   outlook_create_filter / create_label / update_label / modify_* / trash / delete_* EXCEPT
+#       delete_event (INCLUDED above) ........ mailbox housekeeping; the live filter tool cannot
+#       forward or redirect
 #   sharepoint_rename_item / create_folder / copy_item / move_item / delete_item ........ names and
 #       ids inside the tenant, no content (see RESIDUAL: a name is still text)
 #   import-claude-design-from-url (HubSpot, Netlify) ........ content by reference only (a URL)
@@ -127,7 +130,7 @@ OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)
 OUTLOOK_MAIL = re.compile(
     r"outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|"
     r"create_reply_all_draft|update_draft|set_vacation)")
-OUTLOOK_CALENDAR = re.compile(r"outlook_(create_event|update_event|respond_to_event)")
+OUTLOOK_CALENDAR = re.compile(r"outlook_(create_event|update_event|respond_to_event|delete_event)")
 TEAMS_SEND = re.compile(
     r"teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)")
 SHAREPOINT_WRITE = re.compile(r"sharepoint_(upload_file|update_file)")

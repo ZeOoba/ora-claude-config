@@ -806,6 +806,9 @@ SEND_TOOLS = {
                                               "attendees": [{"email": "b@example.com"}], "body": t},
     M365 + "outlook_update_event": lambda t: {"eventId": "AAMkAD1", "location": t},
     M365 + "outlook_respond_to_event": lambda t: {"eventId": "AAMkAD1", "response": "decline", "comment": t},
+    # live schema: {eventId (required), comment (max 1024, plain text)}; the comment is INCLUDED IN THE
+    # CANCELLATION EMAIL to attendees when the user is the organizer
+    M365 + "outlook_delete_event": lambda t: {"eventId": "AAMk1", "comment": t},
     M365 + "outlook_set_vacation": lambda t: {"status": "alwaysEnabled", "internalReplyMessage": "Away",
                                               "externalAudience": "all", "externalReplyMessage": t},
     M365 + "teams_send_chat_message": lambda t: {"chatId": "19:abc@thread.v2", "body": t},
@@ -878,6 +881,10 @@ EXCLUDED_BY_DESIGN = [
     M365 + "outlook_create_filter",
     M365 + "sharepoint_rename_item",
     M365 + "sharepoint_create_folder",
+    # other delete_* stay housekeeping (only delete_event mails free text to attendees)
+    M365 + "sharepoint_delete_item",
+    M365 + "outlook_delete_item",
+    M365 + "outlook_trash_thread",
 ]
 for tool in EXCLUDED_BY_DESIGN:
     expect_eq("excluded-by-design %s is not classified" % tool.rsplit("__", 1)[1], None,
@@ -1013,7 +1020,7 @@ PROPOSED_MATCHER = (
     "|mcp__.*outlook_(send|create_draft|send_draft|forward|reply).*"
     "|mcp__.*outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|"
     "create_reply_all_draft|update_draft|set_vacation).*"
-    "|mcp__.*outlook_(create_event|update_event|respond_to_event).*"
+    "|mcp__.*outlook_(create_event|update_event|respond_to_event|delete_event).*"
     "|mcp__.*teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat).*"
     "|mcp__.*sharepoint_(upload_file|update_file).*"
     "|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
