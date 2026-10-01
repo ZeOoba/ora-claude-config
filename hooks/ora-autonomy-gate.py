@@ -30,6 +30,13 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            internal ones, or empty arrays passes. Keys outside the verified schema, non-array
            recipient fields, non-string entries and a blank messageId fail closed.
            Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 1f — ms365 teams_create_chat: a chat send token names the chat id, not its members, so
+           membership is gated at CREATION with the GATE 1b rule. Every `members` entry must be one
+           plain @oxfordra.net UPN; anything else (an outside UPN, or an AAD object id, which cannot
+           be proven internal) needs an external-send token naming it exactly as written. Keys outside
+           the verified schema (members/chatType/topic), a non-array or empty `members`, and
+           non-string entries fail closed.
+           Override: allow-external-send (same tier and binding as GATE 1).
   GATE 1c — Teams MCP sends (teams_send_chat_message / teams_send_channel_message /
            teams_reply_channel_message): always blocked without a token naming the destination
            (`teams:<chatId>` or `teams:<teamId>/<channelId>`).
@@ -40,7 +47,7 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            website-page PUBLISH/REMOVE/RESTORE/NAV_* with an explicit mode="PREVIEW" writes
            nothing and passes. Override: allow-hubspot-cms-write (scope hubspot-cms-write,
            10 min, multi-use: a page edit is several calls ending in a publish).
-  Gates 1b/1c/3 match on the tool-name SUFFIX after the last "__", so a reinstalled
+  Gates 1b/1c/1d/1e/1f/3 match on the tool-name SUFFIX after the last "__", so a reinstalled
   connector with a new id stays gated. They fail CLOSED on any anomaly once a gated tool is
   named, including a payload too malformed to parse. This gate covers Claude Code sessions
   and the CC/MCP scheduled fleet only; hooks do not run inside Cowork (LAMS) sessions.
@@ -58,6 +65,31 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
      So a reply draft cannot be pointed at an arbitrary address and the update_draft gate covers
      any later change; the residual is that a draft's derived recipients are not in any payload,
      so read them before approving a send.
+   * outlook_create_event with a non-default `calendarId` and NO attendees passes ungated. The live
+     schema gives no evidence that creating an event on a shared calendar mails anyone (invitations
+     are tied to `attendees`), but it was not exercised -- no write tool can be tested read-only --
+     so it is unverified, not proven safe. Gating a non-empty `calendarId` would be the
+     conservative fix if a shared or group calendar with outside members ever exists.
+   * An existing teams chat's members are not visible to the hook: a teams_send_chat_message
+     token names the chat id, so approve a send only into a chat whose members you have read.
+     Gate 1f closes the creation path only.
+   * TOKEN BINDING IS NARROWER ON PAPER THAN THE NAMES SUGGEST (Opus 5.5 review, 2026-10-01):
+       - A token is not bound to a TOOL: one minted for an outlook_send_mail recipient also
+         authorizes teams_create_chat naming that same address. (A send into the resulting chat
+         still needs its own `teams:<chatId>` token.)
+       - Gate 1d event tokens name `event:<eventId>` only: one minted to approve an accept can be
+         spent on delete_event (any comment text) or update_event (an attendee-list replacement
+         that cancels every removed outside attendee) on the same id. Vacation tokens name only
+         the audience, not the message or schedule. Filter tokens ARE bound (digest of the input).
+       - A `teams:<chatId>` token does not bind the message text.
+       - A GUID member token approves an opaque identity, so the id-not-contents caveat moves
+         onto the GUID; Gate 1f only forces a human to name it.
+   * "@oxfordra.net" is a DOMAIN test, not proof of an employee: a distribution list, mail
+     contact or renamed guest at that domain with outside members, or mailbox forwarding, is
+     internal to Gates 1b/1e/1f and 1d. Only a tenant audit settles whether any exists.
+   * sharepoint_upload_file / update_file / copy_item into a folder that is already shared
+     externally are not gated here (confidentiality-guard scans the text; nothing gates the
+     destination's audience).
    * HOOKS DO NOT RUN IN COWORK (LAMS) sessions, where the same ms365 tools are exposed
      (as mcp__ms365__*). Every gate in this file, 1e included, protects Claude Code sessions
      and the CC/MCP scheduled fleet only.
@@ -879,6 +911,14 @@ def check_mcp(tool_name, session_id, tool_input=None):
             raise
         except Exception:
             block_shape(tool_name, session_id)
+    # Gate 1f: same fail-closed wrapper, its own try.
+    if short == _MS365_TEAMS_CREATE:
+        try:
+            _check_teams_create_chat(tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
 
 
 _MS365_EMAIL_SENDS = frozenset(("outlook_send_mail", "outlook_forward_mail", "outlook_send_draft"))
@@ -898,6 +938,10 @@ _DRAFT_SEND_KEYS = frozenset(("messageId",))
 # Any other key, or any other recipient shape, fails closed.
 _MS365_DRAFT_UPDATE = "outlook_update_draft"
 _DRAFT_UPDATE_KEYS = frozenset(("messageId", "to", "cc", "bcc", "subject", "body", "bodyType"))
+# Gate 1f. Schema read 2026-10-01 from the live connector (additionalProperties:false): members
+# (required array of AAD object ids or UPNs), chatType oneOnOne|group, topic (group only).
+_MS365_TEAMS_CREATE = "teams_create_chat"
+_TEAMS_CREATE_KEYS = frozenset(("members", "chatType", "topic"))
 
 # Gate 1d. Key names verified 2026-10-01 against the live connector's input schemas. Safe direction
 # regardless: a key outside the allowlist fails closed, so a wrong name over-blocks (the call needs
@@ -993,6 +1037,33 @@ def _check_draft_update(tool_name, tool_input, session_id):
               extra="A draft-send token names the draft, not its recipients, so the update that "
                     "re-points a draft needs its own token naming each external recipient in "
                     "`recipients:`: %s\n" % ", ".join(external))
+
+
+def _check_teams_create_chat(tool_name, tool_input, session_id):
+    """GATE 1f -- teams_create_chat. Creating a chat sends no message, but a teams_send_* token
+    names only `teams:<chatId>`, never who is IN the chat (the draft re-point hole again): a chat
+    made with an outside member could later be approved for a send by id alone, and the topic and
+    the chat itself appear to every member. So membership is gated at creation with the Gate 1b
+    rule: every member must be one plain @oxfordra.net UPN. A member given as an AAD object id
+    (GUID) cannot be proven internal, so it needs a token naming it, like any outsider; the token
+    names each such member exactly as written in `recipients:`."""
+    if not isinstance(tool_input, dict) or set(tool_input) - _TEAMS_CREATE_KEYS:
+        block_shape(tool_name, session_id)
+    members = tool_input.get("members")
+    if not isinstance(members, list) or not members or not all(isinstance(m, str) for m in members):
+        block_shape(tool_name, session_id)
+    for key in ("chatType", "topic"):
+        if key in tool_input and not isinstance(tool_input[key], str):
+            block_shape(tool_name, session_id)
+    external = _dedupe([m for m in members if not _INTERNAL_ADDRESS.fullmatch(m)])
+    if not external:
+        return
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("teams_create_chat adds member(s) not provably @oxfordra.net: %s" % ", ".join(external),
+              EXTERNAL_SEND, session_id,
+              extra="A chat-send token names the chat, not its members, so the chat's membership "
+                    "is gated when it is created. Name each such member in `recipients:` exactly "
+                    "as written: %s\n" % ", ".join(external))
 
 
 def _teams_destination(short, tool_input):
