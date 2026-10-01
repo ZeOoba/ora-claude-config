@@ -1099,8 +1099,8 @@ if os.path.exists(_md):  # _proposed/ is gitignored: checked when present, never
         _m = re.search(r"<!-- new-matcher -->\s*```[a-z]*\n(.+?)\n```", f.read(), re.S)
     expect_eq("_proposed/confguard-matcher.md carries exactly PROPOSED_MATCHER", PROPOSED_MATCHER,
            _m.group(1).strip() if _m else None)
-# The repo's own settings.json: while it still carries the old string the gap is REPORTED (the
-# settings change is a separate, gated step); once anyone changes that entry it must be complete.
+# The repo's own settings.json (matcher applied 2026-10-01): its confidentiality-guard entry must be
+# exactly PROPOSED_MATCHER, and must route every classified send surface.
 _settings = os.path.join(os.path.dirname(HOOK_DIR), "settings.json")
 try:
     with open(_settings, encoding="utf-8") as f:
@@ -1111,17 +1111,10 @@ try:
 except Exception:
     _live = None
 if _live:
+    expect_eq("settings.json confidentiality-guard matcher is exactly PROPOSED_MATCHER", [PROPOSED_MATCHER], _live)
     _gaps = [t for t in _classified if not any(_full(m, t) for m in _live)]
-    if _live == [OLD_LIVE_MATCHER]:
-        _doc_gaps = [t for t in _classified if not any(_search(m, t) for m in _live)]
-        if _doc_gaps:
-            print("  ADVISORY: settings.json confidentiality-guard matcher is the pre-2026-09-30 string; "
-                  "%d classified send surfaces are NOT routed to the guard under the documented "
-                  "(unanchored, case-sensitive) reading -- apply _proposed/confguard-matcher.md: %s"
-                  % (len(_doc_gaps), ", ".join(t.rsplit("__", 1)[1] for t in _doc_gaps)))
-    else:
-        expect_eq("settings.json confidentiality-guard matcher routes every classified send surface "
-               "(gaps: %s)" % ", ".join(t.rsplit("__", 1)[1] for t in _gaps), [], _gaps)
+    expect_eq("settings.json confidentiality-guard matcher routes every classified send surface "
+              "(gaps: %s)" % ", ".join(t.rsplit("__", 1)[1] for t in _gaps), [], _gaps)
 
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)

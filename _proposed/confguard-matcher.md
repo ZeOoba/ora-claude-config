@@ -1,6 +1,6 @@
 # confidentiality-guard PreToolUse matcher -- proposed change (2026-09-30)
 
-Branch: feat/confguard-coverage-0930. Status: PROPOSED, not applied. settings.json is a
+Branch: feat/confguard-coverage-0930. Status: APPLIED to settings.json 2026-10-01 (Gabriel's in-turn approval; this PR). Original note: settings.json is a
 blast-radius file; apply only with Gabriel's in-turn approval, by editing the ONE PreToolUse entry
 whose command runs `hooks/confidentiality-guard.py` (the entry right after the inline
 `Edit|Write` sensitive-file blocker). Change only its `matcher` value. Land the guard change
@@ -56,4 +56,4 @@ asserts this block equals it whenever this file exists.
 
 Apply: replace the old string with the new one in that single entry; run
 `hooks/tests/test-confidentiality-guard.py` (the ADVISORY line disappears; any other value that
-still misses a classified tool is a hard FAIL). Rollback: restore the old string.
+still misses a classified tool is a hard FAIL). Rollback: `git revert` the applying commit (settings.json AND both test files); restoring only the old string turns the pre-push hook-tests gate red because the suites now pin the matcher.
