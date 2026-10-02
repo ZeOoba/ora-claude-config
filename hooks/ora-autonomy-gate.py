@@ -18,9 +18,96 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            Reads and preview deploys pass untouched.
            Overrides: allow-website-write   (scope website-write,  60 min, multi-use) -> b, c
                       allow-website-deploy  (scope website-deploy,  5 min, SINGLE-USE) -> a, d
+  GATE 1b — ms365 MCP email sends (outlook_send_mail / outlook_forward_mail /
+           outlook_send_draft): blocked unless EVERY recipient is strictly @oxfordra.net
+           (full-string match: lookalike domains, display-name forms, and a list smuggled into
+           one string all count as external). outlook_send_draft carries no recipients, so it
+           always needs a token, and the token must name `draft:<messageId>`.
+           Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 1e — ms365 outlook_update_draft: same recipient rule as GATE 1b applied to the
+           to/cc/bcc the update SETS. Any entry that is not one plain @oxfordra.net address needs
+           an external-send token naming each such address; an update with no recipient, only
+           internal ones, or empty arrays passes. Keys outside the verified schema, non-array
+           recipient fields, non-string entries and a blank messageId fail closed.
+           Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 1f — ms365 teams_create_chat: a chat send token names the chat id, not its members, so
+           membership is gated at CREATION with the GATE 1b rule. Every `members` entry must be one
+           plain @oxfordra.net UPN; anything else (an outside UPN, or an AAD object id, which cannot
+           be proven internal) needs an external-send token naming it exactly as written. Keys outside
+           the verified schema (members/chatType/topic), a non-array or empty `members`, and
+           non-string entries fail closed.
+           Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 1c — Teams MCP sends (teams_send_chat_message / teams_send_channel_message /
+           teams_reply_channel_message): always blocked without a token naming the destination
+           (`teams:<chatId>` or `teams:<teamId>/<channelId>`).
+           Override: allow-external-send (same tier and binding as GATE 1).
+  GATE 3 — HubSpot CMS MCP writes (manage_blog_post / manage_landing_page /
+           manage_website_page): an exact-case ALLOWLIST of read actions passes; every other
+           action, an unknown action, BATCH, or a malformed input is a write and blocks. A
+           website-page PUBLISH/REMOVE/RESTORE/NAV_* with an explicit mode="PREVIEW" writes
+           nothing and passes. Override: allow-hubspot-cms-write (scope hubspot-cms-write,
+           10 min, multi-use: a page edit is several calls ending in a publish).
+  Gates 1b/1c/1d/1e/1f/3 match on the tool-name SUFFIX after the last "__", so a reinstalled
+  connector with a new id stays gated. They fail CLOSED on any anomaly once a gated tool is
+  named, including a payload too malformed to parse. This gate covers Claude Code sessions
+  and the CC/MCP scheduled fleet only; hooks do not run inside Cowork (LAMS) sessions.
 
-Exit 2 = block (stderr is shown to the model). Unparseable input fails open so a hook
-malfunction never bricks every tool call.
+  KNOWN RESIDUALS (adversarial review, 2026-09-30 -- accepted, not silently ignored):
+   * A draft-send token names the DRAFT, not its contents. GATE 1e closes the recipient re-point
+     (outlook_update_draft with an external to/cc/bcc needs its own token), but subject, body and
+     any other field of an approved draft can still be rewritten before the send, and
+     outlook_create_draft stays deliberately ungated (drafting is the normal Outlook-pane
+     workflow). Approve a draft only after reading its final content. The window is the token
+     TTL (5 min, single-use).
+   * create_reply_draft / create_reply_all_draft are ungated, and the live schemas (read
+     2026-10-01) show no recipient parameter: only messageId/body/bodyType/comment, with
+     recipients derived from the source message (reply-all expands to every original recipient).
+     So a reply draft cannot be pointed at an arbitrary address and the update_draft gate covers
+     any later change; the residual is that a draft's derived recipients are not in any payload,
+     so read them before approving a send.
+   * outlook_create_event with a non-default `calendarId` and NO attendees passes ungated. The live
+     schema gives no evidence that creating an event on a shared calendar mails anyone (invitations
+     are tied to `attendees`), but it was not exercised -- no write tool can be tested read-only --
+     so it is unverified, not proven safe. Gating a non-empty `calendarId` would be the
+     conservative fix if a shared or group calendar with outside members ever exists.
+   * An existing teams chat's members are not visible to the hook: a teams_send_chat_message
+     token names the chat id, so approve a send only into a chat whose members you have read.
+     Gate 1f closes the creation path only.
+   * TOKEN BINDING IS NARROWER ON PAPER THAN THE NAMES SUGGEST (Opus 5.5 review, 2026-10-01):
+       - A token is not bound to a TOOL: one minted for an outlook_send_mail recipient also
+         authorizes teams_create_chat naming that same address. (A send into the resulting chat
+         still needs its own `teams:<chatId>` token.)
+       - Gate 1d event tokens name `event:<eventId>` only: one minted to approve an accept can be
+         spent on delete_event (any comment text) or update_event (an attendee-list replacement
+         that cancels every removed outside attendee) on the same id. Vacation tokens name only
+         the audience, not the message or schedule. Filter tokens ARE bound (digest of the input).
+       - A `teams:<chatId>` token does not bind the message text.
+       - A GUID member token approves an opaque identity, so the id-not-contents caveat moves
+         onto the GUID; Gate 1f only forces a human to name it.
+   * "@oxfordra.net" is a DOMAIN test, not proof of an employee: a distribution list, mail
+     contact or renamed guest at that domain with outside members, or mailbox forwarding, is
+     internal to Gates 1b/1e/1f and 1d. Only a tenant audit settles whether any exists.
+   * sharepoint_upload_file / update_file / copy_item into a folder that is already shared
+     externally are not gated here (confidentiality-guard scans the text; nothing gates the
+     destination's audience).
+   * HOOKS DO NOT RUN IN COWORK (LAMS) sessions, where the same ms365 tools are exposed
+     (as mcp__ms365__*). Every gate in this file, 1e included, protects Claude Code sessions
+     and the CC/MCP scheduled fleet only.
+   * GATE 1d -- ms365 outlook_create_event / update_event / delete_event / respond_to_event /
+     set_vacation / create_filter. create_event: external attendee needs an external-send token
+     naming it. update/delete/respond: always (existing attendees are invisible to the hook);
+     token names event:<eventId>. set_vacation: unless externalAudience is exactly "none" (or the
+     call disables auto-replies); token names vacation:<audience>. create_filter: always (standing
+     rule); token names filter:<sha256[:16] of the input>. Input keys VERIFIED 2026-10-01 against the live
+     connector schemas (all additionalProperties:false); unknown keys fail closed. Live-schema
+     fixtures are pinned in the test suite (test_live_schema_*).
+   * The confidentiality-guard matcher in settings.json names the retired Composio tools
+     (OUTLOOK_SEND...), so ms365 sends get no confidential-term scan. Separate fix.
+   * Tool names that change (e.g. a renamed "..._v2") are not matched; the tests pin the
+     current connector's names.
+
+Exit 2 = block (stderr is shown to the model). Unparseable input (not a JSON object,
+including RecursionError/oversized-int/invalid-UTF-8 on direct invocation) fails CLOSED -- see main().
 
 OVERRIDE TOKENS (hardened 2026-07-16, Gabriel-ratified; shared contract since 2026-07-17)
 -----------------------------------------------------------------------------------------
@@ -163,8 +250,8 @@ ROUND 3 FIXES (final gauntlet round, 2026-07-17):
      what the real harness uses) would not. Fixed: `sys.stdin.reconfigure(encoding="utf-8",
      errors="strict")` before reading, same pattern as git-prepush-doctrine-gate.py's
      stdout/stderr reconfigure. `errors="strict"` deliberately, not "replace" -- a genuinely
-     malformed (non-UTF-8) byte sequence should raise and hit the existing, already-documented
-     fail-open-on-unparseable-input path, not get silently replaced with U+FFFD (which could
+     malformed (non-UTF-8) byte sequence should raise and hit the unparseable-input path (now
+     fail-CLOSED, 2026-09-30), not get silently replaced with U+FFFD (which could
      reintroduce the same class of spurious-character corruption this fix closes).
 
 2026-09-18 -- check_file_write ONLY: Claude-managed slug-directory exemption.
@@ -214,6 +301,7 @@ and stays untouched. Today's fixes are the opposite direction (WIDENING detectio
 false negatives elsewhere), which is a different risk profile, not a re-litigation of that
 finding.
 """
+import hashlib
 import inspect
 import json
 import os
@@ -228,7 +316,7 @@ try:
     from site_markers import SITE_PATH_MARKERS  # noqa: E402
 except Exception:
     # Fallback matches site_markers.py's current value. This hook's own stated
-    # philosophy is fail-open-on-malfunction, so a missing/broken shared module
+    # philosophy is fail-open-on-MODULE-malfunction (payload parsing fails closed, see main()), so a missing/broken shared module
     # should not crash it -- but a hardcoded fallback keeps Gate 2 functional
     # rather than silently disabling it entirely.
     SITE_PATH_MARKERS = ("website-canonical", "oxford-site")
@@ -352,6 +440,10 @@ except Exception:
         return False  # no validator -> no grant, ever (mirrors token_grants above)
 
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
+# HubSpot CMS pages/posts are public-facing content (CLAUDE.md: publishing or modifying public
+# content needs explicit permission). Multi-use on purpose: a page edit is several calls that
+# end in a publish, and each call would otherwise need its own approval.
+HUBSPOT_CMS_WRITE = Tier("allow-hubspot-cms-write", "hubspot-cms-write", 600)
 
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs
@@ -774,7 +866,7 @@ def check_file_write(file_path, session_id):
             block("write to oxfordra.net site tree: %s" % file_path, WEBSITE_WRITE, session_id)
 
 
-def check_mcp(tool_name, session_id):
+def check_mcp(tool_name, session_id, tool_input=None):
     """GATE 2c — Netlify MCP mutating tools. The deploy/project/extension *-updater
     tools push to prod / change live project config + CSP/headers with no Bash and no
     prompt; under bypassPermissions nothing else stops them. This gate stands in for
@@ -792,6 +884,412 @@ def check_mcp(tool_name, session_id):
     if "netlify" in lowered and not lowered.endswith("-reader"):
         if not override_active(session_id, WEBSITE_DEPLOY):
             block("Netlify MCP mutating call (%s)" % tool_name, WEBSITE_DEPLOY, session_id)
+    # Gates 1b/1c/3. Once a payload names one of these tools, ANY anomaly fails closed, same
+    # as Bash/file tools: an exception here would exit 1, which PreToolUse treats as
+    # non-blocking, i.e. the send or publish would proceed.
+    short = lowered.rsplit("__", 1)[-1]
+    if short in _MS365_EMAIL_SENDS or short in _MS365_TEAMS_SENDS or short in _HUBSPOT_CMS_READS:
+        try:
+            _check_send_and_cms(short, tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
+    # Gate 1d: same fail-closed wrapper, its own try so a bug in one check cannot mask the other.
+    if short in _MS365_CALENDAR:
+        try:
+            _check_calendar(short, tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
+    # Gate 1e: same fail-closed wrapper, its own try.
+    if short == _MS365_DRAFT_UPDATE:
+        try:
+            _check_draft_update(tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
+    # Gate 1f: same fail-closed wrapper, its own try.
+    if short == _MS365_TEAMS_CREATE:
+        try:
+            _check_teams_create_chat(tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
+
+
+_MS365_EMAIL_SENDS = frozenset(("outlook_send_mail", "outlook_forward_mail", "outlook_send_draft"))
+_MS365_TEAMS_SENDS = frozenset(("teams_send_chat_message", "teams_send_channel_message",
+                                "teams_reply_channel_message"))
+# Full-string match. Anything that is not exactly one plain address at the internal domain
+# is external: "a@oxfordra.net.evil.com", "Name <x@evil.com>", "evil@x.com,ceo@oxfordra.net",
+# a trailing space/newline/zero-width character, a non-ASCII homoglyph in the domain.
+_INTERNAL_ADDRESS = re.compile(r"[A-Za-z0-9._+\-]+@oxfordra\.net", re.IGNORECASE | re.ASCII)
+# The only parameters the ms365 send tools document. A recipient-bearing key this gate does not
+# know about (replyTo, a differently-cased "To", a field added later) fails closed instead of
+# being silently ignored.
+_EMAIL_SEND_KEYS = frozenset(("to", "cc", "bcc", "subject", "body", "bodyType", "comment", "messageId"))
+_DRAFT_SEND_KEYS = frozenset(("messageId",))
+# Gate 1e. Schema verified 2026-10-01 against the live connector (additionalProperties false):
+# messageId (required) plus to/cc/bcc as arrays of plain email strings, subject, body, bodyType.
+# Any other key, or any other recipient shape, fails closed.
+_MS365_DRAFT_UPDATE = "outlook_update_draft"
+_DRAFT_UPDATE_KEYS = frozenset(("messageId", "to", "cc", "bcc", "subject", "body", "bodyType"))
+# Gate 1f. Schema read 2026-10-01 from the live connector (additionalProperties:false): members
+# (required array of AAD object ids or UPNs), chatType oneOnOne|group, topic (group only).
+_MS365_TEAMS_CREATE = "teams_create_chat"
+_TEAMS_CREATE_KEYS = frozenset(("members", "chatType", "topic"))
+
+# Gate 1d. Key names verified 2026-10-01 against the live connector's input schemas. Safe direction
+# regardless: a key outside the allowlist fails closed, so a wrong name over-blocks (the call needs
+# a token), it never lets a call through. Allowlists are a superset of the live keys: Graph-style
+# extras that the live connector rejects (additionalProperties:false) -- e.g. `enabled`, `isAllDay`,
+# `recurrence` -- are harmless surplus, since the server refuses them.
+_MS365_CALENDAR = frozenset(("outlook_create_event", "outlook_update_event", "outlook_delete_event",
+                             "outlook_respond_to_event", "outlook_set_vacation",
+                             "outlook_create_filter"))
+_EVENT_ATTENDEE_KEYS = ("attendees", "requiredAttendees", "optionalAttendees")
+_EVENT_BODY_KEYS = frozenset((
+    "subject", "body", "bodyType", "start", "end", "timeZone", "location", "isAllDay",
+    "isOnlineMeeting", "recurrence", "reminderMinutesBeforeStart", "showAs", "importance",
+    "sensitivity", "categories", "calendarId", "allowNewTimeProposals", "responseRequested",
+) + _EVENT_ATTENDEE_KEYS)
+_EVENT_CREATE_KEYS = _EVENT_BODY_KEYS
+_EVENT_UPDATE_KEYS = _EVENT_BODY_KEYS | {"eventId"}
+_EVENT_DELETE_KEYS = frozenset(("eventId", "calendarId", "comment"))
+_EVENT_RESPOND_KEYS = frozenset(("eventId", "calendarId", "response", "comment",
+                                 "sendResponse", "proposedNewTime"))
+_ATTENDEE_OBJECT_KEYS = frozenset(("email", "address", "emailAddress", "name", "type", "status"))
+_ATTENDEE_ADDRESS_KEYS = frozenset(("address", "name"))
+_VACATION_KEYS = frozenset((
+    "enabled", "status", "externalAudience", "internalReplyMessage", "externalReplyMessage",
+    "message", "startDateTime", "endDateTime", "scheduledStartDateTime", "scheduledEndDateTime",
+    "timeZone"))
+
+_HUBSPOT_PAGE_READS = frozenset(("MODULES", "MODULE_TYPES", "MODULE_DEF", "MODULE_STYLES",
+                                 "MODULE_GUIDE", "REVISIONS", "TEMPLATES", "FORMS", "BRAND_KIT"))
+# tool suffix -> (input field holding the action, exact-case set of READ actions). Allowlist
+# by design: an action added to the connector later is a write until someone reads it.
+_HUBSPOT_CMS_READS = {
+    "manage_blog_post": ("action", frozenset(("GET_POST", "GET_AUTHOR", "LIST_BLOGS",
+                                              "LIST_BLOG_POSTS", "LIST_TAGS", "GET_BRAND_KIT"))),
+    "manage_landing_page": ("action", _HUBSPOT_PAGE_READS),
+    "manage_website_page": ("operation", _HUBSPOT_PAGE_READS | frozenset(("NAV_GET_MENU",))),
+}
+# Operations that take mode="PREVIEW", which the connector documents as writing nothing.
+_HUBSPOT_PREVIEWABLE = frozenset(("PUBLISH", "REMOVE", "REMOVE_SECTION", "RESTORE_REVISION",
+                                  "NAV_SET_ITEM", "NAV_REPLACE_MENU", "NAV_REMOVE_ITEM"))
+
+
+def _nonblank(value):
+    return isinstance(value, str) and value.strip() != ""
+
+
+def _email_recipients(tool_input):
+    """Every to/cc/bcc entry, UNSTRIPPED (a padded address is not provably internal). None
+    when the shape is unusable or there is no recipient at all."""
+    if not isinstance(tool_input, dict):
+        return None
+    found = []
+    for key in ("to", "cc", "bcc"):
+        value = tool_input.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return None
+        for address in value:
+            if not isinstance(address, str):
+                return None
+            found.append(address)
+    return found or None
+
+
+def _check_draft_update(tool_name, tool_input, session_id):
+    """GATE 1e -- outlook_update_draft. A send_draft token names the draft id, not its contents,
+    so an ungated update could re-point an approved draft at a new recipient (adversarial review
+    of #292). Same rule as Gate 1b: any to/cc/bcc entry that is not one plain @oxfordra.net
+    address needs an external-send token naming it. An update that supplies no recipient (or only
+    internal ones, or empty arrays that clear the list) passes; the draft's EXISTING recipients
+    are not in the payload and stay governed by the send_draft token. create_draft is ungated."""
+    if not isinstance(tool_input, dict) or set(tool_input) - _DRAFT_UPDATE_KEYS:
+        block_shape(tool_name, session_id)
+    if not _nonblank(tool_input.get("messageId")):
+        block_shape(tool_name, session_id)
+    external = []
+    for key in ("to", "cc", "bcc"):
+        if key not in tool_input:
+            continue
+        value = tool_input[key]
+        if not isinstance(value, list) or not all(isinstance(a, str) for a in value):
+            block_shape(tool_name, session_id)
+        external += [a for a in value if not _INTERNAL_ADDRESS.fullmatch(a)]
+    if not external:
+        return
+    external = _dedupe(external)
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("outlook_update_draft sets external recipient(s): %s" % ", ".join(external),
+              EXTERNAL_SEND, session_id,
+              extra="A draft-send token names the draft, not its recipients, so the update that "
+                    "re-points a draft needs its own token naming each external recipient in "
+                    "`recipients:`: %s\n" % ", ".join(external))
+
+
+def _check_teams_create_chat(tool_name, tool_input, session_id):
+    """GATE 1f -- teams_create_chat. Creating a chat sends no message, but a teams_send_* token
+    names only `teams:<chatId>`, never who is IN the chat (the draft re-point hole again): a chat
+    made with an outside member could later be approved for a send by id alone, and the topic and
+    the chat itself appear to every member. So membership is gated at creation with the Gate 1b
+    rule: every member must be one plain @oxfordra.net UPN. A member given as an AAD object id
+    (GUID) cannot be proven internal, so it needs a token naming it, like any outsider; the token
+    names each such member exactly as written in `recipients:`."""
+    if not isinstance(tool_input, dict) or set(tool_input) - _TEAMS_CREATE_KEYS:
+        block_shape(tool_name, session_id)
+    members = tool_input.get("members")
+    if not isinstance(members, list) or not members or not all(isinstance(m, str) for m in members):
+        block_shape(tool_name, session_id)
+    for key in ("chatType", "topic"):
+        if key in tool_input and not isinstance(tool_input[key], str):
+            block_shape(tool_name, session_id)
+    external = _dedupe([m for m in members if not _INTERNAL_ADDRESS.fullmatch(m)])
+    if not external:
+        return
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("teams_create_chat adds member(s) not provably @oxfordra.net: %s" % ", ".join(external),
+              EXTERNAL_SEND, session_id,
+              extra="A chat-send token names the chat, not its members, so the chat's membership "
+                    "is gated when it is created. Name each such member in `recipients:` exactly "
+                    "as written: %s\n" % ", ".join(external))
+
+
+def _teams_destination(short, tool_input):
+    if not isinstance(tool_input, dict):
+        return None
+    if short == "teams_send_chat_message":
+        chat = tool_input.get("chatId")
+        return "teams:" + chat.strip() if _nonblank(chat) else None
+    team, channel = tool_input.get("teamId"), tool_input.get("channelId")
+    if _nonblank(team) and _nonblank(channel):
+        return "teams:%s/%s" % (team.strip(), channel.strip())
+    return None
+
+
+def _hubspot_cms_is_read(short, tool_input):
+    if not isinstance(tool_input, dict):
+        return False
+    field, reads = _HUBSPOT_CMS_READS[short]
+    value = tool_input.get(field)
+    if field == "action":
+        return isinstance(value, str) and value in reads
+    if not isinstance(value, dict):
+        return False
+    kind = value.get("_type")
+    if not isinstance(kind, str):
+        return False
+    if kind in reads:
+        return True
+    if kind in _HUBSPOT_PREVIEWABLE:
+        # Explicit only: the connector's own default for NAV_* is PREVIEW, but an omitted or
+        # odd mode is not something this gate should bet a live site menu on.
+        return value.get("mode") == "PREVIEW" and not value.get("confirmNavChange")
+    return False
+
+
+def _check_send_and_cms(short, tool_name, tool_input, session_id):
+    if short in _HUBSPOT_CMS_READS:
+        if _hubspot_cms_is_read(short, tool_input):
+            return
+        detail = ""
+        if isinstance(tool_input, dict):
+            probe = tool_input.get("action") or (tool_input.get("operation") or {})
+            probe = probe.get("_type") if isinstance(probe, dict) else probe
+            detail = " " + probe[:40] if isinstance(probe, str) else ""
+        if not override_active(session_id, HUBSPOT_CMS_WRITE):
+            block("HubSpot CMS write (%s%s) -- public-facing content" % (short, detail),
+                  HUBSPOT_CMS_WRITE, session_id)
+        return
+    if short in _MS365_TEAMS_SENDS:
+        destination = _teams_destination(short, tool_input)
+        if destination is None:
+            block_shape(tool_name, session_id)
+        external = [destination]
+        reason = "Teams message send (%s)" % short
+        hint = "Name the destination in `recipients:` exactly: %s\n" % destination
+    elif short == "outlook_send_draft":
+        message_id = tool_input.get("messageId") if isinstance(tool_input, dict) else None
+        if not _nonblank(message_id) or set(tool_input) - _DRAFT_SEND_KEYS:
+            block_shape(tool_name, session_id)
+        external = ["draft:" + message_id.strip()]
+        reason = "Outlook draft send (%s)" % short
+        hint = ("outlook_send_draft carries no recipient list, so the token must name the "
+                "draft itself in `recipients:`: %s\n" % external[0])
+    else:
+        recipients = _email_recipients(tool_input)
+        if recipients is None or set(tool_input) - _EMAIL_SEND_KEYS:
+            block_shape(tool_name, session_id)
+        external = [a for a in recipients if not _INTERNAL_ADDRESS.fullmatch(a)]
+        if not external:
+            return  # internal-only: parity with Gate 1, which also leaves internal sends alone
+        reason = "external email recipient(s) via MCP (%s): %s" % (short, ", ".join(external))
+        hint = ""
+    # consume=True (default): this is the ONLY enforcement point for these tools, so it must
+    # be the one that spends the single-use grant (see override_active's docstring).
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("%s: %s" % (reason, ", ".join(external)) if hint else reason,
+              EXTERNAL_SEND, session_id, extra=hint)
+
+
+def _attendee_addresses(tool_input):
+    """Every address in attendees / requiredAttendees / optionalAttendees, UNSTRIPPED. Accepts a
+    plain string, or an object carrying exactly one of email / address / emailAddress (the last
+    either a string or {address, name}). Returns None on ANY other shape -- callers fail closed;
+    [] when there are no attendees."""
+    found = []
+    for key in _EVENT_ATTENDEE_KEYS:
+        if key not in tool_input or tool_input[key] is None:
+            continue
+        entries = tool_input[key]
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if isinstance(entry, dict):
+                if set(entry) - _ATTENDEE_OBJECT_KEYS:
+                    return None
+                holders = [k for k in ("email", "address", "emailAddress") if k in entry]
+                if len(holders) != 1:
+                    return None
+                entry = entry[holders[0]]
+                if isinstance(entry, dict):
+                    if set(entry) - _ATTENDEE_ADDRESS_KEYS:
+                        return None
+                    entry = entry.get("address")
+            if not isinstance(entry, str):
+                return None
+            found.append(entry)
+    return found
+
+
+# Prose fields: an address typed into the text of a body or subject is not a recipient.
+_EVENT_PROSE_KEYS = frozenset(("body", "subject", "bodyType"))
+
+
+def _stray_addresses(value, _top=True):
+    """Every string anywhere in an event payload outside the prose fields that contains an "@"
+    and is not, IN FULL, one plain internal address -- location objects, categories, recurrence,
+    attendee `name`/`type`, dict keys, whatever an allowlisted key carries. The attendee scan
+    alone let `location.locationEmailAddress` through (adversarial review finding 4), and an
+    extractor that pulls address-shaped substrings missed `a@oxfordra.net@evil.com`, a quoted
+    local part and an IP-literal domain (re-review finding 1), so the test is "has an @ and is
+    not provably internal", after NFKC (folds the fullwidth at-sign). The whole string is the
+    token target. Over-blocks text like "Meet @ HQ": the accepted direction."""
+    found = []
+    if isinstance(value, str):
+        folded = unicodedata.normalize("NFKC", value)
+        if "@" in folded and not _INTERNAL_ADDRESS.fullmatch(folded):
+            found.append(folded)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if _top and k in _EVENT_PROSE_KEYS:
+                continue
+            found += _stray_addresses(k, False) + _stray_addresses(v, False)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            found += _stray_addresses(v, False)
+    return found
+
+
+def _dedupe(items):
+    seen, out = set(), []
+    for item in items:
+        if item.lower() not in seen:
+            seen.add(item.lower())
+            out.append(item)
+    return out
+
+
+def _vacation_is_disabled(tool_input):
+    """Turning auto-replies OFF sends nothing. Only when the input says so unambiguously: a
+    contradictory pair (enabled=True + status=disabled) is treated as enabled. The fast-path also
+    requires that NOTHING else is in the call, so a call that still carries an audience, message
+    or schedule can never ride it (adversarial review C9). The live schema's disable call is
+    exactly {"status": "disabled"} (other fields must be omitted); `enabled` is not a live key."""
+    if set(tool_input) - {"enabled", "status"}:
+        return False
+    enabled, status = tool_input.get("enabled"), tool_input.get("status")
+    if enabled is False and status in (None, "disabled"):
+        return True
+    return status == "disabled" and enabled in (None, False)
+
+
+def _check_calendar(short, tool_name, tool_input, session_id):
+    """GATE 1d -- ms365 calendar / vacation / filter tools that email or auto-reply to outside
+    parties or install a standing rule. Same token tier and recipient binding as Gate 1b.
+
+    The hook sees only the call, never the stored event, so update/delete/respond are gated on
+    every call: an update or cancellation notifies the event's EXISTING attendees, which the
+    input does not list. The token names `event:<eventId>` (plus any external attendee address)."""
+    if short == "outlook_create_filter":
+        # A filter is a standing rule (CLAUDE.md: forwarding/auto-reply/filter rules need explicit
+        # permission). Its body is irrelevant: gated on every call, whatever the shape.
+        # The token names a digest of the WHOLE input, so approving one rule (move to Archive)
+        # cannot authorize a different one (forward to an outside address) -- adversarial review
+        # C6a. Schema-independent: it binds to whatever the call says, whatever the keys are.
+        blob = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        external = ["filter:" + hashlib.sha256(blob.encode("ascii")).hexdigest()[:16]]
+        reason = "Outlook filter rule creation (standing rule)"
+        hint = "Name this exact rule in `recipients:` exactly: %s\n" % external[0]
+    else:
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        keys = set(tool_input)
+        if short == "outlook_create_event":
+            attendees = _attendee_addresses(tool_input) if not keys - _EVENT_CREATE_KEYS else None
+            if attendees is None:
+                block_shape(tool_name, session_id)
+            external = _dedupe([a for a in attendees if not _INTERNAL_ADDRESS.fullmatch(a)]
+                               + _stray_addresses(tool_input))
+            if not external:
+                return  # no attendee, or internal only: no mail leaves the firm
+            reason = "calendar invitation to external attendee(s) via MCP (%s)" % short
+            hint = ""
+        elif short in ("outlook_update_event", "outlook_delete_event", "outlook_respond_to_event"):
+            allowed = {"outlook_update_event": _EVENT_UPDATE_KEYS,
+                       "outlook_delete_event": _EVENT_DELETE_KEYS,
+                       "outlook_respond_to_event": _EVENT_RESPOND_KEYS}[short]
+            event_id = tool_input.get("eventId")
+            if keys - allowed or not _nonblank(event_id):
+                block_shape(tool_name, session_id)
+            external = ["event:" + event_id.strip()]
+            if short == "outlook_update_event":
+                attendees = _attendee_addresses(tool_input)
+                if attendees is None:
+                    block_shape(tool_name, session_id)
+                external = _dedupe(external
+                                   + [a for a in attendees if not _INTERNAL_ADDRESS.fullmatch(a)]
+                                   + _stray_addresses(tool_input))
+            reason = ("%s notifies the event's attendees (existing ones are not in the input)"
+                      % short)
+            hint = "Name the event in `recipients:` exactly: %s\n" % external[0]
+        else:  # outlook_set_vacation
+            if keys - _VACATION_KEYS:
+                block_shape(tool_name, session_id)
+            if _vacation_is_disabled(tool_input):
+                return
+            audience = tool_input.get("externalAudience", "")
+            if audience == "none":
+                return  # exact-case: Graph's own "no external replies" value
+            if not isinstance(audience, str):
+                block_shape(tool_name, session_id)
+            external = ["vacation:" + (audience.strip() or "unspecified")]
+            reason = "Outlook auto-reply to external senders (externalAudience=%r)" % audience
+            hint = ("An omitted externalAudience is not \"none\"; name the audience in "
+                    "`recipients:` exactly: %s\n" % external[0])
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("%s: %s" % (reason, ", ".join(external)), EXTERNAL_SEND, session_id, extra=hint)
 
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
@@ -814,17 +1312,29 @@ def main():
         sys.stdin.reconfigure(encoding="utf-8", errors="strict")  # type: ignore[attr-defined]
     except Exception:
         pass
-    # ONLY an unparseable hook payload fails open -- blocking every tool call system-wide
-    # when we cannot even read the hook input would brick the session; that availability
-    # tradeoff is deliberate. Once we HAVE a parsed payload naming a gated tool, any
-    # anomaly in it fails CLOSED (below): a false positive costs a retry, a false negative
-    # publishes to the live site.
+    # Anything that is not a parseable JSON OBJECT fails CLOSED (review finding C8 and its
+    # generalization). json.loads raises RecursionError on ~3000-deep nesting and ValueError on
+    # a >4300-digit integer -- both inducible by padding an unknown key in tool_input -- and
+    # this used to exit 0, disarming every gate below. A raw-text scan for gated names was
+    # rejected: the Bash command is model-controlled, so a JSON \uXXXX escape hides the marker
+    # from it. The brick risk that earlier argued for fail-open is disproven: this gate is only
+    # invoked for its own matchers, and Bash/Edit/Write reach it through pretooluse-dispatcher
+    # where confidentiality-guard already refuses every payload json cannot parse (exit 2,
+    # verified 2026-09-30 on garbage, padded, big-int and invalid-UTF-8 input). Newly blocked:
+    # NotebookEdit and the gated MCP tools on all such input, and on every path empty or
+    # non-object stdin (confidentiality-guard passes or crashes on those). The harness always
+    # sends a JSON object, so none of this occurs on legitimate traffic.
     try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        return
+        raw = sys.stdin.read()
+        payload = json.loads(raw)
+    except Exception:  # includes RecursionError, UnicodeDecodeError (strict stdin)
+        payload = None
     if not isinstance(payload, dict):
-        return  # a non-object payload names no tool we can evaluate -> fail open
+        sys.stderr.write(
+            "BLOCKED by ORA autonomy gate: the hook payload could not be parsed into a JSON "
+            "object, so it cannot be evaluated for a send / publish / site write. Unparseable "
+            "input fails closed (hard invariant 1/2).\n")
+        sys.exit(2)
 
     tool_name = payload.get("tool_name", "")
     tool_input = payload.get("tool_input", {})
@@ -859,8 +1369,9 @@ def main():
             block_shape(tool_name, session_id)
         check_file_write(file_path, session_id)
     elif isinstance(tool_name, str) and tool_name.startswith("mcp__"):
-        # check_mcp reads only tool_name, so a malformed tool_input cannot affect it.
-        check_mcp(tool_name, session_id)
+        # The Netlify gate reads only tool_name; Gates 1b/1c/3 also read tool_input and fail
+        # closed on any shape they cannot evaluate.
+        check_mcp(tool_name, session_id, tool_input)
 
 
 if __name__ == "__main__":
