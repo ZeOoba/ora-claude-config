@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: ba3393eb-867c-4773-be60-0095ba1567b2
-  modified: 2026-08-25T20:56:57.635Z
+  modified: 2026-10-01T14:43:45.237Z
 ---
 
 # ⚠️ CURRENT STATE (2026-08-10): internal debt reporting is FROZEN — Gabriel ruled Option C.
@@ -51,3 +51,7 @@ Independently investigating why `debt_scores` (DSCR/LTV governor trend history) 
 - **Next ingest: check whether Eric has produced the source doc or re-entered the loan before reporting any internal figure.** Do not infer the answer from whichever way the workbook currently happens to be booked — it has flipped three times.
 
 Full record: Open Workbook Corrections register (Notion `3b16ecd8-9e59-8153-8c9e-f264e301b3ca`, WBC-012) and the [[00_system_of_record]] DSOR change log.
+
+## Possible development — 2026-10-01 (unconfirmed, surfaced by ora-am-brief Block C inbox triage)
+
+An email thread "RE: 9/30 payment" (Eric Goldberg ↔ jm@mm-pllc.com, cc Gabriel, 2026-09-30 ~21:30 ET) has Eric stating "we have paid off the loan from EGFLLC to Oxford" and separately asking jm@mm-pllc.com to resend a spreadsheet of "annuity balances." Direction (EGFLLC as lender, Oxford/Northwood as borrower) matches this loan's profile. **This is NOT confirmed as the Ruling-C source document** — it is a casual email mention, not a note/assignment/settlement statement, and the freeze's own text requires Eric to *produce the source document*, not just reference a payoff in passing. Flagged to Gabriel in that day's Inbox Pre-Brief as a RED FLAG rather than acted on. **Do not lift the freeze or update internal debt reporting from this email alone** — verify whether a real source document follows, and whether "paid off" here resolves the full contested $2.8M band or something narrower.
