@@ -391,8 +391,39 @@ RE_SENTINEL_PROSE = re.compile(r"1\.75\s*[x×]?\s+regression\s+sentinel", re.I)
 # them for operational ALERT thresholds at different LEGIT values (e.g. dscrFloor: 1.1, ltvCeiling:
 # 0.65), so a global check would false-positive. Number literal allows leading-dot (.40) -- a valid
 # TS form. Capital config is unit-interval: DSCR floor == 1.25, LTV ceiling == 0.40 (NOT 40).
-GOVERNOR_CODE_FILES = {"capital-config.ts"}
+# 2026-09-30: governor-constants.ts joins the set. oxford-command-center PR 386 moved the ratified
+# LITERALS (`dscrFloor: 1.25`, `ltvCeiling: 0.40`) out of capital-config.ts into
+# src/contracts/governor-constants.ts (RATIFIED_GOVERNORS), leaving capital-config.ts comparing
+# against the variable. Without this entry the probe verified no literal at all and a weakened
+# constant would have passed silently. Both files hold only governor values (no alert-threshold
+# reuse of the identifiers), so routing them to scan_code carries no false-positive risk.
+GOVERNOR_CODE_FILES = {"capital-config.ts", "governor-constants.ts"}
+# Variable-form canonical guards (`next.dscrFloor < RATIFIED_GOVERNORS.dscrFloor`), the shape
+# capital-config.ts uses since PR 386. They license the `> 0` positivity exemption in scan_code.
+# Matched as the EXACT real shape `if (next.X <op> RATIFIED_GOVERNORS.X)` -- no extra operand, no
+# `&&`/`||` composition, no arithmetic on the constant, `next.` only -- so a neutered guard
+# (`&& false`, `- 0.15`, `prev.dscrFloor`) fails closed instead of licensing the exemption.
+# The guard must START its own line (`^[ \t]*if`), so text mid-line inside a string, template or
+# regex literal can never license the exemption even if tokenizing desyncs.
+RE_CODE_DSCR_RATIFIED_GUARD = re.compile(
+    r"^[ \t]*if\s*\(\s*next\.dscrFloor\s*<\s*RATIFIED_GOVERNORS\.dscrFloor\s*\)", re.M)
+RE_CODE_LTV_RATIFIED_GUARD = re.compile(
+    r"^[ \t]*if\s*\(\s*next\.ltvCeiling\s*>\s*RATIFIED_GOVERNORS\.ltvCeiling\s*\)", re.M)
+# Comments and string/template literals are blanked in ONE left-to-right pass (leftmost match wins,
+# so a `/*` inside a string is part of the string and a `'` inside a comment is part of the comment)
+# before guard detection. Two separate passes desync on exactly those cases.
+RE_CODE_TOKENS = re.compile(
+    r"//[^\n]*|/\*.*?\*/|'(?:[^'\\\n]|\\.)*'?|\"(?:[^\"\\\n]|\\.)*\"?|`(?:[^`\\]|\\.)*`?|/\*.*", re.S)
+# The closing quote/backtick is OPTIONAL on purpose: with a mandatory closer, every unclosed quote
+# rescanned to end-of-line (backtick: end-of-file), which was quadratic (~2.4s at 32KB). Optional,
+# an unterminated literal simply swallows to its boundary in linear time -- which also fails closed,
+# because the swallowed text can no longer supply a canonical guard.
+# Simple template interpolation body: identifiers, dots, whitespace, then the closing brace.
+RE_CODE_TMPL_INTERP_SIMPLE = re.compile(r"[\w.\s]*\}")
 _NUM = r"(?:[0-9]*\.[0-9]+|[0-9]+)"
+# Numeric-form canonical guards, same exact-shape discipline: `if (next.dscrFloor < 1.25)`.
+RE_CODE_DSCR_NUM_GUARD = re.compile(r"^[ \t]*if\s*\(\s*next\.dscrFloor\s*<\s*(" + _NUM + r")\s*\)", re.M)
+RE_CODE_LTV_NUM_GUARD = re.compile(r"^[ \t]*if\s*\(\s*next\.ltvCeiling\s*>\s*(" + _NUM + r")\s*\)", re.M)
 # Enforcement-GUARD forms: identifier <op> literal  (`if (next.dscrFloor < 1.25)`).
 RE_CODE_DSCR = re.compile(r"\bdscrFloor\s*(<=?|>=?)\s*(" + _NUM + r")")
 RE_CODE_LTV = re.compile(r"\bltvCeiling\s*(<=?|>=?)\s*(" + _NUM + r")")
@@ -411,7 +442,7 @@ CANON_LTV_NUM = 0.40
 
 def scan_code(text):
     """Validate the acquisition-governor ENFORCEMENT CONSTANTS in the GOVERNOR SOURCE FILE
-    (capital-config.ts) -- not prose. main() routes ONLY that file here (see GOVERNOR_CODE_FILES:
+    (capital-config.ts, governor-constants.ts) -- not prose. main() routes ONLY those files here (see GOVERNOR_CODE_FILES:
     the identifiers are overloaded, so a global check would false-positive on conditions.ts alert
     thresholds). Numeric equality: 0.4 == 0.40, 1.250 == 1.25, leading-dot .40 == 0.40.
 
@@ -421,10 +452,68 @@ def scan_code(text):
     governor declaration is caught separately in main() (presence guard).
 
     Adversarial residuals (single-line regex, stdlib-only -- a full TS AST is out of scope; low risk
-    given the scope is ONE small controlled file using identifier-first literal forms): a renamed
+    given the scope is TWO small controlled files using identifier-first literal forms). Residuals
+    accepted in the 2026-09-30 review of the `> 0` exemption: it is FILE-scoped, not path-scoped
+    (a second write function carrying only a `> 0` guard is licensed by the canonical guard in a
+    different function); the guard is matched textually, never validated as reachable or as having
+    a throwing body (an empty `{}` body, an earlier `return`, a shadowed `next`, or a dead branch
+    built inside an unrelated `if` all pass; shapes with `&&`/`||`/arithmetic still fail closed);
+    complex template interpolation, or a backtick surviving the tokenizer, disables the exemption
+    for the whole file (fail closed); a deliberately BALANCED tokenizer desync built from regex
+    literals (e.g. a regex containing a backtick paired with a later one, exposing template text as
+    live code) is NOT detected -- the tokenizer has no regex-literal awareness and a full TS lexer
+    is out of scope; this probe is a tripwire for accidental drift, and a deliberate edit to these
+    two small files is caught in PR review; seed literals with arithmetic (`1.25 - 0.15`)
+    or `&&` tails pass the seed regex, as before. A renamed
     identifier; a constant via a variable (`< MIN`) or scientific notation (`1.25e-1` / `4e-1`); a
     Yoda comparison (`1.10 > dscrFloor`); a declaration split across lines or broken by a comment."""
     out = []
+    # Positivity-guard exemption (2026-09-30). capital-config.ts carries fail-closed `x > 0` guards
+    # beside the real guards (a zero ceiling turns the DSCR proxy into Infinity). Read alone, `> 0`
+    # looks like a relaxed floor/ceiling, which blocked a push. It is exempt ONLY while the real
+    # canonical guard for the SAME metric (`if (next.dscrFloor < 1.25)` / `if (next.ltvCeiling > 0.40)`
+    # or the RATIFIED_GOVERNORS variable form) is still present as a whole line OUTSIDE every comment
+    # and literal -- so replacing or deleting the real guard re-arms the flag. Strictly `> 0`:
+    # `>= 0`, `> 0.5` and any drifted canonical constant stay flagged.
+    # Blank comments and literals in one pass, keeping each match's newlines so line starts stay true.
+    desync = []  # set when any quote/backtick/block-comment token is unterminated
+
+    def _blank(m):
+        tok = m.group(0)
+        if tok[0] in "'\"`":
+            bs = len(tok) - 1 - len(tok[:-1].rstrip("\\"))  # backslashes immediately before the last char
+            if len(tok) < 2 or tok[-1] != tok[0] or bs % 2:
+                desync.append(tok[:1])
+        elif tok.startswith("/*") and not tok.endswith("*/"):
+            desync.append("/*")
+        return " " + "\n" * tok.count("\n")
+
+    code_only = RE_CODE_TOKENS.sub(_blank, text)
+    has_dscr_guard = (
+        any(float(m.group(1)) == CANON_DSCR_NUM for m in RE_CODE_DSCR_NUM_GUARD.finditer(code_only))
+        or RE_CODE_DSCR_RATIFIED_GUARD.search(code_only) is not None)
+    has_ltv_guard = (
+        any(float(m.group(1)) == CANON_LTV_NUM for m in RE_CODE_LTV_NUM_GUARD.finditer(code_only))
+        or RE_CODE_LTV_RATIFIED_GUARD.search(code_only) is not None)
+    # Fail closed on complex template interpolation: a backtick, quote, comment or brace inside `${...}`
+    # can close the tokenizer's template early and expose template TEXT as live code (second-pass
+    # review: a guard on its own line inside a multi-line template after `${"`"}`). Regex cannot track
+    # nested templates, so any `${...}` holding more than identifiers, dots and whitespace disables
+    # the exemption for the whole file. Every `${...}` in the real capital-config.ts is a plain
+    # identifier chain (`${next.dscrFloor}`), so the real file is unaffected.
+    # Linear scan (a findall over `[^}]*` was quadratic on `${${${...`; measured 29s at 160KB): each
+    # `${` must be followed by a short identifier run and its `}` or the exemption is dropped.
+    pos = text.find("${")
+    while pos != -1:
+        if not RE_CODE_TMPL_INTERP_SIMPLE.match(text, pos + 2):
+            has_dscr_guard = has_ltv_guard = False
+            break
+        pos = text.find("${", pos + 2)
+    # An UNTERMINATED quote, template or block comment means a template/regex literal desynced the
+    # tokenizer (the closers are optional, so such a token swallows to its boundary): fail closed. A
+    # deliberately BALANCED desync built from regex literals is an accepted residual (see docstring).
+    if desync or "`" in code_only:
+        has_dscr_guard = has_ltv_guard = False
     for i, raw in enumerate(text.splitlines(), 1):
         # SEED literals -- the ratified default value; must equal canonical.
         for m in RE_CODE_DSCR_ASSIGN.finditer(raw):
@@ -445,6 +534,8 @@ def scan_code(text):
                 elif num != CANON_DSCR_NUM:
                     out.append((i, "DSCR floor constant %s != canonical %s" % (m.group(2), CANON_DSCR),
                                 raw.strip()[:120]))
+            elif op == ">" and num == 0 and has_dscr_guard:
+                continue  # positivity guard; the real floor guard is present (see exemption note above)
             elif num <= 2:  # '>'/'>=' in the governor range = inverted/relaxed floor; '> 3' sanity exempt
                 out.append((i, "DSCR floor compared with '%s %s' -- inverted/relaxed floor"
                             % (op, m.group(2)), raw.strip()[:120]))
@@ -454,6 +545,8 @@ def scan_code(text):
                 if op == ">=":
                     out.append((i, "LTV ceiling guard uses '>=' (direction drift; expected '> %s')"
                                 % CANON_LTV_NUM, raw.strip()[:120]))
+                elif op == ">" and num == 0 and has_ltv_guard:
+                    continue  # positivity guard; the real ceiling guard is present (see note above)
                 elif num != CANON_LTV_NUM:
                     out.append((i, "LTV ceiling constant %s != canonical %s" % (m.group(2), CANON_LTV_NUM),
                                 raw.strip()[:120]))

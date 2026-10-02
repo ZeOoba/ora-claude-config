@@ -408,10 +408,10 @@ def test_broken_website_deploy_tier_fails_closed():
     print("PASS test_broken_website_deploy_tier_fails_closed")
 
 
-def test_malformed_stdin_fails_open():
+def test_malformed_stdin_fails_closed():
     proc = subprocess.run([sys.executable, HOOK], input="not json", capture_output=True, text=True)
-    assert proc.returncode == 0, "malformed stdin must exit 0, got %s" % proc.returncode
-    print("PASS test_malformed_stdin_fails_open")
+    assert proc.returncode == 2, "malformed stdin must exit 2, got %s" % proc.returncode
+    print("PASS test_malformed_stdin_fails_closed")
 
 
 # --------------------------------------------------------------------------
@@ -1719,6 +1719,1278 @@ def test_missing_text_normalization_module_still_blocks():
             "exit %s (%s). Exit 1 in particular is fail-OPEN here -- PreToolUse treats it "
             "as a non-blocking error and runs the tool anyway." % (label, rc, err))
     print("PASS test_missing_text_normalization_module_still_blocks")
+
+
+# ---------------------------------------------------------------------------------------
+# Gate 1b/1c/3: ms365 email sends, Teams sends, HubSpot CMS writes (MCP surface).
+# Before this, the only MCP gate was Netlify's. The ms365 and HubSpot connectors expose
+# send/publish tools that a session under bypassPermissions could call with no prompt and
+# no hook; the confidentiality-guard matcher that looked like cover was registered on
+# uppercase Composio-era names (OUTLOOK_SEND...) and never matched the live lowercase ones.
+# ---------------------------------------------------------------------------------------
+MS365 = "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__"
+HUBSPOT = "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__"
+
+
+def tool_payload(tool_name, tool_input):
+    return {"tool_name": tool_name, "tool_input": tool_input}
+
+
+def mail(to, cc=None, bcc=None, tool="outlook_send_mail"):
+    ti = {"to": to, "subject": "s", "body": "b"}
+    if cc is not None:
+        ti["cc"] = cc
+    if bcc is not None:
+        ti["bcc"] = bcc
+    return tool_payload(MS365 + tool, ti)
+
+
+def test_ms365_send_mail_external_recipient_blocks():
+    rc, out, err = run_hook(mail(["counterparty@example.com"]))
+    assert rc == 2, "external outlook_send_mail must block, got %s (%s)" % (rc, err)
+    assert "counterparty@example.com" in err, "block message must name the recipient"
+    print("PASS test_ms365_send_mail_external_recipient_blocks")
+
+
+def test_ms365_send_mail_internal_only_allows():
+    rc, out, err = run_hook(mail(["ggoldberg@oxfordra.net"], cc=["EGOLDBERG@OXFORDRA.NET"]))
+    assert rc == 0, "internal-only send matches Gate 1 parity and must pass, got %s (%s)" % (rc, err)
+    print("PASS test_ms365_send_mail_internal_only_allows")
+
+
+def test_ms365_send_mail_mixed_and_bcc_block():
+    rc, _, err = run_hook(mail(["ggoldberg@oxfordra.net", "x@example.com"]))
+    assert rc == 2, "one external among internals must block, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(mail(["ggoldberg@oxfordra.net"], bcc=["x@example.com"]))
+    assert rc == 2, "an external BCC must block, got %s (%s)" % (rc, err)
+    print("PASS test_ms365_send_mail_mixed_and_bcc_block")
+
+
+def test_ms365_send_mail_lookalike_and_malformed_recipients_block():
+    bad = [
+        "a@oxfordra.net.evil.com",
+        "a@oxfordra.network",
+        "evil@example.com,ceo@oxfordra.net",      # list smuggled into one string
+        "Name <evil@example.com>",
+        "ceo@oxfordra.net​",                   # zero-width suffix
+        "ceo@oxfordra.net\n",                       # trailing newline
+        "ceo@oxfordra.net ",
+        "сeo@oxfordra.net.example.com",
+        "no-at-sign",
+        "",
+    ]
+    for addr in bad:
+        rc, _, err = run_hook(mail([addr]))
+        assert rc == 2, "recipient %r must be treated as external, got %s (%s)" % (addr, rc, err)
+    print("PASS test_ms365_send_mail_lookalike_and_malformed_recipients_block")
+
+
+def test_ms365_send_mail_unusable_shape_fails_closed():
+    for ti in ({}, {"subject": "s", "body": "b"}, {"to": []}, {"to": [None]},
+               {"to": [["a@oxfordra.net"]]}, {"to": 5}, "not-a-dict", None, []):
+        rc, _, err = run_hook(tool_payload(MS365 + "outlook_send_mail", ti))
+        assert rc == 2, "tool_input %r must fail closed, got %s (%s)" % (ti, rc, err)
+    print("PASS test_ms365_send_mail_unusable_shape_fails_closed")
+
+
+def test_ms365_send_mail_token_binds_to_named_recipients_and_is_single_use():
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["counterparty@example.com"])
+    rc, _, err = run_hook(mail(["someone-else@example.com"]), sessions_dir=d)
+    assert rc == 2, "a token naming another recipient must not authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(mail(["counterparty@example.com"]), sessions_dir=d)
+    assert rc == 0, "a token naming the recipient must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(mail(["counterparty@example.com"]), sessions_dir=d)
+    assert rc == 2, "the external-send token is single-use, got %s (%s)" % (rc, err)
+    print("PASS test_ms365_send_mail_token_binds_to_named_recipients_and_is_single_use")
+
+
+def test_ms365_forward_mail_follows_recipient_rule():
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_forward_mail",
+                                       {"messageId": "AAA", "to": ["x@example.com"]}))
+    assert rc == 2, "external forward must block, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_forward_mail",
+                                       {"messageId": "AAA", "to": ["ggoldberg@oxfordra.net"]}))
+    assert rc == 0, "internal forward must pass, got %s (%s)" % (rc, err)
+    print("PASS test_ms365_forward_mail_follows_recipient_rule")
+
+
+def test_ms365_send_draft_needs_token_naming_the_draft():
+    p = tool_payload(MS365 + "outlook_send_draft", {"messageId": "AAMkAGDraftOne"})
+    rc, _, err = run_hook(p)
+    assert rc == 2, "send_draft carries no recipients and must block, got %s (%s)" % (rc, err)
+    assert "draft:AAMkAGDraftOne" in err, "block message must say what to name in the token"
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["draft:AAMkAGDraftTwo"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "a token naming a DIFFERENT draft must not authorize, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["draft:AAMkAGDraftOne"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "a token naming this draft must authorize, got %s (%s)" % (rc, err)
+    print("PASS test_ms365_send_draft_needs_token_naming_the_draft")
+
+
+def test_teams_sends_block_and_bind_to_destination():
+    chat = tool_payload(MS365 + "teams_send_chat_message", {"chatId": "19:abc@thread.v2", "body": "hi"})
+    chan = tool_payload(MS365 + "teams_send_channel_message",
+                        {"teamId": "T1", "channelId": "19:c1@thread.tacv2", "body": "hi"})
+    reply = tool_payload(MS365 + "teams_reply_channel_message",
+                         {"teamId": "T1", "channelId": "19:c1@thread.tacv2", "messageId": "M", "body": "hi"})
+    for p in (chat, chan, reply):
+        rc, _, err = run_hook(p)
+        assert rc == 2, "%s must block without a token, got %s (%s)" % (p["tool_name"], rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["teams:19:other@thread.v2"])
+    rc, _, err = run_hook(chat, sessions_dir=d)
+    assert rc == 2, "a token naming another chat must not authorize, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["teams:19:abc@thread.v2"])
+    rc, _, err = run_hook(chat, sessions_dir=d)
+    assert rc == 0, "a token naming the chat must authorize, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["teams:T1/19:c1@thread.tacv2"])
+    rc, _, err = run_hook(chan, sessions_dir=d)
+    assert rc == 0, "a token naming team/channel must authorize a channel post, got %s (%s)" % (rc, err)
+    print("PASS test_teams_sends_block_and_bind_to_destination")
+
+
+def test_teams_send_missing_destination_fails_closed():
+    for name in ("teams_send_chat_message", "teams_send_channel_message", "teams_reply_channel_message"):
+        for ti in ({}, {"body": "hi"}, {"chatId": ""}, {"chatId": 7}, None, "x"):
+            rc, _, err = run_hook(tool_payload(MS365 + name, ti))
+            assert rc == 2, "%s with %r must fail closed, got %s (%s)" % (name, ti, rc, err)
+    print("PASS test_teams_send_missing_destination_fails_closed")
+
+
+def test_ms365_non_send_tools_pass():
+    for name in ("outlook_create_draft", "outlook_email_search", "outlook_calendar_search",
+                 "teams_list_chats", "teams_list_channel_messages", "sharepoint_search"):
+        rc, _, err = run_hook(tool_payload(MS365 + name, {"to": ["x@example.com"], "body": "b"}))
+        assert rc == 0, "%s is not a send and must not block, got %s (%s)" % (name, rc, err)
+    print("PASS test_ms365_non_send_tools_pass")
+
+
+def test_gates_match_on_tool_suffix_not_connector_id():
+    rc, _, err = run_hook(tool_payload("mcp__some-new-server-id__outlook_send_mail",
+                                       {"to": ["x@example.com"], "subject": "s", "body": "b"}))
+    assert rc == 2, "a reinstalled connector with a new id must stay gated, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(tool_payload("mcp__some-new-server-id__manage_blog_post",
+                                       {"action": "PUBLISH", "contentId": 1}))
+    assert rc == 2, "a reinstalled HubSpot connector must stay gated, got %s (%s)" % (rc, err)
+    print("PASS test_gates_match_on_tool_suffix_not_connector_id")
+
+
+HS_READS = (
+    ("manage_blog_post", {"action": "GET_POST", "contentId": 1}),
+    ("manage_blog_post", {"action": "LIST_BLOG_POSTS"}),
+    ("manage_blog_post", {"action": "LIST_TAGS"}),
+    ("manage_landing_page", {"action": "MODULES", "contentId": 1}),
+    ("manage_landing_page", {"action": "TEMPLATES"}),
+    ("manage_landing_page", {"action": "REVISIONS", "contentId": 1}),
+    ("manage_website_page", {"operation": {"_type": "MODULES", "contentId": 1}}),
+    ("manage_website_page", {"operation": {"_type": "NAV_GET_MENU"}}),
+    ("manage_website_page", {"operation": {"_type": "TEMPLATES"}}),
+)
+
+
+def test_hubspot_cms_reads_pass():
+    for name, ti in HS_READS:
+        rc, _, err = run_hook(tool_payload(HUBSPOT + name, ti))
+        assert rc == 0, "%s %r is a read and must pass, got %s (%s)" % (name, ti, rc, err)
+    print("PASS test_hubspot_cms_reads_pass")
+
+
+HS_WRITES = (
+    ("manage_blog_post", {"action": "CREATE", "title": "t", "postBody": "<p>x</p>"}),
+    ("manage_blog_post", {"action": "UPDATE", "contentId": 1, "title": "t"}),
+    ("manage_blog_post", {"action": "PUBLISH", "contentId": 1}),
+    ("manage_blog_post", {"action": "UNPUBLISH", "contentId": 1}),
+    ("manage_landing_page", {"action": "PUBLISH", "contentId": 1}),
+    ("manage_landing_page", {"action": "SET_METADATA", "contentId": 1, "slug": "s"}),
+    ("manage_landing_page", {"action": "CREATE_CUSTOM_TEMPLATE", "slug": "s", "hublSource": "x"}),
+    ("manage_landing_page", {"action": "BATCH", "operationsJson": "[]"}),
+    ("manage_website_page", {"operation": {"_type": "CREATE_FROM_TEMPLATE", "pageName": "p", "templatePath": "t"}}),
+    ("manage_website_page", {"operation": {"_type": "PUBLISH", "contentId": 1}}),
+    ("manage_website_page", {"operation": {"_type": "REMOVE", "contentId": 1, "moduleId": "m"}}),
+    ("manage_website_page", {"operation": {"_type": "NAV_REPLACE_MENU", "menuItemsJson": "[]"}}),
+    ("manage_website_page", {"operation": {"_type": "NAV_SET_ITEM", "label": "x"}}),
+    ("manage_website_page", {"operation": {"_type": "BATCH", "steps": []}}),
+)
+
+
+def test_hubspot_cms_writes_block():
+    for name, ti in HS_WRITES:
+        rc, _, err = run_hook(tool_payload(HUBSPOT + name, ti))
+        assert rc == 2, "%s %r is a write and must block, got %s (%s)" % (name, ti, rc, err)
+    print("PASS test_hubspot_cms_writes_block")
+
+
+def test_hubspot_cms_preview_mode_passes_only_when_explicit():
+    def web(op):
+        return tool_payload(HUBSPOT + "manage_website_page", {"operation": op})
+    for t in ("PUBLISH", "REMOVE", "REMOVE_SECTION", "RESTORE_REVISION",
+              "NAV_SET_ITEM", "NAV_REPLACE_MENU", "NAV_REMOVE_ITEM"):
+        rc, _, err = run_hook(web({"_type": t, "contentId": 1, "mode": "PREVIEW"}))
+        assert rc == 0, "%s with mode=PREVIEW writes nothing and must pass, got %s (%s)" % (t, rc, err)
+    for op in ({"_type": "PUBLISH", "contentId": 1, "mode": "APPLY"},
+               {"_type": "PUBLISH", "contentId": 1, "mode": "preview"},
+               {"_type": "PUBLISH", "contentId": 1, "mode": None},
+               {"_type": "NAV_SET_ITEM", "mode": "PREVIEW", "confirmNavChange": True},
+               {"_type": "CREATE_FROM_TEMPLATE", "pageName": "p", "templatePath": "t", "mode": "PREVIEW"},
+               {"_type": "SET_METADATA", "contentId": 1, "mode": "PREVIEW"}):
+        rc, _, err = run_hook(web(op))
+        assert rc == 2, "%r must block, got %s (%s)" % (op, rc, err)
+    print("PASS test_hubspot_cms_preview_mode_passes_only_when_explicit")
+
+
+def test_hubspot_cms_unknown_or_malformed_fails_closed():
+    blog = HUBSPOT + "manage_blog_post"
+    web = HUBSPOT + "manage_website_page"
+    cases = [
+        tool_payload(blog, {"action": "SOME_FUTURE_WRITE"}),
+        tool_payload(blog, {"action": "get_post"}),        # exact-case allowlist only
+        tool_payload(blog, {"action": " GET_POST"}),
+        tool_payload(blog, {"action": "GET_POST​"}),
+        tool_payload(blog, {}),
+        tool_payload(blog, {"action": 5}),
+        tool_payload(blog, None),
+        tool_payload(blog, "GET_POST"),
+        tool_payload(blog, []),
+        tool_payload(web, {}),
+        tool_payload(web, {"operation": "MODULES"}),
+        tool_payload(web, {"operation": {}}),
+        tool_payload(web, {"operation": {"_type": 5}}),
+        tool_payload(web, {"operation": {"_type": "FUTURE_WRITE"}}),
+    ]
+    for p in cases:
+        rc, _, err = run_hook(p)
+        assert rc == 2, "%r must fail closed, got %s (%s)" % (p, rc, err)
+    print("PASS test_hubspot_cms_unknown_or_malformed_fails_closed")
+
+
+def test_hubspot_cms_token_authorizes_multi_use_and_is_not_interchangeable():
+    p = tool_payload(HUBSPOT + "manage_blog_post", {"action": "PUBLISH", "contentId": 1})
+    d = fresh_sessions_dir()
+    mint(d, "allow-hubspot-cms-write", "hubspot-cms-write")
+    for _ in range(2):
+        rc, _, err = run_hook(p, sessions_dir=d)
+        assert rc == 0, "a CMS token is multi-use (edit, edit, publish), got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com"])
+    mint(d, "allow-website-write", "website-write")
+    mint(d, "allow-website-deploy", "website-deploy")
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "email/site tokens must not authorize CMS writes, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-hubspot-cms-write", "hubspot-cms-write")
+    rc, _, err = run_hook(mail(["x@example.com"]), sessions_dir=d)
+    assert rc == 2, "a CMS token must not authorize an external email, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-hubspot-cms-write", "hubspot-cms-write", session_id=SESSION_B)
+    rc, _, err = run_hook(p, sessions_dir=d, session_id=SESSION_A)
+    assert rc == 2, "a token minted for another session must not authorize, got %s (%s)" % (rc, err)
+    print("PASS test_hubspot_cms_token_authorizes_multi_use_and_is_not_interchangeable")
+
+
+def test_hubspot_cms_token_expires():
+    p = tool_payload(HUBSPOT + "manage_blog_post", {"action": "PUBLISH", "contentId": 1})
+    d = fresh_sessions_dir()
+    mint(d, "allow-hubspot-cms-write", "hubspot-cms-write", age_seconds=601)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "a CMS token older than its 10-minute TTL must not authorize, got %s (%s)" % (rc, err)
+    print("PASS test_hubspot_cms_token_expires")
+
+
+def run_raw(raw, sessions_dir=None):
+    """Feed the hook an exact stdin string (run_hook always serialises a dict)."""
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir if sessions_dir is not None else fresh_sessions_dir()
+    proc = subprocess.run([sys.executable, HOOK], input=raw, capture_output=True, text=True, env=env)
+    return proc.returncode, proc.stdout, proc.stderr
+
+
+def test_unparseable_payload_naming_a_gated_tool_fails_closed():
+    """Review finding C8. json.loads raises RecursionError on deeply nested input and main()
+    treated EVERY parse failure as 'not a payload we can evaluate' -> exit 0, so a padded extra
+    key let a live send/publish through with no token. A payload that cannot be parsed but
+    NAMES a gated tool must block (every unparseable payload now does; see
+    test_unparseable_payload_fails_closed_for_every_tool)."""
+    deep = "[" * 5000 + "]" * 5000
+    cases = (
+        (MS365 + "outlook_send_mail", '{"to":["a@evil.com"],"subject":"s","body":"b","x":%s}' % deep),
+        (MS365 + "teams_send_chat_message", '{"chatId":"19:a","body":"b","x":%s}' % deep),
+        (HUBSPOT + "manage_website_page", '{"operation":{"_type":"PUBLISH","mode":"APPLY","x":%s}}' % deep),
+        ("mcp__netlify__project-updater", '{"x":%s}' % deep),
+    )
+    for tool, ti in cases:
+        raw = '{"tool_name":"%s","tool_input":%s,"session_id":"%s"}' % (tool, ti, SESSION_A)
+        rc, _, err = run_raw(raw)
+        assert rc == 2, "unparseable payload naming %s must fail closed, got %s (%s)" % (tool, rc, err)
+    print("PASS test_unparseable_payload_naming_a_gated_tool_fails_closed")
+
+
+def run_raw_bytes(raw):
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = fresh_sessions_dir()
+    proc = subprocess.run([sys.executable, HOOK], input=raw, capture_output=True, env=env)
+    return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
+
+
+def test_unparseable_payload_fails_closed_for_every_tool():
+    """The gate is only ever invoked for a gated matcher, and in production Bash/Edit/Write
+    already fail closed on garbage via confidentiality-guard inside the dispatcher, so failing
+    closed here costs nothing new. A marker scan (the prior MCP-only fix) cannot cover Bash:
+    the command is model-controlled and `\u006f`-style JSON escapes hide the marker from a raw
+    scan. So EVERY payload the gate cannot parse into a JSON object is refused."""
+    deep = "[" * 5000 + "]" * 5000
+    marker = "send-via-" + "outlook.ps1"
+    site = "website-" + "canonical"
+    escaped = "send-via-outl" + chr(92) + "u006fok.ps1"  # JSON text carries a literal backslash-u
+    cases = (
+        ("Bash", '{"command":"powershell %s -To a@evil.com","x":%s}' % (marker, deep)),
+        ("Bash", '{"command":"powershell %s -To a@evil.com","x":%s}' % (escaped, deep)),
+        ("Bash", '{"command":"ls","x":%s}' % deep),
+        ("Write", '{"file_path":"C:/Users/Owner/%s/i.html","content":"x","x":%s}' % (site, deep)),
+        ("Edit", '{"file_path":"C:/Users/Owner/%s/i.html","x":%s}' % (site, deep)),
+        ("MultiEdit", '{"file_path":"C:/Users/Owner/%s/i.html","x":%s}' % (site, deep)),
+        ("NotebookEdit", '{"notebook_path":"C:/Users/Owner/%s/n.ipynb","x":%s}' % (site, deep)),
+        ("Read", '{"x":%s}' % deep),
+        (MS365 + "outlook_email_search", '{"x":%s}' % deep),
+    )
+    for tool, ti in cases:
+        raw = '{"tool_name":"%s","tool_input":%s,"session_id":"%s"}' % (tool, ti, SESSION_A)
+        rc, out, err = run_raw(raw)
+        assert rc == 2, "unparseable %s payload must fail closed, got %s (%s)" % (tool, rc, err)
+        assert out == "" and "could not be parsed" in err, (out, err)
+    # int-digit cap is a second attacker-inducible ValueError (not RecursionError)
+    big = '{"tool_name":"Bash","tool_input":{"command":"ls","n":%s},"session_id":"s"}' % ("9" * 6000)
+    rc, _, err = run_raw(big)
+    assert rc == 2, "oversized-integer payload must fail closed, got %s (%s)" % (rc, err)
+    for junk in ("not json at all", "", "   ", "[]", "null", '"Bash"', "42"):
+        rc, _, err = run_raw(junk)
+        assert rc == 2, "non-object/unparseable stdin %r must fail closed, got %s (%s)" % (junk, rc, err)
+    rc, _, err = run_raw_bytes(b'{"tool_name":"Bash","tool_input":{"command":"' + bytes([0xff, 0xfe]) + b'"}}')
+    assert rc == 2, "invalid UTF-8 stdin must fail closed, got %s (%s)" % (rc, err)
+    # a well-formed benign payload is untouched
+    rc, _, err = run_hook(tool_payload("Bash", {"command": "ls"}))
+    assert rc == 0, "a parseable benign payload must still pass, got %s (%s)" % (rc, err)
+    print("PASS test_unparseable_payload_fails_closed_for_every_tool")
+
+
+def test_ms365_email_unknown_keys_fail_closed():
+    """Review hardening: a recipient-bearing parameter the gate does not know about (replyTo,
+    a differently-cased To, a future field) must not be silently ignored."""
+    base = {"to": ["a@oxfordra.net"], "subject": "s", "body": "b"}
+    for extra in ({"replyTo": ["x@evil.com"]}, {"To": ["x@evil.com"]}, {"attachments": ["f"]}):
+        rc, _, err = run_hook(tool_payload(MS365 + "outlook_send_mail", dict(base, **extra)))
+        assert rc == 2, "unknown key %r must fail closed, got %s (%s)" % (extra, rc, err)
+    # The token matters here: without one send_draft blocks anyway, so an un-tokened call
+    # cannot tell the stray-key rule apart from the plain no-token block (review finding C5).
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["draft:AAA"])
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_send_draft",
+                                       {"messageId": "AAA", "to": ["x@evil.com"]}), sessions_dir=d)
+    assert rc == 2, "send_draft with stray recipient keys must fail closed even WITH a token, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["draft:AAA"])
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_send_draft", {"messageId": "AAA"}), sessions_dir=d)
+    assert rc == 0, "a clean send_draft with a matching token must pass, got %s (%s)" % (rc, err)
+    ok = dict(base, cc=["b@oxfordra.net"], bcc=["c@oxfordra.net"], bodyType="html")
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_send_mail", ok))
+    assert rc == 0, "the documented keys must still pass for an internal send, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_forward_mail",
+                                       {"messageId": "AAA", "to": ["a@oxfordra.net"], "comment": "fyi"}))
+    assert rc == 0, "a documented internal forward must pass, got %s (%s)" % (rc, err)
+    print("PASS test_ms365_email_unknown_keys_fail_closed")
+
+
+def test_ms365_internal_address_local_part_is_strict():
+    # U+212A (Kelvin sign) case-folds to "k", so it slips through a [a-z] class unless the
+    # pattern is ASCII-only; the e-acute pins the same thing for ordinary non-ASCII letters.
+    for addr in ("ce​o@oxfordra.net", "ce%o@oxfordra.net", "a!b@oxfordra.net",
+                 "a:b@oxfordra.net", "a\x1fb@oxfordra.net", "a\x85b@oxfordra.net",
+                 "K@oxfordra.net", "é@oxfordra.net"):
+        rc, _, err = run_hook(mail([addr]))
+        assert rc == 2, "local part of %r is not plain ASCII atext; must block, got %s (%s)" % (addr, rc, err)
+    for addr in ("ggoldberg@oxfordra.net", "first.last+tag@oxfordra.net", "a_b-c@OXFORDRA.NET"):
+        rc, _, err = run_hook(mail([addr]))
+        assert rc == 0, "%r is a plain internal address and must pass, got %s (%s)" % (addr, rc, err)
+    print("PASS test_ms365_internal_address_local_part_is_strict")
+
+
+def test_send_and_cms_exception_fails_closed_in_process():
+    """Review gap M5: nothing pinned the `except Exception -> block_shape` wrapper, so a future
+    edit could turn it into a silent `return` (fail open) with every test still green."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("oag_inproc", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected failure")
+
+    mod._check_send_and_cms = boom
+    for tool in (MS365 + "outlook_send_mail", MS365 + "teams_send_chat_message",
+                 HUBSPOT + "manage_blog_post"):
+        try:
+            mod.check_mcp(tool, "sess", {"to": ["a@oxfordra.net"]})
+        except SystemExit as exc:
+            assert exc.code == 2, "%s: wrong exit code %r" % (tool, exc.code)
+        else:
+            raise AssertionError("%s: an exception inside the check must exit 2, not return" % tool)
+    print("PASS test_send_and_cms_exception_fails_closed_in_process")
+
+
+def test_teams_channel_token_binds_team_and_channel():
+    """Review gap M6: a token for one team/channel must not authorize another."""
+    def chan(team, channel):
+        return tool_payload(MS365 + "teams_send_channel_message",
+                            {"teamId": team, "channelId": channel, "body": "hi"})
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["teams:T1/19:c1@thread.tacv2"])
+    rc, _, err = run_hook(chan("T2", "19:c1@thread.tacv2"), sessions_dir=d)
+    assert rc == 2, "same channel id under a different team must not authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(chan("T1", "19:c2@thread.tacv2"), sessions_dir=d)
+    assert rc == 2, "a different channel in the same team must not authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(chan("T1", "19:c1@thread.tacv2"), sessions_dir=d)
+    assert rc == 0, "the named team/channel must authorize, got %s (%s)" % (rc, err)
+    print("PASS test_teams_channel_token_binds_team_and_channel")
+
+
+def test_settings_matcher_registers_every_gated_tool():
+    """The hook only runs for tools its settings.json matcher selects. A gate that is correct
+    but unregistered is the exact defect that left the ms365 sends uncovered, so pin the
+    wiring: every gated tool name must full-match the ora-autonomy-gate matcher."""
+    import re
+    settings = os.path.join(HERE, "..", "settings.json")
+    with open(settings, encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    matchers = []
+    for entry in cfg.get("hooks", {}).get("PreToolUse", []):
+        for h in entry.get("hooks", []):
+            if "ora-autonomy-gate.py" in h.get("command", ""):
+                matchers.append(entry.get("matcher", ""))
+    assert matchers, "ora-autonomy-gate.py is not registered under PreToolUse"
+    def covered(tool):
+        return any(re.fullmatch(m, tool) for m in matchers)
+    gated = [MS365 + n for n in ("outlook_send_mail", "outlook_send_draft", "outlook_forward_mail",
+                                 "teams_send_chat_message", "teams_send_channel_message",
+                                 "teams_reply_channel_message", "outlook_update_draft")]
+    gated += [HUBSPOT + n for n in ("manage_blog_post", "manage_landing_page", "manage_website_page")]
+    gated += ["mcp__netlify__project-updater"]
+    for t in gated:
+        assert covered(t), "%s is gated in the script but not selected by the settings matcher" % t
+    for t in (MS365 + "outlook_create_draft", MS365 + "outlook_email_search",
+              MS365 + "teams_list_chats", HUBSPOT + "search_crm_objects", "Read"):
+        assert not covered(t), "%s should not be routed through the gate (over-broad matcher)" % t
+    print("PASS test_settings_matcher_registers_every_gated_tool")
+
+
+# ---------------------------------------------------------------------------------------
+# Gate 1d: ms365 calendar / vacation / filter tools. These email or auto-reply to outside
+# parties (invitations, cancellations, response comments, auto-replies) or install standing
+# rules, with no Bash and no prompt. SCHEMAS ARE UNVERIFIED against the live connector (the
+# mutating tools were not exposed when this was written): key names follow Microsoft Graph, and
+# any key outside the allowlist fails closed, so a wrong guess over-blocks, never under-blocks.
+# ---------------------------------------------------------------------------------------
+CAL_TOOLS = ("outlook_create_event", "outlook_update_event", "outlook_delete_event",
+             "outlook_respond_to_event", "outlook_set_vacation", "outlook_create_filter")
+
+
+def _filter_dest(tool_input):
+    import hashlib
+    blob = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return "filter:" + hashlib.sha256(blob.encode("ascii")).hexdigest()[:16]
+
+
+def cal(tool, **ti):
+    return tool_payload(MS365 + tool, ti)
+
+
+def _ev(attendees, **extra):
+    ti = {"subject": "s", "start": {"dateTime": "2026-10-01T10:00:00", "timeZone": "UTC"},
+          "end": {"dateTime": "2026-10-01T11:00:00", "timeZone": "UTC"}}
+    if attendees is not None:
+        ti["attendees"] = attendees
+    ti.update(extra)
+    return cal("outlook_create_event", **ti)
+
+
+def test_create_event_external_attendee_blocks_in_every_shape():
+    for att in (["x@example.com"], [{"email": "x@example.com"}], [{"address": "x@example.com"}],
+                [{"emailAddress": "x@example.com"}],
+                [{"emailAddress": {"address": "x@example.com", "name": "X"}, "type": "required"}],
+                ["a@oxfordra.net", "x@example.com"]):
+        rc, _, err = run_hook(_ev(att))
+        assert rc == 2, "external attendee %r must block, got %s (%s)" % (att, rc, err)
+    for key in ("requiredAttendees", "optionalAttendees"):
+        rc, _, err = run_hook(cal("outlook_create_event", **{key: ["x@example.com"]}))
+        assert rc == 2, "%s must be inspected, got %s (%s)" % (key, rc, err)
+    print("PASS test_create_event_external_attendee_blocks_in_every_shape")
+
+
+def test_create_event_internal_or_no_attendees_allows():
+    for att in (None, [], ["ggoldberg@oxfordra.net"], [{"emailAddress": {"address": "A@OXFORDRA.NET"}}]):
+        rc, _, err = run_hook(_ev(att, location="Suite 4", isOnlineMeeting=True))
+        assert rc == 0, "attendees %r send no outside mail and must pass, got %s (%s)" % (att, rc, err)
+    # All three attendee keys are documented inputs: internal-only must PASS (not merely "unknown
+    # key" block), and an external one in any of them must be covered by a token naming it.
+    for key in ("attendees", "requiredAttendees", "optionalAttendees"):
+        rc, _, err = run_hook(cal("outlook_create_event", **{key: ["a@oxfordra.net"]}))
+        assert rc == 0, "%s with an internal address must pass, got %s (%s)" % (key, rc, err)
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=["x@example.com"])
+        rc, _, err = run_hook(cal("outlook_create_event", **{key: ["x@example.com"]}), sessions_dir=d)
+        assert rc == 0, "%s external with a matching token must pass, got %s (%s)" % (key, rc, err)
+    print("PASS test_create_event_internal_or_no_attendees_allows")
+
+
+def test_create_event_lookalike_and_malformed_attendees_block():
+    for att in (["a@oxfordra.net.evil.com"], ["Name <x@evil.com>"], ["x@evil.com,a@oxfordra.net"],
+                ["a@oxfordra.net "], ["a@oxfordra.net\n"], ["a@oxfordra.net‮"],
+                ["nodomain"], [""], [5], [None], [["a@oxfordra.net"]], [{}],
+                [{"name": "no address"}], [{"emailAddress": {"name": "n"}}],
+                [{"emailAddress": 7}], "a@oxfordra.net", {"emailAddress": "a@oxfordra.net"}, 5):
+        rc, _, err = run_hook(_ev(att))
+        assert rc == 2, "attendees %r must fail closed, got %s (%s)" % (att, rc, err)
+    print("PASS test_create_event_lookalike_and_malformed_attendees_block")
+
+
+def test_attendee_object_stray_or_duplicate_address_fields_fail_closed():
+    """A token naming the lone internal address must NOT carry a second, unvetted address that
+    rides in an extra field of the same attendee object (mutation survivor)."""
+    d = fresh_sessions_dir()
+    for att in ([{"email": "a@oxfordra.net", "forwardTo": "x@evil.com"}],
+                [{"email": "a@oxfordra.net", "address": "x@evil.com"}],
+                [{"emailAddress": {"address": "a@oxfordra.net", "altAddress": "x@evil.com"}}],
+                [{"emailAddress": "a@oxfordra.net", "email": "x@evil.com"}]):
+        rc, _, err = run_hook(_ev(att), sessions_dir=d)
+        assert rc == 2, "attendee object %r must fail closed, got %s (%s)" % (att, rc, err)
+        assert "uninspectable" in err, "must be the shape refusal, not a token block: %s" % err
+    print("PASS test_attendee_object_stray_or_duplicate_address_fields_fail_closed")
+
+
+def test_blank_event_id_fails_closed_even_with_a_matching_token():
+    """Without a token a blank id blocks anyway, which hides a missing blank-id check. Mint a
+    token that WOULD match 'event:' so only the shape check can refuse (mutation survivor)."""
+    for tool in ("outlook_update_event", "outlook_delete_event", "outlook_respond_to_event"):
+        for blank in ("", "  ", "\t\n"):
+            d = fresh_sessions_dir()
+            mint(d, "allow-external-send", "external-send", recipients=["event:"])
+            rc, _, err = run_hook(cal(tool, eventId=blank), sessions_dir=d)
+            assert rc == 2, "%s eventId %r must fail closed even with a token, got %s" % (tool, blank, rc)
+            assert "uninspectable" in err, "must be the shape refusal: %s" % err
+    print("PASS test_blank_event_id_fails_closed_even_with_a_matching_token")
+
+
+def test_calendar_unknown_keys_fail_closed():
+    for extra in ({"replyTo": ["x@evil.com"]}, {"Attendees": ["x@evil.com"]}, {"cc": ["x@evil.com"]}):
+        rc, _, err = run_hook(_ev(["a@oxfordra.net"], **extra))
+        assert rc == 2, "unknown key %r must fail closed, got %s (%s)" % (extra, rc, err)
+    rc, _, err = run_hook(cal("outlook_update_event", eventId="E1", bogus=1))
+    assert rc == 2, "unknown key on update must fail closed, got %s (%s)" % (rc, err)
+    for ti in ("not-a-dict", None, [], 5):
+        for tool in ("outlook_create_event", "outlook_update_event", "outlook_delete_event",
+                     "outlook_respond_to_event", "outlook_set_vacation"):
+            rc, _, err = run_hook(tool_payload(MS365 + tool, ti))
+            assert rc == 2, "%s with tool_input %r must fail closed, got %s (%s)" % (tool, ti, rc, err)
+    print("PASS test_calendar_unknown_keys_fail_closed")
+
+
+def test_create_event_token_binds_to_attendees_and_is_single_use():
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["other@example.com"])
+    rc, _, err = run_hook(_ev(["x@example.com"]), sessions_dir=d)
+    assert rc == 2, "a token naming another address must not authorize, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com"])
+    rc, _, err = run_hook(_ev(["x@example.com", "a@oxfordra.net"]), sessions_dir=d)
+    assert rc == 0, "a token naming the external attendee must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(_ev(["x@example.com"]), sessions_dir=d)
+    assert rc == 2, "the external-send token is single-use, got %s (%s)" % (rc, err)
+    print("PASS test_create_event_token_binds_to_attendees_and_is_single_use")
+
+
+def test_update_event_always_gated_because_existing_attendees_are_invisible():
+    p = cal("outlook_update_event", eventId="E1", subject="moved")
+    rc, _, err = run_hook(p)
+    assert rc == 2, "update with no attendees still notifies existing attendees, got %s (%s)" % (rc, err)
+    assert "event:E1" in err, "block message must say what to name in the token"
+    p_int = cal("outlook_update_event", eventId="E1", attendees=["a@oxfordra.net"])
+    rc, _, err = run_hook(p_int)
+    assert rc == 2, "internal attendees in the input do not prove the stored list is internal, got %s" % rc
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["event:E2"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "a token naming a DIFFERENT event must not authorize, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["event:E1"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "a token naming the event must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "single-use, got %s (%s)" % (rc, err)
+    p_ext = cal("outlook_update_event", eventId="E1", attendees=["x@example.com"])
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["event:E1"])
+    rc, _, err = run_hook(p_ext, sessions_dir=d)
+    assert rc == 2, "event-only token must not cover an external attendee, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["event:E1", "x@example.com"])
+    rc, _, err = run_hook(p_ext, sessions_dir=d)
+    assert rc == 0, "token naming both must authorize, got %s (%s)" % (rc, err)
+    for bad in ({}, {"eventId": ""}, {"eventId": 5}, {"eventId": "  "}):
+        rc, _, err = run_hook(cal("outlook_update_event", **bad))
+        assert rc == 2, "missing/blank eventId %r must fail closed, got %s" % (bad, rc)
+    print("PASS test_update_event_always_gated_because_existing_attendees_are_invisible")
+
+
+def test_delete_and_respond_event_need_token_naming_the_event():
+    for tool, extra in (("outlook_delete_event", {"comment": "cancelled"}),
+                        ("outlook_delete_event", {}),
+                        ("outlook_respond_to_event", {"response": "accept", "comment": "see you"}),
+                        ("outlook_respond_to_event", {"response": "decline"})):
+        p = cal(tool, eventId="E1", **extra)
+        rc, _, err = run_hook(p)
+        assert rc == 2, "%s %r must block, got %s (%s)" % (tool, extra, rc, err)
+        assert "event:E1" in err
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=["event:E9"])
+        rc, _, err = run_hook(p, sessions_dir=d)
+        assert rc == 2, "a token for another event must not authorize, got %s (%s)" % (rc, err)
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=["event:E1"])
+        rc, _, err = run_hook(p, sessions_dir=d)
+        assert rc == 0, "%s with a matching token must pass, got %s (%s)" % (tool, rc, err)
+        rc, _, err = run_hook(p, sessions_dir=d)
+        assert rc == 2, "single-use, got %s (%s)" % (rc, err)
+    for tool in ("outlook_delete_event", "outlook_respond_to_event"):
+        rc, _, err = run_hook(cal(tool, comment="x"))
+        assert rc == 2, "%s without eventId must fail closed, got %s" % (tool, rc)
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=["event:E1"])
+        rc, _, err = run_hook(cal(tool, eventId="E1", attendees=["x@evil.com"]), sessions_dir=d)
+        assert rc == 2, "%s with an unknown key must fail closed even WITH a token, got %s" % (tool, rc)
+    print("PASS test_delete_and_respond_event_need_token_naming_the_event")
+
+
+def test_set_vacation_external_audience_gated():
+    base = {"internalReplyMessage": "away", "externalReplyMessage": "away"}
+    for aud in ("contactsOnly", "all", "ALL", "None", " none", "none ", "", "nonee"):
+        rc, _, err = run_hook(cal("outlook_set_vacation", externalAudience=aud, **base))
+        assert rc == 2, "externalAudience %r must block, got %s (%s)" % (aud, rc, err)
+    rc, _, err = run_hook(cal("outlook_set_vacation", **base))
+    assert rc == 2, "an omitted audience is not 'none' (Graph defaults to all), got %s (%s)" % (rc, err)
+    for aud in (None, 5, ["none"], {"v": "none"}):
+        rc, _, err = run_hook(cal("outlook_set_vacation", externalAudience=aud, **base))
+        assert rc == 2, "non-string audience %r must fail closed, got %s" % (aud, rc)
+    rc, _, err = run_hook(cal("outlook_set_vacation", externalAudience="none", **base))
+    assert rc == 0, "audience exactly 'none' sends nothing outside, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_set_vacation", status="disabled"))
+    assert rc == 0, "turning auto-replies OFF must pass, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_set_vacation", enabled=False))
+    assert rc == 0, "enabled=False must pass, got %s (%s)" % (rc, err)
+    # The disable fast-path trusts `enabled`/`status` ONLY when nothing else is in the call. A
+    # connector that ignores those keys would otherwise switch on replies to "all" with no token
+    # (adversarial review C9): any audience, message or schedule field falls through to the audience check.
+    for extra in ({"externalAudience": "all"}, {"externalReplyMessage": "m"}, {"internalReplyMessage": "m"},
+                  {"scheduledStartDateTime": "2026-10-01T00:00:00"}, {"timeZone": "UTC"}, {"message": "m"}):
+        for flag in ({"status": "disabled"}, {"enabled": False}):
+            rc, _, err = run_hook(cal("outlook_set_vacation", **dict(flag, **extra)))
+            assert rc == 2, "%r with %r must not take the disable fast-path, got %s (%s)" % (flag, extra, rc, err)
+    rc, _, err = run_hook(cal("outlook_set_vacation", enabled=True, status="disabled"))
+    assert rc == 2, "a contradictory enabled/status pair is treated as enabled, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_set_vacation", enabled=False, status="scheduled"))
+    assert rc == 2, "enabled=False with a non-disabled status is contradictory, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_set_vacation", externalAudience="none", replyTo="x@evil.com"))
+    assert rc == 2, "unknown key must fail closed, got %s (%s)" % (rc, err)
+    print("PASS test_set_vacation_external_audience_gated")
+
+
+def test_set_vacation_token_names_the_audience_and_is_single_use():
+    p = cal("outlook_set_vacation", externalAudience="contactsOnly", externalReplyMessage="away")
+    rc, _, err = run_hook(p)
+    assert "vacation:contactsonly" in err.lower(), "block message must say what to name: %s" % err
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["vacation:all"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "a token for another audience must not authorize, got %s (%s)" % (rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["vacation:contactsOnly"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "matching token must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "single-use, got %s (%s)" % (rc, err)
+    print("PASS test_set_vacation_token_names_the_audience_and_is_single_use")
+
+
+def test_create_filter_always_gated():
+    for ti in ({}, {"name": "fwd", "forwardTo": ["x@evil.com"]}, {"name": "tidy", "moveToFolder": "Archive"},
+               "junk", None, []):
+        rc, _, err = run_hook(tool_payload(MS365 + "outlook_create_filter", ti))
+        assert rc == 2, "create_filter %r is a standing rule and must always block, got %s (%s)" % (ti, rc, err)
+    p = cal("outlook_create_filter", name="tidy")
+    assert _filter_dest({"name": "tidy"}) in run_hook(p)[2], "block message must print the token target"
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=[_filter_dest({"name": "tidy"})])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "a matching token must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "single-use, got %s (%s)" % (rc, err)
+    print("PASS test_create_filter_always_gated")
+
+
+def test_create_filter_token_is_bound_to_the_exact_rule():
+    """Adversarial review C6a: a token approving one harmless rule must not authorize a different
+    (e.g. forwarding) rule. The target is a digest of the whole input, so any change needs a new token."""
+    tidy, fwd = {"name": "tidy", "moveToFolder": "Archive"}, {"name": "tidy", "forwardTo": "x@evil.com"}
+    for token_target in ("filter:create", _filter_dest(tidy)):
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=[token_target])
+        rc, _, err = run_hook(tool_payload(MS365 + "outlook_create_filter", fwd), sessions_dir=d)
+        assert rc == 2, "token %r must not authorize a different rule, got %s (%s)" % (token_target, rc, err)
+    assert _filter_dest(tidy) != _filter_dest(fwd)
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=[_filter_dest(fwd)])
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_create_filter", fwd), sessions_dir=d)
+    assert rc == 0, "a token naming THIS rule must authorize, got %s (%s)" % (rc, err)
+    print("PASS test_create_filter_token_is_bound_to_the_exact_rule")
+
+
+def test_stray_addresses_outside_attendees_count_as_external():
+    """Adversarial review finding 4: an allowlisted field (location, categories, ...) must not be a
+    side door for an external address. body/subject are prose, not recipients, and are not scanned."""
+    for extra in ({"location": {"displayName": "HQ", "locationEmailAddress": "x@evil.com"}},
+                  {"location": "x@evil.com"}, {"categories": ["x@evil.com"]},
+                  {"recurrence": {"who": "x@evil.com"}}):
+        rc, _, err = run_hook(cal("outlook_create_event", attendees=["a@oxfordra.net"], **extra))
+        assert rc == 2, "create %r must need a token, got %s (%s)" % (extra, rc, err)
+        # update always needs event:E1, so an event-only token is the case that isolates the
+        # stray-address scan: it must STILL block until the address is named too (review finding 2).
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=["event:E1"])
+        rc, _, err = run_hook(cal("outlook_update_event", eventId="E1", attendees=["a@oxfordra.net"], **extra),
+                              sessions_dir=d)
+        assert rc == 2, "update %r with only event:E1 must block, got %s (%s)" % (extra, rc, err)
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=["x@evil.com"])
+        rc, _, err = run_hook(cal("outlook_create_event", attendees=["a@oxfordra.net"], **extra), sessions_dir=d)
+        assert rc == 0, "a token naming the address authorizes it, got %s (%s)" % (rc, err)
+    # Forms a findall-style extractor misses (review finding 1): any "@" string that is not, in
+    # full, one plain internal address is external. NFKC folds the fullwidth at-sign.
+    for odd in ("a@oxfordra.net@evil.com", '"x y"@evil.com', "x@[192.0.2.1]", "x＠evil.com",
+                " a@oxfordra.net", "Meet @ HQ"):
+        rc, _, err = run_hook(_ev(["a@oxfordra.net"], location=odd))
+        assert rc == 2, "location %r must need a token, got %s (%s)" % (odd, rc, err)
+    rc, _, err = run_hook(_ev([{"email": "a@oxfordra.net", "name": "x@evil.com"}]))
+    assert rc == 2, "an address in an attendee name is still an address, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(_ev(["a@oxfordra.net"], location={"displayName": "Suite 4", "address": "b@oxfordra.net"}))
+    assert rc == 0, "an internal address in location is fine, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(_ev(["a@oxfordra.net"], body="cc the broker at x@evil.com", subject="see x@evil.com"))
+    assert rc == 0, "prose in body/subject is not a recipient, got %s (%s)" % (rc, err)
+    print("PASS test_stray_addresses_outside_attendees_count_as_external")
+
+
+def test_calendar_gate_matches_by_suffix_on_any_server_prefix():
+    for prefix in ("mcp__other-ms365__", "mcp__claude_ai_Microsoft_365__"):
+        rc, _, err = run_hook(tool_payload(prefix + "outlook_create_filter", {}))
+        assert rc == 2, "%s must be gated by suffix, got %s" % (prefix, rc)
+    print("PASS test_calendar_gate_matches_by_suffix_on_any_server_prefix")
+
+
+def test_unparseable_payload_naming_calendar_tool_fails_closed():
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="oag-sess-")
+    for name in CAL_TOOLS:
+        raw = '{"tool_name": "%s%s", "tool_input": %s1%s}' % (MS365, name, "[" * 100000, "]" * 100000)
+        proc = subprocess.run([sys.executable, HOOK], input=raw, capture_output=True, text=True, env=env)
+        assert proc.returncode == 2, "unparseable payload naming %s must fail closed, got %s" % (name, proc.returncode)
+    print("PASS test_unparseable_payload_naming_calendar_tool_fails_closed")
+
+
+def test_calendar_check_exception_fails_closed_in_process():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("oag_inproc2", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected failure")
+
+    mod._check_calendar = boom
+    for tool in CAL_TOOLS:
+        try:
+            mod.check_mcp(MS365 + tool, "sess", {"attendees": ["a@oxfordra.net"]})
+        except SystemExit as exc:
+            assert exc.code == 2, "%s: wrong exit code %r" % (tool, exc.code)
+        else:
+            raise AssertionError("%s: an exception inside the check must exit 2, not return" % tool)
+    print("PASS test_calendar_check_exception_fails_closed_in_process")
+
+
+def test_settings_matcher_registers_calendar_tools():
+    import re
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    matchers = [e.get("matcher", "") for e in cfg.get("hooks", {}).get("PreToolUse", [])
+                for h in e.get("hooks", []) if "ora-autonomy-gate.py" in h.get("command", "")]
+    assert matchers, "ora-autonomy-gate.py is not registered under PreToolUse"
+    covered = lambda t: any(re.fullmatch(m, t) for m in matchers)  # noqa: E731
+    for n in CAL_TOOLS:
+        assert covered(MS365 + n), "%s is gated in the script but not selected by the matcher" % n
+    for n in ("outlook_calendar_search", "outlook_find_available_time", "find_meeting_availability"):
+        assert not covered(MS365 + n), "%s is a read and must not be routed through the gate" % n
+    print("PASS test_settings_matcher_registers_calendar_tools")
+
+
+# ---------------------------------------------------------------------------------------
+# Gate 1e: outlook_update_draft. A send_draft token names the draft id, not its contents, so
+# an ungated update re-pointed an approved draft at a new recipient (adversarial review of
+# #292). Schema VERIFIED 2026-10-01 against the live connector: additionalProperties false,
+# keys messageId (required) / to / cc / bcc (arrays of email strings) / subject / body /
+# bodyType. outlook_create_draft stays ungated: drafting for Gabriel to send is the normal flow.
+# ---------------------------------------------------------------------------------------
+def upd(**ti):
+    ti.setdefault("messageId", "AAMkAGDraftOne")
+    return tool_payload(MS365 + "outlook_update_draft", ti)
+
+
+def test_draft_repoint_sequence_is_closed():
+    """The exact sequence from the #292 review: update re-points the draft, then the token that
+    named only the draft id sends it. The update must now block, so the send is never reached
+    with a changed recipient."""
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["draft:AAMk"])
+    rc, _, err = run_hook(upd(messageId="AAMk", to=["a@evil.com"]), sessions_dir=d)
+    assert rc == 2, "re-pointing an approved draft at an outside recipient must block, got %s (%s)" % (rc, err)
+    assert "a@evil.com" in err, "block message must name the recipient to put in the token"
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_send_draft", {"messageId": "AAMk"}), sessions_dir=d)
+    assert rc == 0, "the blocked update must not have spent the draft token, got %s (%s)" % (rc, err)
+    print("PASS test_draft_repoint_sequence_is_closed")
+
+
+def test_draft_update_without_external_recipient_passes():
+    for ti in ({}, {"subject": "s"}, {"body": "b", "bodyType": "html"}, {"to": []},
+               {"to": ["ggoldberg@oxfordra.net"], "cc": ["EGoldberg@OxfordRA.net"], "bcc": []},
+               {"to": [], "cc": [], "bcc": []}):
+        rc, _, err = run_hook(upd(**ti))
+        assert rc == 0, "internal-only / recipient-free update %r must pass, got %s (%s)" % (ti, rc, err)
+    print("PASS test_draft_update_without_external_recipient_passes")
+
+
+def test_draft_update_external_in_any_recipient_field_blocks():
+    for field in ("to", "cc", "bcc"):
+        rc, _, err = run_hook(upd(**{field: ["x@example.com"]}))
+        assert rc == 2, "external address in %s must block, got %s (%s)" % (field, rc, err)
+    rc, _, err = run_hook(upd(to=["ggoldberg@oxfordra.net"], bcc=["x@example.com"]))
+    assert rc == 2, "one external among internal must block, got %s (%s)" % (rc, err)
+    print("PASS test_draft_update_external_in_any_recipient_field_blocks")
+
+
+def test_draft_update_lookalike_addresses_count_as_external():
+    for bad in ("a@oxfordra.net.evil.com", "Name <x@evil.com>", " ggoldberg@oxfordra.net",
+                "ggoldberg@oxfordra.net ", "ggoldberg@oxfordra.net\n", "a@oxfordra.net@evil.com",
+                "evil@x.com,ggoldberg@oxfordra.net", "ggoldberg@oxfordra.nеt",
+                "ggoldberg@oxfordra​.net", "ggoldberg＠oxfordra.net", "ggoldberg"):
+        rc, _, err = run_hook(upd(to=[bad]))
+        assert rc == 2, "%r is not provably internal and must block, got %s (%s)" % (bad, rc, err)
+    print("PASS test_draft_update_lookalike_addresses_count_as_external")
+
+
+def test_draft_update_token_names_recipients_and_is_single_use():
+    p = upd(to=["x@example.com"], cc=["y@example.org"])
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com", "y@example.org"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "a token naming every external recipient must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "the token is single-use, got %s (%s)" % (rc, err)
+    for named in (["x@example.com"], ["y@example.org"],
+                  ["z@example.net"], ["draft:AAMkAGDraftOne"]):
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=named)
+        rc, _, err = run_hook(p, sessions_dir=d)
+        assert rc == 2, "token naming %r must not authorize, got %s (%s)" % (named, rc, err)
+    d = fresh_sessions_dir()
+    mint(d, "allow-website-write", "website-write")
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "a token of another scope must not authorize, got %s (%s)" % (rc, err)
+    print("PASS test_draft_update_token_names_recipients_and_is_single_use")
+
+
+def test_draft_update_internal_recipients_are_not_named_in_token():
+    p = upd(to=["ggoldberg@oxfordra.net", "x@example.com"])
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "internal recipients need no naming, got %s (%s)" % (rc, err)
+    print("PASS test_draft_update_internal_recipients_are_not_named_in_token")
+
+
+def test_draft_update_malformed_shapes_fail_closed():
+    bad_inputs = (
+        {"to": "ggoldberg@oxfordra.net"},                 # schema says array; a bare string is not
+        {"to": None}, {"cc": None}, {"bcc": 5}, {"to": {"a": "b"}},
+        {"to": {"ggoldberg@oxfordra.net": 1}},            # iterating a dict yields an internal-looking key
+        {"to": ["ggoldberg@oxfordra.net", 7]}, {"to": [None]},
+        {"to": [{"email": "ggoldberg@oxfordra.net"}]},    # object entries are not in the schema
+        {"to": [["ggoldberg@oxfordra.net"]]},
+        {"replyTo": ["x@evil.com"]}, {"To": ["x@evil.com"]}, {"toRecipients": ["x@evil.com"]},
+        {"attachments": []}, {"importance": "high"},
+        {"messageId": ""}, {"messageId": "   "}, {"messageId": 5}, {"messageId": None},
+        {"messageId": ["AAA"]},
+    )
+    for ti in bad_inputs:
+        payload = tool_payload(MS365 + "outlook_update_draft", dict({"messageId": "AAMkAGDraftOne"}, **ti))
+        rc, _, err = run_hook(payload)
+        assert rc == 2, "%r must fail closed, got %s (%s)" % (ti, rc, err)
+        # The SHAPE refusal, not a token-style block: a bare string would otherwise be over-blocked
+        # as a pile of external "characters" while still passing for the wrong reason.
+        assert "uninspectable input shape" in err, "%r must be refused as a bad shape, got: %s" % (ti, err)
+    rc, _, err = run_hook(tool_payload(MS365 + "outlook_update_draft", {"to": ["ggoldberg@oxfordra.net"]}))
+    assert rc == 2, "missing messageId must fail closed, got %s (%s)" % (rc, err)
+    for ti in (None, "x", [], 7, {}):
+        rc, _, err = run_hook(tool_payload(MS365 + "outlook_update_draft", ti))
+        assert rc == 2, "tool_input %r must fail closed, got %s (%s)" % (ti, rc, err)
+        assert "uninspectable input shape" in err, "%r must be refused as a bad shape, got: %s" % (ti, err)
+    print("PASS test_draft_update_malformed_shapes_fail_closed")
+
+
+def test_draft_update_malformed_shape_fails_closed_even_with_a_token():
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com"])
+    rc, _, err = run_hook(upd(to=["x@example.com"], replyTo=["z@evil.com"]), sessions_dir=d)
+    assert rc == 2, "a stray recipient-bearing key must block even with a token, got %s (%s)" % (rc, err)
+    print("PASS test_draft_update_malformed_shape_fails_closed_even_with_a_token")
+
+
+def test_create_draft_stays_ungated():
+    for ti in ({"to": ["x@example.com"], "subject": "s", "body": "b", "bodyType": "text"},
+               {"to": ["x@example.com"], "bcc": ["y@example.com"]}, {}):
+        rc, _, err = run_hook(tool_payload(MS365 + "outlook_create_draft", ti))
+        assert rc == 0, "create_draft is the normal Outlook-pane flow and must pass, got %s (%s)" % (rc, err)
+    print("PASS test_create_draft_stays_ungated")
+
+
+def test_draft_update_gate_matches_by_suffix_on_any_server_prefix():
+    for prefix in ("mcp__ms365__", "mcp__other-ms365__", "mcp__claude_ai_Microsoft_365__"):
+        rc, _, err = run_hook(tool_payload(prefix + "outlook_update_draft",
+                                           {"messageId": "AAA", "to": ["x@example.com"]}))
+        assert rc == 2, "%s must be gated by suffix, got %s (%s)" % (prefix, rc, err)
+    print("PASS test_draft_update_gate_matches_by_suffix_on_any_server_prefix")
+
+
+def test_unparseable_payload_naming_update_draft_fails_closed():
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="oag-sess-")
+    raw = '{"tool_name": "%soutlook_update_draft", "tool_input": %s1%s}' % (MS365, "[" * 100000, "]" * 100000)
+    proc = subprocess.run([sys.executable, HOOK], input=raw, capture_output=True, text=True, env=env)
+    assert proc.returncode == 2, "unparseable payload naming update_draft must fail closed, got %s" % proc.returncode
+    print("PASS test_unparseable_payload_naming_update_draft_fails_closed")
+
+
+def test_draft_update_check_exception_fails_closed_in_process():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("oag_inproc3", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected failure")
+
+    mod._check_draft_update = boom
+    try:
+        mod.check_mcp(MS365 + "outlook_update_draft", "sess", {"messageId": "A", "to": ["a@oxfordra.net"]})
+    except SystemExit as exc:
+        assert exc.code == 2, "wrong exit code %r" % (exc.code,)
+    else:
+        raise AssertionError("an exception inside the draft-update check must exit 2, not return")
+    print("PASS test_draft_update_check_exception_fails_closed_in_process")
+
+
+def test_settings_matcher_registers_update_draft():
+    import re
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    matchers = [e.get("matcher", "") for e in cfg.get("hooks", {}).get("PreToolUse", [])
+                for h in e.get("hooks", []) if "ora-autonomy-gate.py" in h.get("command", "")]
+    assert matchers, "ora-autonomy-gate.py is not registered under PreToolUse"
+    covered = lambda t: any(re.fullmatch(m, t) for m in matchers)  # noqa: E731
+    for prefix in (MS365, "mcp__ms365__"):
+        assert covered(prefix + "outlook_update_draft"), "update_draft is gated but not selected by the matcher"
+        assert not covered(prefix + "outlook_create_draft"), "create_draft must stay out of the gate"
+    print("PASS test_settings_matcher_registers_update_draft")
+
+
+# ---------------------------------------------------------------------------------------
+# Live-schema golden fixtures (2026-10-01). The input schemas of the ms365 write tools were read
+# from the live connector (additionalProperties:false on all of them) and pinned here as valid
+# payloads, so Gate 1d / 1e are tested against what the connector really accepts rather than
+# against Graph-shaped guesses. Reply drafts take only messageId/body/bodyType/comment -- their
+# recipients derive from the source message and cannot be set, so there is nothing to gate.
+# ---------------------------------------------------------------------------------------
+_EID = "AAMkAGEventOne"
+_LIVE_START = {"dateTime": "2026-10-02T10:00:00", "timeZone": "Eastern Standard Time"}
+_LIVE_END = {"dateTime": "2026-10-02T11:00:00", "timeZone": "Eastern Standard Time"}
+
+
+def _event_token(recipients):
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=recipients)
+    return d
+
+
+def test_live_schema_create_event_full_payload():
+    internal = [{"email": "ggoldberg@oxfordra.net", "name": "Gabriel", "type": "required"},
+                {"email": "egoldberg@oxfordra.net", "type": "optional"}]
+    full = dict(subject="Sync", start=_LIVE_START, end=_LIVE_END, body="<p>agenda</p>", bodyType="html",
+                location="Conference Room 2", calendarId="", importance="high", sensitivity="private",
+                showAs="busy", responseRequested=True, isOnlineMeeting=True)
+    rc, _, err = run_hook(cal("outlook_create_event", attendees=internal, **full))
+    assert rc == 0, "internal-only invite with every live key must pass, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_create_event", **full))
+    assert rc == 0, "an event with no attendees sends nothing and must pass, got %s (%s)" % (rc, err)
+    ext = [{"email": "tenant@example.com", "name": "Tenant", "type": "required"}]
+    rc, _, err = run_hook(cal("outlook_create_event", attendees=ext, **full))
+    assert rc == 2, "an external invitee must block, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_create_event", attendees=ext, **full),
+                          sessions_dir=_event_token(["tenant@example.com"]))
+    assert rc == 0, "a token naming the invitee must authorize, got %s (%s)" % (rc, err)
+    print("PASS test_live_schema_create_event_full_payload")
+
+
+def test_live_schema_update_delete_event_need_the_event_token():
+    upd_ev = dict(eventId=_EID, subject="s", start=_LIVE_START, end=_LIVE_END, body="b", bodyType="text",
+                  location="HQ", importance="low", sensitivity="normal", showAs="free",
+                  responseRequested=False, isOnlineMeeting=True,
+                  attendees=[{"email": "ggoldberg@oxfordra.net", "name": "G", "type": "resource"}])
+    delete_ev = dict(eventId=_EID, comment="Cancelled: room unavailable")
+    for tool, payload in (("outlook_update_event", upd_ev), ("outlook_delete_event", delete_ev)):
+        rc, _, err = run_hook(cal(tool, **payload))
+        assert rc == 2 and "event:" + _EID in err, "%s must need the event token, got %s (%s)" % (tool, rc, err)
+        assert "uninspectable input shape" not in err, "%s: a live-schema payload must not be a shape error" % tool
+        rc, _, err = run_hook(cal(tool, **payload), sessions_dir=_event_token(["event:" + _EID]))
+        assert rc == 0, "%s with the event token must pass, got %s (%s)" % (tool, rc, err)
+    print("PASS test_live_schema_update_delete_event_need_the_event_token")
+
+
+def test_live_schema_respond_to_event_all_keys_are_authorizable():
+    """sendResponse and proposedNewTime are live keys. Before this fix they were unknown keys, so a
+    legitimate decline-with-a-new-time failed closed with NO token able to authorize it."""
+    base = dict(eventId=_EID, response="decline")
+    variants = (
+        dict(base),
+        dict(base, comment="can't make it", sendResponse=True),
+        dict(base, sendResponse=False),
+        dict(base, response="tentative", comment="maybe", sendResponse=True,
+             proposedNewTime={"start": _LIVE_START, "end": _LIVE_END}),
+        dict(eventId=_EID, response="accept", sendResponse=False),
+    )
+    for payload in variants:
+        rc, _, err = run_hook(cal("outlook_respond_to_event", **payload))
+        assert rc == 2 and "event:" + _EID in err, "must need the event token, got %s (%s)" % (rc, err)
+        assert "uninspectable input shape" not in err, "%r is a valid live payload, not a shape error" % (payload,)
+        rc, _, err = run_hook(cal("outlook_respond_to_event", **payload),
+                              sessions_dir=_event_token(["event:" + _EID]))
+        assert rc == 0, "%r with the event token must pass, got %s (%s)" % (payload, rc, err)
+    rc, _, err = run_hook(cal("outlook_respond_to_event", eventId=_EID, response="accept", replyTo="x@evil.com"))
+    assert rc == 2 and "uninspectable input shape" in err, "an unknown key must still fail closed, got %s (%s)" % (rc, err)
+    print("PASS test_live_schema_respond_to_event_all_keys_are_authorizable")
+
+
+def test_live_schema_set_vacation_payloads():
+    msg = "I am away."
+    cases = (
+        (dict(status="disabled"), 0),
+        (dict(status="alwaysEnabled", internalReplyMessage=msg, externalAudience="none"), 0),
+        (dict(status="alwaysEnabled", internalReplyMessage=msg), 2),  # audience omitted: still gated
+        (dict(status="alwaysEnabled", internalReplyMessage=msg, externalAudience="contactsOnly",
+              externalReplyMessage=msg), 2),
+        (dict(status="scheduled", internalReplyMessage=msg, externalAudience="all", externalReplyMessage=msg,
+              startDateTime="2026-10-05T00:00:00Z", endDateTime="2026-10-12T00:00:00Z"), 2),
+    )
+    for payload, want in cases:
+        rc, _, err = run_hook(cal("outlook_set_vacation", **payload))
+        assert rc == want, "%r: expected %s, got %s (%s)" % (payload, want, rc, err)
+        assert "uninspectable input shape" not in err, "%r is a valid live payload, not a shape error" % (payload,)
+    print("PASS test_live_schema_set_vacation_payloads")
+
+
+def test_live_schema_create_filter_payload_needs_its_own_token():
+    payload = dict(displayName="Archive newsletters", isEnabled=True, sequence=5,
+                   conditions={"fromAddresses": ["news@example.com"], "subjectContains": ["weekly"],
+                               "hasAttachments": True, "importance": "low"},
+                   actions={"moveToFolderId": "AAMkFolder1", "assignCategories": ["Newsletters"],
+                            "markAsRead": True, "markImportance": "low"})
+    rc, _, err = run_hook(cal("outlook_create_filter", **payload))
+    assert rc == 2 and _filter_dest(payload) in err, "a filter must need its own digest token, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(cal("outlook_create_filter", **payload), sessions_dir=_event_token([_filter_dest(payload)]))
+    assert rc == 0, "the token naming this exact rule must authorize, got %s (%s)" % (rc, err)
+    other = dict(payload, actions={"markAsRead": True})
+    rc, _, err = run_hook(cal("outlook_create_filter", **other), sessions_dir=_event_token([_filter_dest(payload)]))
+    assert rc == 2, "a token for one rule must not authorize a different rule, got %s (%s)" % (rc, err)
+    print("PASS test_live_schema_create_filter_payload_needs_its_own_token")
+
+
+def test_reply_drafts_stay_ungated_and_unrouted():
+    import re
+    payloads = ({"messageId": "AAMkMsg1", "body": "<p>Thanks</p>", "bodyType": "html"},
+                {"messageId": "AAMkMsg1", "comment": "Thanks"}, {"messageId": "AAMkMsg1"})
+    for prefix in (MS365, "mcp__ms365__"):
+        for tool in ("outlook_create_reply_draft", "outlook_create_reply_all_draft"):
+            for ti in payloads:
+                rc, _, err = run_hook(tool_payload(prefix + tool, ti))
+                assert rc == 0, "%s%s is draft-only with no settable recipient and must pass, got %s (%s)" % (prefix, tool, rc, err)
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    matchers = [e.get("matcher", "") for e in cfg.get("hooks", {}).get("PreToolUse", [])
+                for h in e.get("hooks", []) if "ora-autonomy-gate.py" in h.get("command", "")]
+    for tool in ("outlook_create_reply_draft", "outlook_create_reply_all_draft"):
+        assert not any(re.fullmatch(m, MS365 + tool) for m in matchers), "%s must not be routed to the gate" % tool
+    print("PASS test_reply_drafts_stay_ungated_and_unrouted")
+
+
+# ---------------------------------------------------------------------------------------
+# Gate 1f: teams_create_chat. Live schema read 2026-10-01 (additionalProperties:false):
+# members (array 1-50 of AAD object ids or UPNs, required), chatType oneOnOne|group, topic
+# (group only). Creating a chat sends no message, but a teams_send_*_message token names only
+# `teams:<chatId>`, never who is IN the chat -- the same id-not-contents hole the draft re-point
+# had. So a chat created with an outside member could later be approved for a send by id.
+# Membership is therefore gated at creation, with the Gate 1b rule: every member must be one
+# plain @oxfordra.net UPN; a GUID cannot be proven internal, so it needs a token like any outsider.
+# ---------------------------------------------------------------------------------------
+def chat(**ti):
+    return tool_payload(MS365 + "teams_create_chat", ti)
+
+
+def test_teams_create_chat_internal_upns_pass():
+    for ti in ({"members": ["egoldberg@oxfordra.net"]},
+               {"members": ["egoldberg@oxfordra.net"], "chatType": "oneOnOne"},
+               {"members": ["EGoldberg@OxfordRA.net", "ggoldberg@oxfordra.net"], "chatType": "group",
+                "topic": "Closing checklist"}):
+        rc, _, err = run_hook(chat(**ti))
+        assert rc == 0, "an all-internal chat %r must pass, got %s (%s)" % (ti, rc, err)
+    print("PASS test_teams_create_chat_internal_upns_pass")
+
+
+def test_teams_create_chat_outside_or_unprovable_member_blocks():
+    guid = "0f1e2d3c-4b5a-6978-8695-a4b3c2d1e0f9"
+    for members in (["x@example.com"], ["egoldberg@oxfordra.net", "x@example.com"], [guid],
+                    ["a@oxfordra.net.evil.com"], ["Name <x@oxfordra.net>"], [" egoldberg@oxfordra.net"],
+                    ["egoldberg@oxfordra.net\n"], ["a@oxfordra.net@evil.com"],
+                    ["egoldberg@oxfordra.net,x@example.com"], ["egoldberg@oxfordra.nеt"],
+                    ["egoldberg＠oxfordra.net"], ["egoldberg"]):
+        for chat_type in ("oneOnOne", "group"):
+            rc, _, err = run_hook(chat(members=members, chatType=chat_type))
+            assert rc == 2, "%r (%s) is not provably internal and must block, got %s (%s)" % (members, chat_type, rc, err)
+            assert "uninspectable input shape" not in err, "%r is a valid shape, must be a token block" % (members,)
+    print("PASS test_teams_create_chat_outside_or_unprovable_member_blocks")
+
+
+def test_teams_create_chat_token_names_each_member_and_is_single_use():
+    p = chat(members=["x@example.com", "egoldberg@oxfordra.net", "y@example.org"], chatType="group", topic="t")
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com", "y@example.org"])
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "a token naming every non-internal member must authorize, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "the token is single-use, got %s (%s)" % (rc, err)
+    for named in (["x@example.com"], ["y@example.org"], ["z@example.net"], ["teams:19:abc@thread.v2"]):
+        d = fresh_sessions_dir()
+        mint(d, "allow-external-send", "external-send", recipients=named)
+        rc, _, err = run_hook(p, sessions_dir=d)
+        assert rc == 2, "token naming %r must not authorize, got %s (%s)" % (named, rc, err)
+    print("PASS test_teams_create_chat_token_names_each_member_and_is_single_use")
+
+
+def test_teams_create_chat_malformed_shapes_fail_closed():
+    ok = ["egoldberg@oxfordra.net"]
+    bad = ({"members": "egoldberg@oxfordra.net"}, {"members": []}, {"members": None},
+           {"members": {"egoldberg@oxfordra.net": 1}}, {"members": ok + [7]}, {"members": ok + [None]},
+           {"members": [{"id": "egoldberg@oxfordra.net"}]}, {"members": [ok]},
+           {"members": ok, "chatType": 5}, {"members": ok, "chatType": None}, {"members": ok, "topic": 5},
+           {"members": ok, "message": "hello"}, {"members": ok, "firstMessage": "hello"},
+           {"members": ok, "users": ["x@evil.com"]}, {"Members": ["x@evil.com"]}, {"topic": "t"}, {})
+    for ti in bad:
+        rc, _, err = run_hook(chat(**ti))
+        assert rc == 2, "%r must fail closed, got %s (%s)" % (ti, rc, err)
+        assert "uninspectable input shape" in err, "%r must be refused as a bad shape, got: %s" % (ti, err)
+    for ti in (None, "x", [], 7):
+        rc, _, err = run_hook(tool_payload(MS365 + "teams_create_chat", ti))
+        assert rc == 2 and "uninspectable input shape" in err, "tool_input %r must fail closed, got %s (%s)" % (ti, rc, err)
+    print("PASS test_teams_create_chat_malformed_shapes_fail_closed")
+
+
+def test_teams_create_chat_stray_key_blocks_even_with_a_token():
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=["x@example.com"])
+    rc, _, err = run_hook(chat(members=["x@example.com"], message="hi"), sessions_dir=d)
+    assert rc == 2, "an unknown key must block even with a token, got %s (%s)" % (rc, err)
+    print("PASS test_teams_create_chat_stray_key_blocks_even_with_a_token")
+
+
+def test_teams_create_chat_gate_matches_by_suffix_on_any_server_prefix():
+    for prefix in ("mcp__ms365__", "mcp__other-ms365__"):
+        rc, _, err = run_hook(tool_payload(prefix + "teams_create_chat", {"members": ["x@example.com"]}))
+        assert rc == 2, "%s must be gated by suffix, got %s (%s)" % (prefix, rc, err)
+    print("PASS test_teams_create_chat_gate_matches_by_suffix_on_any_server_prefix")
+
+
+def test_unparseable_payload_naming_teams_create_chat_fails_closed():
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = tempfile.mkdtemp(prefix="oag-sess-")
+    raw = '{"tool_name": "%steams_create_chat", "tool_input": %s1%s}' % (MS365, "[" * 100000, "]" * 100000)
+    proc = subprocess.run([sys.executable, HOOK], input=raw, capture_output=True, text=True, env=env)
+    assert proc.returncode == 2, "unparseable payload naming teams_create_chat must fail closed, got %s" % proc.returncode
+    print("PASS test_unparseable_payload_naming_teams_create_chat_fails_closed")
+
+
+def test_teams_create_chat_check_exception_fails_closed_in_process():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("oag_inproc4", HOOK)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("injected failure")
+
+    mod._check_teams_create_chat = boom
+    try:
+        mod.check_mcp(MS365 + "teams_create_chat", "sess", {"members": ["egoldberg@oxfordra.net"]})
+    except SystemExit as exc:
+        assert exc.code == 2, "wrong exit code %r" % (exc.code,)
+    else:
+        raise AssertionError("an exception inside the create-chat check must exit 2, not return")
+    print("PASS test_teams_create_chat_check_exception_fails_closed_in_process")
+
+
+def test_settings_matcher_registers_teams_create_chat():
+    import re
+    with open(os.path.join(HERE, "..", "settings.json"), encoding="utf-8") as fh:
+        cfg = json.load(fh)
+    matchers = [e.get("matcher", "") for e in cfg.get("hooks", {}).get("PreToolUse", [])
+                for h in e.get("hooks", []) if "ora-autonomy-gate.py" in h.get("command", "")]
+    assert matchers, "ora-autonomy-gate.py is not registered under PreToolUse"
+    covered = lambda t: any(re.fullmatch(m, t) for m in matchers)  # noqa: E731
+    for prefix in (MS365, "mcp__ms365__"):
+        assert covered(prefix + "teams_create_chat"), "teams_create_chat is gated but not selected by the matcher"
+        for read in ("teams_list_chats", "teams_list_teams", "teams_list_channels", "teams_list_channel_messages"):
+            assert not covered(prefix + read), "%s is a read and must not be routed through the gate" % read
+    print("PASS test_settings_matcher_registers_teams_create_chat")
+
+
+def test_teams_create_chat_guest_upn_and_guid_with_token():
+    # An Entra guest UPN (#EXT#) is never one plain @oxfordra.net address, so it blocks.
+    for guest in ("x_example.com#EXT#@oxfordra.net", "x%40example.com@oxfordra.net"):
+        rc, _, err = run_hook(chat(members=[guest], chatType="oneOnOne"))
+        assert rc == 2, "%r must block, got %s (%s)" % (guest, rc, err)
+    # A GUID cannot be proven internal; it is authorized only by a token naming it as written.
+    guid = "0f1e2d3c-4b5a-6978-8695-a4b3c2d1e0f9"
+    d = fresh_sessions_dir()
+    mint(d, "allow-external-send", "external-send", recipients=[guid])
+    rc, _, err = run_hook(chat(members=[guid], chatType="oneOnOne"), sessions_dir=d)
+    assert rc == 0, "a token naming the GUID as written must authorize, got %s (%s)" % (rc, err)
+    print("PASS test_teams_create_chat_guest_upn_and_guid_with_token")
 
 
 if __name__ == "__main__":

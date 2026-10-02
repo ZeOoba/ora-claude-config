@@ -12,6 +12,20 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-09-28 -- census-v19 install: submarket-spatial-analysis v1.9 + acquisition-underwriting (manual evidence)
+
+Logged 2026-09-29 from Claude Code. Gabriel clicked Save skill in a Cowork session on 2026-09-28 for both packages (confirmed by Gabriel in-session; the click, not the repo commit, is the install): submarket-spatial-analysis v1.9 (SHA-256 prefix 9c26645a3b5d5ba0) and acquisition-underwriting with the comp-grid-discipline.md rent-basis rule, SKILL.md H1 still v4.24 (prefix a93e985a7a62d005). Source: origin/main 532b706 (submarket v1.9 reconcile at f010deb). Packages re-hashed with tools/stage_transfer.py emit and match both prefixes.
+
+PROOF TIER = MANUAL, not reimport_correlate CONFIRMED. `postclick` returned NO-BASELINE for both skills: the click happened Cowork-side and no pre-click CreationTime baseline was captured, so the tool could not correlate. Manual evidence: Local main.log "Delta 2 / downloaded 2 / failed 0" at 2026-09-28T21:47:26; both cache dirs dated 2026-09-28 21:47; repo-vs-cache hashes EOL-normalized identical for every shipped file (only difference: the platform re-quotes `name:` in frontmatter); repo_first_check IN-SYNC and verify_installed_cache 0 needing attention for both. Not proven to the second per skill, since the Local log is skill-blind.
+
+Pre-install runtime v1.8 of submarket-spatial-analysis was merged into v1.9 in the repo; verified every v1.8 content marker is present in v1.9 (the Ring Demographics heading was extended with the v1.9 key path, not dropped). Rescue copy archived to ora-skills/_archive/2026-09-28_submarket-v18-rescue/.
+
+Out of scope, noted: repo_first_check still reports six unrelated cache-ahead skills (estoppel-request-generation, lease-abstraction-pipeline, lease-renewal-pipeline, market-monitor, loi-generation template, eval-harness summary.csv).
+
+## 2026-09-29 -- package-and-stage-skill reimport
+
+package-and-stage-skill reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
 ## 2026-09-23 -- lease-addendum v1.1 reimport
 - lease-addendum v1.1 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
 
