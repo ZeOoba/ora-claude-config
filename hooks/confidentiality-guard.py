@@ -9,6 +9,8 @@ confidential-terms.json) from crossing any EXTERNAL egress boundary:
   * /outputs/ artifacts               (.pptx .docx .pdf .html .htm .csv)
   * Notion create/update tool calls   (mcp__*notion-(create|update|append|duplicate|move|comment)*)
   * Outlook send/draft/forward calls  (mcp__*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)*)
+  * live M365 / HubSpot send surfaces (outlook mail + calendar, Teams, SharePoint uploads,
+                                       HubSpot content writes -- MCP_SEND_SURFACES, 2026-09-30)
   * egress shell commands             (git push / curl / wget / scp / rsync-remote / Invoke-WebRequest)
 
 The deal legitimately exists INSIDE the brain, so INTERNAL reads/writes/commands are
@@ -45,7 +47,7 @@ repo) when this checkout's own copy is missing or unreadable and no explicit
 CONFIDENTIAL_TERMS_FILE_OVERRIDE is set. Still fail-closed if the file is unreadable in BOTH
 places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 """
-import sys, os, json, re, datetime, subprocess
+import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(HOOK_DIR, "lib")
@@ -71,7 +73,189 @@ ARTIFACT_EXT = (".pptx", ".docx", ".pdf", ".html", ".htm", ".csv")
 BUILD_MARKERS = ("/dist/", "\\dist\\", "/outputs/", "\\outputs\\", "mirror")
 
 NOTION_WRITE = re.compile(r"notion[-_]?(create|update|append|duplicate|move|comment)", re.I)
+# Composio-era pattern, kept verbatim so every name it ever matched still classifies.
 OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)", re.I)
+
+# --- Live M365 / HubSpot send surfaces (2026-09-30) ----------------------------------------------
+# Composio is gone; the live connector's tools are lowercase (mcp__<uuid>__outlook_send_mail ...),
+# and OUTLOOK_SEND above missed the reply drafts, update_draft and every calendar/Teams/SharePoint/
+# HubSpot write. Rule for inclusion: the tool carries free text that leaves the machine for a
+# recipient or a service outside the brain. Per tool:
+#   INCLUDED
+#   outlook_send_mail / send_draft / forward_mail ........ outbound mail (send_draft and forward_mail
+#       carry an id plus an optional note; the body they send is NOT in the payload -- see RESIDUAL)
+#   outlook_create_draft / create_reply_draft / create_reply_all_draft / update_draft
+#       ........ draft content that one send_draft call puts on the wire
+#   outlook_set_vacation ....... the auto-reply text goes to every external sender (externalAudience)
+#   outlook_create_event / update_event ........ an invite with attendees IS a send (subject, body,
+#       location reach every attendee)
+#   outlook_respond_to_event ... the optional comment is mailed to the organizer
+#   outlook_delete_event ....... the optional comment (max 1024, plain text) is INCLUDED IN THE
+#       CANCELLATION EMAIL to attendees when the user is the organizer (live schema, 2026-10-01)
+#   teams_send_chat_message / send_channel_message / reply_channel_message ........ outbound messages
+#   teams_create_chat .......... the group topic is shown to every member
+#   sharepoint_upload_file / update_file ........ file content written to a shareable library
+#   HubSpot manage_crm_objects . CRM records in a third-party SaaS
+#   HubSpot manage_blog_post / manage_landing_page / manage_website_page ........ PUBLIC web content
+#   HubSpot manage_campaign_objects / manage_segment ........ free-text names, notes, audiences,
+#       filter expressions stored in the SaaS
+#   HubSpot manage_aeo_prompts . CREATE sends promptTexts to external AI assistants
+#   Notion notion-send-message-to-session / notion-spawn-session ........ message / initial_message
+#       text goes to a Notion Custom Agent (NOTION_WRITE predates these and misses them)
+#   EXCLUDED
+#   Notion notion-upload-skill ........ payload is ids + a checksum; the archive bytes go by an
+#       out-of-band PUT (a Bash curl, which EGRESS_BASH scans as command text only)
+#   outlook_email_search / calendar_search / find_available_time, teams_list_*, chat_message_search,
+#       sharepoint_search / folder_search, read_resource, search_people, get_me, HubSpot get_* /
+#       search_* / query_crm_data ........ reads: a term there is a query, not egress
+#   HubSpot manage_saved_reports (LIST/FETCH only), manage_aeo_recommendations (LIST/DETAIL;
+#       START_ACTION is a documented no-op), manage_onboarding (enum goal) ........ no free text out
+#   outlook_create_filter / create_label / update_label / modify_* / trash / delete_* EXCEPT
+#       delete_event (INCLUDED above) ........ mailbox housekeeping; the live filter tool cannot
+#       forward or redirect
+#   sharepoint_rename_item / create_folder / copy_item / move_item / delete_item ........ names and
+#       ids inside the tenant, no content (see RESIDUAL: a name is still text)
+#   import-claude-design-from-url (HubSpot, Netlify) ........ content by reference only (a URL)
+# RESIDUAL (not closable from a payload scan): outlook_send_draft / forward_mail and reply drafts put
+# text on the wire that is not in the payload (the stored draft, the forwarded/quoted original);
+# SharePoint names via rename/create_folder; binary uploads that are neither text nor zip (PDF
+# streams are compressed) are scanned only as raw bytes.
+#
+# MATCHER CONTRACT: the settings.json PreToolUse matcher for this hook must contain, verbatim, the
+# alternative "mcp__.*<pattern>.*" for EVERY pattern below (test-confidentiality-guard.py asserts
+# it, and generates tool names from each pattern's alternatives to check routing). The patterns
+# added 2026-09-30 are case-SENSITIVE, like the matcher, so the two agree exactly; NOTION_WRITE and
+# OUTLOOK_SEND keep their historical re.I (the matcher routes their lowercase forms and the
+# Composio-era uppercase OUTLOOK_* forms; other case mixes are classified here but not routed).
+OUTLOOK_MAIL = re.compile(
+    r"outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|"
+    r"create_reply_all_draft|update_draft|set_vacation)")
+OUTLOOK_CALENDAR = re.compile(r"outlook_(create_event|update_event|respond_to_event|delete_event)")
+TEAMS_SEND = re.compile(
+    r"teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)")
+SHAREPOINT_WRITE = re.compile(r"sharepoint_(upload_file|update_file)")
+HUBSPOT_WRITE = re.compile(
+    r"__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
+    r"aeo_prompts)")
+NOTION_AGENT = re.compile(r"notion-(send-message-to-session|spawn-session)")
+
+# Order is the old if/elif order (Notion, then Outlook) followed by the new surfaces; the first match
+# names the surface in the block message. Every one scans the WHOLE tool_input.
+MCP_SEND_SURFACES = (
+    (NOTION_WRITE, "Notion write"),
+    (OUTLOOK_SEND, "Outlook send/draft"),
+    (OUTLOOK_MAIL, "Outlook send/draft"),
+    (OUTLOOK_CALENDAR, "Outlook calendar invite/response"),
+    (TEAMS_SEND, "Teams message"),
+    (SHAREPOINT_WRITE, "SharePoint content write"),
+    (HUBSPOT_WRITE, "HubSpot write"),
+    (NOTION_AGENT, "Notion agent message"),
+)
+FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+
+
+def classify_tool(tool):
+    """Surface label for a tool whose WHOLE payload is bound for an external service, else None.
+    File tools and Bash are classified by their target / command in main(), never here."""
+    if not isinstance(tool, str) or tool in FILE_TOOLS or tool == "Bash":
+        return None
+    for rx, label in MCP_SEND_SURFACES:
+        if rx.search(tool):
+            return "%s (%s)" % (label, tool)
+    return None
+
+
+# What the recipient sees is not always the raw payload string: an HTML body is rendered (an empty
+# tag can split a name, an entity can spell one of its letters), an upload arrives base64-encoded,
+# and an Office file is a zip of XML whose runs split words at arbitrary points. Each view is added
+# to the scan, never substituted for the raw text, so this can only add hits.
+_TAG = re.compile(r"<[^<>]*>")
+_BETWEEN_TAGS = re.compile(r">\s+<")
+_WS = re.compile(r"\s+")  # str patterns: also matches U+00A0, which &nbsp; decodes to
+# Exact field names (lowercased) that carry base64 file bytes on the live connectors: SharePoint
+# upload/update `contentBase64`, Graph attachment `contentBytes`. Exact, not a substring: a flag
+# such as isBase64 / useBase64 is not content and must not be decoded (review finding 2026-09-30).
+_B64_FIELDS = ("contentbase64", "contentbytes")
+_DATA_URI = re.compile(r"^data:[^,]*;base64,", re.I)
+ZIP_MAX_MEMBERS = 5000
+# Total bytes decoded across ALL blobs and zip members of one call. Past it the call BLOCKS: the
+# harness's hook timeout does not block, so an unbounded decode would be a fail-open by timeout.
+SCAN_MAX_DECODED_BYTES = 32 * 1024 * 1024
+
+
+def _rendered_views(text):
+    """How a renderer shows `text`: tags dropped, entities decoded, whitespace runs collapsed -- once
+    as is, and once with whitespace BETWEEN tags removed (pretty-printed XML runs that split a
+    word)."""
+    loose = _WS.sub(" ", html.unescape(_TAG.sub("", text)))
+    tight = _WS.sub(" ", html.unescape(_TAG.sub("", _BETWEEN_TAGS.sub("><", text))))
+    return (loose, tight) if tight != loose else (loose,)
+
+
+def _b64decode(value):
+    """Decode base64 the way a lenient sender might have produced it: data: URI prefix, line
+    wrapping, URL-safe alphabet, missing padding. RAISES if it still is not base64."""
+    s = _WS.sub("", _DATA_URI.sub("", value.strip()))
+    s = s.replace("-", "+").replace("_", "/")
+    s += "=" * (-len(s) % 4)
+    return base64.b64decode(s, validate=True)
+
+
+def _blobs(obj, out):
+    """Decode every base64 content field (see _B64_FIELDS) into `out`.
+    RAISES on a value that is not base64 -- the caller fails closed on that."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(v, str) and isinstance(k, str) and k.lower() in _B64_FIELDS:
+                out.append(_b64decode(v))
+            else:
+                _blobs(v, out)
+    elif isinstance(obj, list):
+        for v in obj:
+            _blobs(v, out)
+    return out
+
+
+def _blob_texts(blob, budget):
+    """Readable text of a decoded blob: the bytes as UTF-8 (and UTF-16 by BOM), plus every member of
+    a zip container (docx/xlsx/pptx). `budget` is a one-item list of bytes still allowed to decode.
+    RAISES past the budget or member cap, or on a member that cannot be read (e.g. encrypted) --
+    the caller fails closed on that."""
+    budget[0] -= len(blob)
+    if budget[0] < 0:
+        raise ValueError("payload too large to scan")
+    texts = [blob.decode("utf-8", "ignore")]
+    if blob[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        texts.append(blob.decode("utf-16", "ignore"))
+    buf = io.BytesIO(blob)
+    if zipfile.is_zipfile(buf):
+        with zipfile.ZipFile(buf) as z:
+            infos = z.infolist()
+            if len(infos) > ZIP_MAX_MEMBERS or sum(i.file_size for i in infos) > budget[0]:
+                raise ValueError("zip container too large to scan")
+            for info in infos:
+                # Bounded read: a header's declared size can lie, the decompressed stream cannot.
+                with z.open(info) as fh:
+                    data = fh.read(budget[0] + 1)
+                budget[0] -= len(data)
+                if budget[0] < 0:
+                    raise ValueError("zip container too large to scan")
+                texts.append(data.decode("utf-8", "ignore"))
+    return texts
+
+
+def mcp_scan_text(ti):
+    """Everything an MCP send surface's payload can put in front of a recipient, as one string.
+    RAISES when part of it cannot be read; main() blocks on that (fail closed)."""
+    base = collect_text(ti)
+    views = [base]
+    views.extend(_rendered_views(base))
+    budget = [SCAN_MAX_DECODED_BYTES]
+    for blob in _blobs(ti, []):
+        for t in _blob_texts(blob, budget):
+            views.append(t)
+            views.extend(_rendered_views(t))
+    return "\n".join(v for v in views if v)
 EGRESS_BASH = re.compile(
     r"\bgit\s+push\b|\bcurl\b|\bwget\b|\bscp\b|\brsync\b\s+\S+::|"
     r"invoke-webrequest|invoke-restmethod|\bnetlify\b.*\bdeploy\b|\bwrangler\b.*\b(deploy|publish)\b|"
@@ -266,21 +450,31 @@ def surface_staleness(detail, session_id):
         pass  # telemetry only -- egress safety must never depend on this write succeeding
 
 
-def find_hit(text, terms):
-    """Return (deal_label, term) on first confidential hit in `text`, else None."""
+def _str_terms(deal, field):
+    """The string entries of a roster list. A malformed entry (a number, a nested list) is skipped
+    rather than allowed to raise: an uncaught exception here exits 1, which is NON-BLOCKING."""
+    value = deal.get(field) or []
+    return [t for t in value if isinstance(t, str) and t] if isinstance(value, list) else []
+
+
+def find_hit(text, terms, context_text=None):
+    """Return (deal_label, term) on first confidential hit in `text`, else None. A context term
+    counts when its trigger (context_requires_any) appears in `context_text`, which defaults to
+    `text`; seam windows pass the whole post-edit file so a trigger elsewhere on the page counts."""
     if not text:
         return None
     low = text.lower()
+    ctx_low = low if context_text is None else context_text.lower()
     for key, deal in terms.items():
         if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
             continue
-        for t in deal.get("always", []):
-            if t and t.lower() in low:
+        for t in _str_terms(deal, "always"):
+            if t.lower() in low:
                 return (deal.get("label", key), t)
-        reqs = [r.lower() for r in deal.get("context_requires_any", [])]
-        if reqs and any(r in low for r in reqs):
-            for t in deal.get("context", []):
-                if t and t.lower() in low:
+        reqs = [r.lower() for r in _str_terms(deal, "context_requires_any")]
+        if reqs and any(r in ctx_low for r in reqs):
+            for t in _str_terms(deal, "context"):
+                if t.lower() in low:
                     return (deal.get("label", key), t)
     return None
 
@@ -299,6 +493,104 @@ def collect_text(obj):
     elif obj is not None:
         parts.append(str(obj))
     return " ".join(p for p in parts if p)
+
+
+# --- Edit seams (2026-09-24) ---------------------------------------------------------------------
+# An Edit's new_string is not the whole story: the text it lands between is already on disk, so a
+# term can be CREATED at the seam -- "Zephyr C|QQ|orp Portfolio" with QQ -> "" (or with QQ -> "o",
+# which alone contains no term) becomes a confidential name that new_string never carried. Before
+# this, that shape passed unscanned; and a delete-only Edit (new_string "") had nothing to scan at
+# all, so it fail-closed on every public-site edit that only removed text. Both close the same way:
+# apply the edit(s) to the file's current text in memory and scan a window around every seam, at
+# least as wide as the longest term on each side. Context triggers are looked up in the WHOLE
+# post-edit file, since a trigger elsewhere on the page makes a context term at the seam a hit.
+#
+# Fail closed when the edit cannot be simulated against a file that EXISTS: the real Edit tool
+# matches more leniently than `old in text` (curly/straight quote folding, \uXXXX decoding,
+# UTF-16 files by BOM, files far past our size cap), so "old_string not found here" does not mean
+# "the tool will refuse". Only a target that does not exist yet keeps the pre-2026-09-24 behavior
+# (scan new_string; nothing to scan -> block).
+#
+# Known limit: the decision is taken on a snapshot. A writer that changes the file between this hook
+# and the Edit's apply (seconds, measured) is not seen; nothing re-scans after the write. The
+# pre-2026-09-24 guard had the same gap for any non-empty edit (a seam it never looked at).
+#
+# Why the windows cover every new occurrence (MultiEdit applies edits in order): take a term present
+# after the last edit that was not there before. Let k be the last edit whose replaced span or
+# insertion point falls inside the term. No later edit changes the term's characters, so the term is
+# already present, intact, in the text right after edit k -- and it contains or straddles k's seam.
+# The window taken from that intermediate text, [seam - W, seam + len(new) + W] with W >= the term's
+# length, contains it.
+SEAM_MAX_FILE_BYTES = 20 * 1024 * 1024
+
+
+def _seam_width(terms):
+    """Window margin on each side of a seam: twice the longest active term (lower() can lengthen
+    some non-ASCII characters) plus slack. 0 when no deal is active -- nothing to find. None on a
+    roster shape it cannot read, which disables seam simulation (the caller then fails closed on
+    an empty scan, as before)."""
+    try:
+        longest = 0
+        for key, deal in terms.items():
+            if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
+                continue
+            for field in ("always", "context", "context_requires_any"):
+                for t in deal.get(field, []) or []:
+                    if isinstance(t, str):
+                        longest = max(longest, len(t))
+        return 2 * longest + 8 if longest else 0
+    except Exception:
+        return None
+
+
+def _edit_seams(path, edits, width):
+    """(windows, post_edit_text) for the edit(s), or None when they cannot be simulated (unreadable,
+    non-UTF-8 or oversized file, a non-dict edit, missing or empty old_string, old_string not in the
+    text). Never raises: an uncaught exception exits 1, which is NON-BLOCKING, i.e. fail-open.
+
+    Mirrors the Edit tool where it matters: universal newlines (it matches LF old_strings against
+    CRLF files), and a delete (new_string "") of text followed by a newline also removes that
+    newline. Windows only feed the term scan, so none of this changes what is written."""
+    try:
+        if not path or os.path.getsize(path) > SEAM_MAX_FILE_BYTES:
+            return None
+        with open(path, encoding="utf-8", errors="strict", newline=None) as f:
+            text = f.read()
+        windows = []
+        for ed in edits:
+            if not isinstance(ed, dict):
+                return None
+            old, new = ed.get("old_string"), ed.get("new_string")
+            if not isinstance(old, str) or not isinstance(new, str) or not old:
+                return None
+            old, new = old.replace("\r\n", "\n"), new.replace("\r\n", "\n")
+            if old not in text:
+                return None
+            if new == "" and not old.endswith("\n") and old + "\n" in text:
+                old += "\n"
+            if ed.get("replace_all"):
+                parts = text.split(old)
+                text = new.join(parts)
+                at = 0
+                for part in parts[:-1]:
+                    at += len(part)
+                    windows.append(text[max(0, at - width):at + len(new) + width])
+                    at += len(new)
+            else:
+                at = text.index(old)
+                text = text[:at] + new + text[at + len(old):]
+                windows.append(text[max(0, at - width):at + len(new) + width])
+        return windows, text
+    except Exception:
+        return None
+
+
+def _exists(path):
+    """True when something is at `path` (file, directory, anything). Never raises."""
+    try:
+        return bool(path) and isinstance(path, str) and os.path.lexists(path)
+    except Exception:
+        return False
 
 
 def path_egress_surface(path):
@@ -345,27 +637,40 @@ def main():
     # File-writing tools: only egress when the target path is an external surface.
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
         path = ti.get("file_path") or ti.get("notebook_path") or ""
+        if not isinstance(path, str):
+            block("file path is not a string; cannot classify the write target.")
         surface = path_egress_surface(path)
         if surface:
             # scan the content being written/inserted (not old_string)
             pieces = [ti.get("content", ""), ti.get("new_string", ""), ti.get("new_source", "")]
-            for ed in ti.get("edits", []) or []:
-                if isinstance(ed, dict):
-                    pieces.append(ed.get("new_string", ""))
+            raw_edits = ti.get("edits")
+            for ed in raw_edits if isinstance(raw_edits, list) else ([raw_edits] if raw_edits else []):
+                pieces.append(ed.get("new_string", "") if isinstance(ed, dict) else ed)
             scan_text = " ".join(str(p) for p in pieces if p)
-            if not scan_text:
+            # An explicit empty Write writes nothing that could leak.
+            extracted = tool == "Write" and isinstance(ti.get("content"), str)
+            if tool in ("Edit", "MultiEdit"):
+                edits = [ti] if tool == "Edit" else ti.get("edits")
+                width = _seam_width(terms)
+                seams = None
+                if isinstance(edits, list) and edits and width is not None:
+                    seams = _edit_seams(path, edits, width)
+                if seams is None:
+                    if _exists(path):
+                        block("edit to %s could not be simulated against the file on disk, so the "
+                              "text at its seams cannot be checked." % surface)
+                else:
+                    windows, post_edit = seams
+                    for w in windows:
+                        hit = find_hit(w, terms, context_text=post_edit)
+                        if hit:
+                            block("'%s' identifier ('%s') would be formed where this edit joins the "
+                                  "existing text of %s. This deal must not reach any external surface "
+                                  "until closing." % (hit[0], hit[1], surface))
+                    extracted = True
+            if not scan_text and not extracted:
                 # egress write we cannot read -> fail closed
                 block("write to %s but content could not be extracted." % surface)
-
-    # Notion writes: the whole payload is bound for Notion.
-    elif NOTION_WRITE.search(tool):
-        surface = "Notion write (%s)" % tool
-        scan_text = collect_text(ti)
-
-    # Outlook send/draft/forward/reply: the whole payload is bound for email.
-    elif OUTLOOK_SEND.search(tool):
-        surface = "Outlook send/draft (%s)" % tool
-        scan_text = collect_text(ti)
 
     # Shell: only egress commands are scanned (internal commands may reference the deal).
     elif tool == "Bash":
@@ -373,6 +678,16 @@ def main():
         if EGRESS_BASH.search(cmd):
             surface = "egress shell command"
             scan_text = cmd
+
+    # Notion / Outlook / Teams / SharePoint / HubSpot writes: the whole payload is bound for an
+    # external service (see MCP_SEND_SURFACES for what is in and out, and why).
+    else:
+        surface = classify_tool(tool)
+        if surface:
+            try:
+                scan_text = mcp_scan_text(ti)
+            except Exception as e:
+                block("payload for %s could not be fully decoded for scanning (%s)." % (surface, e))
 
     # Not an egress surface -> allow.
     if surface is None:

@@ -154,6 +154,31 @@ def lint_config_case(shape):
                      "ORA_OVERRIDE_SESSIONS_DIR": _LINT_SESS}
 
 
+# ascii-only-guard.py (wired 2026-09-30, hooks-audit). Contracted to exactly the
+# shapes its introduced_text() reads: Write / Edit and the Desktop Commander
+# write_file / edit_block twins (both path fields, both DC prefixes). MultiEdit
+# and NotebookEdit are deliberately NOT contracted -- 0 real calls each over the
+# 1628 transcripts its docstring measured, so a branch there would be dead code.
+ASCII_TOOLS = frozenset(("Write", "Edit")) \
+    | tcp.DC_WRITE_FILE_NAMES | tcp.DC_EDIT_BLOCK_NAMES
+_ASCII_ROOT = tempfile.mkdtemp(prefix="wgc-ascii-root-")
+_ASCII_SESS = tempfile.mkdtemp(prefix="wgc-ascii-sess-")
+_ASCII_MODULE = '"""Fixture.\n\nStdlib only. ASCII-only. Windows (`python`).\n"""\nX = 1\n'
+_EM_DASH = "\u2014"
+
+
+def ascii_case(shape):
+    target = os.path.join(_ASCII_ROOT, "declared_%s.py" % shape.name
+                          .replace("-", "_")).replace("\\", "/")
+    with open(target, "w", encoding="ascii") as fh:
+        fh.write(_ASCII_MODULE)
+    bad = "Y = 'a %s b'\n" % _EM_DASH
+    payload = {"session_id": "meta-s1", "tool_name": shape.tool_name,
+               "tool_input": shape.build(target, content=_ASCII_MODULE + bad,
+                                         old="X = 1\n", new=bad)}
+    return payload, {"ORA_OVERRIDE_SESSIONS_DIR": _ASCII_SESS}
+
+
 GUARDS = [
     GuardSpec("registry-write-guard.py",
               lambda s: s.kind == "file" and s.tool_name in LEGACY_TOOLS,
@@ -175,7 +200,38 @@ GUARDS = [
     GuardSpec("lint-config-guard.py",
               lambda s: s.kind in ("file", "move"),
               lint_config_case, blocked_exit2, "lint-config-guard.py"),
+    GuardSpec("ascii-only-guard.py",
+              lambda s: s.kind == "file" and s.tool_name in ASCII_TOOLS,
+              ascii_case, blocked_exit2, "ascii-only-guard.py"),
 ]
+
+
+sys.path.insert(0, os.path.join(HOOKS_DIR, "tests", "lib"))
+import settings_proposal  # noqa: E402
+
+
+def settings_views():
+    """[(label, settings, guard specs to check)] -- ALWAYS the tracked
+    settings.json, never an untracked side file (adversarial review
+    2026-09-30, finding 1).
+
+      * "live"      -- the file exactly as tracked. Every guard EXCEPT
+                       ascii-only-guard must already be routed here: the
+                       hooks-audit proposal does not touch them, so a live gap
+                       is a real gap before and after the apply.
+      * "effective" -- settings_proposal.effective(live): as-is once the
+                       proposal is applied, else with it applied in memory.
+                       EVERY guard, ascii-only-guard's Desktop Commander entry
+                       included, must be routed here.
+    Post-apply both views are the same file, so the ascii guard is then
+    asserted against the real tracked settings with no code change."""
+    with open(os.path.join(CLAUDE_ROOT, "settings.json"), "r",
+              encoding="utf-8-sig") as fh:
+        live = json.load(fh)
+    st = settings_proposal.state(live)
+    legacy = [g for g in GUARDS if g.hook != "ascii-only-guard.py"]
+    return [("live[%s]" % st, live, legacy),
+            ("effective[%s]" % st, settings_proposal.effective(live), GUARDS)]
 
 
 def test_guard_shape_matrix():
@@ -207,20 +263,22 @@ def test_settings_matchers_route_every_contracted_shape():
     catches (2026-08-05 wiring). Recognizing (b) is what keeps this test able
     to go red on a REAL gap (guard dropped from GUARD_CHAIN, or the dispatcher's
     own matcher narrowed) instead of alarming on the dispatcher refactor itself."""
-    settings_path = os.path.join(CLAUDE_ROOT, "settings.json")
-    with open(settings_path, "r", encoding="utf-8-sig") as fh:
-        settings = json.load(fh)
+    guard_chain = _dispatcher_guard_chain()
+    for view, settings, specs in settings_views():
+        _route_checks(view, settings, specs, guard_chain)
+
+
+def _route_checks(view, settings, specs, guard_chain):
     entries = settings.get("hooks", {}).get("PreToolUse", [])
     dispatcher_matchers = [e.get("matcher", "") for e in entries
                             if any(DISPATCHER in (h.get("command") or "")
                                    for h in e.get("hooks", []))]
-    guard_chain = _dispatcher_guard_chain()
-    for spec in GUARDS:
+    for spec in specs:
         matchers = [e.get("matcher", "") for e in entries
                     if any(spec.matcher_key in (h.get("command") or "")
                            for h in e.get("hooks", []))]
         in_chain = spec.hook[:-len(".py")] in guard_chain
-        check("%s is registered in settings.json PreToolUse" % spec.hook,
+        check("[%s] %s is registered in settings.json PreToolUse" % (view, spec.hook),
               len(matchers) >= 1 or in_chain)
         for shape in tcp.SHAPES:
             if not spec.shape_filter(shape):
@@ -228,7 +286,7 @@ def test_settings_matchers_route_every_contracted_shape():
             direct = any(re.fullmatch(m, shape.tool_name) for m in matchers if m)
             via_dispatcher = in_chain and any(
                 re.fullmatch(m, shape.tool_name) for m in dispatcher_matchers if m)
-            check("settings.json routes %s to %s" % (shape.tool_name, spec.hook),
+            check("[%s] settings.json routes %s to %s" % (view, shape.tool_name, spec.hook),
                   direct or via_dispatcher,
                   "matchers=%r dispatcher_matchers=%r in_chain=%s" %
                   (matchers, dispatcher_matchers, in_chain))
@@ -239,8 +297,8 @@ def test_settings_matchers_route_every_contracted_shape():
             # pass, then blocks on the second). GUARD_CHAIN's own docstring
             # names this exact trap: "add it to GUARD_CHAIN -- NOT as a new
             # settings.json PreToolUse entry -- or it will run twice."
-            check("%s is not double-routed for %s (direct + dispatcher)"
-                  % (spec.hook, shape.tool_name),
+            check("[%s] %s is not double-routed for %s (direct + dispatcher)"
+                  % (view, spec.hook, shape.tool_name),
                   not (direct and via_dispatcher))
 
 

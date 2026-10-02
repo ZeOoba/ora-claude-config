@@ -375,8 +375,9 @@ PLUGIN_SKILL_ALLOWLIST: set[str] = {"morning", "schedule"}
 # The "Skill precedence" block names orchestration primitives that are NOT SKILL.md
 # skills and must resolve against their own homes, else they false-positive as MISSING:
 #   * AGENTS    -> ~/.claude/agents/<name>.md. CLAUDE.md literally labels these "agent"
-#                  ("the bare `deal-recon` agent", "the `lease-sweep` agent", "the
-#                  `portfolio-anomaly-scout` agent").
+#                  ("the bare `deal-recon` agent", "the `portfolio-anomaly-scout` agent";
+#                  "the `lease-sweep` agent" was also named until it left the tie-breaks
+#                  in 2026-06 and was retired 2026-09-30).
 #   * WORKFLOWS -> ~/.claude/workflows/<name>.js (e.g. `verified-deal-recon`, the live
 #                  DEFAULT pre-screen skill, is workflow-backed -- no SKILL.md dir).
 # These live under ~/.claude (local), so they are NOT subject to the OneDrive
@@ -706,6 +707,74 @@ AGENT_BUILTIN_TOOLS = {
 }
 
 
+# Tool/body mismatch lint (2026-09-30). deal-flow-triage shipped saying "Use the Outlook
+# search" while its tools: line was Read, Grep, Glob -- it could not do its job and sat at
+# zero dispatches. WARN only (never a hard failure): the patterns are heuristics, and this
+# probe runs inside the pre-push gate. An absent tools: line means the agent inherits every
+# tool, so there is nothing to mismatch.
+_AGENT_BODY_OUTLOOK_RE = re.compile(
+    r"\b(?:use|via)\s+(?:the\s+)?outlook(?:[ _]email)?[ _]search\b"
+    r"|(?:\bmcp__[A-Za-z0-9_-]+?__)?outlook_email_search", re.I)
+_AGENT_BODY_WEB_RE = re.compile(
+    r"\b(?:use|run|via|with)\s+(?:the\s+)?(web[ _]?search|web[ _]?fetch)\b", re.I)
+# Tool names may contain single hyphens (notion-search) but a double dash is prose punctuation.
+_AGENT_BODY_MCP_TOKEN_RE = re.compile(
+    r"\bmcp__[A-Za-z0-9_-]+?__[A-Za-z0-9_]+(?:-[A-Za-z0-9_]+)*")
+# A prohibition is not a capability claim, but only when the negator sits directly before
+# the claim (optionally one call-verb between, e.g. "never call mcp__x"). A substring test
+# on a wider window suppressed real claims ("if X is not attached, use WebSearch"; "casino"),
+# and an any-word gap still let "if not found use WebSearch" through.
+_AGENT_BODY_NEGATOR_RE = re.compile(
+    r"\b(?:never(?:\s+ever)?|not|no|cannot|can['’]t|don['’]t|mustn['’]t|shouldn['’]t|"
+    r"shan['’]t|won['’]t)\s+"
+    r"(?:(?:ever|directly|also|really)\s+)?"
+    r"(?:(?:use|call|run|invoke|try)\s+)?$", re.I)
+# Escape hatch for a body the heuristic misreads: put this marker anywhere in the agent
+# body (an HTML comment keeps it out of the rendered prompt's prose). Warn-only lint, so
+# the cost of a false positive is noise; the marker makes that noise removable per agent.
+_AGENT_BODY_LINT_OPT_OUT_RE = re.compile(r"agent-lint:\s*ignore\s+tools-body", re.I)
+
+
+def _agent_body_negated(body, start):
+    return bool(_AGENT_BODY_NEGATOR_RE.search(body[max(0, start - 30):start]))
+
+
+def agent_body_tool_warnings(fn, body, tools_raw):
+    """Return WARN strings for capabilities an agent body claims but its tools: lacks."""
+    if not isinstance(tools_raw, str):
+        return []
+    if _AGENT_BODY_LINT_OPT_OUT_RE.search(body):
+        return []
+    granted = [t.strip().lower() for t in tools_raw.split(",") if t.strip()]
+    if "*" in granted:
+        return []
+    warns = []
+    # Outlook search: a draft/send/label tool does not satisfy "use the Outlook search".
+    if not any(t.endswith("outlook_email_search") for t in granted):
+        for m in _AGENT_BODY_OUTLOOK_RE.finditer(body):
+            if not _agent_body_negated(body, m.start()):
+                warns.append("%s: body says to use Outlook search but tools: grants no "
+                             "outlook_email_search tool -- the agent cannot do this"
+                             % ascii_safe(fn))
+                break
+    reported = set()
+    for m in _AGENT_BODY_WEB_RE.finditer(body):
+        tool = m.group(1).lower().replace(" ", "").replace("_", "")
+        if tool in granted or tool in reported or _agent_body_negated(body, m.start()):
+            continue
+        reported.add(tool)
+        warns.append("%s: body says to use %s but tools: does not grant it"
+                     % (ascii_safe(fn), ascii_safe(m.group(1))))
+    named = set()
+    for m in _AGENT_BODY_MCP_TOKEN_RE.finditer(body):
+        if not _agent_body_negated(body, m.start()):
+            named.add(m.group(0).lower())
+    for tok in sorted(named - set(granted)):
+        warns.append("%s: body names MCP tool %s but tools: does not grant it"
+                     % (ascii_safe(fn), ascii_safe(tok)))
+    return warns
+
+
 def check_agent_definitions(agents_dir):
     """Strict-validate every agents/*.md definition. Returns (hard_failures, warnings).
 
@@ -810,6 +879,7 @@ def check_agent_definitions(agents_dir):
                     warnings.append("%s: grants unrecognised tool '%s' (allowlist may "
                                     "simply be stale -- verify before acting)"
                                     % (fn, ascii_safe(tool)))
+            warnings.extend(agent_body_tool_warnings(fn, text[end + 4:], tools_raw))
 
     return failures, warnings
 
