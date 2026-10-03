@@ -7,12 +7,14 @@ skills, scheduled tasks, agents, commands, and workflows. It exists so that conf
 skills, and hooks survive a lost/wiped machine, are diffable and code-reviewable like
 any other source, and have a durable audit trail (git history) independent of the
 live filesystem. Nothing here runs on its own — it is read and executed by Claude Code
-itself when pointed at a `~/.claude` directory populated from this repo.
+itself (or by Windows Task Scheduler / GitHub Actions for the few off-fleet jobs noted
+below) on the machine where `~/.claude` lives.
 
-> Point-in-time doc, verified against the live repo 2026-07-26 — treat any count or
-> path as directional and re-verify against `docs/system-inventory.md`
-> (auto-refreshed weekly) and `session-context.md` (fleet roster, regenerated daily)
-> before relying on a specific number.
+> Point-in-time doc, verified against `origin/main` on 2026-10-03 (counts below were
+> taken with `git ls-files` at that commit). Treat every count and path as directional:
+> re-verify against `git ls-files`, `docs/system-inventory.md` (overwritten by
+> `ora-weekly-hygiene` Block H — check its own "Generated" stamp before trusting it),
+> and `python maintenance/fleet-status.py --summary` for live fleet state.
 
 ---
 
@@ -20,158 +22,331 @@ itself when pointed at a `~/.claude` directory populated from this repo.
 
 `~/.claude` on the operating machine (`C:\Users\Owner\.claude`) is simultaneously (a)
 Claude Code's live working directory — where it reads config and writes session/runtime
-state every time it runs — and (b) this git repository. The two are the same folder;
-there is no separate build/deploy step that produces one from the other. A `.gitignore`
-with a **default-deny** policy (`/*` ignored, then explicit `!/path` opt-ins) decides
-which of the ~40 top-level entries are versioned. Most of the directory is disposable
-runtime state that never reaches GitHub (`cache/`, `sessions/`, `shell-snapshots/`,
-`worktrees/`, `telemetry/`, `history.jsonl`, `.credentials.json`, `backups/`, `jobs/`,
-`daemon/`, …); only named machinery — the actual configuration surface — is opted in
-and pushed.
+state every time it runs — and (b) a git checkout of this repository. There is no
+separate build/deploy step that produces one from the other. A `.gitignore` with a
+**default-deny** policy (`/*` ignored, then explicit `!/path` opt-ins) decides which
+top-level entries are versioned. Most of the directory is disposable runtime state that
+never reaches GitHub (`cache/`, `sessions/`, `shell-snapshots/`, `worktrees/`,
+`telemetry/`, `history.jsonl`, `.credentials.json`, `backups/`, `jobs/`, `daemon/`, …);
+only named machinery — the actual configuration surface — is opted in and pushed.
+
+The primary checkout is a **shared, single-writer** working tree that several concurrent
+sessions write into, and it does not necessarily sit on `main`. Drift between it and
+`origin/main` is detected by `maintenance/live-branch-drift-probe.py` /
+`cross-repo-wip-scan.py` and reconciled by the `ora-checkout-merge-forward` scheduled task
+(`maintenance/checkout-merge-forward.py`, which never leaves a conflicted state). Edits are
+expected to happen in an isolated `git worktree`, gated by
+`maintenance/preflight-shared-checkout.py`.
 
 ## 2. How the pieces relate
 
 ```mermaid
 flowchart TB
     subgraph SESSION["A Claude Code session on this machine"]
-        CFG["settings.json\nhook wiring, permissions,\nmodel/plugin config"]
-        HOOKS["hooks/\n~30 guard scripts across all 6 hook events\n(PreToolUse/PostToolUse/Session*/Stop/PromptSubmit)\n+ git pre-push chain"]
-        SKILLS["skills/ + agents/ + commands/ + workflows/\nprocedures the session can invoke"]
-        SCHED["scheduled-tasks/*/SKILL.md\nspecs for recurring automations"]
-        MAINT["maintenance/\nhealth/probe scripts"]
+        CFG["settings.json<br/>hook wiring, permissions,<br/>model / plugin config"]
+        HOOKS["hooks/<br/>36 hook scripts: 2 PreToolUse dispatcher chains,<br/>direct PreToolUse / PostToolUse / Session* / Stop /<br/>UserPromptSubmit entries, 3 native git pre-push gates"]
+        SKILLS["skills/ + agents/ + commands/ + workflows/<br/>procedures the session can invoke"]
+        SCHED["scheduled-tasks/&lt;id&gt;/SKILL.md<br/>CC/MCP fleet task specs"]
+        MAINT["maintenance/<br/>fleet, health and integrity probes"]
         CFG -->|registers| HOOKS
         CFG -->|exposes| SKILLS
-        HOOKS -->|invokes, e.g. doctrine/governor probes\nduring the git pre-push chain| MAINT
+        HOOKS -->|pre-push doctrine gate launches<br/>doctrine-integrity-probe.py| MAINT
     end
 
-    SCHEDULER(("Claude Desktop CC/MCP scheduler\n(registry: AppData/Roaming/Claude/\nclaude-code-sessions/.../scheduled-tasks.json)\nfires ONLY while the Desktop app is open"))
-    SCHED -.read by, not this repo.-> SCHEDULER
-    LAMS(("LAMS/Cowork fleet\nspecs live in OneDrive\nDocuments/Claude/Scheduled/,\nNOT in this repo"))
-    WINTASKS(("Windows Task Scheduler (off-fleet)\na few ORA* tasks, e.g.\nobsidian-fleet-mirror/write-fleet.ps1\nevery 60s -> Obsidian BrainVault/_Claude"))
-    DEADMAN(("GitHub Actions\n.github/workflows/fleet-deadman.yml\ndaily off-box dead-man check"))
-    SCHEDULER -.health watched by.-> DEADMAN
+    CCREG(("CC/MCP scheduler registry<br/>claude-code-sessions/…/scheduled-tasks.json<br/>fires only while the Desktop app is open"))
+    LAMS(("LAMS/Cowork registry<br/>local-agent-mode-sessions/…/scheduled-tasks.json<br/>specs in OneDrive, NOT in this repo"))
+    WINTASKS(("Windows Task Scheduler (off-fleet)<br/>8 task XMLs in maintenance/windows-task-xml/"))
+    DEADMAN(("GitHub Actions<br/>fleet-deadman.yml<br/>daily off-box dead-man"))
+    SCHED -.read by.-> CCREG
+    MAINT -.->|"fleet-status.py reads both"| CCREG
+    MAINT -.-> LAMS
+    WINTASKS -.->|"heartbeat publish"| DEADMAN
 
-    LOCALDIR[("Live directory on disk\nC:\\Users\\Owner\\.claude\n(~40 entries, mostly runtime state)")]
+    LOCALDIR[("Live directory on disk<br/>C:\Users\Owner\.claude<br/>mostly untracked runtime state")]
     LOCALDIR ==contains==> SESSION
-    LOCALDIR -.git add / commit / push\n(opt-in files only).-> REPO[("This repo:\nGitHub ZeOoba/ora-claude-config\n(PRIVATE — backup mirror, not a deploy target)")]
-    REPO -.git clone / pull\n(disaster recovery).-> LOCALDIR
+    LOCALDIR -.->|"git commit / push<br/>opt-in files only, through the pre-push gates"| REPO[("This repo:<br/>GitHub ZeOoba/ora-claude-config<br/>PRIVATE backup mirror, not a deploy target")]
+    REPO -.->|"git clone<br/>disaster recovery"| LOCALDIR
 ```
-<!-- diagram-verified: 2026-09-18 -->
+<!-- diagram-verified: 2026-10-03 -->
 
 **Reading the diagram:** everything in the top box happens inside one live Claude Code
-session. `settings.json` wires up the hooks and exposes the skills/agents/commands/
-workflows a session can call; the hooks then guard every tool call and session-lifecycle
-event that follows (not drawn as a self-loop — Mermaid rejects an edge from a subgraph's
-own child back to the subgraph). `HOOKS -> MAINT` is a real, not illustrative, edge:
-`hooks/git-prepush-doctrine-gate.py` directly launches
-`maintenance/doctrine-integrity-probe.py` as part of the pre-push chain, so a hook calling
-into a maintenance probe is load-bearing, not simplified for the picture.
-`scheduled-tasks/*/SKILL.md` specs point outward to an
-external scheduler node because they're read by the Claude Desktop CC/MCP scheduler, not by
-this session directly. That scheduler is neither Windows Task Scheduler nor Cowork (an earlier
-revision of this diagram said both): its registry lives under `AppData/Roaming/Claude/`, it
-fires only while the Desktop app is open, and the LAMS/Cowork fleet's specs live in OneDrive
-rather than here. Windows Task Scheduler does run a few off-fleet `ORA*` jobs (the
-`obsidian-fleet-mirror` writer is the one whose scripts are tracked here), and
-`fleet-deadman.yml` is the one check that runs off this machine entirely. Cadences are
-deliberately not drawn: the live registry is the authority, and most tasks moved to weekly on
-2026-09-17. Below that, the live directory on disk contains the whole session
-and is the only thing that ever pushes to GitHub (dotted arrow, opt-in files only) — the
-repo is downstream of the live directory, never the other way around: nothing deploys
-*from* GitHub back into a running session automatically. A clone only becomes "live"
-again when it's placed at `~/.claude` and Claude Code is pointed at it.
+session. `settings.json` wires the hooks and exposes the skills/agents/commands/workflows
+a session can call; the hooks then guard every tool call and lifecycle event that follows
+(detail in §4a). `HOOKS -> MAINT` is load-bearing, not illustrative:
+`hooks/git-prepush-doctrine-gate.py` launches `maintenance/doctrine-integrity-probe.py`
+during the pre-push chain. `scheduled-tasks/*/SKILL.md` are the specs of the **CC/MCP**
+fleet, read by the Claude Desktop scheduler (registry under `AppData/Roaming/Claude/` or
+the packaged-app `LocalCache` mirror, located via `maintenance/_shared/scheduler-stores.json`);
+the second, **LAMS/Cowork** fleet keeps its specs in OneDrive, outside this repo (§4b).
+Windows Task Scheduler runs a handful of off-fleet jobs, and `fleet-deadman.yml` is the one
+check that runs off this machine entirely. Cadences are deliberately not drawn: the live
+registries are the authority. The live directory is upstream of GitHub — nothing deploys
+*from* GitHub back into a running session automatically (§4c).
 
 ## 3. Directory structure
 
-Verified against the actual tracked contents (`git ls-files`) and a sample of files in
-each directory — not assumed from folder names.
+Verified against `git ls-files` at `origin/main` (2026-10-03) and the files' own headers.
 
 | Path | What it actually contains |
 |---|---|
-| `CLAUDE.md` | The global operating prompt (identity, hard invariants, routing canon) loaded into every session. |
-| `settings.json` | Hook wiring, permissions, model/plugin config — top-level keys include `hooks`, `permissions`, `enabledPlugins`, `env`, `model`, `statusLine`. |
-| `hooks/` | ~25 guard scripts across all 6 hook events, not just PreToolUse (`confidentiality-guard.py`, `config-write-guard.py`, `shared-checkout-guard.py`, `ora-autonomy-gate.py`, `commit-provenance-guard.py`, `git-prepush-confidential-scan.py`, `git-prepush-doctrine-gate.py`, …) plus `bin/`, `lib/`, `tests/`, `active-work/`. `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked** by git. |
-| `commands/` | 13 slash-command definitions (`build.md`, `debug.md`, `refactor.md`, `research.md`, `ship.md`, `plan.md`, `heavy.md`, `ram.md`, `handoff.md`, `solo.md`, `cleardisk.md`, `cleardisk-sessions.md`, `open-sessions.md`) — the Engineering-OS lane dispatch. |
-| `agents/` | 17 custom sub-agent definitions (`adversarial-reviewer.md`, `comms-qc-reviewer.md`, `dd-package-sweep.md`, `deal-flow-triage.md`, `deal-recon.md`, `estoppel-reconciler.md`, `insurance-declaration-checker.md`, `lease-abstract-verifier.md`, `noi-opportunity-scout.md`, `open-items-triage.md`, `portfolio-anomaly-scout.md`, `psa-redline-checker.md`, `repro-isolator.md`, `security-auditor.md`, `site-qc-reviewer.md`, `tax-appeal-scout.md`, `underwriting-checker.md`). Domain-specific ORA agents, distinct from the general Cowork skill library. `lease-sweep` retired 2026-09-30 (copy at `archive/agents/`, local-only). |
-| `skills/` | Only 5 ORA-authored skills are versioned here (`county-parcel-screen/`, `evidence-dossier-drafting/`, `external-artifact-intake/`, `ratify-hurdle-rate/`, `security-and-hardening/`), each with its own `SKILL.md` plus `references/`/`scripts/` subfolders. This is **not** the full skill catalog — most `anthropic-skills:*` skills Gabriel uses day to day are Cowork-synced runtime content and are not tracked in this repo. |
-| `maintenance/` | 54 fleet/health/probe scripts and their tests (`fleet-status.py`, `doctrine-integrity-probe.py`, `governor-drift-probe.py`, `append-event-log.py`, `setup-self-audit.py`, `stuck-session-watchdog.ps1`, …) plus a `1-Check-My-Setup-SAFE.cmd`-style onboarding script set and `_state/`, `_applied/`, `_archive/`, `_shared/` subfolders. |
-| `scheduled-tasks/` | One folder per scheduled task (48+ live/archived folders observed); **only each task's `SKILL.md` spec is tracked** — runtime state, logs, and `.bak` files are not. Includes a large set of dated `_archive_*_retired` / `_archive_*_orphans` subfolders preserving retired task specs. |
-| `_scheduled_tasks_backup/` | A second, redundant-by-design snapshot of task `SKILL.md` specs (107 entries observed) — a belt-and-suspenders backup of `scheduled-tasks/`. |
-| `workflows/` | 3 named multi-agent `Workflow` scripts (`cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`) plus a `README-cc-self-audit.md` and a `_tests/` prompt-snapshot rig. |
-| `mcp-servers/` | Only `fred/` — a self-authored FRED (St. Louis Fed) MCP server; the only custom MCP server versioned here. |
-| `obsidian-fleet-mirror/` | Scripts that mirror live fleet state into an Obsidian-readable form; the actual state files they produce are deliberately untracked. |
-| `prompts/` | Standing prompt templates used for recurring autonomous runs, plus an `_archive/` of retired ones. |
-| `docs/` | `system-inventory.md` (weekly-refreshed environment snapshot), `MIGRATION_RUNBOOK.md`, dated build reports, and a `superpowers/` subtree of design specs/plans for the Engineering-OS work. |
-| `.github/workflows/` | 2 CI workflow files (`claude-ci-fix.yml`, `fleet-deadman.yml`). |
-| `projects/…/memory/` | The ORA memory system — only the nested `C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/` path is tracked (204 files: `MEMORY.md` index, `event_log.md`, dated deal/project/reference notes). Raw session transcripts (`.jsonl`) elsewhere under `projects/` are **not** tracked. |
-| `_archive/` | Superseded config, retired hooks, and pre-trim snapshots — files are moved here rather than deleted. |
-| `confidential-repos.json` | A small roster naming which *other* ORA repos require confidentiality gating on code-review tooling, plus the rule text explaining why — see §5 below; contents not enumerated in this README. |
+| `CLAUDE.md` | The global operating prompt (identity, hard invariants, routing canon, Engineering OS) loaded into every session. |
+| `settings.json` | Hook wiring, permissions (`defaultMode: bypassPermissions`, with `allow`/`deny` lists), `env`, `model`, `statusLine`, `worktree`, `enabledPlugins` (`superpowers`, `pr-review-toolkit`), `extraKnownMarketplaces`, `skillOverrides`, and UI preferences. |
+| `hooks/` | 36 top-level hook scripts (§4a), plus `lib/` (19 shared modules: commit/provenance parsing, override tokens, secret patterns, guard telemetry, session liveness, site/deploy tiers, …), `bin/netlify-guard-global.js` (machine-wide netlify CLI shim for Hard Invariant 2), `tests/` (61 `test-*.py` suites plus `tests/lib/`), and `archive/` (retired hook artifacts). `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked**. |
+| `commands/` | 13 slash-command definitions — the Engineering-OS lanes (`build`, `debug`, `refactor`, `research`, `ship`, `plan`) and session utilities (`heavy`, `ram`, `solo`, `handoff`, `open-sessions`, `cleardisk`, `cleardisk-sessions`). |
+| `agents/` | 17 custom sub-agent definitions (`adversarial-reviewer`, `comms-qc-reviewer`, `dd-package-sweep`, `deal-flow-triage`, `deal-recon`, `estoppel-reconciler`, `insurance-declaration-checker`, `lease-abstract-verifier`, `noi-opportunity-scout`, `open-items-triage`, `portfolio-anomaly-scout`, `psa-redline-checker`, `repro-isolator`, `security-auditor`, `site-qc-reviewer`, `tax-appeal-scout`, `underwriting-checker`). |
+| `skills/` | 8 ORA-authored skills (`adversarial-merge-gate`, `branch-catchup`, `county-parcel-screen`, `county-sales-monitor`, `evidence-dossier-drafting`, `external-artifact-intake`, `ora-setup-audit`, `security-and-hardening`), some with `references/`, `scripts/` or `workflows/` subfolders, plus two `_archive_*` folders of retired skills. **Not** the full skill catalog — most `anthropic-skills:*` skills are Cowork-synced runtime content; ORA-built skill source lives in `ZeOoba/ora-skills`. |
+| `maintenance/` | 91 top-level scripts/configs (Python probes, PowerShell engines, three onboarding `.cmd` launchers) and 97 test files across `maintenance/`, `_tests/`, `tests/` and `headless/`. Subfolders: `_shared/` (store discovery, fleet-pause helpers, acknowledgement allowlists, `scheduler-stores.json`), `_state/` (tracked probe state), `_applied/`, `_archive/`, `headless/` (Windows-Task-Scheduler twins of selected fleet checks, in parallel burn-in per `headless/CUTOVER.md`), `windows-task-xml/` (exported definitions of the 8 off-fleet Windows tasks). |
+| `scheduled-tasks/` | One folder per CC/MCP task spec: 55 task folders, 27 dated `_archive_*` folders of retired/completed specs, one `_draft-*` folder, and `_shared/` (the Outlook COM send helper `send-via-outlook.ps1`, `outlook-sent-probe.ps1`, the double-fire `block-sentinel.py`, and their docs/tests). **Mostly** only `SKILL.md` is tracked; a short allow-list of task engines and references is also tracked (`ora-task-integrity-guard/guard.ps1` + `membership-guard.ps1`, `ora-pm-ledger/*_snapshot_diff.py` etc., `ora-appsec-sweep/suppressions.md`, `ora-renewal-hubspot-reconcile/read_rent_roll.py`). Runtime state, logs and `.bak` files are not. |
+| `_scheduled_tasks_backup/` | A derived mirror of task `SKILL.md` specs (139 task folders + one archive folder), written by `scheduled-tasks/ora-task-integrity-guard/guard.ps1` (§4b). Canonical specs are authoritative; this mirror is used only to restore a canonical spec that has gone **absent**. |
+| `workflows/` | 3 multi-agent `Workflow` scripts (`cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`), `README-cc-self-audit.md`, and a `_tests/` prompt-snapshot rig. |
+| `mcp-servers/` | 2 self-authored, single-file, read-only MCP servers: `fred/` (St. Louis Fed FRED API) and `census/` (U.S. Census Bureau Data API). |
+| `obsidian-fleet-mirror/` | Scripts that render live fleet state into the Obsidian vault (`write-fleet.ps1`, run every 60 s by the `ClaudeFleetMirror` Windows task via `run-hidden.vbs`); the rendered state files are untracked. |
+| `prompts/` | Standing prompt templates for recurring autonomous runs, their extract/verify helpers, and an `_archive/`. |
+| `docs/` | `system-inventory.md` (weekly overwrite snapshot), `MIGRATION_RUNBOOK.md` (cold-start/restore), `authority-registry.md`, `review-lenses.md`, dated build reports/specs, `plans/`, `agent-references/`, and `superpowers/` (8 design specs + 19 implementation plans for the Engineering-OS and remediation work). |
+| `_proposed/` | A staged, not-yet-applied `settings.json` proposal from the hooks audit (`settings.json`, `settings.diff`, `APPLY.md`, `confguard-matcher.md`). Merging it changes nothing; it is applied as a separate, explicit step. |
+| `.github/workflows/` | 2 workflows: `fleet-deadman.yml` (scheduled off-box dead-man, §4b) and `claude-ci-fix.yml` (event-driven auto-fix responder on failed PR checks, change-requested reviews, or `@claude` / CodeRabbit comments). |
+| `projects/…/memory/` | The ORA memory system — only `projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/` is tracked (401 files: `MEMORY.md` index, `event_log.md`, `open-items-tracker.md`, dated feedback/project/reference notes). Session transcripts (`.jsonl`) are **not** tracked. |
+| `_archive/` | Superseded config, a retired plugin bundle, and pre-trim snapshots — files are moved here rather than deleted. |
+| `confidential-repos.json` | A small roster naming which *other* ORA repos require confidentiality gating on code-review tooling, plus the rule text — see §5; contents not enumerated here. |
 | `keybindings.json`, `.gitattributes`, `daily-setup-audit-prompt.md` | Small standalone config/reference files, individually opted in. |
 
-Everything else visible on disk (`cache/`, `sessions/`, `worktrees/`, `telemetry/`,
-`.credentials.json`, `backups/`, `jobs/`, `daemon/`, `shell-snapshots/`,
-`session-env/`, `handoffs/`, `plans/`, `tasks/`, `ide/`, `paste-cache/`, `artifacts/`,
-`downloads/`, `history.jsonl`, `.last-cleanup`, …) is intentionally absent from
-GitHub — secret, machine-specific, or freely regenerable.
+Everything else on disk (`cache/`, `sessions/`, `worktrees/`, `telemetry/`,
+`.credentials.json`, `backups/`, `jobs/`, `daemon/`, `shell-snapshots/`, `session-env/`,
+`session-context.md`, `handoffs/`, `plans/`, `tasks/`, `ide/`, `paste-cache/`,
+`artifacts/`, `downloads/`, `history.jsonl`, …) is intentionally absent from GitHub —
+secret, machine-specific, confidential, or freely regenerable.
 
-## 4. What this repo is NOT
+## 4. Architecture
 
-- **Not runnable software.** There is no build step, no `npm start`/`pip install -r
-  requirements.txt` entry point, and no service that gets deployed from this repo. The
-  `.py`/`.js`/`.ps1` files here are hooks, probes, and workflow scripts that only do
-  anything when Claude Code (or Windows Task Scheduler / a `.cmd` launcher) invokes
-  them directly on the machine where `~/.claude` lives.
-- **Not a source→deploy pipeline.** The `.github/workflows/` CI here checks the repo's
-  own hygiene (e.g. a fleet dead-man check); it does not build or ship a product.
-- **How it's actually used:** this repo is synced onto a machine by being cloned to (or
-  already living at) that machine's `~/.claude` path — on Windows specifically
-  `C:\Users\Owner\.claude`, since hardcoded hook paths in `settings.json` assume that
-  profile name. Claude Code then reads it as ordinary config on every session start.
-  Restoring a machine means `git clone` into that path, then separately recovering the
-  secrets and live state this repo deliberately excludes (`.credentials.json`,
-  `_shared/*.dat`, live scheduled-task registries) — see `docs/MIGRATION_RUNBOOK.md`
-  for the full cold-start sequence, and `python maintenance/fleet-status.py --summary`
-  / `doctrine-integrity-probe.py` / `governor-drift-probe.py` to verify health once
-  running.
+### 4a. Hook gate chain
 
-## 5. Confidentiality note
+`settings.json` wires hooks on six events. The PreToolUse layer is consolidated into
+`hooks/pretooluse-dispatcher.py`, which runs two **separate** ordered chains in one
+process: the default chain for `Edit|Write|MultiEdit`, and `--chain bash` for `Bash`.
+Tools outside those matchers (NotebookEdit, Desktop Commander writes, Excel, Outlook/Teams/
+Notion/SharePoint/HubSpot write tools, the scheduled-tasks MCP) are covered by direct
+`settings.json` entries instead.
+
+```mermaid
+flowchart LR
+    CALL["Tool call"] --> M{"settings.json<br/>PreToolUse matcher"}
+    M -->|"Edit / Write / MultiEdit"| DEW["pretooluse-dispatcher.py<br/>(default chain)"]
+    M -->|"Bash"| DB["pretooluse-dispatcher.py<br/>--chain bash"]
+    M -->|"NotebookEdit, MCP write tools"| DIRECT["Direct entries:<br/>ora-autonomy-gate, confidentiality-guard,<br/>config-write-guard, lint-config-guard,<br/>workbook-write-guard, registry-write-guard,<br/>memory-index-guard, scheduled-task-update-preguard"]
+    M -->|"Edit / Write"| INLINE["Inline sensitive-file blocker<br/>(credentials / .env / password paths)"]
+
+    subgraph EW["Edit/Write chain (in order)"]
+        direction TB
+        E1["ora-autonomy-gate"] --> E2["confidentiality-guard"] --> E3["eos-plan-gate"] --> E4["shared-checkout-guard"] --> E5["registry-write-guard"] --> E6["config-write-guard"] --> E7["eos-claude-md-guard"] --> E8["memory-index-guard"] --> E9["rules-md-guard"] --> E10["lint-config-guard"] --> E11["ascii-only-guard"]
+    end
+
+    subgraph BC["Bash chain (in order)"]
+        direction TB
+        B1["ora-autonomy-gate"] --> B2["confidentiality-guard"] --> B3["config-write-guard"] --> B4["lint-config-guard"] --> B5["workbook-write-guard"] --> B6["eos-evidence-gate"] --> B7["eos-review-gate"] --> B8["commit-provenance-guard"] --> B9["worktree-isolation-guard"] --> B10["destructive-git-guard"] --> B11["memory-orphan-link-guard"] --> B12["commit-hygiene-guard"]
+    end
+
+    DEW --> E1
+    DB --> B1
+    E11 --> RES{"Any guard exit 2?"}
+    B12 --> RES
+    DIRECT --> RES
+    INLINE --> RES
+    RES -->|"yes: first block wins,<br/>chain short-circuits"| BLOCK["Tool call refused"]
+    RES -->|"no"| RUN["Tool runs, then PostToolUse hooks"]
+```
+<!-- diagram-verified: 2026-10-03 -->
+
+Dispatcher semantics (from its own header): guard order is load-bearing and mirrors
+`settings.json`; each guard runs in-process and, if it cannot load or raises, is re-run as
+a subprocess; the first exit 2 blocks and short-circuits; a guard script **missing** from
+disk fails the whole chain **closed**; malformed input is passed through so each guard
+applies its own policy (`confidentiality-guard.py` fails closed by design). Per-guard
+telemetry goes to `hooks/_state/guard-telemetry.jsonl` (no command text or paths), read
+with `hooks/guard-telemetry-summary.py`. `python hooks/pretooluse-dispatcher.py --selfcheck`
+verifies both chains.
+
+| Hook | Event / wiring | Purpose (from the file header) |
+|---|---|---|
+| `ora-autonomy-gate` | PreToolUse (both chains + direct) | Preserves the human gates for external sends and oxfordra.net deploys under `bypassPermissions`. |
+| `confidentiality-guard` | PreToolUse (both chains + direct) | Fail-closed egress guard against confidential deal identifiers in outbound tools. |
+| `config-write-guard` | PreToolUse (both chains + direct) | Hard write-gate on the governance layer (hooks, settings, CLAUDE.md, etc.) plus claim-lock. |
+| `lint-config-guard` | PreToolUse (both chains + direct) | Fail-closed guard on edits to existing oxford-command-center lint/format/typecheck configs. |
+| `workbook-write-guard` | PreToolUse (Bash chain + direct) | Write-gate on the ORA Master Workbook. |
+| `registry-write-guard` | PreToolUse (Edit/Write chain + Desktop Commander) | Blocks hand-edits of scheduled-task registry JSON. |
+| `memory-index-guard` | PreToolUse (Edit/Write chain + Desktop Commander) | Write-time checks on the `MEMORY.md` index. |
+| `eos-plan-gate`, `eos-claude-md-guard`, `rules-md-guard`, `shared-checkout-guard`, `ascii-only-guard` | PreToolUse (Edit/Write chain) | Plan-before-sprawl gate; CLAUDE.md doctrine guard; `rules.md` dated-header guard; shared-checkout warning; ASCII-only rail for declared files. |
+| `eos-evidence-gate`, `eos-review-gate`, `commit-provenance-guard`, `worktree-isolation-guard`, `destructive-git-guard`, `memory-orphan-link-guard`, `commit-hygiene-guard` | PreToolUse (Bash chain) | Commit-time gates: evidence (non-blocking), review for blast-radius/financial code, no sweeping another live session's WIP, blast-radius commits must come from a worktree, no discarding uncommitted work, no orphan memory-index links, commit hygiene (warn-only). |
+| `scheduled-task-update-preguard` / `-postguard` | Pre/PostToolUse on `update_scheduled_task` | Hand-edit warning; dropped-frontmatter-key warning. |
+| `commit-provenance-recorder`, `memory-nag-correction`, `eos-plan-marker`, `eos-gate-sentinel`, `fleet-session-hook` | PostToolUse | Records which session wrote which file; memory-index nag correction; plan marker; test-ran marker; Obsidian live-activity mirror. |
+| `engineering-router` | UserPromptSubmit | Non-blocking Engineering-OS lane suggester. |
+| `repo-freshness`, `active-work-broadcast`, `fleet-session-hook` | SessionStart | oxford-command-center freshness; broadcast live cross-session claims; activity mirror. (SessionStart also `cat`s the untracked `session-context.md`.) |
+| `fleet-session-hook`, `eos-telemetry` | Stop / SessionEnd | Activity mirror; reliability telemetry. |
+| `git-prepush-doctrine-gate`, `git-prepush-hook-tests-gate`, `git-prepush-confidential-scan` | Native git `pre-push` (not `settings.json`) | See below. |
+| `posttooluse-dispatcher` | **Not wired on `main`** | Staged consolidation of the Bash PostToolUse hooks; the matching `settings.json` change lives in `_proposed/`. |
+
+`settings.json` also carries two non-script PostToolUse Bash entries (an
+`ora-skills/tools/catch_up_main.py --hook` run and an inline oxfordra.net post-deploy HTTP
+check) and an inline Netlify-MCP post-call check.
+
+**Pre-push chain.** A native `.git/hooks/pre-push` shim (untracked; clones do not carry
+`.git/hooks` — re-install per each gate's header and `docs/MIGRATION_RUNBOOK.md`) runs
+three gates in order:
+
+```mermaid
+flowchart LR
+    PUSH["git push"] --> G1["git-prepush-doctrine-gate.py<br/>doctrine drift, via<br/>maintenance/doctrine-integrity-probe.py"]
+    G1 -->|pass| G2["git-prepush-hook-tests-gate.py<br/>runs every test file in hooks/tests,<br/>maintenance, maintenance/_tests"]
+    G2 -->|pass| G3["git-prepush-confidential-scan.py<br/>scans the full diff of every commit<br/>new to the remote; fail-closed"]
+    G3 -->|pass| REMOTE["origin"]
+    G1 -->|block| STOP["push refused"]
+    G2 -->|block| STOP
+    G3 -->|block| STOP
+```
+<!-- diagram-verified: 2026-10-03 -->
+
+The confidentiality scan covers the commit range being pushed (remote ref..local, or
+`origin/<default>..local` for a brand-new branch) — not the whole history on every push —
+and reports deal-relative indices only, never the terms. The `ora-prepush-gate-sweep`
+scheduled task runs the same three gates weekly without pushing.
+
+### 4b. Dual scheduled-task fleet
+
+Two scheduler registries are live, both fired by the Claude Desktop app and only while it
+is open. `maintenance/fleet-status.py` reads both and tags each task by fleet; store roots
+and ratified fleet floors are single-sourced in `maintenance/_shared/scheduler-stores.json`.
+Tasks are registered only through the supervised `create_scheduled_task` /
+`update_scheduled_task` MCP tools — `hooks/registry-write-guard.py` blocks registry JSON
+hand-edits.
+
+```mermaid
+flowchart TB
+    subgraph DESKTOP["Claude Desktop app (fires only while open)"]
+        CC["CC/MCP fleet<br/>registry: claude-code-sessions/…/scheduled-tasks.json<br/>written by the scheduled-tasks MCP"]
+        LM["LAMS/Cowork fleet<br/>registry: local-agent-mode-sessions/…/scheduled-tasks.json<br/>written by Cowork sessions"]
+    end
+    CCSPEC["~/.claude/scheduled-tasks/&lt;id&gt;/SKILL.md<br/>tracked in this repo"]
+    LMSPEC["OneDrive Documents/Claude/Scheduled/&lt;id&gt;/<br/>NOT in this repo; OneDrive versioning"]
+    CC -->|filePath| CCSPEC
+    LM -->|filePath| LMSPEC
+
+    GUARD["ora-task-integrity-guard (CC task)<br/>guard.ps1 + membership-guard.ps1"]
+    GOV["OneDrive Claude_Workspace/<br/>00_Governance/Scheduled (mirror)"]
+    BAK["~/.claude/_scheduled_tasks_backup/ (mirror)"]
+    GUARD -->|reads registries| CC
+    GUARD -->|reads registries| LM
+    GUARD -->|refresh mirrors from canonical| GOV
+    GUARD -->|refresh mirrors from canonical| BAK
+    BAK -.restore only if canonical is ABSENT.-> CCSPEC
+
+    STATUS["maintenance/fleet-status.py<br/>+ registry / folder / freshness probes"]
+    STATUS -.reads.-> CC
+    STATUS -.reads.-> LM
+
+    subgraph OFF["Off-fleet: Windows Task Scheduler"]
+        HBP["ORA Fleet Heartbeat Push<br/>push-fleet-heartbeat.ps1"]
+        LDM["ORA Fleet Dead-Man<br/>fleet-deadman.ps1 (local backstop)"]
+        OTHER["ClaudeFleetMirror, Stuck-Session Watchdog,<br/>Nightly Disk Clean, Desktop Wake-and-Launch,<br/>PM Crons, Command Center Mirror Deploy"]
+    end
+    HBP -->|emit-fleet-heartbeat.py| HB["maintenance/_state/fleet-heartbeat.json<br/>counts + registry hashes"]
+    HB -->|publish-fleet-heartbeat.py<br/>GitHub API, no git push| BR["deadman-heartbeat branch"]
+    BR --> GHA["fleet-deadman.yml<br/>daily cron, off-box"]
+    GHA -->|stale, late, below floor,<br/>or registry missing| ISSUE["GitHub issue opened / commented"]
+```
+<!-- diagram-verified: 2026-10-03 -->
+
+`guard.ps1`'s write policy (from its header): canonical specs are authoritative, the two
+mirrors are derived, canonical is written **only when absent**, nothing is deleted, and
+content identity is a CR-normalized SHA-256 (never mtime). Scheduled-task email goes out
+only through the Outlook COM helper in `scheduled-tasks/_shared/send-via-outlook.ps1`,
+under the routing canon in `CLAUDE.md`. Selected checks are also being run as headless
+Windows tasks in parallel burn-in (`maintenance/headless/CUTOVER.md`); none of the in-fleet
+twins is retired.
+
+### 4c. Repo layout and backup flow
+
+```mermaid
+flowchart LR
+    subgraph DISK["C:\Users\Owner\.claude (live, shared checkout)"]
+        RT["Runtime state<br/>sessions, cache, credentials,<br/>session-context.md, confidential-terms.json"]
+        TR["Opt-in tracked tree<br/>CLAUDE.md, settings.json, hooks/, agents/,<br/>commands/, skills/, workflows/, maintenance/,<br/>scheduled-tasks/, memory/, docs/ …"]
+    end
+    GI[".gitignore<br/>default-deny /* + !/opt-ins"]
+    GI -->|excludes| RT
+    GI -->|admits| TR
+    TR -->|"session work in a git worktree<br/>(preflight-shared-checkout.py)"| WT["worktree branch"]
+    WT -->|"commit, then push via<br/>safe-push.py / verify-push.py"| GATES["pre-push gates (§4a)"]
+    TR -->|"ora-memory-commit-sweep<br/>commits settled memory/ changes<br/>(local only, never pushes)"| LOCALC["local commits on whatever<br/>branch is checked out"]
+    MAINWT["worktree that has main checked out"] -->|"push-fleet-heartbeat.ps1 backup leg<br/>(ff-only, else clean merge;<br/>aborts on any conflict)"| GATES
+    GATES --> GH[("GitHub ZeOoba/ora-claude-config<br/>main + PR branches")]
+    GH -->|"ora-checkout-merge-forward<br/>merge-forward, never left conflicted"| TR
+    GH -.->|"git clone into ~/.claude<br/>+ restore secrets per MIGRATION_RUNBOOK"| DISK
+```
+<!-- diagram-verified: 2026-10-03 -->
+
+Nothing deploys from GitHub into a running session: a clone only becomes "live" when it
+is placed at `~/.claude` and Claude Code is pointed at it. Before a new top-level directory
+is opted in, `maintenance/scrub-before-optin.py` checks it; `doctrine-integrity-probe.py`
+surfaces untracked backup-coverage gaps, and
+`maintenance/task-folder-backup-completeness-probe.py` flags substantive files inside
+CC/MCP task folders that `.gitignore` would silently hide.
+
+## 5. What this repo is NOT
+
+- **Not runnable software.** There is no build step and no deployable service. The
+  `.py`/`.js`/`.ps1` files are hooks, probes, engines and workflow scripts that only act
+  when Claude Code, Windows Task Scheduler, or a `.cmd` launcher invokes them on the
+  machine where `~/.claude` lives.
+- **Not a source-to-deploy pipeline.** The two GitHub workflows monitor the fleet
+  heartbeat and respond to PR review/CI events; neither builds or ships a product.
+- **How it is actually used:** cloned to (or already living at) `~/.claude` — on Windows
+  specifically `C:\Users\Owner\.claude`, since hook paths in `settings.json` are hardcoded
+  to that profile and interpreter. Restoring a machine means `git clone` into that path,
+  re-installing the native pre-push shim, then separately recovering the secrets and live
+  state this repo deliberately excludes (`.credentials.json`, `hooks/confidential-terms.json`,
+  the out-of-repo secret files and environment variables the runbook lists, the live
+  scheduler registries, `session-context.md`) — see
+  `docs/MIGRATION_RUNBOOK.md`. Verify health with
+  `python maintenance/fleet-status.py --summary`, `doctrine-integrity-probe.py`,
+  `governor-drift-probe.py` and `python hooks/pretooluse-dispatcher.py --selfcheck`.
+
+## 6. Confidentiality note
 
 This is a **PRIVATE** GitHub repository (`ZeOoba/ora-claude-config`). Even so:
 
 - **`confidential-repos.json`** — a roster of other repos that require confidentiality
-  gating (e.g. blocking certain cloud code-review tooling on them) because they may
-  embed deal figures, tenant data, or site content under a never-touch guardrail. Its
-  contents are not enumerated in this README by design — treat it as a pointer, not a
-  disclosure surface.
+  gating (e.g. blocking certain cloud code-review tooling on them). Its contents are not
+  enumerated in this README by design.
 - **`hooks/confidential-terms.json`** — the live roster of active confidential deal
-  terms. It resides in `hooks/` on disk but is git-ignored outright (confirmed not
-  tracked); it never reaches this repo's history.
-- Every `git push` from this checkout is additionally scanned by
-  `hooks/git-prepush-confidential-scan.py`, which checks full history
-  (`git log -p --all`), not just the current diff, before anything leaves the machine.
-- Deal-specific content, tenant PII, and credentials should never be described in
-  specifics anywhere in this repo's own documentation (including this README) — only
-  generically, by reference to the file/mechanism that holds them.
+  terms. It resides in `hooks/` on disk but is git-ignored; it never reaches this repo's
+  history. Tests that need it declare `CANNOT RUN:` (an ENV-SKIP, not a failure) in a
+  worktree where it is absent.
+- **`session-context.md`** — the other home of that roster; untracked by design and
+  backed up only locally, scrubbed, by `maintenance/backup-session-context.py`.
+- Every push is scanned by `hooks/git-prepush-confidential-scan.py` across the full diff
+  of every commit new to the remote, fail-closed, before anything leaves the machine.
+- Deal-specific content, tenant PII, and credentials are never described in specifics in
+  this repo's documentation (including this README) — only by reference to the file or
+  mechanism that holds them.
 
 ---
 
-## 6. Known caveats
+## 7. Known caveats
 
-- The working tree routinely carries uncommitted changes from other in-flight sessions
-  (scheduled-task `SKILL.md` backups, memory event-log appends, registry-membership
-  snapshots) — this is normal churn from the fleet's own probes, not drift to fix.
-  `~/.claude` is a **shared, single-writer checkout**: confirm a file is actually yours
-  (via `git status` / `git log -1`) before committing it, and prefer an isolated
-  worktree for any non-trivial edit.
-- `skills/` here is intentionally small (5 skills). Do not treat it as the full skill
-  catalog when auditing what's "in" this system — cross-check `docs/system-inventory.md`
-  and the separate Cowork skill-sync location instead.
-- Live scheduled-task counts, crons, and registry state are **generated daily** into
-  `session-context.md` and are never hand-maintained in this README or in
-  `docs/system-inventory.md` — treat any headline number here as stale by the time you
-  read it.
+- The live checkout routinely carries uncommitted changes from other in-flight sessions
+  (task-spec mirrors, memory appends, probe state). That is normal fleet churn, not drift
+  to fix. Confirm a file is yours before committing it (the provenance hooks enforce this),
+  and edit in an isolated worktree.
+- `skills/` here is intentionally small (8 skills). Do not treat it as the full catalog;
+  cross-check `docs/system-inventory.md` and `ZeOoba/ora-skills`.
+- Live task counts, crons and enablement are never hand-maintained here; read the
+  registries via `fleet-status.py`. `docs/system-inventory.md` is only as current as its
+  last `ora-weekly-hygiene` run.
+- The fleet-floor tripwires used by `fleet-deadman.yml` and by
+  `maintenance/_shared/scheduler-stores.json` are defined separately in each; read both
+  before reasoning about a "below floor" alarm.
 
 ---
 
 *This README is itself an opt-in (`.gitignore` `!/README.md`) — if it stops appearing
-on GitHub after a `.gitignore` edit, that opt-in was the thing that broke.*
+on GitHub after a `.gitignore` edit, that opt-in was the thing that broke. Its
+`diagram-verified` stamps are checked by `maintenance/diagram-freshness-probe.py`.*
