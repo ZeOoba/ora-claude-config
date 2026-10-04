@@ -145,11 +145,23 @@ def test_registration_age_annotates_never():
         os.unlink(path)
 
 
+def _quarterly_cron_next_slot_ahead(days_ahead=30):
+    """A quarterly cron (4 months, 3 apart) whose NEXT slot is ~days_ahead out and whose
+    PREVIOUS slot is a quarter earlier, so older than any fixture createdAt here.
+    A literal '1,4,7,10' is date-dependent: from the 1st of each quarter month until the
+    fixture task ages out, its first post-registration slot has elapsed and the
+    first-slot rule correctly flags it (this failed the pre-push gate on 2026-10-02)."""
+    import datetime
+    fut = datetime.date.today() + datetime.timedelta(days=days_ahead)
+    months = sorted({((fut.month - 1 + 3 * k) % 12) + 1 for k in range(4)})
+    return "0 8 %d %s *" % (min(fut.day, 28), ",".join(str(m) for m in months))
+
+
 def test_all_healthy_is_ok():
     tasks = [
         task("daily-a", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso()),
         task("weekly-b", cron="0 7 * * 1", created_days_ago=2, last_run=recent_iso()),
-        task("quarterly-c", cron="0 8 1 1,4,7,10 *", created_days_ago=5),  # never-ran, not due -- fine
+        task("quarterly-c", cron=_quarterly_cron_next_slot_ahead(), created_days_ago=5),  # never-ran, not due -- fine
         task("onetime-d", fire_at=now_ms() - 5 * DAY, enabled=False, last_run="2026-01-01T00:00:00Z"),
     ]
     data, err = run(tasks)
@@ -159,7 +171,7 @@ def test_all_healthy_is_ok():
 
 # 2. A quarterly task that has simply never reached its next fire is NOT overdue.
 def test_quarterly_not_yet_due_is_not_overdue():
-    tasks = [task("quarterly-new", cron="0 8 1 1,4,7,10 *", created_days_ago=10)]
+    tasks = [task("quarterly-new", cron=_quarterly_cron_next_slot_ahead(), created_days_ago=10)]
     data, _ = run(tasks)
     check("test_quarterly_not_yet_due_is_not_overdue",
           data is not None and data.get("never_ran_overdue") == [],
