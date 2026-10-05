@@ -176,7 +176,7 @@ REVIEWS_SUBDIR = "reviews"
 # hardcoded constant, by Gabriel's 2026-07-24 amendment -- a retired id must
 # degrade to the next entry rather than make the gate unsatisfiable. Sweep target
 # for reference_model_release_checklist.md.
-REVIEWER_MODEL_LADDER = ("claude-fable-5-1", "claude-opus-5-5", "claude-opus-5")
+REVIEWER_MODEL_LADDER = ("claude-opus-5-5", "claude-opus-5")
 
 # A self-reported model id can carry a trailing context-window tag, e.g.
 # "claude-opus-5[1m]" -- same hazard maintenance/model-canary-probe.py's
