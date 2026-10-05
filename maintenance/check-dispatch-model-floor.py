@@ -73,7 +73,7 @@ MODEL_RANK = {
     # a courtesy for old transcripts: floor_rank() below builds "claude-%s-5" %
     # floor, so the explicit `--floor fable` shorthand resolves through THIS key
     # (the default floor is now the full id claude-opus-5-5; NB `--floor opus`
-    # would resolve to claude-opus-5 / rank 90, NOT Opus 5.5 -- pass the full id).
+    # now aliases to claude-opus-5-5).
     # Deleting this entry breaks `--floor fable` (exit 2, TOOLING ERROR).
     "claude-fable-5": 100,
     "claude-opus-5-5": 95,  # 2026-09-22 -- above opus-5; the default floor since 2026-10-05
@@ -99,6 +99,8 @@ def model_rank(model):
 def floor_rank(floor):
     """Resolve a floor NAME (e.g. 'fable') to its rank. Unknown floor is a usage
     error, surfaced by the caller — here we return None so main() can exit 2."""
+    if floor == "opus":  # the Agent-tool alias means Opus 5.5 (the floor), not the claude-opus-5 that "%s-5" would build
+        floor = "claude-opus-5-5"
     key = "claude-%s-5" % floor if not floor.startswith("claude-") else floor
     return MODEL_RANK.get(key)
 
