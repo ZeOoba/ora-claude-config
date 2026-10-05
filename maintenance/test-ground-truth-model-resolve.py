@@ -54,18 +54,18 @@ def test_verifier_model_matches_or_exceeds_audited_tier():
           gmr._tier(verifier) >= gmr._tier("claude-sonnet-5"), (verifier, reasoning))
 
 
-def test_verifier_model_unresolved_audited_model_forces_fable():
+def test_verifier_model_unresolved_audited_model_forces_top_tier():
     verifier, reasoning = gmr.resolve_verifier_model({})
-    check("an unresolved audited model forces the verifier to Fable "
+    check("an unresolved audited model forces the verifier to Opus 5.5 "
           "(reviewer >= implementer must never be silently violated)",
-          verifier == gmr.FABLE_MODEL, (verifier, reasoning))
+          verifier == gmr.TOP_MODEL, (verifier, reasoning))
 
 
-def test_verifier_model_unknown_audited_model_also_forces_fable():
+def test_verifier_model_unknown_audited_model_also_forces_top_tier():
     verifier, reasoning = gmr.resolve_verifier_model({"model": "some-future-model-not-in-the-table"})
-    check("an audited model outside the known tier table also fails safe to Fable "
+    check("an audited model outside the known tier table also fails safe to Opus 5.5 "
           "(never silently license a cheaper verifier)",
-          verifier == gmr.FABLE_MODEL, (verifier, reasoning))
+          verifier == gmr.TOP_MODEL, (verifier, reasoning))
 
 
 def test_extract_model_tag_parses_the_real_frontmatter_format():
@@ -90,8 +90,8 @@ def test_to_agent_tool_model_name_maps_all_four_known_ids():
           gmr.to_agent_tool_model_name("claude-sonnet-5") == "sonnet")
     check("claude-opus-5 maps to 'opus'",
           gmr.to_agent_tool_model_name("claude-opus-5") == "opus")
-    check("claude-fable-5-1 maps to 'fable'",
-          gmr.to_agent_tool_model_name("claude-fable-5-1") == "fable")
+    check("claude-opus-5-5 maps to 'opus'",
+          gmr.to_agent_tool_model_name("claude-opus-5-5") == "opus")
 
 
 def test_to_agent_tool_model_name_raises_on_unknown_id():
@@ -110,8 +110,8 @@ if __name__ == "__main__":
     test_rung3_session_record_used_when_registry_and_tag_absent()
     test_rung4_all_absent_fails_safe_to_none()
     test_verifier_model_matches_or_exceeds_audited_tier()
-    test_verifier_model_unresolved_audited_model_forces_fable()
-    test_verifier_model_unknown_audited_model_also_forces_fable()
+    test_verifier_model_unresolved_audited_model_forces_top_tier()
+    test_verifier_model_unknown_audited_model_also_forces_top_tier()
     test_extract_model_tag_parses_the_real_frontmatter_format()
     test_extract_model_tag_parses_the_simple_format()
     test_to_agent_tool_model_name_maps_all_four_known_ids()

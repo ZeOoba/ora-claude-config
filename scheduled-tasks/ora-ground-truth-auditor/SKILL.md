@@ -159,7 +159,7 @@ agent_tool_model = gmr.to_agent_tool_model_name(verifier_model)
 
 `resolve_verifier_model` returns a full model id (e.g. `"claude-opus-5"`) -- the Agent
 tool's `model` parameter does NOT accept full ids, only the short names
-`sonnet | opus | haiku | fable`. Always call `to_agent_tool_model_name` on the resolved
+`sonnet | opus | haiku`. Always call `to_agent_tool_model_name` on the resolved
 id and dispatch the Agent tool with `agent_tool_model` (the short name), never with
 `verifier_model` (the full id) directly. `to_agent_tool_model_name` raises `ValueError`
 loudly if `verifier_model` is somehow outside the known four -- do not catch and
@@ -180,7 +180,7 @@ If `run["file_path"]` is absent or unreadable, pass `skill_md_text=None` and let
 ladder fall through to rung 3 (never fail the dispatch over a missing SKILL.md read).
 
 **Runs touching financial data, governor
-constants (DSCR/LTV), or a confidential deal never verify below Fable regardless of what
+constants (DSCR/LTV), or a confidential deal never verify below Opus 5.5 regardless of what
 the ladder returns** -- round up explicitly for those, per CLAUDE.md's Dispatch
 invariants (round up before converting with `to_agent_tool_model_name`, so the
 short name passed to the Agent tool reflects the rounded-up floor). Pin the resolved
