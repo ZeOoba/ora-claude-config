@@ -145,11 +145,21 @@ def test_registration_age_annotates_never():
         os.unlink(path)
 
 
+def _quarterly_cron_next_slot_ahead():
+    """A quarterly cron (1st of every 3rd month, 08:00) whose first slot is the 1st of NEXT month, so it is
+    always still ahead of a task created days ago. A hardcoded `1 1,4,7,10` here is date-dependent: from
+    2026-10-02 the Oct 1 slot has elapsed since creation and the first-slot rule correctly flags it."""
+    import datetime
+    m0 = datetime.date.today().month % 12 + 1
+    months = sorted({(m0 - 1 + 3 * k) % 12 + 1 for k in range(4)})
+    return "0 8 1 %s *" % ",".join(str(m) for m in months)
+
+
 def test_all_healthy_is_ok():
     tasks = [
         task("daily-a", cron="0 6 * * *", created_days_ago=1, last_run=recent_iso()),
         task("weekly-b", cron="0 7 * * 1", created_days_ago=2, last_run=recent_iso()),
-        task("quarterly-c", cron="0 8 1 1,4,7,10 *", created_days_ago=5),  # never-ran, not due -- fine
+        task("quarterly-c", cron=_quarterly_cron_next_slot_ahead(), created_days_ago=5),  # never-ran, not due -- fine
         task("onetime-d", fire_at=now_ms() - 5 * DAY, enabled=False, last_run="2026-01-01T00:00:00Z"),
     ]
     data, err = run(tasks)
@@ -159,7 +169,7 @@ def test_all_healthy_is_ok():
 
 # 2. A quarterly task that has simply never reached its next fire is NOT overdue.
 def test_quarterly_not_yet_due_is_not_overdue():
-    tasks = [task("quarterly-new", cron="0 8 1 1,4,7,10 *", created_days_ago=10)]
+    tasks = [task("quarterly-new", cron=_quarterly_cron_next_slot_ahead(), created_days_ago=10)]
     data, _ = run(tasks)
     check("test_quarterly_not_yet_due_is_not_overdue",
           data is not None and data.get("never_ran_overdue") == [],
@@ -383,7 +393,7 @@ def test_json_tasks_expose_last_run_at():
     tasks = [
         task("ran-before", cron="0 6 * * *", created_days_ago=5,
              last_run="2026-08-01T12:00:00.000Z"),
-        task("never-ran", cron="0 8 1 1,4,7,10 *", created_days_ago=1),
+        task("never-ran", cron=_quarterly_cron_next_slot_ahead(), created_days_ago=1),
     ]
     data, _ = run(tasks)
     by_id = {t["id"]: t for t in (data or {}).get("tasks", [])}
