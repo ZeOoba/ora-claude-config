@@ -145,14 +145,16 @@ def test_registration_age_annotates_never():
         os.unlink(path)
 
 
-def _quarterly_cron_next_slot_ahead():
-    """A quarterly cron (1st of every 3rd month, 08:00) whose first slot is the 1st of NEXT month, so it is
-    always still ahead of a task created days ago. A hardcoded `1 1,4,7,10` here is date-dependent: from
-    2026-10-02 the Oct 1 slot has elapsed since creation and the first-slot rule correctly flags it."""
+def _quarterly_cron_next_slot_ahead(days_ahead=30):
+    """A quarterly cron (4 months, 3 apart) whose NEXT slot is ~days_ahead out and whose
+    PREVIOUS slot is a quarter earlier, so older than any fixture createdAt here.
+    A literal '1,4,7,10' is date-dependent: from the 1st of each quarter month until the
+    fixture task ages out, its first post-registration slot has elapsed and the
+    first-slot rule correctly flags it (this failed the pre-push gate on 2026-10-02)."""
     import datetime
-    m0 = datetime.date.today().month % 12 + 1
-    months = sorted({(m0 - 1 + 3 * k) % 12 + 1 for k in range(4)})
-    return "0 8 1 %s *" % ",".join(str(m) for m in months)
+    fut = datetime.date.today() + datetime.timedelta(days=days_ahead)
+    months = sorted({((fut.month - 1 + 3 * k) % 12) + 1 for k in range(4)})
+    return "0 8 %d %s *" % (min(fut.day, 28), ",".join(str(m) for m in months))
 
 
 def test_all_healthy_is_ok():
@@ -393,7 +395,7 @@ def test_json_tasks_expose_last_run_at():
     tasks = [
         task("ran-before", cron="0 6 * * *", created_days_ago=5,
              last_run="2026-08-01T12:00:00.000Z"),
-        task("never-ran", cron=_quarterly_cron_next_slot_ahead(), created_days_ago=1),
+        task("never-ran", cron="0 8 1 1,4,7,10 *", created_days_ago=1),
     ]
     data, _ = run(tasks)
     by_id = {t["id"]: t for t in (data or {}).get("tasks", [])}
