@@ -1,0 +1,21 @@
+%% From README 4c, maintenance/push-fleet-heartbeat.ps1:1-68 (v3.2), maintenance/checkout-merge-forward.py:1-40,
+%% safe-push.py, verify-push.py. git status -sb on 2026-10-06: live/primary-checkout ahead 3 / behind 4 vs origin/main
+%% (point-in-time; re-check before relying on it).
+%% diagram-verified: 2026-10-06
+flowchart LR
+  subgraph DISK["~/.claude (shared checkout, branch live/primary-checkout)"]
+    RT["untracked runtime state (default-deny .gitignore)"]
+    TR["tracked tree (1283 files; 421 under projects/ memory)"]
+  end
+  TR -->|"edit in worktree after preflight"| WT["worktree branch"]
+  WT -->|"commit + PR (merge-commit)"| GATES["pre-push gates (02)"]
+  WT -->|"safe-push.py / verify-push.py (post-push landed?)"| GATES
+  GATES --> GH[("GitHub ZeOoba/ora-claude-config main")]
+  TR -->|"memory-commit-sweep (local only)"| LCOM["local commits"]
+  LCOM -.->|"07:30 ET push-fleet-heartbeat.ps1 backup leg:<br/>ff-only else clean merge, retry once on lost race, fail-OPEN"| GATES
+  FLAGS["backup-push-failed.json / -ok.json"] -.signal.-> HUMAN["human / health checks"]
+  GH -->|"ora-checkout-merge-forward<br/>(refuses on dirty index, in-progress op, foreign claim;<br/>merge, never rebase)"| TR
+  GH -.->|"git clone + secrets per MIGRATION_RUNBOOK<br/>(2026-06-11 base, corrections 2026-10-06)"| DISK
+  SC["backup-session-context.py (scrubbed local copy)"] -.-> LOCALONLY[("local only: session-context.md,<br/>confidential-terms.json")]
+  OFFSITE["Offsite copy of untracked state (credentials, terms, registries): none found in tree"]:::warn
+  classDef warn color:#b00,stroke:#b00

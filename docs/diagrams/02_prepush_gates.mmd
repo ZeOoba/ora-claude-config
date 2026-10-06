@@ -1,0 +1,14 @@
+%% Verified: .git/hooks/pre-push (shim, untracked) + hooks/git-prepush-confidential-scan.py:7-26
+%% diagram-verified: 2026-10-06
+flowchart LR
+  PUSH["git push (manual, safe-push.py, or<br/>push-fleet-heartbeat.ps1 backup leg)"] --> SHIM[".git/hooks/pre-push shim<br/>(UNTRACKED, re-install per clone)"]
+  SHIM --> G1["1 doctrine gate<br/>doctrine-integrity-probe (override-able)"]
+  G1 -->|pass| G2["2 hook-tests gate<br/>runs hooks/tests + maintenance tests as subprocesses<br/>(~11-12 min; override-able)"]
+  G2 -->|pass| G3["3 confidential scan<br/>git log -p over pushed range only<br/>(FAIL-CLOSED)"]
+  G3 -->|pass| REM[("origin")]
+  G1 -.block.-> X["push refused"]
+  G2 -.block.-> X
+  G3 -.block.-> X
+  CI["GitHub Actions: NO test workflow<br/>(only fleet-deadman + claude-ci-fix)"]:::dim
+  REM -.-> CI
+  classDef dim stroke-dasharray: 4 3,color:#777
