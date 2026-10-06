@@ -1,6 +1,11 @@
 # Claude Code / Cowork System Inventory
 
-> **Generated 2026-09-14 10:06 ET** by `ora-weekly-hygiene` Block H. Full overwrite every run — this file is a snapshot, not a history. Report-only: Block H flags findings, it never fixes them.
+> **Generated 2026-10-06 15:45 ET** — MANUAL refresh (repo-eval Phase 0, worktree branch
+> `docs/phase0-ci-hardening`), not a Block H run. The normal writer is `ora-weekly-hygiene`
+> Block H (full overwrite every run — this file is a snapshot, not a history; report-only).
+> The previous stamp (2026-09-14) was 22 days old because Block H had not overwritten it.
+> **Treat this file as STALE once its stamp is more than 8 days old**; re-run
+> `python maintenance/fleet-status.py --summary` for live fleet state.
 
 ## Toolchain
 
@@ -14,40 +19,63 @@
 | ripgrep | 14.1.1 |
 | GitHub CLI | 2.96.0 (2026-07-02) |
 
-`gh` was probed at its full path `C:\Program Files\GitHub CLI\gh.exe` — bare `gh` may not resolve on a given session's PATH, so a "not found" from the bare name is not evidence of absence.
+Unchanged since 2026-09-14. `gh` was probed at its full path `C:\Program Files\GitHub CLI\gh.exe`
+— bare `gh` may not resolve on a given session's PATH, so a "not found" from the bare name is
+not evidence of absence.
 
 ## Plugins
 
-4 entries in `enabledPlugins` (down from 5 at the 2026-09-07 run), **2 enabled**:
+2 entries in `enabledPlugins` (down from 4 at the 2026-09-14 run), **2 enabled**:
 
 - `superpowers@superpowers-marketplace` — enabled
 - `pr-review-toolkit@claude-plugins-official` — enabled
-- `code-review@claude-plugins-official` — disabled
-- `commit-commands@claude-plugins-official` — disabled
 
-**CHANGE since 2026-09-07: `claude-md-management@claude-plugins-official` is gone from both `settings.json` → `enabledPlugins` and `plugins/installed_plugins.json`** — it was disabled last run, not enabled, so this looks like a clean uninstall rather than a config-loss incident; flagged here only because it's a change worth a human glance, not acted on.
+**CHANGE since 2026-09-14:** the two previously-disabled entries (`code-review@claude-plugins-official`,
+`commit-commands@claude-plugins-official`) are gone from `settings.json` → `enabledPlugins`, and
+`plugins/installed_plugins.json` now lists the same 2 plugins (1:1 with `enabledPlugins`). Both
+were disabled, so this reads as a clean uninstall, not config loss.
 
-**Duplicate-marketplace check: 0 flags.** No plugin name appears under two marketplace keys with more than one copy `true`. `installed_plugins.json` cross-checked: 4 top-level plugin entries, matches `enabledPlugins` 1:1.
+**Duplicate-marketplace check: 0 flags.**
 
 ## Hooks, agents, commands
 
-- **Hooks** (`~/.claude/hooks/`): top-level entries include eos-gate-sentinel, eos-evidence-gate, eos-plan-gate, eos-plan-marker, eos-claude-md-guard, confidentiality-guard, rules-md-guard, commit-provenance-recorder, registry-write-guard, git-prepush-confidential-scan, fleet-session-hook, repo-freshness (.py), plus `lib/`, `tests/`, `sessions/`, `archive/`, `bin/`, `__pycache__/` subdirectories. Full enumeration exceeded this block's read window (100+ files including per-session override-token artifacts under `sessions/_archive_override_tokens/`) — spot-checked, not exhaustively diffed against `settings.json` → `hooks` bindings this run.
-- **Agents** (`~/.claude/agents/`): 17 — adversarial-reviewer, comms-qc-reviewer, dd-package-sweep, deal-flow-triage, deal-recon, estoppel-reconciler, insurance-declaration-checker, lease-abstract-verifier, noi-opportunity-scout, open-items-triage, portfolio-anomaly-scout, psa-redline-checker, repro-isolator, security-auditor, site-qc-reviewer, tax-appeal-scout, underwriting-checker. (2026-09-30: +adversarial-reviewer, +noi-opportunity-scout previously omitted from this list, −lease-sweep retired.) (Up from 9 at the 2026-09-07 run — 7 new: dd-package-sweep, estoppel-reconciler, insurance-declaration-checker, lease-abstract-verifier, open-items-triage, repro-isolator, tax-appeal-scout.)
-- **Commands** (`~/.claude/commands/`): 13 — build, cleardisk, cleardisk-sessions, debug, handoff, heavy, open-sessions, plan, ram, refactor, research, ship, solo. (2026-10-01: `verify` retired — copy at `~/.claude/archive/commands/`, local-only; `cleardisk-sessions` was missing from this list.)
+Tracked counts are from `git ls-tree origin/main` at `11cce1d` (2026-10-06); on-disk counts are
+from the live `~/.claude` directory.
 
-## Scheduled-task fleet (via `fleet-status.py --summary`, 2026-09-14T10:06:18)
+- **Hooks** (`hooks/`): 36 top-level `.py` hook scripts, 19 `lib/` modules, 61 `tests/test-*.py`
+  suites. `settings.json` wires 28 hook `command` entries across 6 events (UserPromptSubmit,
+  PreToolUse, PostToolUse, SessionStart, Stop, SessionEnd); PreToolUse Edit/Write and Bash calls go
+  through `pretooluse-dispatcher.py` (see README §4a and `docs/diagrams/01_hook_lifecycle.mmd`).
+- **Agents** (`agents/`): **17 tracked**, **21 on disk**. The 4 on-disk-only definitions —
+  `listing-channel-scout`, `listing-poster`, `listing-syndication-auditor`,
+  `vacancy-listing-packager` — are untracked new files in the live checkout (not ignored, never
+  committed on any branch). Flagged for a human glance; not acted on.
+  Tracked: adversarial-reviewer, comms-qc-reviewer, dd-package-sweep, deal-flow-triage,
+  deal-recon, estoppel-reconciler, insurance-declaration-checker, lease-abstract-verifier,
+  noi-opportunity-scout, open-items-triage, portfolio-anomaly-scout, psa-redline-checker,
+  repro-isolator, security-auditor, site-qc-reviewer, tax-appeal-scout, underwriting-checker.
+- **Commands** (`commands/`): 13 tracked and on disk — build, cleardisk, cleardisk-sessions,
+  debug, handoff, heavy, open-sessions, plan, ram, refactor, research, ship, solo.
 
-- Total tracked: **67** (enabled 66 / disabled 1) — cc=38, lams=28.
-- Never-ran: 6 (ora-counsel-review-standard-positions-2027, ora-county-sales-monitor, ora-exit-cap-spotcheck, ora-gis-endpoint-liveping, ora-passed-deal-tracker, ora-pm-monthly-billing) — 0 overdue by cadence.
-- One-time fireAt: 2 (ora-counsel-review-standard-positions-2027, ora-lams-fleet-resume-20260911) — 1 EXPIRED (ora-lams-fleet-resume-20260911), normal completion.
-- Missed single cycle (open at generation time): 3 — ora-deal-aging-sla (165.4h), ora-health-guard-fail-aging-nudge (165.4h), ora-lease-snapshot-refresh (163.5h). Point-in-time only; may have self-healed since.
-- Pause-explained (NOT missed): 3 — ora-cc-schematic-refresh, ora-command-center-mirror-drift-check, ora-sofr-direct-prefetch.
-- Throttle skips last 24h: 132 across 13 tasks (top: ora-ar-feed-sweep 11, ora-cc-snapshot-refresh 11, ora-checkout-merge-forward 11, ora-deal-aging-sla 11, ora-ground-truth-auditor 11, ora-lease-snapshot-refresh 11, ora-memory-commit-sweep 11, ora-pm-daily-crons 11).
-- Same-time collisions: 0. Duplicate registrations: 0.
-- VERDICT: ATTENTION (3 missed cycles + 132 throttle skips in 24h — consistent with the documented AM catch-up-burst pattern, not flagged as a new incident).
+## Scheduled-task fleet (via `fleet-status.py --summary`, 2026-10-06T15:44:59)
 
-**Retired-in-spec-but-live-in-registry cross-check:** 12 SKILL.md files under `scheduled-tasks/` contain the string "RETIRED" somewhere in body text. Of these, 5 are themselves archived task dirs (already out of the live registry by location: `_archive_2026-08-09_retired/`, `_archive_2026-07-16_retired/`, `_archive_2026-07-07_retired/` x3) — consistent, not a mismatch. The remaining 7 (ora-health-guard, ora-weekly-hygiene, ora-task-integrity-guard, ora-pm-ledger, ora-doctrine-integrity-guard, ora-deal-sourcing-scan, ora-am-brief) are all live core fleet members; spot-checked two (`ora-am-brief`, `ora-health-guard`) and confirmed the string refers to a *different, already-decommissioned* artifact (e.g. "LAMS twin retired") in body text, never the live task's own frontmatter `description` declaring itself retired. Did not spot-check the remaining 5 individually this run (all are long-standing, previously-clean core tasks) — **0 mismatches found on the sample checked; full 7-way frontmatter diff not repeated this run**, noted as a lighter-touch pass than 2026-09-07's full check.
+- Total tracked: **88** (enabled 15 / disabled 73) — per-fleet enabled: cc=14, lams=1.
+  (2026-09-14: 67 total, 66 enabled. The large disabled share is a fleet-level pause/state
+  change since the last run; verify against `list_scheduled_tasks` before acting.)
+- Never-ran: 21 — of which **5 overdue** by cadence: ora-incentive-registry-refresh [cc],
+  ora-passed-deal-tracker [cc], ora-sourcing-construction-verify [cc],
+  ora-exit-cap-spotcheck [lams], ora-gis-endpoint-liveping [lams].
+- One-time fireAt: 6 — 3 EXPIRED (ora-county-sales-refresh-1003,
+  ora-lams-fleet-resume-20260911, ora-notion-trial-expiry-reminder), all normal completions.
+- Missed single cycle (open at generation time): 0. Pause-explained: 0 (0 recorded windows).
+- Throttle skips: 0 (all-time and last 24h). Same-time collisions: 0. Duplicate registrations: 0.
+- AM pileup (05:00-09:30): 23 tasks.
+- VERDICT: ATTENTION — 5 never-ran past their expected cadence. Snapshot, not live state.
+
+**Retired-in-spec cross-check:** not repeated in this manual refresh (last done 2026-09-14,
+0 mismatches on the sample checked).
 
 ## Guard
 
-Block H is read-only except this one file. No `settings.json`, hook, `CLAUDE.md`, or memory-file edit was made by this block.
+This refresh edited only this file (in a worktree). No `settings.json`, hook, `CLAUDE.md`, or
+memory-file edit was made.

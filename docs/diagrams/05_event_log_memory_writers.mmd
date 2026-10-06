@@ -1,0 +1,21 @@
+%% From maintenance/append-event-log.py:1-45, maintenance/memory-commit-sweep.py:1-40, docs/authority-registry.md
+%% diagram-verified: 2026-10-06
+flowchart TB
+  S1["Session / Cowork handback"] -->|"append-event-log.py (SOLE writer)"| EL[("memory/event_log.md newest-first")]
+  EL -. "mtime-guard retry, atomic os.replace" .-> EL
+  EL -. "blocked: in-place fallback (backup + read-back verify)" .-> EL
+  EL -. "still locked: SPOOL to event_log.md.pending/, drained next run" .-> EL
+  EL --> RO["rollover-event-log.py"]
+  RO --> ARC[("memory/_archive/event_log_DATE.md (up to 1.3 MB each)")]
+  S2["Sessions: Edit/Write memory files directly"] --> MF[("memory/*.md (421 tracked incl. MEMORY.md index)")]
+  G1["PreToolUse: memory-index-guard (MEMORY.md)"] -.-> MF
+  G2["PostToolUse: memory-nag-correction"] -.-> MF
+  G3["Bash: memory-orphan-link-guard (commit time)"] -.-> MF
+  MF --> SW["memory-commit-sweep.py (scheduled; quiet-window, staged-set verify, no push)"]
+  EL --> SW
+  SW --> LC["local commit on whatever branch is checked out"]
+  OI["allocate-oi-id.py"] --> OIT[("open-items-tracker.md 733 KB + history 508 KB")]
+  MIP["memory-integrity-probe.py (detects orphans / dead pointers)"] -.reads.-> MF
+  LC --> BK["backup path (diagram 06)"]
+  NOTE["Three write disciplines in one dir: spooled appender (event log),<br/>direct Edit (memory files), id allocator (tracker)"]:::warn
+  classDef warn color:#b00,stroke:#b00
