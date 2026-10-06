@@ -5,11 +5,28 @@ Execute on the NEW machine as Phase B, one section at a time, in order. Re-verif
 fact against live state first — this doc is as-of 2026-06-11. Full sprint context:
 `Claude_Workspace/00_Governance/outputs/2026-06-11_claude-setup-audit-rev2-grade-72.md`.
 
+> **Corrections (re-verified 2026-10-06 against `origin/main` 11cce1d).** Two facts below
+> have drifted and are corrected in place:
+> 1. *Hook command count.* `settings.json` now carries **28 hook `command` entries**
+>    across 6 events (plus the `statusLine` command), 27 of which hardcode
+>    `C:/Users/Owner/...` paths — not "9". The username-pinning rationale is stronger, not weaker.
+> 2. *Push-gate scan scope.* `hooks/git-prepush-confidential-scan.py` (header L1-26) scans
+>    `git log -p` over the **pushed range only** — `remote_sha..local_sha` for an existing
+>    ref, `origin/<default>..local_sha` for a brand-new ref, the full history only for an
+>    orphan branch — not `git log -p --all`. The unbounded scan was retired 2026-07-25
+>    because it re-flagged commits already public on `origin/main`. The scan is
+>    fail-closed and now also checks credential patterns (`hooks/lib/secret_patterns.py`).
+>    The `.git/hooks/pre-push` shim runs three gates in order (doctrine gate, hook-tests
+>    gate, then this scan); see README §4a.
+> For current counts and layout, prefer `README.md` §3 and `docs/system-inventory.md`
+> (check its "Generated" stamp first).
+
 ## B0. Decisions already made (Gabriel, 2026-06-11)
 - **Username: pin `Owner`.** Create the Windows profile as a LOCAL account named `Owner`
   at OOBE so the profile dir is exactly `C:\Users\Owner` (Microsoft-account setup
   auto-derives folder names — do it deliberately, attach the MS account after).
-  WHY: 15+ load-bearing hardcoded paths — all 9 hook commands in settings.json, the
+  WHY: 15+ load-bearing hardcoded paths — the hook commands in settings.json (9 as of
+  2026-06-11; 28 entries, 27 path-bearing, as of 2026-10-06), the
   integrity-guard engine paths, send-via-outlook.ps1's log path, SKILL.md output paths.
   If the profile dir differs, EVERY hook fails at first session.
 - **Backup remote: `ZeOoba/ora-claude-config` (PRIVATE).** Created + pushed 2026-06-11;
@@ -25,8 +42,11 @@ fact against live state first — this doc is as-of 2026-06-11. Full sprint cont
   Confidential terms are scrubbed from all tracked files (verified 0 hits across the
   full live terms list). NEVER commit a deal term to it; the guard test suite derives
   its fixtures from the untracked terms file. **STANDING RULE: any pre-push
-  confidentiality gate must scan `git log -p --all` (full history), not just the
-  tree — a clean HEAD does not mean a clean push.** The pre-purge history lives on
+  confidentiality gate must scan the full diff (`git log -p`) of every commit being
+  pushed, not just the tree — a clean HEAD does not mean a clean push.** (As written
+  2026-06-11 this said `git log -p --all`, full history; superseded 2026-07-25 by the
+  pushed-range scan described in the Corrections note above. The principle — diffs, not
+  the tree — is unchanged.) The pre-purge history lives on
   LOCAL-ONLY branch `archive/pre-purge-20260611` — NEVER push it; exclude it from any
   future remote (it does not migrate via clone; if migrating by disk copy, leave it).
 
