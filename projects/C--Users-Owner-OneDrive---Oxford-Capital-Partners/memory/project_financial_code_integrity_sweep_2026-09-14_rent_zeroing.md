@@ -1,0 +1,33 @@
+---
+name: project-financial-code-integrity-sweep-2026-09-14-rent-zeroing
+description: "2026-09-14 weekly financial-code integrity sweep found a real HIGH defect: commit 85dfecf silently zeroed rent on 3 leases (incl. one ACTIVE, Tyson Consulting Group at 29000 Information Lane #202), deleting $130,929.96 NOI / $1,870,428 value with zero guard coverage. No governor breach. Notion completion row could not be written (quota exhaustion)."
+metadata:
+  type: project
+  originSessionId: 229589ab-5061-42af-8fe0-3c2b38246335
+  modified: 2026-09-18T16:47:04.057Z
+---
+
+**Finding:** the weekly `ora-financial-code-integrity-sweep` (2026-09-14, oxford-command-center repo) ran its adversarial refute workflow (`wf_f4b32c62-0cf`, 5/5 lenses, full coverage via opus fallback after Fable hit its monthly spend limit on every lens) against the trailing week's single financial-data commit, `85dfecf` (2026-09-09, "Auto-refresh: snapshot sync"). All 5 lenses independently converged on the same root defect.
+
+**The defect:** three lease rows in `data/snapshots/portfolio.json` had `monthlyRent`/`rentPerSf`/`annualRent` zeroed in place (rows kept, ids/dates/status untouched) — CJ's Tint Shop ($22,200/yr) and Granite Tops & More ($89,952/yr), both status Expired, plus **Tyson Consulting Group (29000 Information Lane #202) — status ACTIVE through 2027-01-31 with a 3% escalation still scheduled 2027-02-01, and $6,063.09 of live AR — now showing $0/yr rent.** Sum = $130,929.96, which is exactly the amount workbookTotals.noi and .value fell. 29000 Information Lane's LTV moved 0.3741→0.4063 on an unchanged loan balance, crossing the 0.40 per-property fallback ceiling in `src/analytics/conditions.ts` as a pure denominator artifact (not the protected aggregate LTV governor, not a real debt event). No guard in the repo caught it: `evaluateAnomalyFloor` is count-only, `checkSnapshot` ties Σrent/Σvalue/ΣNOI to the workbook's own Portfolio Total cells (which co-moved), and `lease-snapshot-drift-check.ts` only diffs `leaseEnd`, never `annualRent`, on retained lease ids.
+
+**Why: unresolved** — could not be determined from the repo alone whether the source workbook cells are genuinely wrong or the tenant actually stopped paying. The Tyson row is the one that can't be legitimate as-is: an in-force lease with 4 months left and a live AR balance cannot also be a $0/yr lease.
+
+**Secondary findings (5 medium, 3 low):** cash snapshot date corruption (current balance overwrote a 2-months-stale history slot, corrupting every entity's trailing-3-month average); `matchTenantToLease()` tie-break is rent-roll row-order dependent (verified: reversing the roster flips 4/312 real tenant names); the AR "never auto-attribute to a dead lease" guard only excludes literal `status==='Expired'`, missing `'Vacant'` and this commit's own newly-created zero-rent-but-Active lease; an AR review-queue duplicate that a name-keyed SKIP entry can't suppress because the queue row carries no tenant name; and a 5th recurrence of `data/ar-mapping-cache.json` sitting outside the sweep's enumerated scope list (previously caught 07-24, 08-11, 08-17, 08-24).
+
+**Why this matters:** [[reference_governor_ltv_remediation_2026-07-24|the governor-remediation history]] shows this class of "green gate, wrong number" defect is recurring in this codebase; this is the first instance caught on a pure DATA commit (no code change, no test corpus at all).
+
+**How to apply:** before trusting the current portfolio.json for 29000 Information Lane or Sepich Portfolio NOI/DSCR/LTV, have someone re-verify the Tyson Consulting Group, CJ's Tint Shop, and Granite Tops rent cells against the source workbook (`Master Excel Template Company Wide -- Oxford.xlsx`).
+
+**DATA HALF RESOLVED 2026-09-18 — all three zeroed leases mirror the source of record; none is a data defect.** Checked against the live Master Workbook `Master Tenant Rent Roll` (as of 2026-09-18; extract archived at `Claude_Workspace/_Archive/2026-09-18_RenewalReconciliation/rent_roll.tsv`):
+- **Tyson Consulting Group** (29000 Information Lane 202): workbook row shows $0 rent, `Notice to Vacate = Yes`, class "Vacant — notice given"; the workbook's own vacancy schedule lists unit 202 vacant from **2026-08-31** (asking $1,900/mo). **Gabriel ruled in-session 2026-09-18 that the $0 is correct.** The "can't be legitimate" reasoning above was wrong on its premise: a lease running to 2027-01-31 CAN carry $0 when the tenant has vacated early under notice. The `Status = Active` label is what misled — the workbook has no "vacated early" status.
+- **Granite Tops & More** (Zettler 2000-2002, 11,160 SF): workbook $0, `Expired`, notice = Yes, "Vacant — lease expired"; vacancy schedule shows vacant from **2026-07-31** (asking $8,500/mo). HubSpot renewal deal was closed-lost 2026-07-21.
+- **CJ's Tint Shop** (29000 Information Lane 105): lease expired 2026-08-31, tenant left; unit re-let to Capital Property Recovery from 2026-09-10 at $1,700/mo. Closes `OI-218`.
+
+Consequences: the −$130,929.96 NOI / −$1,870,428 value move in `85dfecf` was a REAL leasing event, not corruption. The 29000 Information Lane per-property LTV move (0.3741→0.4063) is therefore a real NOI decline on an unchanged loan, not a "pure denominator artifact" — it still is not the protected aggregate governor and no governor constant was touched or should be on this basis.
+
+**STILL OPEN — the code half is unchanged and still valid:** no guard in oxford-command-center detects `monthlyRent`/`annualRent` being zeroed on a retained lease id (`evaluateAnomalyFloor` is count-only, `checkSnapshot` ties to workbook totals that co-move, `lease-snapshot-drift-check.ts` diffs only `leaseEnd`). This time the zeroing was legitimate; a bogus one would look byte-identical. The right fix is a rent-delta check that REPORTS zero-outs with the row's `status`/notice context for a human to confirm — not one that blocks them. The 5 medium / 3 low secondary findings above were NOT re-examined on 2026-09-18.
+
+**BACKFILLED 2026-09-18:** the Notion completion row was recreated verbatim from the fallback email once the block quota lifted (14-day trial) — [ORA Financial-Code Integrity Sweep — 2026-09-14 [BACKFILLED]](https://app.notion.com/p/3df6ecd89e598120b2acd918c8c499d6). It is clearly marked as a backfill (source: the same email, sent 2026-09-14 to ggoldberg@oxfordra.net). [[reference_notion_free_block_quota_exhausted_2026-09-12]] has the fuller OI-288 history.
+
+Related: [[reference_notion_free_block_quota_exhausted_2026-09-12]] · [[project_governor_ltv_remediation_2026-07-24]] · [[reference_ar_review_queue_has_no_resolver]] · [[reference_ar_subsystem_exists_but_dark_2026-08-16]]

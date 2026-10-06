@@ -10,6 +10,7 @@
 - [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
+- **[Portfolio LTV — current, verified](project_portfolio_ltv_current.md)** — 18.71% as of 2026-09-23 (`00_Home!G7`, live read); internal only, no numeric LTV in counterparty/public text; supersedes 17.9% and every "~15%"
 - **→ [Projects & system sub-index](INDEX_projects_system.md)** — audit revisions 7–25, oxfordra.net, Command Center, platform/governance, PFI, landed + closed work. **Not auto-loaded** — open it before starting project/audit/website/CC work
 - [System of Record](00_system_of_record.md) — architecture + cold-start runbook + fleet/connector/secret inventory
 - [Event Log](event_log.md) — append-only system changes, deal milestones, decisions (newest first)
@@ -20,12 +21,14 @@
 - **[Regression root-cause audit 08-28](project_regression_root_cause_audit_2026-08-28.md)** — 6-repo fix→refix pattern, 3 shared mechanisms (no-source-of-truth · heuristic-not-structure · no-real-failure-gate), report-only, [artifact](https://claude.ai/code/artifact/24cabf38-d976-4312-819e-691492696132)
 - **OPEN/BLOCKED:** [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open) · [primary checkout main-move blocked 08-12](project_primary_checkout_main_move_blocked_2026-08-12.md) (CLEARED 08-16: the 117-file/15-session blocker no longer holds — re-measure, never cite a count from here; rule stands: don't force-switch, isolated worktree only) · [rent-comp retirement process gap 08-13](project_rent_comp_retirement_process_gap_2026-08-13.md) (data restored 08-12; no-dependency-check + no-skip-gate PROCESS gaps still open, task_cf7b9098 spawned)
 - **PLANNED, awaiting Gabriel:** [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
-- **⛔ [Automation Audit Rev 26 09-22](project_automation_audit_rev26_2026-09-22.md)** — the latest pass; earlier revisions are listed in the Projects & system sub-index. ora-am-brief re-enabled (it sat outside the 09-28 resume list); store lags repo on 2 governor-facing skills (a Gabriel-only re-import). Chains [Rev 25](project_automation_audit_rev25_2026-09-11.md)
+- **⛔ [Automation Audit Rev 29 10-02](project_automation_audit_rev29_2026-10-02.md)** — latest pass (earlier: Projects & system sub-index; Rev 27 pointer moved there). Fleet 8/87 enabled, unexplained; CLAUDE.md 2w from FAIL; backup push failing; audit-skill copies drift
+- **[R28 plugins/connectors 09-30](project_automation_audit_rev28_plugins_connectors_2026-09-30.md)** — Desktop Commander KEEP (19,310 calls); Notion trial lapses ~10-02; send/CMS guard gap; chains Rev 27
 - **⚠️ [Run-once guard EXISTS as block-sentinel.py](reference_run_once_guard_is_block_sentinel_not_run_once_guard_ps1.md)** — shipped 08-09 (PR #39/#40); NOT `run-once-guard.ps1`, exits are 10/11/12 not 3/4. Re-specced from scratch once already — verify before building
 - **[governor-drift-probe DSCR-changelog-scaling-multiplier fix + duplicate-session finding, 08-22](project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md)** — landed `ecf7b42`; also caught 3+ parallel sessions independently fixing the identical bug — flag for Gabriel
 - [Governor-LTV remediation PR #233](project_governor_ltv_remediation_2026-07-24.md) — 11 shipped; OPEN: debt-scoring ltv gap + silent-refusal reload path
+- **[Financial-code sweep 09-14 — rent-zeroing](project_financial_code_integrity_sweep_2026-09-14_rent_zeroing.md)** — DATA half RESOLVED 09-18: all 3 zeroed leases (CJ's, Granite Tops, Tyson) mirror the workbook; tenants left, −$130,929.96 NOI is real. STILL OPEN: no guard detects rent zero-outs
 - **⛔ [CC branch-protect/mjs-dmts gaps](project_ccm_mjs_dmts_parity_and_branch_protection_gap_2026-08-24.md)** — OI-205/OI-206; 08-25: OI-205 now blocks ALL direct pushes to CC `main` — both snapshot tasks strand
-- [HubSpot lease-renewal pipeline stalled 08-23](reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md) — all 43 deals stuck at appointmentscheduled since 03-27, incl. tenants expiring within days
+- [HubSpot lease-renewal pipeline stalled 08-23](reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md) — open deals stuck at appointmentscheduled since 03-27, incl. tenants expiring within days. **Count anchor withdrawn 09-02 — re-measure, never cite one from that file**
 - **⛔ [Northwood/EGFLLC $2.8M loan 07-27](project_northwood_egflc_loan_miscategorized_2026-07-27.md) — REOPENED. Reclassified 08-03, REVERSED unlogged 08-09 as a "duplicate"; Gabriel ruled C 08-10: INTERNAL DEBT REPORTING FROZEN until Eric produces the source doc. Quote external debt ($10,627,017) only — never Total Debt/internal. No governor impaired**
 
 ## Markets
@@ -35,7 +38,7 @@
 - **⛔ [openpyxl re-save breaks exceljs workbook parse 08-14](reference_openpyxl_resave_breaks_exceljs_workbook_parse_2026-08-14.md)** — Exit 3 `Cannot read properties of undefined (reading 'comments')` = absolute comment rel targets, NOT a lock or corruption (zip clean, all parts present). Breaks both snapshot tasks AND the mirror deploy (there it reads only as `build:mirror failed (1)`) until Excel rewrites the file
 
 ## Reference
-- **⛔ [Notion free-block quota exhausted 09-12](reference_notion_free_block_quota_exhausted_2026-09-12.md)** — [OI-288](open-items-tracker.md#OI-288). `notion-create-pages` fleet-wide fails ("used all of its free blocks"); genuine plan-tier ceiling, NOT the debunked query-quota myth below — a plan upgrade actually fixes this one. Reads/updates to existing pages unaffected
+- **[Notion free-block quota — RESOLVED 09-30: upgraded to Plus, live create verified](reference_notion_free_block_quota_exhausted_2026-09-12.md)** — [OI-288](open-items-tracker-history.md#OI-288) CLOSED. 21+3 pages backfilled 09-18 (Daily Briefs/Inbox Pre-Briefs/EOD Ledgers/Doctrine checks/financial sweep/skill audit/Rate History), each marked [BACKFILLED] with source cited
 - ⛔ **[Bounded pause VOIDS overlapping efficacy checks 08-21](reference_bounded_pause_voided_overlapping_efficacy_checks_2026-08-21.md)** — a paused task and a missed task are indistinguishable in `send-log.txt`; the 08-17 pause manufactured 3 fake misses in `ora-pm-ledger`'s 08-13→08-19 window (4 of 4 eligible days actually delivered ON-SLOT). Check `lastRunAt` + the FleetPause restore ledger BEFORE any efficacy verdict. Also: `recordedSkips` is ROLLING (~6d) — 107→4 is retention decay, not improvement
 - **⛔ [Transcript mtime ≠ event date — hookify already stopped 08-13](reference_hookify_noop_hooks_every_tool_call.md)** — hookify's no-op hooks are HISTORICAL, nothing to disable. The reusable lesson: bucket transcript metrics by each event's own `timestamp`, never by file mtime — a resumed session's .jsonl is touched today but holds week-old lines, which made a dead finding read as live
 - **⛔ [LastRunTime is re-stamped on Modern Standby resume 08-25](reference_lastruntime_restamped_on_modern_standby_resume.md)** — a long wall-clock scheduled-task run on this laptop is almost always SLEEP, not a hang (135.1 min wall − 126.9 suspended = 8.3 min real). Never bound it with a wall-clock timeout. `fix/deploy-mirror-deploy-timeout` is an EMPTY branch — the SKILL.md pointer to it is wrong
@@ -66,6 +69,7 @@
 - [Polling-claim loop is the default](feedback_polling_claim_loop_default_2026-08-13.md) — contested claim/staged state: wait+recheck (1-4 min cleared it), don't force
 - [Check active claims before optimization-queue work](feedback_check_active_claims_before_optimization_queue_work_2026-08-13.md) — 2 of 9 batch items were already claimed by other live sessions
 - [Apply findings with outcomes — reusable macro](feedback_apply_findings_with_outcomes_macro.md) — proven twice (CC-round, ora-skills-round); triage → claim by touched path → fix → re-report outcomes
+- [ora-skills tests: zero-tests rule](feedback_ora_skills_tests_zero_tests_rule.md) — stdlib unittest + `__main__` only; pytest-style runs 0 tests yet "ok"; run_suite.sh fails EMPTY/BARE (PR #80)
 - [REFUTE differential harness](reference_refute_differential_harness.md) — guard/probe regex edits: old-vs-new differential battery; judge deltas, not absolutes
 - [Refute gate's path scope went stale TWICE](reference_refute_gate_excludes_server_workbook.md) — never trust a path-scoped `git log` returning empty; diff it against an unscoped log first
 - [git status --short hides branch, use -sb](feedback_git_status_short_hides_branch_use_sb.md) — before any commit in a shared checkout; generalizes [[rules.md §14]]
@@ -88,6 +92,9 @@
 - [Auto-review blast-radius gate](feedback_auto_review_blast_radius_gate.md) — 07-24: blocking for hooks/financial code; needs an AgentTool carve-out
 - [config-write-guard: no fast-path](feedback_config_write_guard_no_fast_path.md) — 08-14: investigated and declined; single-line ≠ low-risk in hooks/settings.json/CLAUDE.md
 - [Artifact staleness scan false positives](feedback_artifact_staleness_scan_mtime_false_positives.md) — mtime can't measure a live-read artifact; LIVE/FROZEN/HYBRID convention
+- [Relay a model's output in full](feedback_relay_model_output_in_full.md) — 09-18: Cowork cited text it was never sent; summarizing a relay yields confident invention, not an error
+- [Worktrees freeze stale memory](reference_worktrees_freeze_stale_memory.md) — 09-18: a 163-behind worktree recalled a withdrawn count as its `description:`; search all worktrees, not just the live tree
+- [Livingston Heartland NEVI signed](project_livingston_heartland_nevi_signed.md) — 2026-09-23 site-host agreement executed; ORA pays station power, no host fee (draft terms)
 
 ---
 *Index holds pointers, not narration — history in [event_log.md](event_log.md).*
