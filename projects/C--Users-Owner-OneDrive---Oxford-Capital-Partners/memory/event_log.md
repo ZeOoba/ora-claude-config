@@ -5,12 +5,16 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-02T21:27:42.566Z
+  modified: 2026-10-06T18:12:57.124Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-10-06 — Scheduled-task model standard bumped to claude-sonnet-5-5 (medium)
+
+Gabriel-directed. Recreated 13 enabled CC/MCP tasks from a Sonnet 5.5/medium session (ids unchanged; SKILL.md bodies restored byte-identical, backups `SKILL.md.bak-2026-10-06-model-sonnet55`), tagged `[MODEL: claude-sonnet-5-5 | set 2026-10-06]`. `ora-master-workbook-ingest` skipped (mid-run; its run session already showed sonnet-5-5/medium without recreation, so runs may follow the app default). Deleting registry entries archived old run sessions for ora-am-brief (2), ora-loopnet-listings-sync (1), ora-pr-land-watch (6). Notifications set off on recreated tasks. Standard file updated; ~45 paused tasks keep old tags. Verify ora-am-brief run model on 2026-10-07.
 
 ## 2026-10-02 — ora-loopnet-listings-sync v1.1 live and re-enabled (portfolio availability badges)
 
