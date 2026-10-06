@@ -596,10 +596,76 @@ def _shell_writes_workbook(text):
     # redirect, etc -- naming the workbook is still a real write path (REFUTE B2:
     # `copy /Y t.xlsx <master>`, `shutil.copy(..., <master>)`). Reuses the same
     # word-boundary-anchored battery config-write-guard.py already trusts.
-    if TOOL_PATHS_LOADED and shell_may_write(text):
+    if TOOL_PATHS_LOADED and shell_may_write(_neutralize_quoted_heredoc_bodies(text)):
         return (True, "mutating shell command names the master workbook")
 
     return (False, "")
+
+
+# The ONLY command shape whose `>` characters are exempted (see the function below):
+#   [cd <path> &&] python[3][.exe] - <<'DELIM'  ...body...  DELIM        (and nothing else)
+_PY_STDIN_HEREDOC_RE = re.compile(
+    r"\A[ \t]*(?:cd[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|<>`$]+)[ \t]*&&[ \t]*)?"
+    r"(?:python3?|py)(?:\.exe)?[ \t]+-[ \t]*<<[ \t]*'([A-Za-z0-9_]+)'[ \t]*\r?\n"
+    r"(.*)\n[ \t]*\1[ \t]*\r?\n?[ \t\r\n]*\Z", re.DOTALL)
+
+
+def _neutralize_quoted_heredoc_bodies(text):
+    """`text` with the `>` characters in the BODY of a lone `python - <<'DELIM'` heredoc
+    replaced by spaces, ONLY when the whole command is exactly that one heredoc.
+
+    The shared shell_may_write treats a bare `>` as a redirect (breadth over precision,
+    deliberately, for the governance guards). In THIS guard that produced a false
+    positive (2026-10-06): a python comparison (`if i>48`) inside a read-only openpyxl
+    heredoc blocked the sanctioned read path. The body of a quoted-delimiter heredoc is
+    literal text to the shell, so a `>` there is never a redirect.
+
+    WHY SO NARROW. Two adversarial reviews REFUTED broader designs: judging `>` by
+    whether the same line names the workbook (a target held in a variable, on the next
+    line or in a glob slipped through), then a general heredoc scanner (an opener in a
+    comment, a here-string `<<<`, an arithmetic `1<<'3'`, a partly quoted delimiter or
+    a quote-count trick made the scanner believe a heredoc had opened when bash did not,
+    blanking a real redirect on a later line). Recognising a heredoc inside arbitrary
+    shell text needs a real shell parser. So this accepts exactly one shape, anchored at
+    both ends, with no shell text outside the opener line and the body -- there is no
+    later line for a mis-parse to hide a redirect on -- and refuses (returns `text`
+    unchanged, i.e. the old block behavior) if any body line equals the delimiter, since
+    bash would end the heredoc there and run what follows."""
+    m = _PY_STDIN_HEREDOC_RE.match(text)
+    if not m:
+        return text
+    delim = m.group(1)
+    body = m.group(2)
+    if any(ln.strip() == delim for ln in body.split("\n")):
+        return text
+    blanked = _blank_python_operator_gt(body)
+    if blanked is None:
+        return text
+    return text[:m.start(2)] + blanked + text[m.end(2):]
+
+
+def _blank_python_operator_gt(body):
+    """`body` with every `>` that Python's tokenizer reports as an OPERATOR token
+    (>, >=, >>, ->) replaced by a space; a `>` inside a string literal or comment is
+    left alone. None if the body does not tokenize (caller then keeps the old
+    behavior). Third adversarial review: blanking EVERY `>` in the body let a shell-out
+    through (os.system('echo x > M'), subprocess.run('... > M', shell=True)) -- the
+    redirect lives in a string that a shell later runs, so it must stay visible."""
+    import io
+    import tokenize
+    lines = body.split("\n")
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(body + "\n").readline))
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return None
+    for tok in toks:
+        if tok.type == tokenize.OP and ">" in tok.string:
+            (r1, c1), (r2, c2) = tok.start, tok.end
+            if r1 != r2 or r1 - 1 >= len(lines):
+                return None
+            ln = lines[r1 - 1]
+            lines[r1 - 1] = ln[:c1] + tok.string.replace(">", " ") + ln[c2:]
+    return "\n".join(lines)
 
 
 def _block(reason, detail, session_id):
