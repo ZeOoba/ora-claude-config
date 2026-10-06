@@ -42,7 +42,7 @@ HOOK = os.path.join(HERE, "eos-review-gate.py")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 import gitfixture  # noqa: E402
 
-LADDER_TOP = "claude-fable-5-1"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
+LADDER_TOP = "claude-opus-5-5"  # must match eos-review-gate.REVIEWER_MODEL_LADDER[0]
 
 
 # --------------------------------------------------------------------------

@@ -12,14 +12,14 @@ lookup. Resolves in order:
      closing `|`/`]` -- the real production format does this);
   3. the joined session record's `model`, when present;
   4. failing all three (or an audited model outside the known tier table),
-     assume the highest tier and verify at Fable.
+     assume the highest tier and verify at Opus 5.5.
 
 Step 4 is deliberately fail-safe: an unknown model must never silently
 license a CHEAPER verifier than the run it audits (reviewer >= implementer).
 """
 import re
 
-FABLE_MODEL = "claude-fable-5-1"
+TOP_MODEL = "claude-opus-5-5"  # top dispatch tier since 2026-10-05 (was claude-fable-5-1)
 
 # Captures the model id, tolerating one bare trailing word (e.g. "observed")
 # before the required '|' or ']' -- matches the real production tag format:
@@ -28,7 +28,7 @@ MODEL_TAG_RE = re.compile(r"\[MODEL:\s*([a-zA-Z0-9._-]+)(?:\s+\w+)*\s*(?:\||\])"
 
 # Coarse tier ordering (lowest to highest) for "reviewer >= implementer".
 # Unknown models are never assumed cheap -- see resolve_verifier_model step 4.
-MODEL_TIERS = ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5", FABLE_MODEL]
+MODEL_TIERS = ["claude-haiku-4-5-20251001", "claude-sonnet-5", "claude-opus-5", TOP_MODEL]
 
 
 def _tier(model_id):
@@ -65,7 +65,7 @@ def resolve_audited_model(task_record, skill_md_text=None, session_record=None):
 
 def resolve_verifier_model(task_record, skill_md_text=None, session_record=None):
     """The model the VERIFIER must run at: >= the audited run's own model
-    (reviewer >= implementer), or Fable if the audited model could not be
+    (reviewer >= implementer), or Opus 5.5 if the audited model could not be
     resolved, or was resolved to something outside the known tier table
     (fail-safe -- spec Sec 5 Stage 2 step 4).
 
@@ -73,12 +73,12 @@ def resolve_verifier_model(task_record, skill_md_text=None, session_record=None)
     """
     audited_model, source = resolve_audited_model(task_record, skill_md_text, session_record)
     if audited_model is None:
-        return FABLE_MODEL, ("audited model unresolved (registry/SKILL.md tag/session "
-                              "record all absent) -- fail-safe to Fable, never assume cheap")
+        return TOP_MODEL, ("audited model unresolved (registry/SKILL.md tag/session "
+                              "record all absent) -- fail-safe to Opus 5.5, never assume cheap")
     audited_tier = _tier(audited_model)
     if audited_tier < 0:
-        return FABLE_MODEL, ("audited model '{}' not in the known tier table -- "
-                              "fail-safe to Fable".format(audited_model))
+        return TOP_MODEL, ("audited model '{}' not in the known tier table -- "
+                              "fail-safe to Opus 5.5".format(audited_model))
     return MODEL_TIERS[audited_tier], (
         "audited model '{}' resolved via {} -- verifying at >= that tier".format(
             audited_model, source))
@@ -91,14 +91,14 @@ AGENT_TOOL_MODEL_NAMES = {
     "claude-haiku-4-5-20251001": "haiku",
     "claude-sonnet-5": "sonnet",
     "claude-opus-5": "opus",
-    FABLE_MODEL: "fable",
+    TOP_MODEL: "opus",
 }
 
 
 def to_agent_tool_model_name(full_model_id):
     """Map a full model id (as returned by resolve_verifier_model) to the
     short name the Agent tool's `model` parameter accepts (sonnet | opus |
-    haiku | fable). Raises ValueError -- loudly, never silently -- if given
+    haiku). Raises ValueError -- loudly, never silently -- if given
     a full id outside the known map, since silently returning something
     wrong would produce an invalid Agent-tool dispatch."""
     try:
