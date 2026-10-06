@@ -1,7 +1,8 @@
 # LAMS/Cowork Scheduled-Task Model Standard
 
-**Current standard: claude-sonnet-5**
-**Set:** 2026-07-08 (rationale + mechanism: event_log.md, "2026-07-08 (cont.) — LAMS/Cowork scheduled-task fleet standardized onto claude-sonnet-5")
+**Current standard: claude-sonnet-5-5 (effort: medium)**
+**Set:** 2026-10-06 (Gabriel-directed; previous standard claude-sonnet-5, set 2026-07-08 — rationale + mechanism: event_log.md, "2026-07-08 (cont.) — LAMS/Cowork scheduled-task fleet standardized onto claude-sonnet-5").
+**2026-10-06 note:** effort has no tag field and no settable control on `create_/update_scheduled_task`; "medium" is the intended run effort, not a tag-checked value. The 13 enabled CC/MCP tasks other than `ora-master-workbook-ingest` were recreated from a Sonnet 5.5 / medium session and tagged `[MODEL: claude-sonnet-5-5 | set 2026-10-06]`. A scheduled run of `ora-master-workbook-ingest` (never recreated) already showed `claude-sonnet-5-5`/medium, so runs may follow the app default rather than the creating session's model — unconfirmed; check the `ora-am-brief` run session on 2026-10-07 before recreating anything else on this basis. The ~45 paused tasks keep their old tags (exempt while paused; re-tag on re-enable).
 
 ## Why this file exists
 
