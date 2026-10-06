@@ -1,0 +1,38 @@
+%% Verified against README 4b + maintenance/push-fleet-heartbeat.ps1 header + docs/system-inventory.md
+%% (manually refreshed 2026-10-06; previous Block H stamp was 2026-09-14)
+%% diagram-verified: 2026-10-06
+flowchart TB
+  subgraph DESKTOP["Claude Desktop (fires only while open)"]
+    CC["CC/MCP registry (claude-code-sessions/.../scheduled-tasks.json)"]
+    LM["LAMS/Cowork registry (local-agent-mode-sessions/.../scheduled-tasks.json)"]
+  end
+  CCSPEC["~/.claude/scheduled-tasks/id/SKILL.md (tracked: 55 live + 27 archive dirs)"]
+  LMSPEC["OneDrive Claude/Scheduled/id (NOT tracked)"]
+  CC --> CCSPEC
+  LM --> LMSPEC
+  REGW["registration only via create/update_scheduled_task MCP;<br/>registry-write-guard blocks hand edits"] -.-> CC
+  GUARD["ora-task-integrity-guard (itself a fleet task)<br/>guard.ps1 + membership-guard.ps1"]
+  GUARD -->|reads| CC
+  GUARD -->|reads| LM
+  GUARD -->|"mirror (write if absent)"| BAK["_scheduled_tasks_backup/ (140 dirs, 147 tracked files)"]
+  GUARD -->|mirror| GOV["OneDrive 00_Governance/Scheduled"]
+  BAK -.restore if canonical absent.-> CCSPEC
+  FS["fleet-status.py + registry-membership / folder / freshness probes"] -.reads.-> CC
+  FS -.reads.-> LM
+  TASKS["task bodies: Claude sessions"] -->|"send-via-outlook.ps1 (sole path)"| MAIL["ggoldberg@ only (+ egoldberg on Daily Brief)"]
+  TASKS -->|"write findings"| MEM[("memory/ + Notion + _state/*.json")]
+  subgraph WIN["Windows Task Scheduler (off-fleet, 8 XML)"]
+    HB["ORA Fleet Heartbeat Push 07:30 ET<br/>push-fleet-heartbeat.ps1"]
+    DM["ORA Fleet Dead-Man (local backstop)"]
+    OTH["FleetMirror (60s), Stuck-Session Watchdog,<br/>Disk Clean, Desktop Wake, PM crons, CC Mirror Deploy"]
+    HLS["maintenance/headless twins (burn-in)"]
+  end
+  HB --> EM["emit-fleet-heartbeat.py"]
+  EM --> HBJ[("_state/fleet-heartbeat.json<br/>TRACKED, ~58 commits since 08-01")]
+  HBJ --> PUB["publish-fleet-heartbeat.py (GitHub API)"]
+  PUB --> BR["deadman-heartbeat branch"]
+  BR --> GHA["fleet-deadman.yml cron 14:00 UTC"]
+  GHA -->|"stale / late / below floor"| ISS["GitHub issue"]
+  ISS -.no automated consumer found.-> HUMAN["Gabriel (manual)"]
+  INV["docs/system-inventory.md<br/>weekly overwrite by ora-weekly-hygiene Block H;<br/>manual refresh 2026-10-06; STALE once stamp is >8 days old"]:::warn
+  classDef warn color:#b00,stroke:#b00
