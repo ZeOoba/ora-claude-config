@@ -12,6 +12,14 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-10-07 -- correction: xlsx-warehouse-importer cache copy not byte-identical
+- Prior entry said the Cowork cache SKILL.md is byte-identical to the repo. Wrong: the platform re-quoted the `description:` frontmatter value (YAML-equivalent); body is identical (verified with diff after stripping CR). Install itself is unaffected.
+
+## 2026-10-07 -- xlsx-warehouse-importer v1.0 reimport confirmed
+- New skill `xlsx-warehouse-importer` (ora-skills 563eb4a, pushed to origin/main) installed in the Cowork runtime cache via manual Save-skill click; Cowork confirmed installed and listed. Cache SKILL.md byte-identical to repo.
+- Code-surface mirror created at ~/.claude/skills/xlsx-warehouse-importer (sync_skill; --all --check clean).
+- Origin: PCA register work; property-id crosswalk and Notion mapping saved to memory (reference_pca_register_notion_field_mapping, project_pca_register_property_id_crosswalk). PCA importer itself not built (plan awaits Phase 0 approval).
+
 ## 2026-10-06 — Scheduled-task model standard bumped to claude-sonnet-5-5 (medium)
 
 Gabriel-directed. Recreated 13 enabled CC/MCP tasks from a Sonnet 5.5/medium session (ids unchanged; SKILL.md bodies restored byte-identical, backups `SKILL.md.bak-2026-10-06-model-sonnet55`), tagged `[MODEL: claude-sonnet-5-5 | set 2026-10-06]`. `ora-master-workbook-ingest` skipped (mid-run; its run session already showed sonnet-5-5/medium without recreation, so runs may follow the app default). Deleting registry entries archived old run sessions for ora-am-brief (2), ora-loopnet-listings-sync (1), ora-pr-land-watch (6). Notifications set off on recreated tasks. Standard file updated; ~45 paused tasks keep old tags. Verify ora-am-brief run model on 2026-10-07.
