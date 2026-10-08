@@ -464,6 +464,62 @@ def test_unsupported_cron_field_falls_back_to_cadence_buffer():
 #     failure mode) must each keep their own reason.
 
 
+def _load_fs():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fs_mod", HOOK)
+    fs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fs)
+    return fs
+
+
+# 4g. createdAt-aware NEVER label (R30): a task deleted and recreated keeps its
+#     old first-add date in registry-membership.log; the registry row's createdAt
+#     must win for the label, and the overdue logic must not flag a recreated task
+#     whose first slot is still ahead.
+def test_never_label_recreated_prefers_created_at():
+    import datetime
+    fs = _load_fs()
+    now = datetime.datetime(2026, 10, 8, 12, 0)
+    reg = {"cc:ora-x": "2026-06-01"}
+    created = int(datetime.datetime(2026, 10, 6, 9, 0).timestamp() * 1000)
+    lbl = fs.never_label("ora-x", "cc", reg, now, created)
+    check("recreated label shows both ages",
+          lbl == "NEVER (recreated 2d ago (first added 129d ago))", lbl)
+    # Not meaningfully newer (<= 1 day): unchanged legacy label.
+    same = int(datetime.datetime(2026, 6, 2, 9, 0).timestamp() * 1000)
+    check("createdAt within 1 day of first add -> unchanged label",
+          fs.never_label("ora-x", "cc", reg, now, same)
+          == fs.never_label("ora-x", "cc", reg, now), fs.never_label("ora-x", "cc", reg, now, same))
+    # createdAt missing / junk -> falls back to log-only behavior.
+    for bad in (None, "x", True):
+        check("createdAt %r falls back" % (bad,),
+              fs.never_label("ora-x", "cc", reg, now, bad) == "NEVER (registered 129d ago, 2026-06-01)")
+    # No log entry but createdAt present -> createdAt dates the registration.
+    check("no log entry uses createdAt",
+          fs.never_label("ora-y", "cc", {}, now, created) == "NEVER (registered 2d ago, 2026-10-06)",
+          fs.never_label("ora-y", "cc", {}, now, created))
+    check("no log entry and no createdAt stays bare",
+          fs.never_label("ora-y", "cc", {}, now, None) == "NEVER")
+    # Implausible createdAt (0, or epoch SECONDS mistaken for ms) must read as absent,
+    # never as a fabricated 1970 registration date.
+    for junk in (0, 1759700000, -5):
+        check("junk createdAt %r stays bare" % (junk,),
+              fs.never_label("ora-y", "cc", {}, now, junk) == "NEVER",
+              fs.never_label("ora-y", "cc", {}, now, junk))
+        check("junk createdAt %r keeps the log label" % (junk,),
+              fs.never_label("ora-x", "cc", reg, now, junk) == "NEVER (registered 129d ago, 2026-06-01)")
+
+
+def test_recreated_task_future_first_slot_not_overdue():
+    """Recreated 2 days ago on a monthly cron whose first slot is 3 days ahead:
+    not overdue, regardless of any older first-add date in the membership log."""
+    cron = "0 5 %d * *" % _dom_days_from_today(+3)
+    data, _ = run([task("recreated-monthly", cron=cron, created_days_ago=2)])
+    check("test_recreated_task_future_first_slot_not_overdue",
+          data is not None and data.get("never_ran_overdue") == [],
+          "expected not overdue, got %r" % (data,))
+
+
 if __name__ == "__main__":
     test_all_healthy_is_ok()
     test_quarterly_not_yet_due_is_not_overdue()
@@ -487,6 +543,8 @@ if __name__ == "__main__":
     test_multifire_never_ran_first_slot_elapsed_is_overdue()
     test_unsupported_cron_field_falls_back_to_cadence_buffer()
     test_duplicate_id_overdue_reasons_are_not_collapsed()
+    test_never_label_recreated_prefers_created_at()
+    test_recreated_task_future_first_slot_not_overdue()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
