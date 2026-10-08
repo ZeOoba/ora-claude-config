@@ -1,6 +1,6 @@
 ---
 name: ora-passed-deal-tracker
-description: Monthly sweep (15th, 06:30 ET) — detect trades of passed/flagged deals; log clearing price vs ORA walk to calibrate RCT + P(exec) bands (Buy Box v1.1-E-iii). Read-only calibration evidence gathering — never auto-adjusts governor weights/bands. Moved from LAMS/Cowork to CC/MCP 2026-08-15 (Gabriel-directed workflow-optimization item T3-12): the LAMS surface has no path to the Outlook COM send script, confirmed failing live 2026-08-15 ("SEND FAILURE — no COM access", ora-pm-ledger). [MODEL: claude-sonnet-5 | set 2026-08-15]
+description: Monthly sweep (15th, 06:30 ET) — detect trades of passed/flagged deals; log clearing price vs ORA walk to calibrate RCT + P(exec) bands (Buy Box v1.1-E-iii). Read-only calibration evidence gathering — never auto-adjusts governor weights/bands. Moved from LAMS/Cowork to CC/MCP 2026-08-15 (Gabriel-directed workflow-optimization item T3-12): the LAMS surface has no path to the Outlook COM send script, confirmed failing live 2026-08-15 ("SEND FAILURE — no COM access", ora-pm-ledger). [MODEL: UNVERIFIABLE | checked 2026-10-08]
 ---
 
 # ORA Passed-Deal Tracker (monthly — Buy Box v1.1-E-iii)
