@@ -277,20 +277,44 @@ def registration_dates(path=None):
     return out
 
 
-def never_label(task_id, fleet, reg_dates, now_local):
+def never_label(task_id, fleet, reg_dates, now_local, created_ms=None):
     """'NEVER' annotated with how long ago the task was registered, when known.
 
     An unknown registration date yields a bare 'NEVER' rather than a guess --
     a fabricated age here would be worse than the missing one, since the whole
-    point is to support a keep/retire decision."""
+    point is to support a keep/retire decision.
+
+    created_ms: the registry row's own `createdAt` (epoch ms), when present. The
+    membership log keeps only the FIRST add per (fleet, id), so a task deleted and
+    recreated later (e.g. the 2026-10-06 model re-pin) would otherwise read months
+    old. If createdAt is more than 1 day newer than the first logged add, label it
+    'recreated Nd ago (first added Md ago)'; if there is no logged add, createdAt
+    alone is the registration date. Absent createdAt -> log-only behavior."""
     day = (reg_dates or {}).get("%s:%s" % (fleet, task_id))
-    if not day:
+    first = None
+    if day:
+        try:
+            first = datetime.datetime.strptime(day, "%Y-%m-%d").date()
+        except ValueError:
+            first = None
+    created = None
+    # createdAt is epoch MILLISECONDS; anything below 1e12 (before 2001, e.g. 0 or an
+    # epoch-seconds value) is implausible and is treated as absent, never as a date.
+    if (isinstance(created_ms, (int, float)) and not isinstance(created_ms, bool)
+            and created_ms >= 1e12):
+        try:
+            created = datetime.datetime.fromtimestamp(created_ms / 1000.0).date()
+        except (OverflowError, OSError, ValueError):
+            created = None
+    if created is not None and first is not None and (created - first).days > 1:
+        return "NEVER (recreated %dd ago (first added %dd ago))" % (
+            max((now_local.date() - created).days, 0), (now_local.date() - first).days)
+    if first is None and created is not None:
+        first = created
+        day = created.isoformat()
+    if first is None:
         return "NEVER"
-    try:
-        reg = datetime.datetime.strptime(day, "%Y-%m-%d").date()
-    except ValueError:
-        return "NEVER"
-    age = (now_local.date() - reg).days
+    age = (now_local.date() - first).days
     if age <= 0:
         return "NEVER (registered today)"
     return "NEVER (registered %dd ago, %s)" % (age, day)
@@ -981,7 +1005,8 @@ def main():
             # offset -- an unintended display change to every task that HAS run.
             _lr = t.get("lastRunAt")
             last = (_lr[:19] if _lr else
-                    never_label(t.get("id"), t.get("_fleet"), reg_dates, now_local)[:44])
+                    never_label(t.get("id"), t.get("_fleet"), reg_dates, now_local,
+                                t.get("createdAt"))[:60])
             print("%-42s %-5s %-16s %-4s %-5s %s" % (tid, t.get("_fleet", "?"), cron, en, sk, last))
         print("-" * 84)
 
