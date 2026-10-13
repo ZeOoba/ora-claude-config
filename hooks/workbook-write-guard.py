@@ -604,8 +604,10 @@ def _shell_writes_workbook(text):
 
 # The ONLY command shape whose `>` characters are exempted (see the function below):
 #   [cd <path> &&] python[3][.exe] - <<'DELIM'  ...body...  DELIM        (and nothing else)
+# The unquoted <path> excludes `#`: `cd #&& python - <<'EOF'` is a bash COMMENT, so no heredoc
+# opens and the "body" lines run as shell (REFUTE 2026-10-13).
 _PY_STDIN_HEREDOC_RE = re.compile(
-    r"\A[ \t]*(?:cd[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|<>`$]+)[ \t]*&&[ \t]*)?"
+    r"\A[ \t]*(?:cd[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s;&|<>`$#]+)[ \t]*&&[ \t]*)?"
     r"(?:python3?|py)(?:\.exe)?[ \t]+-[ \t]*<<[ \t]*'([A-Za-z0-9_]+)'[ \t]*\r?\n"
     r"(.*)\n[ \t]*\1[ \t]*\r?\n?[ \t\r\n]*\Z", re.DOTALL)
 
