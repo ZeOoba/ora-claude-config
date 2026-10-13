@@ -124,7 +124,7 @@ powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\
 Send summary email via Outlook COM:
 - Script: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1
 - To: ggoldberg@oxfordra.net ONLY (never cc egoldberg@, never ze@ addresses)
-- On COM failure: retry once, then log failure to Notion Ops Hub (32b6ecd8) — do NOT halt (that Ops Hub create follows the same look-for-it rule; never blind-retry a create — it produced a duplicate)
+- On COM failure: retry once, then log failure to Notion Ops Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062) — do NOT halt (that Ops Hub create follows the same look-for-it rule; never blind-retry a create — it produced a duplicate)
 - Subject: "ORA Entry Market Scan — [Month YYYY]: [N] New Candidates, [N] Watched, [N] Passed"
 - Body: RE-ENGAGE alerts first (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags) — for any GATE-FLAGGED Delmarva listing already carrying a `Gate Review` ratification, mark it "reviewed <date>" in the table instead of re-asking, then market summary, then data gaps / questions for Gabriel (genuinely new items only)
 
