@@ -349,7 +349,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    expecting the model to discover it by name.
 
 ## Output
-6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (32b6ecd8) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
+6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`, full UUID) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
    found any passed-deal `RE-CHECK:` line due or overdue, carry that list on the Ops Hub
    note** (added 2026-09-19) — it is the only surface this branch writes, and a due
    re-check that lands nowhere is the same silent-loss failure 4d was added to close.
@@ -380,7 +380,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
    No `--email-sent-at` on this path — no email was sent, and stamping one would misreport the artifact. A zero-trades sweep is a completed sweep, so `complete` is correct here, not `fail`.
 
-7. If trades detected: post block to Notion Ops Hub (32b6ecd8) and email summary via
+7. If trades detected: post block to Notion Ops Hub (`32b6ecd8-9e59-81f2-b329-df3fd0e25062` — always the FULL UUID; the 8-char prefix `32b6ecd8` also matches the retired "Cowork OS — Master Index" page `32b6ecd8-9e59-81a9-a566-e3ed1b1c9a9e`, which is where the 2026-10-13 sweep landed by mistake) and email summary via
    the SOLE send path `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`
    (Composio removed 2026-06-11 — no fallback connector exists; on a non-zero COM exit
    retry once, then flag, do not halt)
