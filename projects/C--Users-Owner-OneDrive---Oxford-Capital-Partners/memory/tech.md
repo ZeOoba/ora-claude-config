@@ -146,7 +146,7 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - Claude-in-Chrome | state=active | verify=allow:claude-in-chrome
 - chrome-devtools | state=retired | verify=allow:plugin_chrome-devtools-mcp_chrome-devtools
 - Apify | state=retired | verify=allow:apify
-- pdf-viewer | state=active | verify=allow:pdf-viewer
+- pdf-viewer | state=retired | verify=allow:pdf-viewer
 - scheduled-tasks | state=active | verify=allow:scheduled-tasks
 - computer-use | state=active | verify=cloud
 - Composio-Outlook | state=retired | verify=allow:composio
