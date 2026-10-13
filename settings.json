@@ -8,7 +8,6 @@
   },
   "permissions": {
     "allow": [
-      "Bash(start chrome *)",
       "Bash(node *)",
       "Bash(npm *)",
       "Bash(npx *)",
@@ -32,7 +31,6 @@
       "Bash(export PATH*)",
       "Bash(python3 *)",
       "Bash(python *)",
-      "Bash(/c/Windows/System32/wsl.exe *)",
       "Read",
       "Edit",
       "Write",
@@ -92,11 +90,9 @@
       "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__get-netlify-coding-context",
       "mcp__claude-in-chrome__*",
       "mcp__excel__*",
-      "mcp__pdf-viewer__*",
       "mcp__plugin_desktop-commander_desktop-commander__*",
       "Read(//c/Users/Owner/.claude/plugins/cache/**)",
       "Read(//c/Users/Owner/.claude/plugins/marketplaces/**)",
-      "Bash(tasklist *)",
       "Bash(powershell.exe -NoProfile*)",
       "Bash(rg *)"
     ],
