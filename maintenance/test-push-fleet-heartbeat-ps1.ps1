@@ -139,6 +139,87 @@ if (Has 'Invoke-BackupPush') {
     Expect 'race+conflict: HEAD unchanged, tree clean' (((git -C $r.a rev-parse HEAD) -eq $before) -and -not (git -C $r.a status --porcelain))
 }
 
+# --- self-heal: a heartbeat file left staged/modified by a KILLED run (0xC000013A between
+#     `git add` and `git commit --only`) must not wedge the step-1 reconcile forever. The 2026-10-07
+#     incident: git refused every merge because the staged hb.json would be overwritten, so no
+#     later run ever reached the emit/commit/push steps.
+Expect 'Clear-StaleHeartbeatState exists' (Has 'Clear-StaleHeartbeatState')
+if (Has 'Clear-StaleHeartbeatState') {
+    function Age($path, $minutes) { (Get-Item -LiteralPath $path).LastWriteTime = (Get-Date).AddMinutes(-$minutes) }
+
+    # the incident shape: stale staged hb + remote moved hb
+    $r = NewRace
+    Set-Content (Join-Path $r.b 'hb.json') 'remote-hb'; G $r.b commit -qam remote; G $r.b push -q origin main
+    Set-Content (Join-Path $r.a 'hb.json') 'killed-run'; G $r.a add -- hb.json
+    Age (Join-Path $r.a 'hb.json') 2880
+    $before = git -C $r.a rev-parse HEAD
+    Expect 'repro: a staged stale hb blocks the step-1 reconcile' ((Invoke-MainReconcile $r.a) -ne 'ok')
+    $script:logLines = @()
+    Expect 'stale staged hb is cleared' ((Clear-StaleHeartbeatState $r.a 'hb.json') -eq 'cleared')
+    Expect 'cleared: HEAD unchanged' ((git -C $r.a rev-parse HEAD) -eq $before)
+    Expect 'cleared: tree clean' (-not (git -C $r.a status --porcelain))
+    Expect 'cleared: content is the committed one' ((Get-Content (Join-Path $r.a 'hb.json')) -eq '1')
+    Expect 'cleared: the discard is logged' (@($script:logLines | Where-Object { $_ -match 'stale heartbeat' }).Count -ge 1)
+    Expect 'after clearing, the step-1 reconcile succeeds' ((Invoke-MainReconcile $r.a) -eq 'ok')
+
+    # an unstaged (half-written) stale modification is cleared too
+    $r = NewRace
+    Set-Content (Join-Path $r.a 'hb.json') 'half-written'; Age (Join-Path $r.a 'hb.json') 120
+    Expect 'stale unstaged hb is cleared' ((Clear-StaleHeartbeatState $r.a 'hb.json') -eq 'cleared')
+    Expect 'unstaged cleared: tree clean' (-not (git -C $r.a status --porcelain))
+
+    # a FRESH change may belong to a sibling run that is mid-flight (daily task + guard script 3): leave it
+    $r = NewRace
+    Set-Content (Join-Path $r.a 'hb.json') 'in-flight'; G $r.a add -- hb.json
+    Expect 'fresh dirty hb is left alone' ((Clear-StaleHeartbeatState $r.a 'hb.json') -eq 'fresh')
+    Expect 'fresh: still staged with its content' (((@(git -C $r.a diff --cached --name-only)) -contains 'hb.json') -and ((Get-Content (Join-Path $r.a 'hb.json')) -eq 'in-flight'))
+
+    # scope: ONLY the heartbeat path is touched
+    $r = NewRace
+    Set-Content (Join-Path $r.a 'hb.json') 'stale'; Age (Join-Path $r.a 'hb.json') 300
+    Set-Content (Join-Path $r.a 'other.txt') 'someone-elses-wip'; G $r.a add -- other.txt
+    Set-Content (Join-Path $r.a 'untracked.txt') 'u'
+    [void](Clear-StaleHeartbeatState $r.a 'hb.json')
+    $st = @(git -C $r.a status --porcelain)
+    Expect 'scope: other staged work survives' ($st -contains 'M  other.txt')
+    Expect 'scope: untracked file survives' ($st -contains '?? untracked.txt')
+    Expect 'scope: hb.json no longer listed' (-not ($st -match 'hb\.json'))
+    Expect 'scope: other.txt content intact' ((Get-Content (Join-Path $r.a 'other.txt')) -eq 'someone-elses-wip')
+
+    # clean tree: no-op, silent
+    $r = NewRace
+    $script:logLines = @()
+    Expect 'clean tree returns clean' ((Clear-StaleHeartbeatState $r.a 'hb.json') -eq 'clean')
+    Expect 'clean tree logs nothing' (@($script:logLines).Count -eq 0)
+
+    # a heartbeat path that was never committed must NOT be deleted
+    $r = NewRace
+    Set-Content (Join-Path $r.a 'newhb.json') 'x'; Age (Join-Path $r.a 'newhb.json') 300
+    $rc = Clear-StaleHeartbeatState $r.a 'newhb.json'
+    Expect 'untracked hb is never deleted' ((Test-Path (Join-Path $r.a 'newhb.json')) -and ($rc -ne 'cleared'))
+
+    # a heartbeat path staged as a NEW file (absent from HEAD) must not be deleted either
+    $r = NewRace
+    Set-Content (Join-Path $r.a 'newhb.json') 'x'; G $r.a add -- newhb.json; Age (Join-Path $r.a 'newhb.json') 300
+    $rc = Clear-StaleHeartbeatState $r.a 'newhb.json'
+    Expect 'staged-new hb (not in HEAD) is never deleted' ((Test-Path (Join-Path $r.a 'newhb.json')) -and ($rc -ne 'cleared'))
+
+    # an unmerged (conflicted) hb is left for a human, with its conflict state intact
+    $r = NewRace
+    Set-Content (Join-Path $r.a 'hb.json') 'L'; G $r.a commit -qam local
+    Set-Content (Join-Path $r.b 'hb.json') 'R'; G $r.b commit -qam remote; G $r.b push -q origin main
+    G $r.a fetch -q origin; G $r.a merge origin/main
+    Age (Join-Path $r.a 'hb.json') 300
+    Expect 'repro: the merge left hb unmerged' ([bool](@(git -C $r.a status --porcelain) -match '^UU hb\.json'))
+    Expect 'unmerged hb returns restore-failed' ((Clear-StaleHeartbeatState $r.a 'hb.json') -eq 'restore-failed')
+    Expect 'unmerged state is kept' ([bool](@(git -C $r.a status --porcelain) -match '^UU hb\.json'))
+
+    # fail-open: a bad repo path must not throw
+    $threw = $false
+    try { [void](Clear-StaleHeartbeatState (Join-Path $env:TEMP 'no-such-repo-xyz') 'hb.json') } catch { $threw = $true }
+    Expect 'bad repo path does not throw' (-not $threw)
+}
+
 # --- main-body wiring: step 1 uses the function, step 4 retries exactly once through it
 $calls = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and
     $n.GetCommandName() -eq 'Invoke-MainReconcile' }, $true))
@@ -152,6 +233,21 @@ Expect 'main body gates the retry on Test-PushRaceRejection' ($raceCalls.Count -
 $src = Get-Content -Raw $target
 Expect 'no rebase anywhere in the script body (merge-only doctrine)' ($src -notmatch '(?m)^[^#\r\n]*\bgit\b[^#\r\n]*\brebase\b')
 Expect 'never --no-verify' ($src -notmatch '--no-verify')
+
+# --- self-heal wiring: called once, in the MAIN body (not inside a function), before the step-1 reconcile
+function InFn($n) { for ($p = $n.Parent; $p; $p = $p.Parent) { if ($p -is [System.Management.Automation.Language.FunctionDefinitionAst]) { return $true } }; return $false }
+$clr = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and
+    $n.GetCommandName() -eq 'Clear-StaleHeartbeatState' }, $true))
+Expect ('Clear-StaleHeartbeatState called exactly once (' + $clr.Count + ')') ($clr.Count -eq 1)
+$step1 = @($calls | Where-Object { -not (InFn $_) })
+Expect 'exactly one step-1 Invoke-MainReconcile in the main body' ($step1.Count -eq 1)
+Expect 'self-heal sits in the main body, before the step-1 reconcile' (($clr.Count -eq 1) -and ($step1.Count -eq 1) -and
+    (-not (InFn $clr[0])) -and ($clr[0].Extent.StartOffset -lt $step1[0].Extent.StartOffset))
+# blast-radius limits: the heal is a pathspec-scoped restore, never a broad discard
+Expect 'no reset --hard, clean -f, stash or broad checkout in the script' ($src -notmatch '(?m)^[^#\r\n]*\bgit\b[^#\r\n]*(\breset\s+--hard\b|\bclean\s+-[a-z]*f|\bstash\b|\bcheckout\s+(--\s+)?\.(\s|$))')
+$restores = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] -and
+    $n.GetCommandName() -eq 'git' -and $n.Extent.Text -match '\brestore\b' }, $true))
+Expect ('exactly one git restore, and it is pathspec-scoped (' + $restores.Count + ')') (($restores.Count -eq 1) -and ($restores[0].Extent.Text -match '\s--\s+\$\w+'))
 }
 finally {
     foreach ($d in $roots) {

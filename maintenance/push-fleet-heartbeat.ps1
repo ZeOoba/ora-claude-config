@@ -136,6 +136,44 @@ function Write-BackupPushOk {
     } catch { Log ('backup-push stamp write FAILED (non-fatal): ' + $_.Exception.Message) }
 }
 
+# --- Self-heal a heartbeat file stranded by a KILLED run (v3.3, 2026-10-13 diagnosis). Step 3
+# does `git add` then `git commit --only` on the heartbeat path. A run killed in between (Task
+# Scheduler catch-ups at wake exit 0xC000013A within ~45s) leaves that ONE file staged or
+# modified; from then on every step-1 merge is refused ("local changes ... would be
+# overwritten", seen 2026-10-07), so no later run ever reaches the emit, commit or push and the
+# backup goes stale for good. Step 2 regenerates this file every run, so a STALE uncommitted
+# copy is worthless. Restore ONLY that path from HEAD, and only once it has sat dirty longer
+# than $minAgeMinutes: a younger change may belong to a sibling run that is mid-flight (the daily
+# task and the integrity guard's script 3 can overlap). Pathspec-scoped: other staged work,
+# untracked files and every other path are never touched; an untracked or unmerged heartbeat
+# path is not ours to discard. Returns 'clean', 'fresh', 'cleared' or 'restore-failed'; never
+# throws (fail-open like the rest of the backup step).
+function Clear-StaleHeartbeatState($repo, $rel, $minAgeMinutes = 30) {
+    try {
+        $dirty = @(git -C $repo status --porcelain -- $rel 2>$null)
+        if ($LASTEXITCODE -ne 0) { return 'restore-failed' }
+        if ($dirty.Count -eq 0) { return 'clean' }
+        $full = Join-Path $repo ($rel -replace '/', '\')
+        if (Test-Path -LiteralPath $full) {
+            $age = ((Get-Date) - (Get-Item -LiteralPath $full).LastWriteTime).TotalMinutes
+            if ($age -lt $minAgeMinutes) { return 'fresh' }
+        }
+        if ("$($dirty[0])" -match '^(\?\?|U.|.U|AA|DD)') { return 'restore-failed' }
+        # A path absent from HEAD (e.g. staged as a NEW file) has nothing to restore TO: git restore
+        # would delete it. Not ours to discard (adversarial review finding, 2026-10-13).
+        git -C $repo cat-file -e ('HEAD:' + $rel) 2>$null
+        if ($LASTEXITCODE -ne 0) { return 'restore-failed' }
+        Log ('stale heartbeat state left by a killed run - restoring ' + $rel + ' from HEAD (was: ' + ((@($dirty) -join ' ').Trim()) + ')')
+        git -C $repo restore --source=HEAD --staged --worktree -- $rel 2>&1 | ForEach-Object { Log ("restore: " + $_) }
+        if ($LASTEXITCODE -ne 0) { return 'restore-failed' }
+        if (@(git -C $repo status --porcelain -- $rel 2>$null).Count -ne 0) { return 'restore-failed' }
+        return 'cleared'
+    } catch {
+        Log ('heartbeat self-heal ERROR (non-fatal): ' + $_.Exception.Message)
+        return 'restore-failed'
+    }
+}
+
 # --- Reconcile main with origin/main (v3.2, OI-353: factored out of step 1 so step 4 can
 # run it again before its one retry push). Fetch, then ff-only (the common case per the
 # 2026-08-04 fix: 6 of 8 historical failures were pure races, not real conflicts); only on
@@ -257,6 +295,10 @@ try {
     #    conflict from that aborts immediately, leaving the tree exactly as
     #    found. This script NEVER resolves a conflict itself. (Logic lives in
     #    Invoke-MainReconcile since v3.2 so step 4's race retry reuses it.)
+    #    v3.3: first clear a heartbeat file stranded (staged or modified) by a KILLED earlier run,
+    #    which would otherwise make every merge below fail forever -- see Clear-StaleHeartbeatState.
+    $heal = Clear-StaleHeartbeatState $repo $hbRel
+    if ($heal -ne 'clean') { Log ('heartbeat self-heal: ' + $heal) }
     $rec = Invoke-MainReconcile $repo
     # Only unmerged paths make it a genuine conflict. A nonzero merge with none has more than
     # one possible cause (another run holding .git/index.lock -- the daily Windows task and
