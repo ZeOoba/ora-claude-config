@@ -1,0 +1,61 @@
+%% Updated hook lifecycle. Verified 2026-10-06 against settings.json hooks block (command list
+%% printed via python json load), hooks/pretooluse-dispatcher.py:135-192 (GUARD_CHAIN, BASH_GUARD_CHAIN)
+%% and :343-385 (_dispatch).
+%% diagram-verified: 2026-10-06
+flowchart TB
+  subgraph EVENTS["settings.json events (6)"]
+    UPS["UserPromptSubmit<br/>engineering-router.py (non-blocking)"]
+    SS["SessionStart (4 entries)<br/>cat session-context.md<br/>repo-freshness, active-work-broadcast,<br/>fleet-session-hook (async)"]
+    PRE["PreToolUse"]
+    POST["PostToolUse"]
+    STOP["Stop: fleet-session-hook (async)"]
+    SE["SessionEnd: fleet-session-hook (async),<br/>eos-telemetry"]
+  end
+
+  PRE --> MATCH{"matcher"}
+  MATCH -->|"Edit|Write|MultiEdit"| DEW["pretooluse-dispatcher.py<br/>GUARD_CHAIN (11 guards)"]
+  MATCH -->|"Bash"| DB["pretooluse-dispatcher.py --chain bash<br/>BASH_GUARD_CHAIN (12 guards)"]
+  MATCH -->|"Edit|Write"| INLINE["inline bash: sensitive-file blocker<br/>(.env / credentials / password paths)"]
+  MATCH -->|"outbound MCP + NotebookEdit +<br/>Netlify updaters + manage_*"| D1["direct: ora-autonomy-gate"]
+  MATCH -->|"Notion/Outlook/Teams/SharePoint/<br/>HubSpot write tools"| D2["direct: confidentiality-guard<br/>(FAIL-CLOSED)"]
+  MATCH -->|"Desktop Commander write/edit"| D3["direct: registry-write-guard,<br/>memory-index-guard"]
+  MATCH -->|"excel + DC + NotebookEdit"| D4["direct: config-write-guard,<br/>lint-config-guard"]
+  MATCH -->|"Write|Edit|MultiEdit + excel + DC"| D5["direct: workbook-write-guard<br/>(also fires on Edit/Write, not only Bash;<br/>not in GUARD_CHAIN)"]
+  MATCH -->|"update_scheduled_task"| D6["direct: scheduled-task-update-preguard (warn)"]
+
+  subgraph DISP["dispatcher internals"]
+    PF{"any guard script missing?"} -->|yes| FC["exit 2: fail CLOSED"]
+    PF -->|no| LOOP["for guard in chain: run in-process;<br/>on import/raise re-run as subprocess"]
+    LOOP --> TEL[("hooks/_state/guard-telemetry.jsonl<br/>ts, chain, guard, rc, ms, path")]
+    LOOP --> RC{"rc == 2 ?"}
+    RC -->|"yes: short-circuit"| BLK["BLOCK (blocking guard stdout only)"]
+    RC -->|"no, all pass"| MERGE["merge guards JSON stdout<br/>(systemMessage / additionalContext)"]
+  end
+  DEW --> PF
+  DB --> PF
+  MERGE --> RUN["tool runs"]
+  D1 --> RUN
+  D2 --> RUN
+  D3 --> RUN
+  D4 --> RUN
+  D5 --> RUN
+  D6 --> RUN
+  INLINE --> RUN
+  RUN --> POST
+
+  subgraph POSTH["PostToolUse (all non-blocking)"]
+    P1["Bash: ora-skills catch_up_main.py --hook;<br/>inline curl deploy check (greps 'deploy')"]
+    P2["Bash: eos-gate-sentinel"]
+    P3["Bash|Task*|Edit|Write: fleet-session-hook (async)"]
+    P4["Write|Edit|Skill: eos-plan-marker"]
+    P5["Edit/Write/DC: commit-provenance-recorder,<br/>memory-nag-correction"]
+    P6["Netlify MCP: inline check"]
+    P7["update_scheduled_task: postguard"]
+  end
+  POST --> POSTH
+  P5 -->|writes| PROV[("provenance records<br/>(read by commit-provenance-guard, preflight)")]
+  P4 -->|marker| PLAN[("plan marker<br/>(read by eos-plan-gate)")]
+  P2 -->|marker| EVID[("test-ran marker<br/>(read by eos-evidence-gate)")]
+
+  NOTE["NOT WIRED: posttooluse-dispatcher.py<br/>(staged in _proposed/, would fold P1+P2 into one process)"]:::dim
+  classDef dim stroke-dasharray: 4 3,color:#777

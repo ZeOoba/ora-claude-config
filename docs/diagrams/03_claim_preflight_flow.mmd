@@ -1,0 +1,26 @@
+%% From hooks/lib/claim_work.py header, maintenance/preflight-shared-checkout.py:1-60,:245-250,:1183-1193,
+%% hooks/config-write-guard.py:35-38,275,1200-1281
+%% diagram-verified: 2026-10-06
+flowchart TB
+  START["Session wants to edit a shared checkout path"] --> PF["preflight-shared-checkout.py --repo --paths --since SHA<br/>(READ-ONLY; prints RESULT_JSON= on every outcome)"]
+  PF --> A["git rev-parse / status"]
+  PF --> B["hooks/active-work/*.json claims (TTL 2h, fail-open)"]
+  PF --> C[("commit-provenance records:<br/>who touched dirty files, STALE vs LIVE")]
+  A --> V{"verdict"}
+  B --> V
+  C --> V
+  V -->|"0 CLEAR / STALE_UNTRACKED_KNOWN_BLOB"| GO["GO"]
+  V -->|"1 CONTESTED"| STOP1["STOP: dirty overlap with a foreign session<br/>(--accept-stale PATH for partial commits)"]
+  V -->|"3 HEAD_MOVED"| STOP2["STOP: HEAD newer than --since"]
+  V -->|"4 INDETERMINATE"| STOP3["STOP: claims dir unreadable"]
+  V -->|"2 NOT_A_REPO / 5 OUT_OF_REPO"| STOP4["STOP"]
+  GO --> CL["claim_work.py claim slug --paths<br/>(writes hooks/active-work/slug.json)"]
+  CL --> WT["isolated git worktree (blast-radius edits)"]
+  WT --> ED["Edit / Write"]
+  ED --> G["PreToolUse chain: config-write-guard<br/>(CLAIM-LOCK on handoffs/**, chip-claims.log CLAIMED/HEARTBEAT under 60 min),<br/>shared-checkout-guard (warn)"]
+  G --> REC["PostToolUse: commit-provenance-recorder"]
+  REC --> CM["commit: commit-provenance-guard, worktree-isolation-guard,<br/>eos-review-gate (Bash chain)"]
+  CM --> REL["claim_work.py release"]
+  SB["SessionStart: active-work-broadcast"] -.reads.-> B
+  DUP["TWO claim stores: hooks/active-work/ (2h TTL)<br/>and chip-claims.log (60 min) - overlapping purpose"]:::warn
+  classDef warn color:#b00,stroke:#b00
