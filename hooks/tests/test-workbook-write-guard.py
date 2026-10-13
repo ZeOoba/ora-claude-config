@@ -448,6 +448,11 @@ def test_shell_redirect_via_indirection_still_blocks():
         "python - <<'EOF'\nimport os\np='%s'\nos.system('cat t.xlsx > '+p)\nEOF" % q,
         # a body that does not tokenize keeps the old (block) behavior
         "python - <<'EOF'\n# %s\nif 3>2: (\nEOF" % q,
+        # REFUTE 2026-10-13: `#` in the unquoted cd arg starts a bash comment, so no heredoc
+        # opens and the body redirect really runs
+        "cd #&& python - <<'EOF'\necho x > %s\nEOF" % q,
+        "cd #x && python - <<'EOF'\necho x > %s\nEOF" % q,
+        "cd #&& python - <<'EOF'\ncat t.xlsx > %s\nEOF" % q,
         # opener line itself carries a redirect
         "python - <<'EOF' > %s\nif 3>2: pass\nEOF" % q,
     ]
