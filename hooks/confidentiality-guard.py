@@ -47,7 +47,7 @@ repo) when this checkout's own copy is missing or unreadable and no explicit
 CONFIDENTIAL_TERMS_FILE_OVERRIDE is set. Still fail-closed if the file is unreadable in BOTH
 places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 """
-import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile
+import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile, unicodedata, functools, time
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(HOOK_DIR, "lib")
@@ -234,6 +234,7 @@ def _blob_texts(blob, budget):
             if len(infos) > ZIP_MAX_MEMBERS or sum(i.file_size for i in infos) > budget[0]:
                 raise ValueError("zip container too large to scan")
             for info in infos:
+                _check_deadline()
                 # Bounded read: a header's declared size can lie, the decompressed stream cannot.
                 with z.open(info) as fh:
                     data = fh.read(budget[0] + 1)
@@ -252,7 +253,9 @@ def mcp_scan_text(ti):
     views.extend(_rendered_views(base))
     budget = [SCAN_MAX_DECODED_BYTES]
     for blob in _blobs(ti, []):
+        _check_deadline()
         for t in _blob_texts(blob, budget):
+            _check_deadline()
             views.append(t)
             views.extend(_rendered_views(t))
     return "\n".join(v for v in views if v)
@@ -457,24 +460,266 @@ def _str_terms(deal, field):
     return [t for t in value if isinstance(t, str) and t] if isinstance(value, list) else []
 
 
+# --- Matching normalization (2026-10-13; mirror of server/briefing/confidential.ts `normalizeForScan`) ---
+# A bare lowercase substring match is evaded by anything that changes the CHARACTERS without
+# changing what a reader sees: a zero-width space / soft hyphen inside a term, NBSP or thin space for
+# a space, curly quotes and dashes, fullwidth letters, accents, numbers pasted with digit-group
+# separators. Haystack and every roster term go through the same fold, so the comparison happens in
+# one canonical space. KEEP THIS AND THE TYPESCRIPT TWIN ALIGNED -- both are pinned by the same
+# synthetic vectors and the same table hash (tests/test-confidentiality-guard.py,
+# tests/unit/confidential.test.ts).
+#   1. drop superscript/subscript digits, fold typographic punctuation, NFKD, lowercase
+#   2. delete combining marks (Mn) and the invisible set (format chars, default-ignorables,
+#      non-whitespace control chars, fillers); fold non-ASCII decimal digits to ASCII (no NFC step)
+#   3. fold typographic punctuation again, collapse every whitespace run to one space
+# Variants: "tight" (invisible chars deleted -- `Zeph<ZWSP>yrine`), "spaced" (invisible chars become
+# a space -- `Zephyrine<ZWSP>Holdings` for the term `zephyrine holdings`), and, when the text carries
+# bidi override controls, tight REVERSED (what an RLO run renders as). Each also gets a "digits" form
+# with group separators removed from properly grouped numbers (4,250,000 -> 4250000).
+# The Unicode sets are a FIXED table (generated from Unicode 17), not unicodedata properties, so the
+# hook and the TypeScript twin cannot drift when either runtime's Unicode data moves. NFKD and
+# lower() still follow this interpreter's Unicode data (residual: a character assigned after it may
+# fold differently on the two sides). Everything below runs as C-speed regex/str calls: this hook has
+# no timeout of its own, and a timed-out hook does not block.
+_TABLE_MN = "300-36f,483-487,591-5bd,5bf,5c1-5c2,5c4-5c5,5c7,610-61a,64b-65f,670,6d6-6dc,6df-6e4,6e7-6e8,6ea-6ed,711,730-74a,7a6-7b0,7eb-7f3,7fd,816-819,81b-823,825-827,829-82d,859-85b,897-89f,8ca-8e1,8e3-902,93a,93c,941-948,94d,951-957,962-963,981,9bc,9c1-9c4,9cd,9e2-9e3,9fe,a01-a02,a3c,a41-a42,a47-a48,a4b-a4d,a51,a70-a71,a75,a81-a82,abc,ac1-ac5,ac7-ac8,acd,ae2-ae3,afa-aff,b01,b3c,b3f,b41-b44,b4d,b55-b56,b62-b63,b82,bc0,bcd,c00,c04,c3c,c3e-c40,c46-c48,c4a-c4d,c55-c56,c62-c63,c81,cbc,cbf,cc6,ccc-ccd,ce2-ce3,d00-d01,d3b-d3c,d41-d44,d4d,d62-d63,d81,dca,dd2-dd4,dd6,e31,e34-e3a,e47-e4e,eb1,eb4-ebc,ec8-ece,f18-f19,f35,f37,f39,f71-f7e,f80-f84,f86-f87,f8d-f97,f99-fbc,fc6,102d-1030,1032-1037,1039-103a,103d-103e,1058-1059,105e-1060,1071-1074,1082,1085-1086,108d,109d,135d-135f,1712-1714,1732-1733,1752-1753,1772-1773,17b4-17b5,17b7-17bd,17c6,17c9-17d3,17dd,180b-180d,180f,1885-1886,18a9,1920-1922,1927-1928,1932,1939-193b,1a17-1a18,1a1b,1a56,1a58-1a5e,1a60,1a62,1a65-1a6c,1a73-1a7c,1a7f,1ab0-1abd,1abf-1add,1ae0-1aeb,1b00-1b03,1b34,1b36-1b3a,1b3c,1b42,1b6b-1b73,1b80-1b81,1ba2-1ba5,1ba8-1ba9,1bab-1bad,1be6,1be8-1be9,1bed,1bef-1bf1,1c2c-1c33,1c36-1c37,1cd0-1cd2,1cd4-1ce0,1ce2-1ce8,1ced,1cf4,1cf8-1cf9,1dc0-1dff,20d0-20dc,20e1,20e5-20f0,2cef-2cf1,2d7f,2de0-2dff,302a-302d,3099-309a,a66f,a674-a67d,a69e-a69f,a6f0-a6f1,a802,a806,a80b,a825-a826,a82c,a8c4-a8c5,a8e0-a8f1,a8ff,a926-a92d,a947-a951,a980-a982,a9b3,a9b6-a9b9,a9bc-a9bd,a9e5,aa29-aa2e,aa31-aa32,aa35-aa36,aa43,aa4c,aa7c,aab0,aab2-aab4,aab7-aab8,aabe-aabf,aac1,aaec-aaed,aaf6,abe5,abe8,abed,fb1e,fe00-fe0f,fe20-fe2f,101fd,102e0,10376-1037a,10a01-10a03,10a05-10a06,10a0c-10a0f,10a38-10a3a,10a3f,10ae5-10ae6,10d24-10d27,10d69-10d6d,10eab-10eac,10efa-10eff,10f46-10f50,10f82-10f85,11001,11038-11046,11070,11073-11074,1107f-11081,110b3-110b6,110b9-110ba,110c2,11100-11102,11127-1112b,1112d-11134,11173,11180-11181,111b6-111be,111c9-111cc,111cf,1122f-11231,11234,11236-11237,1123e,11241,112df,112e3-112ea,11300-11301,1133b-1133c,11340,11366-1136c,11370-11374,113bb-113c0,113ce,113d0,113d2,113e1-113e2,11438-1143f,11442-11444,11446,1145e,114b3-114b8,114ba,114bf-114c0,114c2-114c3,115b2-115b5,115bc-115bd,115bf-115c0,115dc-115dd,11633-1163a,1163d,1163f-11640,116ab,116ad,116b0-116b5,116b7,1171d,1171f,11722-11725,11727-1172b,1182f-11837,11839-1183a,1193b-1193c,1193e,11943,119d4-119d7,119da-119db,119e0,11a01-11a0a,11a33-11a38,11a3b-11a3e,11a47,11a51-11a56,11a59-11a5b,11a8a-11a96,11a98-11a99,11b60,11b62-11b64,11b66,11c30-11c36,11c38-11c3d,11c3f,11c92-11ca7,11caa-11cb0,11cb2-11cb3,11cb5-11cb6,11d31-11d36,11d3a,11d3c-11d3d,11d3f-11d45,11d47,11d90-11d91,11d95,11d97,11ef3-11ef4,11f00-11f01,11f36-11f3a,11f40,11f42,11f5a,13440,13447-13455,1611e-16129,1612d-1612f,16af0-16af4,16b30-16b36,16f4f,16f8f-16f92,16fe4,1bc9d-1bc9e,1cf00-1cf2d,1cf30-1cf46,1d167-1d169,1d17b-1d182,1d185-1d18b,1d1aa-1d1ad,1d242-1d244,1da00-1da36,1da3b-1da6c,1da75,1da84,1da9b-1da9f,1daa1-1daaf,1e000-1e006,1e008-1e018,1e01b-1e021,1e023-1e024,1e026-1e02a,1e08f,1e130-1e136,1e2ae,1e2ec-1e2ef,1e4ec-1e4ef,1e5ee-1e5ef,1e6e3,1e6e6,1e6ee-1e6ef,1e6f5,1e8d0-1e8d6,1e944-1e94a,e0100-e01ef"
+_TABLE_FMT = "0-8,e-1b,7f-84,86-9f,ad,600-605,61c,6dd,70f,890-891,8e2,115f-1160,180e,200b-200f,202a-202e,2060-206f,2800,3164,feff,ffa0,fff0-fffb,110bd,110cd,13430-1343f,1bca0-1bca3,1d173-1d17a,e0000-e00ff,e01f0-e0fff"
+_TABLE_PD = "2d,58a,5be,1400,1806,2010-2015,2212,2e17,2e1a,2e3a-2e3b,2e40,2e5d,301c,3030,30a0,fe31-fe32,fe58,fe63,ff0d,10d6e,10ead"
+_TABLE_ND0 = "30,660,6f0,7c0,966,9e6,a66,ae6,b66,be6,c66,ce6,d66,de6,e50,ed0,f20,1040,1090,17e0,1810,1946,19d0,1a80,1a90,1b50,1bb0,1c40,1c50,a620,a8d0,a900,a9d0,a9f0,aa50,abf0,ff10,104a0,10d30,10d40,11066,110f0,11136,111d0,112f0,11450,114d0,11650,116c0,116d0,116da,11730,118e0,11950,11bf0,11c50,11d50,11da0,11de0,11f50,16130,16a60,16ac0,16b50,16d70,1ccf0,1d7ce,1d7d8,1d7e2,1d7ec,1d7f6,1e140,1e2f0,1e4f0,1e5f1,1e950,1fbf0"
+
+
+def normalization_tables_sha256():
+    """SHA-256 of the four tables; pinned by tests on both sides of the mirror."""
+    import hashlib
+    return hashlib.sha256("|".join((_TABLE_MN, _TABLE_FMT, _TABLE_PD, _TABLE_ND0)).encode("utf-8")).hexdigest()
+
+
+def _parse_ranges(spec):
+    out = []
+    for r in spec.split(","):
+        a, _, b = r.partition("-")
+        lo = int(a, 16)
+        out.append((lo, int(b, 16) if b else lo))
+    return out
+
+
+def _map_of(ranges, value):
+    return {c: value for a, b in ranges for c in range(a, b + 1)}
+
+
+# str.translate tables: one C-speed dict lookup per character. (A regex character class over these
+# sets is NOT usable: sre scans non-BMP ranges linearly, ~1000 comparisons per character.)
+_MN = _map_of(_parse_ranges(_TABLE_MN), None)
+_FMT = _parse_ranges(_TABLE_FMT)
+_ND_ZEROS = [lo for lo, _ in _parse_ranges(_TABLE_ND0)]
+_PUNCT = {}
+_PUNCT.update(_map_of(_parse_ranges(_TABLE_PD) + [(0x2212, 0x2212)], "-"))
+_PUNCT.update(_map_of([(0x60, 0x60), (0xB4, 0xB4), (0x2B9, 0x2B9), (0x2BB, 0x2BC), (0x2018, 0x201B),
+                       (0x2032, 0x2032), (0x2035, 0x2035), (0xA78C, 0xA78C)], "'"))
+_PUNCT.update(_map_of([(0xAB, 0xAB), (0xBB, 0xBB), (0x201C, 0x201F), (0x2033, 0x2033), (0x2036, 0x2036)], '"'))
+_T_PRE = dict(_PUNCT)
+_T_PRE.update(_map_of([(0xB2, 0xB3), (0xB9, 0xB9), (0x2070, 0x2070), (0x2074, 0x2079), (0x2080, 0x2089)], None))
+_T_POST = dict(_PUNCT)
+for _z in _ND_ZEROS:
+    if _z != 0x30:
+        for _i in range(10):
+            _T_POST[_z + _i] = str(_i)
+_T_TIGHT = dict(_MN)
+_T_TIGHT.update(_map_of(_FMT, None))
+_T_SPACED = dict(_MN)
+_T_SPACED.update(_map_of(_FMT, " "))
+# Pure-ASCII inputs (the common case, and the big base64 payloads) take one fast translate pass.
+# Mixed inputs are processed per NON-ASCII RUN: NFKD / NFC / the strip tables only ever act on
+# non-ASCII characters (every ASCII character is a starter), so ASCII stretches are never walked by
+# the slow code, while lower() still runs over the whole string (contextual final sigma).
+_T_PRE_A = {c: v for c, v in _T_PRE.items() if c < 128}
+_T_TIGHT_A = {c: v for c, v in _T_TIGHT.items() if c < 128}
+_T_SPACED_A = {c: v for c, v in _T_SPACED.items() if c < 128}
+_T_PRE_N = {c: v for c, v in _T_PRE.items() if c >= 128}
+_T_TIGHT_N = {c: v for c, v in _T_TIGHT.items() if c >= 128}
+_T_SPACED_N = {c: v for c, v in _T_SPACED.items() if c >= 128}
+_T_POST_N = {c: v for c, v in _T_POST.items() if c >= 128}
+_RE_NONASCII = re.compile("[^\u0000-\u007f]+")
+_RE_ASCII_FMT = re.compile("[" + "".join(re.escape(chr(c)) for c in sorted(_T_TIGHT_A)) + "]")
+_RE_BIDI = re.compile("[\u202a-\u202e\u2066-\u2069]")
+# 1-3 digits then 1+ (separator + exactly 3 digits); not touching other digits, so 12.50 stays.
+_RE_GROUPED_NUM = re.compile("(?<![0-9])[0-9]{1,3}(?:[,. '_\u00a0\u2009\u202f][0-9]{3})+(?![0-9])")
+_RE_GROUP_SEP = re.compile("[,. '_\u00a0\u2009\u202f]")
+_RE_ANY_DIGIT = re.compile("[0-9]")
+_RE_ALL_DIGITS = re.compile("[0-9]+")
+_SEAM_WALK_CAP = 400000
+# NFKD is ~0.7 s per MB of non-ASCII text and this hook has no timeout of its own (a timed-out hook
+# does not block), so past this many non-ASCII bytes beyond one-per-character the scan REFUSES and
+# the caller blocks -- fail closed instead of timing out open.
+_NONASCII_BUDGET = 2000000
+
+
+class ScanTooLarge(Exception):
+    pass
+
+
+# Total NFKD OUTPUT characters one normalization may produce. Expanding characters (U+FDFA -> 18) make
+# the output, not the input, the cost driver; past this the scan REFUSES and the caller blocks.
+_NFKD_OUT_BUDGET = 4000000
+
+
+def _nfkd_chunked(run, produced):
+    """NFKD of a non-ASCII run in ~512-character pieces cut only before a combining-class-0
+    character. NFKD is context-free between such starters, and one huge call is superlinear
+    (canonical reordering of the mark runs it expands into). NFC is deliberately NOT applied
+    anywhere: haystack and terms are both left decomposed, so the comparison is unaffected."""
+    out, i, n = [], 0, len(run)
+    while i < n:
+        j = min(n, i + 512)
+        # Extend to the next starter, but never past 2048 characters: U+0344 is a combining mark that
+        # EXPANDS under NFKD, so one long mark run is itself superlinear. Marks are deleted afterwards
+        # anyway; a forced cut can only reorder the (non-deleted) marks of a >2048-character run.
+        stop = min(n, i + 2048)
+        while j < stop and unicodedata.combining(run[j]):
+            j += 1
+        piece = unicodedata.normalize("NFKD", run[i:j])
+        produced[0] += len(piece)
+        if produced[0] > _NFKD_OUT_BUDGET:
+            raise ScanTooLarge("normalized output too large to scan within the hook's time budget")
+        out.append(piece)
+        i = j
+    return "".join(out)
+
+
+def _variant(s, table_a, table_n, ascii_fmt_to):
+    if s.isascii():
+        return " ".join(s.translate(_T_PRE_A).lower().translate(table_a).split())
+    if len(s.encode("utf-8", "surrogatepass")) - len(s) > _NONASCII_BUDGET:
+        raise ScanTooLarge("non-ASCII input too large to normalize within the hook's time budget")
+    produced = [0]
+    c = s.replace(chr(96), "'")
+    c = _RE_NONASCII.sub(lambda m: _nfkd_chunked(m.group(0).translate(_T_PRE_N), produced), c)
+    # NFKD can itself emit an ASCII backtick (U+FF40, U+1FEF); fold it like the original ones.
+    c = c.replace(chr(96), "'").lower()
+    c = _RE_NONASCII.sub(lambda m: m.group(0).translate(table_n), c)
+    c = _RE_ASCII_FMT.sub(ascii_fmt_to, c)
+    c = _RE_NONASCII.sub(lambda m: m.group(0).translate(_T_POST_N), c)
+    # str.split() splits on exactly the whitespace set the TypeScript twin collapses (9-13, 1c-1f,
+    # 20, 85, a0, 1680, 2000-200a, 2028/2029, 202f, 205f, 3000), runs included, ends trimmed.
+    return " ".join(c.split())
+
+
+def _tight_form(s):
+    return _variant(s, _T_TIGHT_A, _T_TIGHT_N, "")
+
+
+def _spaced_form(s):
+    return _variant(s, _T_SPACED_A, _T_SPACED_N, " ")
+
+
+def _digits_form(s):
+    if not _RE_ANY_DIGIT.search(s):
+        return s
+    return _RE_GROUPED_NUM.sub(lambda m: _RE_GROUP_SEP.sub("", m.group(0)), s)
+
+
+@functools.lru_cache(maxsize=4)
+def _norm_variants(s):
+    """(text_forms, digit_forms) for a haystack. Cached: seam windows re-use one post-edit file."""
+    tight, spaced = _tight_form(s), _spaced_form(s)
+    texts = [tight] if tight == spaced else [tight, spaced]
+    if _RE_BIDI.search(s):
+        texts.append(tight[::-1])
+    texts = tuple(texts)
+    return texts, tuple(dict.fromkeys(_digits_form(t) for t in texts))
+
+
+def _forms_contain(forms, raw_term):
+    texts, digits = forms
+    tight = _tight_form(raw_term)
+    if not tight:
+        return False
+    if any(tight in h for h in texts):
+        return True
+    d_term = _digits_form(tight)
+    bare = d_term[1:] if d_term.startswith("$") else d_term
+    if _RE_ALL_DIGITS.fullmatch(bare):
+        # In the digit-group-stripped form a purely numeric term must match a WHOLE number: 250000 is
+        # not found inside 4,250,000. (The plain-substring check above is the legacy behavior.)
+        pat = re.compile("(?<![0-9])" + bare + "(?![0-9])")
+        return any(pat.search(h) for h in digits)
+    return any(d_term in h for h in digits)
+
+
+# In-hook wall-clock budget. This hook has no timeout of its own and a timed-out hook does NOT block,
+# so past this many seconds the scan raises ScanTooLarge and every caller turns that into a block.
+_SCAN_SECONDS = 15
+_DEADLINE = [None]
+
+
+def _check_deadline():
+    d = _DEADLINE[0]
+    if d is not None and time.monotonic() > d:
+        raise ScanTooLarge("scan exceeded its time budget")
+
+
+@functools.lru_cache(maxsize=64)
+def _raw_anchor(ctx, reqs):
+    """Is any (lowercased) trigger in the raw context text? Memoized: seam windows all share ONE
+    post-edit file, and re-searching it per window made a many-seam replace_all O(seams x file)."""
+    low = _lower(ctx)
+    return any(r in low for r in reqs)
+
+
+@functools.lru_cache(maxsize=64)
+def _norm_anchor(ctx, reqs):
+    try:
+        forms = _norm_variants(ctx)
+    except ScanTooLarge:
+        # A context file too large to normalize: treat the anchor as PRESENT (the stricter direction),
+        # so its context terms are still looked for in the small window instead of the whole edit
+        # being refused. Context terms are then matched on the window alone.
+        return True
+    return any(_forms_contain(forms, r) for r in reqs)
+
+
+@functools.lru_cache(maxsize=4)
+def _lower(s):
+    return s.lower()
+
+
 def find_hit(text, terms, context_text=None):
     """Return (deal_label, term) on first confidential hit in `text`, else None. A context term
     counts when its trigger (context_requires_any) appears in `context_text`, which defaults to
-    `text`; seam windows pass the whole post-edit file so a trigger elsewhere on the page counts."""
+    `text`; seam windows pass the whole post-edit file so a trigger elsewhere on the page counts.
+    Matching is over normalized forms (see the block above), never the raw text."""
     if not text:
         return None
-    low = text.lower()
-    ctx_low = low if context_text is None else context_text.lower()
+    # Pre-pass: the ORIGINAL matcher (raw lowercase substring), linear time. A plain, unobfuscated
+    # term is therefore blocked before any normalization runs, so padding a payload with
+    # characters that make normalization slow can never hide a plain term.
+    low = _lower(text)
+    ctx_src = text if context_text is None else context_text
     for key, deal in terms.items():
+        _check_deadline()
         if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
             continue
         for t in _str_terms(deal, "always"):
             if t.lower() in low:
                 return (deal.get("label", key), t)
-        reqs = [r.lower() for r in _str_terms(deal, "context_requires_any")]
-        if reqs and any(r in ctx_low for r in reqs):
+        reqs = tuple(r.lower() for r in _str_terms(deal, "context_requires_any"))
+        if reqs and _raw_anchor(ctx_src, reqs):
             for t in _str_terms(deal, "context"):
                 if t.lower() in low:
+                    return (deal.get("label", key), t)
+    forms = _norm_variants(text)
+    if not any(forms[0]):
+        return None
+    for key, deal in terms.items():
+        _check_deadline()
+        if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
+            continue
+        for t in _str_terms(deal, "always"):
+            if _forms_contain(forms, t):
+                return (deal.get("label", key), t)
+        reqs = tuple(_str_terms(deal, "context_requires_any"))
+        if reqs and _norm_anchor(ctx_src, reqs):
+            for t in _str_terms(deal, "context"):
+                if _forms_contain(forms, t):
                     return (deal.get("label", key), t)
     return None
 
@@ -525,10 +770,10 @@ SEAM_MAX_FILE_BYTES = 20 * 1024 * 1024
 
 
 def _seam_width(terms):
-    """Window margin on each side of a seam: twice the longest active term (lower() can lengthen
-    some non-ASCII characters) plus slack. 0 when no deal is active -- nothing to find. None on a
-    roster shape it cannot read, which disables seam simulation (the caller then fails closed on
-    an empty scan, as before)."""
+    """Window margin on each side of a seam, in NORMALIZED characters (see _seam_window): three times
+    the longest active term, measured both raw and normalized (NFKD can expand a character), plus
+    slack. 0 when no deal is active -- nothing to find. None on a roster shape it cannot read, which
+    disables seam simulation (the caller then fails closed on an empty scan, as before)."""
     try:
         longest = 0
         for key, deal in terms.items():
@@ -537,10 +782,28 @@ def _seam_width(terms):
             for field in ("always", "context", "context_requires_any"):
                 for t in deal.get(field, []) or []:
                     if isinstance(t, str):
-                        longest = max(longest, len(t))
-        return 2 * longest + 8 if longest else 0
+                        longest = max(longest, len(t), len(_tight_form(t)))
+        return 3 * longest + 8 if longest else 0
     except Exception:
         return None
+
+
+def _seam_window(text, lo, hi, width):
+    """text[lo:hi] widened until at least `width` NORMALIZED characters lie on each side (or the file
+    ends). Measured with the real normalizer, so any character that normalizes away -- zero-width,
+    combining, fillers, whitespace runs -- cannot push a padded term out of the window. The margin
+    doubles, so cost is linear in the padding. None past _SEAM_WALK_CAP (the caller fails closed)."""
+    n = len(text)
+    x = max(2 * width, 64)
+    while True:
+        _check_deadline()
+        a, b = max(0, lo - x), min(n, hi + x)
+        if ((a == 0 or len(_tight_form(text[a:lo])) >= width)
+                and (b == n or len(_tight_form(text[hi:b])) >= width)):
+            return text[a:b]
+        if x > _SEAM_WALK_CAP:
+            return None
+        x *= 2
 
 
 def _edit_seams(path, edits, width):
@@ -558,6 +821,7 @@ def _edit_seams(path, edits, width):
             text = f.read()
         windows = []
         for ed in edits:
+            _check_deadline()
             if not isinstance(ed, dict):
                 return None
             old, new = ed.get("old_string"), ed.get("new_string")
@@ -573,13 +837,20 @@ def _edit_seams(path, edits, width):
                 text = new.join(parts)
                 at = 0
                 for part in parts[:-1]:
+                    _check_deadline()
                     at += len(part)
-                    windows.append(text[max(0, at - width):at + len(new) + width])
+                    w = _seam_window(text, at, at + len(new), width)
+                    if w is None:
+                        return None
+                    windows.append(w)
                     at += len(new)
             else:
                 at = text.index(old)
                 text = text[:at] + new + text[at + len(old):]
-                windows.append(text[max(0, at - width):at + len(new) + width])
+                w = _seam_window(text, at, at + len(new), width)
+                if w is None:
+                    return None
+                windows.append(w)
         return windows, text
     except Exception:
         return None
@@ -605,6 +876,7 @@ def path_egress_surface(path):
 
 
 def main():
+    _DEADLINE[0] = time.monotonic() + _SCAN_SECONDS
     # 1) If we cannot load the term list, we cannot evaluate confidentiality -> fail closed.
     try:
         terms = load_terms()
@@ -662,7 +934,10 @@ def main():
                 else:
                     windows, post_edit = seams
                     for w in windows:
-                        hit = find_hit(w, terms, context_text=post_edit)
+                        try:
+                            hit = find_hit(w, terms, context_text=post_edit)
+                        except Exception as e:
+                            block("edit seam scan failed (%s); cannot verify egress safety." % type(e).__name__)
                         if hit:
                             block("'%s' identifier ('%s') would be formed where this edit joins the "
                                   "existing text of %s. This deal must not reach any external surface "
@@ -694,7 +969,10 @@ def main():
         sys.exit(0)
 
     # --- Enforce -----------------------------------------------------------------------
-    hit = find_hit(scan_text, terms)
+    try:
+        hit = find_hit(scan_text, terms)
+    except Exception as e:
+        block("egress scan failed (%s); cannot verify egress safety." % type(e).__name__)
     if hit:
         label, term = hit
         block("'%s' identifier ('%s') would cross egress surface [%s]. "
