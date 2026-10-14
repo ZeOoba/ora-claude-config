@@ -5,12 +5,96 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-23T17:57:37.506Z
+  modified: 2026-10-06T18:12:57.124Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-10-07 -- correction: xlsx-warehouse-importer cache copy not byte-identical
+- Prior entry said the Cowork cache SKILL.md is byte-identical to the repo. Wrong: the platform re-quoted the `description:` frontmatter value (YAML-equivalent); body is identical (verified with diff after stripping CR). Install itself is unaffected.
+
+## 2026-10-07 -- xlsx-warehouse-importer v1.0 reimport confirmed
+- New skill `xlsx-warehouse-importer` (ora-skills 563eb4a, pushed to origin/main) installed in the Cowork runtime cache via manual Save-skill click; Cowork confirmed installed and listed. Cache SKILL.md byte-identical to repo.
+- Code-surface mirror created at ~/.claude/skills/xlsx-warehouse-importer (sync_skill; --all --check clean).
+- Origin: PCA register work; property-id crosswalk and Notion mapping saved to memory (reference_pca_register_notion_field_mapping, project_pca_register_property_id_crosswalk). PCA importer itself not built (plan awaits Phase 0 approval).
+
+## 2026-10-06 — Scheduled-task model standard bumped to claude-sonnet-5-5 (medium)
+
+Gabriel-directed. Recreated 13 enabled CC/MCP tasks from a Sonnet 5.5/medium session (ids unchanged; SKILL.md bodies restored byte-identical, backups `SKILL.md.bak-2026-10-06-model-sonnet55`), tagged `[MODEL: claude-sonnet-5-5 | set 2026-10-06]`. `ora-master-workbook-ingest` skipped (mid-run; its run session already showed sonnet-5-5/medium without recreation, so runs may follow the app default). Deleting registry entries archived old run sessions for ora-am-brief (2), ora-loopnet-listings-sync (1), ora-pr-land-watch (6). Notifications set off on recreated tasks. Standard file updated; ~45 paused tasks keep old tags. Verify ora-am-brief run model on 2026-10-07.
+
+## 2026-10-02 — ora-loopnet-listings-sync v1.1 live and re-enabled (portfolio availability badges)
+
+Gabriel directed both steps in-turn ("update the sync task for badges", then "Re-enable the sync task"). Surface: native Claude Code, CC/MCP fleet, `~/.claude/scheduled-tasks/ora-loopnet-listings-sync/`.
+
+- **Why disabled:** paused in the 2026-09-22 fleet pause; the 09-28 resume stalled (see "Fleet Wave 1 re-enabled" above), so it stayed `enabled:false` although its pause window was recorded closed. Not part of Wave 1; enabled individually on Gabriel's request.
+- **SKILL.md v1.1 (live, hash-verified, backup `SKILL.md.bak-2026-10-02-portfolio-badges`):** stages `portfolio.html` alongside `data/listings.json listings.js available-space.html sitemap.xml`; the "never edit outside the data/generated files" rule names all five; a listing no portfolio asset claims is a Step 3 alert. Repo side: ZeOoba/Website #127 makes `build-listings.mjs` also generate `portfolio.html` (badges) and stamp the /portfolio sitemap lastmod. The SKILL.md edit had to be live before #127 merges, else a sync PR fails `Build & verify` on a portfolio.html drift.
+- **Re-enable:** `update_scheduled_task` `enabled:true` + description re-tagged `[MODEL: UNVERIFIABLE | checked 2026-10-02]` in the same call (re-enable precondition; no model observation possible). Cron NOT passed, unchanged at `30 14 * * 1` (the 09-22 retime); the registry description's stale "Mon 10:40 AM ET" corrected to "Mon 2:30 PM ET". Verified with `list_scheduled_tasks`: `enabled:true`, next fire 2026-10-05T18:30Z (Mon 14:30 ET).
+- **Tool side effect:** the update rewrote SKILL.md as LF (was CRLF) and dropped the final newline; body edits survived (checked line 10, 40, 52 and the diff against the backup).
+- **Sequence risk:** merge #127 before Mon 10-05 14:30 ET if possible. If a sync PR lands first, #127 needs `gh pr update-branch` and a `build-listings` regenerate to pick up the new badge counts.
+- Not done: the other Wave 2/3 tasks; `registry-membership-probe.py` not run.
+
+## 2026-10-02 — Fleet Wave 1 re-enabled on Gabriel's approval (5 CC/MCP tasks)
+
+Gabriel approved "Approve all 5" in-turn (AskUserQuestion, 2026-10-02) after a read-only triage showed the 2026-09-28 CC resume stalled at step 1 of 5 (marker `task-progress/cc/ora-routine-pause-resume-09-28.json`), leaving 48 of 49 intended ids disabled.
+
+- Enabled via `update_scheduled_task` (surface: native Claude Code, CC/MCP fleet, paths under `~/.claude/scheduled-tasks/`): `ora-master-workbook-ingest` (Mon 05:45), `ora-pm-daily-crons` (Mon 09:40), `ora-prepush-gate-sweep` (Thu 11:00), `ora-memory-commit-sweep` (Fri 19:00), `ora-pm-monthly-billing` (1st, 11:10; money-moving). Cron unchanged on all five.
+- Each re-tagged `[MODEL: UNVERIFIABLE | checked 2026-10-02]` in the same call (re-enable precondition; no model observation was possible, so the standard's fallback value was used).
+- `update_scheduled_task` dropped `offhost-backup:` on `ora-pm-daily-crons` and `ora-pm-monthly-billing`; both restored by file edit the same pass. The daily-crons line is byte-identical to HEAD. The billing line was flipped `pending` to `live since 2026-10-01` after the first scheduled off-host run concluded success (https://github.com/ZeOoba/ora-pm/actions/runs/36932162552: 2026-10 posted=139, 0 errors, 0 remaining), meeting step 3b's three proofs.
+- Verified with `list_scheduled_tasks`: all five `enabled:true`. Next fires: memory-commit-sweep Fri 10-02 about 19:10 ET, master-workbook-ingest Mon 10-05 about 05:48 ET, pm-daily-crons Mon 10-05 about 09:48 ET, prepush-gate-sweep Thu 10-08 about 11:09 ET, pm-monthly-billing Sun 11-01 about 11:17 ET. CC fleet reads 13 enabled of 58 afterwards.
+- Not done: LAMS Wave 1 item `ora-cowork-heartbeat` (needs a NATIVE Cowork session); Waves 2 and 3. `registry-membership-probe.py` not run, so the 09-23 baseline is still stale.
+- Expect `ora-prepush-gate-sweep` to report failures on its first run: the pre-push gate is failing on a host-load problem (see Automation Audit R29-5).
+
+## 2026-10-01 — Correction: County Sales Monitor parity causes (supersedes the cause list in the deploy entry above)
+
+An independent review of the ora-skills draft re-derived the legacy-only parity causes and refuted the first explanation. Of the 51 legacy-only rows (window 2025-10-01 to 2026-08-15): 20 multi-parcel representation, 20 Franklin rows with SF >= 150K that the legacy pilot kept and the worker's SF gate drops, 3 on 2025-10-01 (before the worker's window start 2025-10-02), 8 other (mostly Franklin last-sale-only `SALEDATE`, G7). Matched counts (207) and new-only (32) are unchanged. Also: LATE-POSTED and flag semantics in the worker differ from the v0.5 manual workflow (First-Seen-based, 365-day re-pull, SF-INCOMPLETE and MULTI-PARCEL-INFERRED flags); recorded in county-sales-monitor v0.6.
+
+## 2026-10-01 — County Sales Monitor Notion Worker deployed (first sync run, parity checked)
+
+Gabriel ordered the ship (L7). Worker `county-sales-monitor` (id `01a0fa61-6ca4-78f2-895d-5aafe648dbbf`, `@notionhq/workers` 0.9.2, ntn 0.23.15, deployed from native Windows because WSL2 is not installed) lives at `C:\Users\Owner\ora-county-sales-monitor` (local git, initial commit `b2b6c35`, no remote, nothing pushed). Syncs `countySalesSync` and `countySalesCoverageSync`, both weekly, Tier A only (Franklin OH, Baltimore Co MD, Polk IA).
+
+- **Databases (moved under Knowledge Base `3386ecd8`):** `County Sales Comps (Worker)` db `3ed6ecd8-9e59-8168-a367-df08b6ff6d3b` / ds `28bae38c-f495-4c9e-9edc-b86c0ae2c413`; `County Sales Coverage (Worker)` db `3ed6ecd8-9e59-81b1-947b-dff540312cfc` / ds `f26e704a-9191-436b-85cf-fd64258928be`. Legacy pilot DB `311cf712…` (304 rows) untouched.
+- **Evidence:** typecheck clean, 12/12 rule tests, simulate passed (Franklin 173 / Baltimore 38 / Polk 64 vs baseline 176 / 38 / 64). Preview and live comps = 275 rows, 275 distinct keys, 0 LATE-POSTED, no `Price PSF` on any NONARMS / CONTRACT-SALE / SF-INCOMPLETE row and none equal to 0. Coverage DB = 7 rows. Run logs: 0 errors. The deploy auto-ran one cycle of each sync, then the manual triggers re-ran them (idempotent upserts, same-day baseline).
+- **Parity vs legacy, window 2025-10-01 to 2026-08-15, strict County+Parcel+Date+Price:** legacy 258 / new 239 rows in window; matched 207 (Franklin 119, Baltimore 38, Polk 50); legacy-only 51 (Franklin 35, Polk 16); new-only 32 (Franklin 18, Polk 14). Baltimore is exact. Reasons: 22 legacy-only and 30 new-only are the same transaction with a different parcel-ID representation (multi-parcel member order or per-parcel rows vs one grouped row); 27 Franklin legacy-only are parcels the live layer no longer shows (Franklin `SALEDATE` holds only the last sale, G7), mostly $0 NONARMS; 2 Polk legacy-only and 2 Franklin new-only unexplained.
+- **Finding:** Polk sales export newest `initial_entry_date` was 2026-07-30 as of 2026-10-01, contradicting "refreshed continuously" in county-endpoints.md.
+- **Pending Gabriel:** review the ora-skills draft diff (county-sales-monitor v0.6 + county-endpoints Polk note, worktree `C:\Users\Owner\ora-skills-csm-v06`, uncommitted); legacy DB archive decision; Polk occupancy codes 25D / 46A ratification; monthly digest reader via register-scheduled-task; any GitHub push. Rollback: `ntn workers capabilities disable countySalesSync` and `countySalesCoverageSync`; never delete the worker or databases.
+
+## 2026-10-01 — oxfordra.net release: broker scoring fixes (Website #110) and Sepich $12M restore (Website #111)
+
+Gabriel confirmed in-turn: merge both and deploy to production. A merge to `main` publishes to production on this site (Netlify builds from main; the live deploy changed seconds after each merge).
+
+- **#110** squash-merged as `3cc54e8`. Production deploy `6abebabec482470007eb1ae2` ready, commit `3cc54e8`. Broker scoring: replacement-cost floor no longer printed to brokers (internalNote whitelisted out), score withheld below 60% scorecard coverage, score rows declared on the `broker-network-ledger` form and joined to the contact row by submission-id. Verified live: apex and /for-brokers 200; `/api/broker-score-status` without a token returns 401 invalid_auth; the served ledger form declares the new fields; Netlify's forms API shows `broker-network-ledger` registered with submission-id, score-total, score-coverage, score-gate-property-type, score-gate-market, score-breakdown.
+- **#111** squash-merged as `c2a7f00`. Production deploy `6abebba08a106f0007e747f8` ready. Sepich Portfolio shows $12M and ~2.6x (owner instruction; reverses the 09-24 workbook-checked ~$9.9M / ~2.1x, so the Master Workbook valuation is now out of step with the site). Verified live: track-record and home page show $12M and ~2.6x, no 9.9M left.
+- **Pre-flight:** CI `Build & verify` green on each final head; site-qc-reviewer (Sonnet 5.5) APPROVE; no roster term or active-confidential deal in either diff. Reviews of the code ran on Opus 5.5 and Sonnet 5.5, not Fable (monthly spend limit).
+- **Rollback:** Netlify "publish previous deploy". Deploy before #110 was `6abeb3f11c3350000984e270` (main at #106); before #111 it was `6abebabec482470007eb1ae2`.
+- **Not done:** Overview PDF still shows 2.1x for Sepich (source row updated, PDF not regenerated); accepted residual that a broker can narrow the replacement-cost floor from the basis points and total score; market gate knows 4 markets while the acquisition engine uses 10 (follow-up PR requested by Gabriel).
+
+## 2026-09-30 — Notion upgraded to Plus; free-block outage closed ([OI-288](open-items-tracker-history.md#OI-288))
+
+Gabriel upgraded the Notion workspace to Plus. Live-verified the same day: `notion-create-pages` succeeded (private draft page `3eb6ecd8-9e59-8161-838b-fffb56dc4235`, "OI-288 block-cap verification 2026-09-30", safe to delete; the connector has no delete or trash command, so removal is manual). OI-288 moved from the open tracker to `open-items-tracker-history.md`, with its `### OI-288` anchor stub. `notion-publish-degraded.json` `trial_expiry_risk` set to resolved (it already read `active:false`). Not checked: that the plan survives its first billing cycle. Earlier entries that cite `open-items-tracker.md#OI-288` now point at the wrong file; the integrity probe flags them and they are left as written (append-only).
+
+## 2026-09-30 — ms365 send, Teams and HubSpot CMS write gate live (ora-claude-config PR 292)
+
+`hooks/ora-autonomy-gate.py` now gates ms365 `outlook_send_mail` / `outlook_forward_mail` / `outlook_send_draft` (internal-only `@oxfordra.net` passes; otherwise an `allow-external-send` token naming the recipients, or `draft:<id>`), Teams sends (token naming `teams:<dest>`), and HubSpot `manage_blog_post` / `manage_landing_page` / `manage_website_page` writes (new `allow-hubspot-cms-write` token, 10 min, multi-use; exact-case read allowlist passes). Also fails closed on an unparseable payload that names a gated MCP tool. PR 292 merged as `b401c08`; the live checkout `live/primary-checkout` was fast-forwarded 781bf6b to b401c08 with Gabriel's approval (one `allow-config-write` token, archived after use). Proved live: 8 of 8 crafted payloads, and a real `outlook_send_draft` call with a nonexistent id was blocked in-session. Reviews ran on Opus 5.5 because Fable was at its monthly spend limit. Residuals: a draft token names the draft, not its contents; calendar invites, vacation replies and mail filters are not yet gated (follow-up session, branch `feat/mcp-calendar-gate`); Bash/file-tool gates still fail open on an unparseable payload (follow-up, branch `fix/autonomy-gate-parse-failclosed`); hooks do not run in Cowork.
+
+## 2026-09-30 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `6945e228-b0b9-4e07-974d-4c696f8a5f39` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel authorized in chat 2026-09-30: test-governor-drift-probe fails on oxford-command-center capital-config.ts lines 198/201 (separate repo, from that repo PR 386); reproduced by running the test directly; this diff touches no governor or oxford-command-center file.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-30 11:03:42 local.
+
+## 2026-09-29 -- Cook County cluster parity patch (Chicago-Greater Cook County IL = 11th canonical cluster)
+
+Gabriel ratified in-turn 2026-09-29 (South Chicago Small-Bay Portfolio FULL underwrite): Chicago-Greater Cook County IL = 11th canonical cluster, ENTRY phase, all of Cook County, collar counties not satellites (Ruling 3), exit cap 8.00%; IL/Cook reassessment row; Chicago RCT v03 row. Parity commit `dc9ea62` on branch `feat/cook-county-parity-2026-09-29` (worktree `ora-worktrees/cook-parity`), NOT yet on main: target-markets.json v1.11 (11 clusters), acquisition-underwriting v4.25 + deal-comparison v1.3 skill-card content ported into the repo (repo was still at v4.24 / v1.2), state-reassessment-matrix IL(Cook) row, Chicago RCT sourcing paragraph (POINT re-derived $250.65 vs row $250.66, row holds), cw-2025-construction-costs.json bundled, doctrine-rationale Gate 3 mirror. Also: ora-entry-market-scan SKILL.md v1.9 (5th scan market; registry untouched; task still shows EN=OFF, as before), ora-skill-text-audit class (j) alias `Chicago-Cook`, Investment Candidates mirror overwritten (was v1.1/9 clusters, pre-edit copy kept in session scratchpad).
+
+Not done / open: market-monitor and daily-brief blocks SKIPPED (repo base hash did not match; daily-brief already at v2.15); exit-cap mirror in doctrine-rationale skipped (anchor absent); memory twin `acquisition_target_markets.md` not found on this machine; another session's uncommitted Louisville v1.11 edit in the main ora-skills checkout's target-markets.json was reviewed BLOCK (submarket table does not sum to metro totals) and left untouched, so landing on main needs it reconciled and Chicago renumbered to v1.12 if it lands first.
+
+## 2026-09-29 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `9481616f-9636-4c9b-8029-3cda3da4d87c` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved in-turn (2026-09-29, AskUserQuestion "Override, push, open PR") for one push of 7e0d4ba (14 added event_log.md lines, no code). Gate failures are pre-existing and unrelated: governor-drift-probe false positive on capital-config.ts finiteness guards (OI-359), test_scheduled_task_run_guard ora-audit-log-sweep frozen-backlog entry, open-items tracker orphan sections OI-354/355/356. Token to be deleted right after the push.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-29 12:30:45 local.
 
 ## 2026-09-28 -- census-v19 install: submarket-spatial-analysis v1.9 + acquisition-underwriting (manual evidence)
 
@@ -25,6 +109,231 @@ Out of scope, noted: repo_first_check still reports six unrelated cache-ahead sk
 ## 2026-09-29 -- package-and-stage-skill reimport
 
 package-and-stage-skill reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-09-28 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `372c45f9-107e-4c85-966f-74ce3f70a06f` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved override in-turn (fifth push, one-line run-guard backlog entry for ora-audit-log-sweep, PR after #285): the only gate failure is the governor-drift-probe false positive (capital-config.ts > 0 finiteness guards; real constants 1.25/0.40 intact in governor-constants.ts; tracked as OI-359). 138 of 139 tests pass and the change is 6 lines in one test file.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-28 23:40:16 local.
+
+## 2026-09-29 — RATIFIED retirement of two completed one-time CC tasks: ora-resume-0928-attend-reminder, ora-routine-pause-resume-09-28
+
+RATIFIED: ora-resume-0928-attend-reminder and ora-routine-pause-resume-09-28 (CC/MCP fleet). Both were one-time tasks for the 2026-09-28 attended resume; both fired 2026-09-28 15:24Z (lastRunAt), are enabled:false, and were failing test_scheduled_task_run_guard.py in the live working tree as untracked, unguarded specs. Gabriel approved retiring them in-turn (2026-09-29). CC order: delete_scheduled_task first (registry-only, folder kept), then archive both folders to scheduled-tasks/_archive_2026-09-29_completed-onetime/. Pre-checks: no same-id task on LAMS (grep of the LAMS registry), no code depends on either id (references are runtime state and handoff briefs only). ora-audit-log-sweep is NOT retired: registered, disabled, held out of PR #285; its run-guard failure is being fixed by a backlog entry citing OI-360 (see memory/open-items-2026-09-28-triage.md).
+
+## 2026-09-28 — PR #284 merge gate closed out: slim PR #285 opened, OI-357..OI-364 filed standalone
+
+The adversarial merge gate (six independent reviewers, pinned head 9329f26) found PR #284 carried a 31.6 MB snapshot tarball (memory files inside, invisible to the pre-push scanners), skills/synced/, and per-run _state files that would pin the merge-forward corrector. #284 was closed and its branch deleted (the hidden refs/pull/284/head still holds the tarball until a GitHub purge). Replacement: PR #285 (57 files, 5 commits, reviewed keepers only; the send-via-outlook change is the cold-start guard alone, the in-script retry was dropped because it doubled the caller retry count and could double-send). Eight follow-ups were filed as OI-357..OI-364 in `memory/open-items-2026-09-28-triage.md` (standalone: open-items-tracker.md was CONTESTED by live session 07f5c5ca; merge them into the tracker when the preflight returns 0, then delete the file). Ids reserved via allocate-oi-id.py. Pre-push overrides used: four, each for test-governor-drift-probe.py, a false positive on positivity guards in oxford-command-center capital-config.ts (constants 1.25 / 0.40 intact) - see OI-359.
+
+## 2026-09-28 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `372c45f9-107e-4c85-966f-74ce3f70a06f` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved override in-turn (fourth push, slim replacement branch for PR #284): remaining expected failure is the governor-drift-probe false positive (capital-config.ts > 0 finiteness guard; real constants 1.25/0.40 intact in governor-constants.ts); run-guard ratchet and sentinel fix are resolved and the three blast-radius commits carry recorded independent review (claude-opus-5-5, approved).
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-28 18:34:03 local.
+
+## 2026-09-28 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `372c45f9-107e-4c85-966f-74ce3f70a06f` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved override in-turn (third push, PR #284 run-guard + sentinel-slot fixes): remaining failure is the governor-drift-probe false positive (capital-config.ts > 0 finiteness guard; real constants 1.25/0.40 intact in governor-constants.ts); run-guard ratchet and sentinel TZ fix are fixed in this push.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-28 17:30:27 local.
+
+## 2026-09-28 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `372c45f9-107e-4c85-966f-74ce3f70a06f` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved override in-turn (second push, merge of origin/main into PR #284 branch): remaining failures unrelated to correctness of the merge - governor-drift-probe false positive (capital-config.ts > 0 finiteness guard; real constants 1.25/0.40 intact) and run-guard ratchet on newly tracked task specs (backlog/guard fix pending, noted in PR #284).
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-28 16:54:30 local.
+
+## 2026-09-28 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `372c45f9-107e-4c85-966f-74ce3f70a06f` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved override in-turn: 3 gate failures pre-exist and are unrelated to the 74 pushed commits - governor-drift-probe false positive (capital-config.ts > 0 finiteness guard; real constants 1.25/0.40 intact), in-flight OI-354/355 filing by another session (uncommitted tracker), and un-backlogged scheduled-task specs on run-guard ratchet (fix pending).
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-28 16:10:30 local.
+
+## 2026-09-28 — Dirty-tree triage: primary checkout reattached + 72 settled files isolated-committed
+
+Checkout was found in detached HEAD (reflog: an interrupted `reset: moving to origin/main`), main unavailable for direct checkout because it's pinned to the dedicated `main-checkout` worktree (which runs the daily `deadman: fleet-heartbeat` commits) — resolved by creating `chore/reattach-primary-checkout-2026-09-28` at the existing commit (0796ad1, already an ancestor of `main`; nothing lost). Then ran evidence-attribution (`hooks/sessions/*/touched-files.txt`, 348 sessions) + mtime-settlement against the 120-entry dirty scan; isolated-committed 16 modified-tracked files via `commit_isolated_replacement()` and 56 untracked files/dirs via scoped `git add`+commit (72 commits, 0 failures). Excluded and left dirty on purpose: the memory-index cluster (33 files — governed by the existing `memory: automated sync checkpoint` process, not ad-hoc triage), `settings.json` and `scheduled-tasks/_shared/send-via-outlook.ps1` (blast-radius, need Gabriel's read-through), today's live pending automation (`ora-resume-0928-attend-reminder/`, `ora-routine-pause-resume-09-28/`), and 11 already-archived `_archive/` dirs (no action needed). `website-canonical`'s one dirty file was left untouched — a session was actively running in that exact checkout. `oxford-command-center`'s one dirty file (the deliberately-tracked `data/snapshots/portfolio.json` fixture) was left untouched — repo is 2 commits behind origin, a sync decision, not a triage one. **Flag:** the `scheduled-tasks/ora-pr-land-watch/SKILL.md` I just committed is the pre-fix version (manual shell TZ math) — local branch `fix/sentinel-et-slot` (unmerged, unpushed) already fixes the exact UTC/ET bug it still has. Do not treat this recovery branch's copy as authoritative; reconcile from `fix/sentinel-et-slot` before either lands on `main`.
+
+## 2026-09-26 — oxfordra.net website-perfection audit shipped (PR #99, live)
+
+- Full-site audit (website-perfection v1.1): Lighthouse 100/100/100/100 desktop, 99–100 mobile; verify gate green; live == HEAD before work.
+- Gabriel approved scope 2026-09-25 via AskUserQuestion: all code/security/a11y/hygiene findings + claim decisions (Indianapolis → "Other Midwest / Mid-Atlantic"; founding claim stays 2005 everywhere, meta.md aligned; placeholder LinkedIn Insight Tag removed with its CSP origins).
+- Landed: P1 tenant-application "Sending…" lock; chat-lead CORS + rate limit; single-use broker intake tokens (release on email failure); CSP hardening directives; webhook/reCAPTCHA silent-failure fixes; 7 prod npm advisories → 0; storage guards; logo `|` → rect (Lighthouse label-content-name-mismatch); mobile nav landmark; aria-controls; titles ≤ 60; llms.txt markets/tenants.
+- Gates: seo.test.mjs WP-1..13 + client-robustness + chat-lead unit tests; mutation cases W1–W13 (14 killed); independent Fable REFUTE review recorded via eos-review-gate (1 confirmed defect fixed pre-commit); CI stale-anchor fix (N10) after mobile-nav tag change.
+- Merged 4c97ba5 on Gabriel's "merge it once CI is green"; Netlify auto-built main; served assets verified live (script.js?v=16, styles.css?v=19, CSP directives, redirects, content).
+- Deferred (in PR body): per-unit size-filter semantics, chat edge global spend cap, netlify-cli 27 bump, one real broker upload to confirm SharePoint uploadUrl host under connect-src.
+
+## 2026-09-24 — adversarial-merge-gate hardened against reviewer hook writes (ora-claude-config PR #282); the override scope was wider than authorized
+
+- **What:** `skills/adversarial-merge-gate` gains a fourth mandatory dispatch clause, "guard surface is off limits": no reviewer writes under `~/.claude/hooks/`, and no encoded or split command text to get past a guard. There is also a pre-dispatch hook-dir listing with a post-swarm breach check. Breaches are archived to `_archive_override_tokens/`, and a plain `override` gets a `.breach-<date>` suffix so the weekly sweep's forced move can't overwrite it. Commit `b8b1c89`, branch `feat/merge-gate-guard-clauses`. An independent opus reviewer approved on its third pass; the PR is open, not merged.
+- **Why:** in the PR #89 (ZeOoba/Website) merge gate, a test-validity reviewer wrote the eos-plan-gate `override` into the orchestrating session's hook dir, and base64-encoded a site path in one command. That marker is archived as `bb65086a-…_override.breach-2026-09-24`.
+- **Override correction:**
+  - Gabriel authorized `allow-hook-test-failure` for load timeouts in `test_checkout_merge_forward.py` and `test_preflight_shared_checkout.py`. Run directly, both passed in 430s and 437s against the 480s budget.
+  - The push that consumed the token (the gate's entry above, 14:53) actually overrode three different tests: `test-commit-hygiene-guard.py` (124), `test-linear-shlex-commit-guards.py` (124 twice), and `test-git-prepush-scan.py` (exit 1; `load_terms` assertion failed on the post-timeout rerun).
+  - Run directly on the branch, all three pass: 39/39 in 37s, 144s and 99s. So the failures look load-induced.
+  - The session first misreported the override as unused and corrected that before closing out. A session-scoped token covers whatever fails during its lifetime, not only the tests named in its reason.
+- **Flaky under load (from the same gate runs):** `hooks/tests/test-eos-review-gate.py` and `maintenance/_tests/test_append_event_log_lock.py` (`WinError 5` on the gate temp dir). Both failed once and passed on rerun.
+
+## 2026-09-24 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `bb65086a-c82a-4529-ad6e-4705d6fb23a8` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel authorized in-turn 2026-09-24 (AskUserQuestion "Authorize override"). Push of b8b1c89 (feat/merge-gate-guard-clauses; diff = skills/adversarial-merge-gate/SKILL.md + agent-prompts.md only). Gate failures are load timeouts, not regressions: maintenance/_tests/test_checkout_merge_forward.py and test_preflight_shared_checkout.py both exit 124 after the doubled-budget retry, but run directly they pass (rc=0, 0 FAIL) in 430s and 437s against the 480s budget, with ~18 sessions running. Neither test reads skill files.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-24 14:53:13 local.
+
+## 2026-09-24 — ora-skills ledger sidecar lock (PR #84, stacked on #79)
+
+- **What:** added a cross-process sidecar lock around every ledger read-modify-write in `ora-skills`. This closes #79's deferred merge-gate race finding F2: 21.7–40.2% of concurrent ledger updates were being lost.
+  - Covers the PENDING_REIMPORT ledger (written by `pending_reimport.py record` / `clear` / `backfill`) and the STORE_AHEAD_OF_REPO ledger (`repo_first_check.record_ledger`).
+  - The lock is a kernel byte-range lock (`msvcrt.locking` / `fcntl.flock`) on a never-deleted `_staging/.<ledger>.lock`, with a 10s bound, then `LedgerLockTimeout`. There is no stale-lock state.
+  - `update_entries()` is now the only sanctioned ledger read-modify-write. **Any new ledger writer must go through it.**
+- **Evidence:**
+  - Contention test, 3 procs × 200 cycles: 0 lost with the lock, versus 388/600 lost or never executed with a no-op lock.
+  - Full suite green: 14/14 files, 0 skips, 0 empty.
+  - CI 2/2 green on #84.
+  - Independent Opus adversarial review: CHANGES REQUESTED (2 Important: silent non-timeout OSError on the post-commit record path, wrong `backfill` remedy), all fixed, then APPROVE.
+- **Open:** #84's base is #79 (`fix/staging-primary-checkout`, round-4 merge gate running on ac52f51 at the time of writing). Once #79 merges: merge `origin/main` into `feat/ledger-sidecar-lock`, re-run `tools/run_suite.sh`, and retarget #84 to `main`. The dry-run merge against ac52f51 was clean.
+
+## 2026-09-24 — oxfordra.net fix-forward: duplicate hero stat (#95)
+
+- #92 added "20+ Years Operating" next to the existing "21+" hero stat, a defect found in the post-deploy visual check. #95 removed it (main fc4d772), after Gabriel's in-turn deploy OK and green CI; landed tree equals the reviewed head.
+- Verified on prod: the hero reads 500,000+ SF · 130+ Tenants · 3 Core Markets · 21+ Years Operating, with a single "Years Operating" label.
+- Lesson: when replacing a stat tile, check its siblings for the replacement label before choosing it. The text-only greps passed; only the visual check caught it.
+
+## 2026-09-24 — oxfordra.net release: Overview PDF (#90) + site figures (#92)
+
+- **Confirmed by Gabriel in-turn** ("deploy #90 and #92 to production"); /ship lane L7.
+- **#90 → main 79932dd, Netlify prod live.** Overview PDF regenerated from the Master Workbook (2026-09-23) and settlement statements: no numeric LTV, no building count, no CONFIDENTIAL marking. PDF republished and hero Download Overview button restored. Verified: PDF 200 application/pdf, sha256 ffe362d7… equals repo; button present.
+- **#92 → main 809c264, Netlify deploy 6ab53f92 ready.** Public figures corrected: 130+ tenants; building counts replaced by SF per market; 2022 = 300,000 SF; "can close all-cash" instead of every-deal; Sepich ~$9.9M, 1900 NB $5.4M+; occupancy / CoC / value-to-price tiles; 9620 = 34,300 SF. Chat firm facts (scripts/meta.md) aligned. Verified: 9 pages 200 with no 140+, building count or universal all-cash claim. Lighthouse 99/100/100/100; secret scan clean.
+- **Gates:** independent fact-checkers (all figures SUPPORTED); site-qc-reviewer APPROVE after 2 BLOCK rounds (review surface, then 2 missed all-cash claims); CI green on the merge heads.
+- **Incidents:**
+  - #85's squash-merge would have silently dropped #90's reversals; fixed with `-s ours`, since the trees were identical.
+  - main went red (#93 × #89 script.js cache-buster); fixed by #94 in parallel.
+  - **Defect shipped:** #92 duplicated the "Years Operating" hero stat. Fix-forward PR opened, pending Gabriel's deploy OK.
+- **Rollback point:** 6ab48985 (e800913).
+
+## 2026-09-24 — Run-guard test cp1252 crash fixed (PR #281, b89595e)
+- Symptom: pre-push hook-tests gate reported `test_scheduled_task_run_guard.py` failing with `UnicodeEncodeError: 'charmap' codec can't encode '→'`. The test quotes task SKILL.md lines in FAIL details; on the gate's cp1252 pipe the print raised inside `check()` before `_failures.append()`, aborting the run and hiding the real failure list.
+- Cause class: environment (Windows cp1252 stdout on a pipe). ~30 `maintenance/*.py` scripts already carry the `reconfigure(encoding="utf-8", errors="replace")` idiom; no file under `maintenance/_tests/` does, so any test that prints non-ASCII detail is exposed the same way.
+- Fix: the standard idiom added to that one test. Repro (PYTHONIOENCODING=cp1252, `check()` with a U+2192 detail): traceback before, FAIL recorded after. Full pre-push suite green on push.
+- Separate, NOT fixed: the live `~/.claude` checkout still fails this test on real FAILs from other sessions' untracked task folders (ora-audit-log-sweep, ora-hubspot-renewal-closeout-tasks, ora-incentive-registry-refresh, ora-jackson-boe-prep-reminder) — frozen-backlog check. That blocks every push from the live checkout, incl. branch deletes.
+
+## 2026-09-24 — oxfordra.net release: PR #94 (application-received on script.js?v=14)
+- **Shipped:** squash `1e02320`, confirmed per-deploy by Gabriel in-turn. It fixes the v=13/v=14 mix #89 left behind.
+- **Verified:** main CI green on 1e02320. Live `/application-received` loads v=14. `script.js?v=14` still has the #93 matcher. `/`, `/tenant-application`, `/application-received` and `/sell-your-building` all return 200.
+
+## 2026-09-24 — oxfordra.net release: PR #93 (script.js upload check honours `accept`)
+- **Shipped:** squash `5498171`, confirmed per-deploy by Gabriel in-turn. #91 had already been merged by ZeOoba at 02:23Z.
+- **Gates before merge:** CI green on 45bb8b6; site-qc-reviewer APPROVE; independent Opus review clean; 186 unit + 49 site tests.
+- **Live:** production is on `fd8f152`, because #89 merged 4s after #93. Verified by curl: `script.js?v=14` has the new matcher, `/tenant-application` is on v=14 with its 3 accept inputs, and pages return 200.
+- **Collision:** #89 put `application-received.html` on `script.js?v=13`, so main CI went red (mixed cache-busters). Follow-up PR #94 (one line, v=14) is a draft with CI green, awaiting per-deploy confirmation.
+- **Lesson:** two same-minute merges that both touch the cache-buster can't see each other. Re-check main's tip after every merge, not just the PR head.
+
+## 2026-09-23 — ora-pr-land-watch registered; one-time ora-branch-catchup-refute-trailer-366 RETIRED (superseded)
+
+- **New:** `maintenance/pr-land-watch.py` plus 37 tests landed in ZeOoba/ora-claude-config PR #279 (merge `9c35410`). It is a queue of "do Y once PR X lands" watches. Recurring CC/MCP task `ora-pr-land-watch` (cron `35 9-21/3 * * *`, enabled, `[MODEL: UNVERIFIABLE | checked 2026-09-23]`) polls it and runs each hash-pinned payload once its PR is MERGED. The task always runs the origin/main copy, extracted to TEMP, because the live checkout's merge-forward is paused.
+- **Why:** it replaces the "one-time task at a guessed time" pattern. An unattended run cannot re-schedule itself (register-scheduled-task v2.23).
+- **Review:** the opus adversarial review ran 3 rounds. It found 6 Important issues, reproduced and fixed each with a regression test, and found no Critical.
+- **Named "land", not "merge":** config-write-guard matches "merge" in any git command that names ~/.claude.
+- **Queued (both trigger on oxford-command-center #366):**
+  - `branch-catchup-366`: the Step 6 refute-trailer doctrine edit, delivered as a PR that is not merged.
+  - `pr364-catchup-after-366`: a guarded catch-up of #364, using Refute-Skip only when the conflict is taken verbatim from main. Gabriel chose "guarded".
+- **RATIFIED retire: `ora-branch-catchup-refute-trailer-366`** (CC/MCP, one-time). It was superseded by the `branch-catchup-366` watch. It was removed with `delete_scheduled_task` first (registry only), then its folder was archived to `scheduled-tasks/_archive_2026-09-23_retired/`.
+- **Push friction:** the ora-claude-config pre-push gate blocked twice. Each time it was timeouts in untouched hook tests under 100% CPU (162 python/node processes, 17+ sessions). It passed 137/137 once load settled.
+
+## 2026-09-23 — ora-site-exposure-probe v1.4: redirects-away classify CLEAN; matrix read from deployed main
+- Why: Step 2 accepted "any non-200" while Step 4 CLEAN required "real 404/403"; no verdict covered a 3xx. oxfordra.net PR #85 (ec3f187) unpublishes the Overview PDF with a `_redirects` 301 -> `/`, so the first post-pause run (Wed 2026-09-30 09:50 ET, via ora-routine-pause-resume-09-28) would have hit an unclassified 301 and could have fallen through to an alarm email.
+- CLEAN = 404 / 403 / CLEAN-redirect (same-host 3xx, decoded path differs from probed path and is `/` or another matrix path). 200/listing stays ALARM. Every other 3xx (self, no Location, off-host, off-matrix target, 300/304/305) and every other status -> ALARM-UNVERIFIED.
+- Steps 1/3 now read build-dist.mjs/_headers from `main` via `gh api` (local working tree was at 31f5cef, behind origin/main; lag would false-alarm when PR #90 restores the PDF). Point raised by the PR #85 session's round-3 race review. No `git fetch` into the site checkout.
+- Adversarial REFUTE pass (Opus) found the "Location differs" rule could launder a leak via an unprobed/off-host target; target restriction added. Open follow-up: the must-not-serve list comes from the same file a regression would edit.
+- Landed: ora-claude-config branch fix/site-exposure-probe-3xx-verdict (a0b02cf); live SKILL.md propagated via propagate-task-spec.py (backup `SKILL.md.bak-2026-09-23-3xx-verdict`, live == blob b3ece05, LF). Registry unchanged: `50 9 * * 3`, enabled:false.
+- Verified: live dry-run on main @ cf92cd3: 34 paths, 2x301 -> / (PDF, PDF/), 32x404, control 200/404, headers match -> CLEAN. 15/15 synthetic adversarial cases classify as intended.
+
+## 2026-09-23 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `4c7805b5-6f44-468c-9262-a9905e86259c` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel approved in-turn 2026-09-23 for push of feat/sourcing-scan-v2-8 (diff = 2 scheduled-task SKILL.md files only). Gate failures triaged: (1) maintenance/test-powershell-suites.py -> test-fleet-deadman-ps1.ps1 timeout(200s) REPRODUCES on unmodified origin/main 0cb7bd1 (pre-existing); (2) maintenance/_tests/test_verify_push.py timed out 480s x2 under machine load but passes 36/36 standalone on origin/main (137s) and on this branch ee4e804 (214s). Neither test reads the changed files.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-09-23 22:17:43 local.
+
+## 2026-09-24 — oxfordra.net PR #88 merged 45s after #85; combined main cf92cd3 verified live
+
+- **What happened:** #88 (form thank-you states) was squash-merged by ZeOoba at 02:03:41Z as `cf92cd3`, 45 seconds after #85 (`ec3f187`). The merged head was `78820da`, the head #88's own 3-round adversarial gate cleared (verdict comment posted 02:03:02Z).
+- **Protocol deviation:** the agreed handoff was that the #88 session would merge main in, re-test, and send session 30dc10ce an exact SHA to merge. That didn't happen; the #88 session ended right after the merge, and it is unconfirmed which actor merged. The prior race simulations (#85@55dc0b3 + #88@78820da: clean in both orders and as squash, 7/7) predicted a clean combination.
+- **Verified after the fact (session 30dc10ce):**
+  - CI "Build & verify" passed on cf92cd3, including csp-smoke.
+  - Locally on cf92cd3: unit 186/186, site 37/37 (includes #88's form tests), verify-jsonld 20 pages, listings in sync.
+  - Production serves cf92cd3: owner, broker and leasing pages carry #88's `scrollIntoView` and success elements, and #85's markers are intact (nav 1279px, styles v18, PDF 301, three-market title).
+  - Not done: no interactive production form test, to avoid real submissions and emails; #88's gate had runtime-verified the forms in a browser.
+- **Still open:** the #89 vs #88 conflict in `tests/site/netlify-forms.test.mjs` now falls to #89 (keep both sides); #90 (PDF restore); the build-guard follow-up; the exposure-probe fix.
+
+## 2026-09-24 — oxfordra.net PR #85 merged + verified live (ec3f187)
+
+**Authority:** Gabriel in-turn: "merge #85 once the other four come back clean" (session 30dc10ce).
+- **Round 3** (adversarial-merge-gate, head 55dc0b3): all 5 mandates reported zero confirmed #85 defects.
+- **Merge:** squash-merged at the pinned head (`--match-head-commit`) as `ec3f187`, 2026-09-24 02:02Z; production served it within about 20s.
+- **Live checks passed:** Markets title lists three markets; nav breakpoint 1279px; styles `?v=18` and chat `?v=3`; the announcement-bar critical CSS is inlined; no "15% portfolio"/"loan-to-value" on home, about or for-brokers; "Download Overview" is gone; the Overview PDF 301s to `/`; the control path returns 404; sitemap lastmod reads 2026-09-23; the leasing form serves form-name, bot-field and #leasingSuccess.
+- **Round-3 residuals, all routed and none in #85:**
+  - Exposure-probe 301 verdict and its Step-1 list source: in the running probe task session.
+  - Build-dist double-listing guard: in a separate follow-up task (Gabriel chose this).
+  - PR #90 (PDF restore) re-based via an `-s ours` merge onto ec3f187.
+  - #88 and #89 conflict in `netlify-forms.test.mjs`; resolve by keeping both.
+- **Next:** #88 merges at the exact SHA its owner session sends after merging main in and passing its gate (Gabriel authorized this in both sessions).
+
+## 2026-09-23 — ora-skills PR #80 merged (37fb909): zero-tests + BARE rules live on main
+
+- **Closes the entry of the same day.** Follow-up be59ec0 passed Opus round 3 (APPROVED), plus a separate review of a comment-only delta: the ALLOWED_SKIPS header now says setUpModule/setUpClass SkipTest counts as 1, while `@unittest.skip` counts per test (fixture-verified).
+- **Checks:** full local suite green (14 files, 0 failed / 0 skipped / 0 empty); CI `tools-tests` pass on be59ec0. Squash-merged, pinned to the head commit.
+- **Cleanup:** claim `ora-skills-tools-suite` released; worktree `ora-worktrees/suite-zero-tests` removed (no junctions); local main forward-merged.
+- **Left open:** the header of `.github/workflows/tools-tests.yml` still describes only the fail and zero-skip checks. It is a shared-infra file, not edited here.
+
+## 2026-09-23 — ora-skills #81 merged (84145e7): portfolio LTV 18.71% internal, no numeric leverage outbound
+
+**Authority:** Gabriel, in-turn: "merge #81 once the review is clean"; "use 26 properties, keep it".
+- Review 1 (independent, opus): APPROVE with 2 Important items. (A) no-numeric-leverage rule was too broad and would collide with deal-level lender RFPs; now scoped to portfolio-level. (B) v1.10 changelog quoted the removed outbound sentence; now paraphrased. Both fixed in 5d17912. Re-review: 0 CONFIRMED, APPROVE. CI green. Squash-merged, pinned to head 5d17912.
+- Shipped: acquisition-underwriting v4.24 (18.71% as of 2026-09-23, internal-only, in CAPITAL STRUCTURE CONTEXT + STAGE 2.3 + references mirror) · loi-generation v1.10 (LOI template Buyer Information page + ora-standards cover note: "conservatively leveraged", 26 properties / 500,000+ SF / ~$57M / ~140 tenants / three core markets).
+- Pending: Cowork Save-skill reimport of both skills; eyeball render of the LOI template (QC #17 page count not run; no LibreOffice, Word COM export hung). Follow-ups: add an LOI QC-gate check that fails on numeric leverage; settle the portfolio-value vs acquisition-proposal-generation never-state conflict; harmonize ora-standards.md:75 wording to the portfolio-level scope.
+
+## 2026-09-23 — ora-skills tools suite: zero-tests silent pass found + gated (PR #80)
+
+**Finding** (adversarial merge gate on ora-skills PR #79):
+- `tools/test_reimport_cycle.py` (bf724aa) held 7 pytest-style module-level `def test_*` functions, with no `unittest.TestCase` and no `__main__` runner.
+- `tools/run_suite.sh` runs each file as plain `python <file>`, with no pytest. The file ran **zero** tests, exited 0, and was reported `ok` with an empty summary.
+- The zero-skip baseline (#63/#72) could not see it, because nothing reports as skipped.
+- Failure class: **tooling / test harness**. It is the same silent-pass family as the 2026-08-05 rent-comp skip.
+
+**Fix** (session 621bf8a0, lane L2 `/debug`, worktree `ora-worktrees/suite-zero-tests`, claim `ora-skills-tools-suite`):
+- **5681d67, pushed as PR #80. CI `tools-tests` pass; local full suite 14 files, 0 failed / 0 skipped / 0 empty.**
+  - The test file is converted to stdlib unittest and now prints `Ran 7 tests OK`. Checked against 8 scratch-copy mutations of `gate_failures()`: all 8 caught.
+  - `run_suite.sh` gains a **zero-empty rule**: a file that exits 0 without `Ran N tests` (N ≥ 1) fails as EMPTY.
+  - Exemption: an exact-path `NON_UNITTEST` list (`test_description_budget.py`) must print `all checks passed` instead.
+  - Opus independent review: APPROVED.
+- **Follow-up commit (in review at time of logging):**
+  - **BARE rule:** any column-0 `def test_*` fails, which catches a stray function beside a TestCase. `NON_UNITTEST` files are exempt.
+  - **Label pin:** `UNKNOWN`/`CACHE-AHEAD`/`DIVERGENT` are pinned in `test_every_bad_label_stops`, closing an inherited mutation survivor.
+  - **Round-2 Opus review: CHANGES REQUESTED, and it was right.** An interim change had routed whole-module skips (`Ran 0 … skipped=1`) into `ALLOWED_SKIPS`. That would have let a census module that ran nothing pass on ubuntu through the `=1` entry. It was reverted: `Ran 0` is always EMPTY. Round 3 is pending.
+- **Memory:** `feedback_ora_skills_tests_zero_tests_rule.md` (indexed under Rules & governance).
+- **Lesson:** "suite green" does not prove a file's tests ran. Read its `Ran N` row. `ALLOWED_SKIPS` counts individual test skips and must never vouch for a module that ran nothing.
+
+## 2026-09-23 — oxfordra.net PR #85 (site review): content decisions + merge-gate rounds 1–2
+
+**Authority:** Gabriel in-turn (multiple AskUserQuestion answers, this session 30dc10ce). Preview only; no production deploy. Merging = auto-deploy, so it needs a separate per-deploy go-ahead.
+- **Content decisions:**
+  - Kansas City stays a **"three core markets"** market. This **supersedes the 2026-09-21 SEO plan's "two core + KC holding"**: plan `docs/superpowers/plans/2026-09-21-oxfordra-seo-followups.md` is annotated, W1 is cancelled, and test M-1 must not be built. W6 now asserts "three core markets".
+  - **No numeric portfolio LTV on any public surface.** Site, About FAQ + JSON-LD and chat `scripts/meta.md` now say "conservative leverage" (verified figure 18.71% is internal-only; see LTV entry above).
+  - The Azad Shah quote uses the About wording everywhere.
+  - About timeline 2022 reads "two markets" (KC entered 2024).
+  - For Brokers hero stays 1100 Rarig (decision relayed by the #86 session, confirmed in-session).
+  - Overview PDF: link hidden (eaa29c8), then **unpublished** (55dc0b3: build exclusion + 301 to /). The old PDF was marked CONFIDENTIAL and publicly reachable with 15% LTV / 600K SF / 4 markets.
+- **Merge gate** (adversarial-merge-gate, 5 mandates):
+  - R1 at 2ad9677: 5 CONFIRMED findings, fixed in e72f910 (About FAQ 15%, chat meta 14–16%, 9 srcset 800w→700w, application-received breakpoint, sitemap lastmod).
+  - R2 at e72f910: 0 PR defects. Process note: merge #85 before the next LoopNet sync PR, since `sitemap.xml` lines 15–17 conflict with any sync PR opened earlier (the sync task is currently `enabled:false`). #85 and #88 merge cleanly in either order.
+  - Final pass still due on eaa29c8 + 55dc0b3.
+- **Spun off:** Overview PDF regeneration, site test hardening (validator false-passes), and stale LTV in skills (the last one is done per the entry above; outbound LOI template still awaiting Gabriel).
+- **Known cosmetic leftover:** a whitespace-only line at `available-space.html:112` (introduced by the announcement-bar inline). It was left because the site-write gate token had expired, and it has no effect on rendering.
+
+## 2026-09-23 — Portfolio LTV figure verified 18.71%; stale "~15%" in ORA skills triaged
+
+**Authority:** Gabriel task brief (in-turn): verify current portfolio LTV from the source of record, sweep skills, update internal refs, ask before touching outbound templates. Governor constants untouched (Invariant 4).
+- **Verified:** 18.71% (gross-external: external debt $10,605,588 ÷ Oxford-share value $56,668,952), Master Workbook `00_Home!G7`, live M365 read 2026-09-23 (local mtime 2026-09-23 13:17). No OPEN WBC row against these cells. Memory: `project_portfolio_ltv_current.md` (supersedes projects.md's Jun-1 17.9%).
+- **Internal fix (committed, not pushed):** ora-skills branch `fix/portfolio-ltv-figure-2026-09-23` (worktree `ora-worktrees/portfolio-ltv-figure`): acquisition-underwriting v4.24 CAPITAL STRUCTURE CONTEXT ~15% → 18.71% dated/internal-only, headroom ~25 → ~21 pts. Preflight CLEAR; governor-drift scan 0 findings.
+- **Outbound, awaiting Gabriel:** loi-generation `templates/LOI_Master_Template_Condensed.docx` Buyer Information page ("portfolio loan-to-value of roughly 15%"; also 27 properties / 600K+ SF / ~$65M) and `references/ora-standards.md` cover-note list (same figures). Site: PR #85 removes the public "15% portfolio LTV" — production still serves it until merge + deploy.
 
 ## 2026-09-23 -- lease-addendum v1.1 reimport
 - lease-addendum v1.1 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.

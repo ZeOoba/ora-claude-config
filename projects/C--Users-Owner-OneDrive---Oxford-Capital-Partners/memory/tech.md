@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-09-22T20:46:38.000Z
+  modified: 2026-10-13T22:40:00.000Z
 ---
 
 # ORA Tech Stack & Reference
@@ -146,7 +146,7 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - Claude-in-Chrome | state=active | verify=allow:claude-in-chrome
 - chrome-devtools | state=retired | verify=allow:plugin_chrome-devtools-mcp_chrome-devtools
 - Apify | state=retired | verify=allow:apify
-- pdf-viewer | state=active | verify=allow:pdf-viewer
+- pdf-viewer | state=retired | verify=allow:pdf-viewer
 - scheduled-tasks | state=active | verify=allow:scheduled-tasks
 - computer-use | state=active | verify=cloud
 - Composio-Outlook | state=retired | verify=allow:composio

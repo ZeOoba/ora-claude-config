@@ -1,7 +1,7 @@
 ---
 name: ora-appsec-sweep
 description: General application-security sweep of ora-pm (live tenant portal, Stripe ACH) and oxford-command-center — secret scan (working tree + full git history), lockfile CVE audit, AR-ledger/balance-display schema review, tenant-portal auth/injection pass, and OWASP-LLM checks scoped to ORA's actual agent surfaces (hooks, MCP connectors, scheduled-task registries). Weekly, Wednesdays. REPORT-ONLY: findings go to Notion Ops Hub + open-items-tracker.md; never rotates, never pushes, never auto-fixes. Reads suppressions.md before reporting. Dispatches the per-repo review to the security-auditor agent, which carries the never-below-Fable model floor (this task's own frontmatter model:fable pin is NOT honored on CC/MCP — server-pin, issue #48976); a post-hoc dispatch-integrity gate probes subagent transcripts after the run and emails a MODEL-FLOOR BREACH alarm only on a drop below Opus (an Opus fallback is ruled COMPLIANT, OI-052 closed). Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-opus-5 observed — frontmatter model: fable still NOT honored on CC/MCP (server-pin) | checked 2026-08-03 via live-run transcript canary]
-model: fable
+model: opus
 ---
 
 <!--
@@ -48,9 +48,9 @@ model: fable
   and this needs his explicit call on scope/wording first.
 
   MODEL PIN — CLAIM CORRECTED 2026-07-24, THE FRONTMATTER PIN IS NOT IN EFFECT.
-  `model: fable` in frontmatter is deliberate INTENT, and this task does review
+  `model: opus` in frontmatter is deliberate INTENT, and this task does review
   security-gate-adjacent and payment-facing code (CLAUDE.md floor:
-  confidential/financial/governor and security-gate code never below Fable).
+  confidential/financial/governor and security-gate code never below Opus 5.5).
   But a transcript canary on this task's own 2026-07-22 17:38 UTC scheduled run
   (session 4b66d74c-b948-49c1-8f8d-883d821e7aa3, whose first timestamp matches
   the registry's lastRunAt to within 2s) shows the scheduled portion fired on
@@ -79,7 +79,7 @@ model: fable
   nothing) and do NOT flip anything to Sonnet.
   The `security-auditor` dispatch is a SEPARATE mechanism and its pin IS
   honored — the Agent call in the PER-REPO REVIEW section below MUST keep
-  passing `model: 'fable'` explicitly, never omitting it and relying on
+  passing `model: 'opus'` explicitly, never omitting it and relying on
   inheritance (CLAUDE.md dispatch invariant).
   DISPATCH NOT YET EXERCISED (resolved 2026-07-24, no defect): the 2026-07-22
   run made ZERO Agent/Task calls and wrote zero subagent transcripts. That is
@@ -142,7 +142,7 @@ For EACH pinned-SHA worktree, invoke the Agent tool once:
 Agent({
   description: "Security audit — <repo-name> @ <sha7>",
   subagent_type: "security-auditor",
-  model: "fable",                 // ALWAYS explicit — never omit (see MODEL PIN note above)
+  model: "opus",                  // ALWAYS explicit — never omit (see MODEL PIN note above)
   run_in_background: false,       // this task runs the two repos sequentially, not in parallel (see NOTES: RAM)
   prompt: <the template below, with <worktree-path>/<sha>/<repo-name> filled in>
 })
@@ -150,10 +150,10 @@ Agent({
 
 ### DISPATCH INTEGRITY GATE (MANDATORY — added 2026-07-24, Gabriel-ratified Option C)
 
-The Fable pin on this task now lives ENTIRELY in the Agent call above. The orchestrating session
+The Opus 5.5 pin (`opus` alias; Fable retired 2026-10-05) on this task now lives ENTIRELY in the Agent call above. The orchestrating session
 itself runs on the CC/MCP server-pinned model (observed `claude-opus-4-8`, 2026-07-24 canary) — the
-frontmatter `model: fable` is inert. So if this dispatch silently fails to happen, the security
-judgment quietly drops to the orchestrator's model and the CLAUDE.md never-below-Fable floor is
+frontmatter `model: opus` is inert. So if this dispatch silently fails to happen, the security
+judgment quietly drops to the orchestrator's model and the CLAUDE.md never-below-Opus-5.5 floor is
 breached with no visible signal. That is exactly the failure this gate exists to prevent.
 
 After EACH per-repo Agent call, assert ALL of the following before using its output:
@@ -162,20 +162,20 @@ After EACH per-repo Agent call, assert ALL of the following before using its out
 2. The findings you report for that repo came FROM the subagent. **You must NEVER substitute your
    own inline review for a failed dispatch** — inline review is precisely the v1.0 behaviour this
    design replaced, and it runs below the floor.
-3. `model: "fable"` was passed explicitly on the call (never omitted, never inherited).
+3. `model: "opus"` was passed explicitly on the call (never omitted, never inherited).
 
 Assertions 1–3 are SPAWN-TIME checks — they confirm the dispatch happened and was pinned. They are
 structurally blind to a mid-run FALLBACK, where a subagent begins on `claude-fable-5` and then drops
 to the orchestrator's model partway through, with that tier producing the actual findings report
 (observed on BOTH the 2026-07-31 fire — fable → opus-5 — and the 2026-08-12 fire — fable → opus-4-8).
-Gabriel RULED 2026-08-14 that a mid-run fallback to an OPUS tier is COMPLIANT with never-below-Fable
-(Opus is still top-tier), and closed OI-052 on that basis. So the post-hoc assertion enforces an OPUS
-floor, not Fable — it stays silent on an Opus fallback but still catches a drop BELOW Opus or a total
-dispatch failure:
+Gabriel RULED 2026-08-14 that a mid-run fallback to an OPUS tier was COMPLIANT, and closed OI-052. On
+2026-10-05 the floor itself became Opus 5.5 (Fable retired from dispatch), so the post-hoc assertion now
+enforces `claude-opus-5-5` exactly: a fallback to opus-5 or opus-4-8 now TRIPS it (tightened from the
+2026-08-14 opus-4-8 floor). It still catches a total dispatch failure:
 
 4. **(POST-HOC — run ONCE after BOTH repos' dispatches, not per-repo)** Every subagent held at least
-   the OPUS floor for its full run, not merely at spawn. Run:
-   `python ~/.claude/maintenance/check-dispatch-model-floor.py --session $CLAUDE_CODE_SESSION_ID --floor claude-opus-4-8`
+   the OPUS 5.5 floor for its full run, not merely at spawn. Run:
+   `python ~/.claude/maintenance/check-dispatch-model-floor.py --session $CLAUDE_CODE_SESSION_ID --floor claude-opus-5-5`
    Exit 0 = every subagent held Opus-or-above end-to-end; exit 1 = at least one subagent ran BELOW Opus
    (sonnet / haiku / unknown id); exit 2 = the transcripts could not be read (verified-null — treat as
    a gate failure, NEVER a pass; an unverifiable floor is not a held floor). Quote the probe's per-agent
@@ -189,12 +189,11 @@ first-class alarm even when the sweep finds nothing.
 
 If assertion 4 fails (probe exit 1 or 2): this is DIFFERENT from a dispatch failure — the findings
 ARE from the real subagent and remain usable (do NOT discard them and do NOT substitute inline
-review). Under the OPUS floor, exit 1 means a subagent dropped BELOW Opus (sonnet / haiku / unknown) —
-NOT merely off Fable; a fable→opus fallback is compliant per Gabriel's 2026-08-14 ruling and does not
-trip this. Exit 2 means the floor could not be verified. Either way, record a
+review). Under the OPUS 5.5 floor, exit 1 means a subagent ran BELOW claude-opus-5-5 (opus-5 / opus-4-8 /
+sonnet / haiku / unknown); a Fable run is above the floor and does not trip this. Exit 2 means the floor could not be verified. Either way, record a
 `MODEL-FLOOR BREACH (OI-052)` line in the completion report AND email ggoldberg@oxfordra.net (subject
 prefix `⚠️ ORA AppSec Sweep — MODEL-FLOOR BREACH`) via the standard Outlook COM path, with the probe's
-output pasted in. Because the routine fable→opus fallback no longer trips it, a firing under the Opus
+output pasted in. Because only a run below Opus 5.5 trips it, a firing under the Opus 5.5
 floor is RARE and a REAL signal — a genuine drop below Opus, or an unreadable transcript — not routine
 noise. Do NOT "fix" a firing by loosening the floor below Opus or deleting the assertion.
 
@@ -261,7 +260,7 @@ old inline checks' output.
 3. Pin SHAs and create the two detached worktrees per the protocol above.
 4. Dispatch the `security-auditor` agent per repo per the PER-REPO REVIEW section above. Collect candidate findings from its returned report: repo, pinned SHA, severity, file/commit location, description, evidence, and its recommendation (NOT executed).
 5. Filter through suppressions. Drop exact matches; annotate near-matches.
-6. NOTION COMPLETION ROW (ALWAYS): Compute the run date once at run start (`date '+%A %Y-%m-%d'`; date part in every date slot, weekday only where one is named) and reuse that exact value in every title, subject and body. If a Notion create returns no page ID (e.g. a grace-period/quota notice), search by the exact title before any retry — a match created at/after the create call is this run's page; never blind-retry a create. Quota errors → `notion-quota-fallback` skill. Write a row to the Ops Hub (Notion collection `32b6ecd8`) recording: date, both pinned SHAs, per-repo finding counts by severity (the agent's own Critical/High/Medium/Low/Info summary — note which ORA-specific delta item or built-in Review Scope section each finding traces to, for traceability, but don't force it back into the old five-letter (a)–(e) shape), result line (CLEAN / N FINDINGS (worst: X) / TOOLING ERROR / PARTIAL — what didn't run), and suppression count applied. A partial sweep is not the same claim as a full one — say what ran and what didn't (e.g. the agent errored before finishing one repo, or `npm audit` failed).
+6. NOTION COMPLETION ROW (ALWAYS): Compute the run date once at run start (`date '+%A %Y-%m-%d'`; date part in every date slot, weekday only where one is named) and reuse that exact value in every title, subject and body. If a Notion create returns no page ID (e.g. a grace-period/quota notice), search by the exact title before any retry — a match created at/after the create call is this run's page; never blind-retry a create. Quota errors → `notion-quota-fallback` skill. Write a row to the Ops Hub (Notion parent page `32b6ecd8-9e59-81f2-b329-df3fd0e25062`, full UUID) recording: date, both pinned SHAs, per-repo finding counts by severity (the agent's own Critical/High/Medium/Low/Info summary — note which ORA-specific delta item or built-in Review Scope section each finding traces to, for traceability, but don't force it back into the old five-letter (a)–(e) shape), result line (CLEAN / N FINDINGS (worst: X) / TOOLING ERROR / PARTIAL — what didn't run), and suppression count applied. A partial sweep is not the same claim as a full one — say what ran and what didn't (e.g. the agent errored before finishing one repo, or `npm audit` failed).
 7. OPEN-ITEMS TRACKER: append each MEDIUM+ finding as an item to `C:\Users\Owner\.claude\projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners\memory\open-items-tracker.md` following its existing item format (it is the canonical punch-list; do not restate items that already exist there — check for duplicates from prior runs first, matching on repo+file+check).
 8. EMAIL (ONLY on CRITICAL/HIGH findings OR a tooling failure — never on a clean or low-only week): send via Outlook COM — the SOLE send path:
    `powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -Body "<body>"`

@@ -169,6 +169,29 @@ def test_exit_code_is_1_only_when_something_is_unresolved_unit():
     print("  PASS test_exit_code_is_1_only_when_something_is_unresolved_unit")
 
 
+def test_claude_outputs_folder_is_a_builtin_search_root_unit():
+    """outreach-ratification.json lives in the OneDrive 'Claude outputs' folder; that
+    folder must be a built-in (read-only) root so it stops reading as MISSING, and a
+    citation there must resolve."""
+    _, mem = _fixture("")
+    want = os.path.join(xref.ONEDRIVE, "Business", "Investment Candidates -- 2026", "Claude outputs")
+    assert want in xref.search_roots(mem), "Claude outputs root missing from search_roots"
+    real_onedrive, real_extra = xref.ONEDRIVE, xref.extra_roots
+    fake = tempfile.mkdtemp(prefix="xref-od-")
+    outs = os.path.join(fake, "Business", "Investment Candidates -- 2026", "Claude outputs")
+    os.makedirs(outs)
+    with open(os.path.join(outs, "outreach-ratification.json"), "w", encoding="utf-8") as f:
+        f.write("{}")
+    src, mem = _fixture("- Bounded by `outreach-ratification.json`.\n")
+    try:
+        xref.ONEDRIVE = fake
+        xref.extra_roots = lambda: []
+        assert xref.probe(src, mem)[0] == []
+    finally:
+        xref.ONEDRIVE, xref.extra_roots = real_onedrive, real_extra
+    print("  PASS test_claude_outputs_folder_is_a_builtin_search_root_unit")
+
+
 def main():
     test_dated_event_log_citation_without_an_entry_is_a_finding_unit()
     test_dated_event_log_citation_with_an_entry_is_clean_unit()
@@ -179,6 +202,7 @@ def main():
     test_resolvable_file_citation_is_clean_unit()
     test_elided_and_prose_backticks_are_skipped_unit()
     test_extra_roots_prevent_the_outside_the_search_path_false_positive_unit()
+    test_claude_outputs_folder_is_a_builtin_search_root_unit()
     test_missing_or_empty_source_fails_open_unit()
     test_exit_code_is_1_only_when_something_is_unresolved_unit()
     print("ALL SESSION-CONTEXT-XREF-PROBE TESTS PASS")

@@ -1,0 +1,26 @@
+---
+name: mortgage-maturity-signal-not-bulk-accessible-2026-09-18
+description: "Mortgage-maturity mining (the 'seller-event trigger stream' idea) is NOT buildable as a free bulk data pull — no ORA market's recorder exposes a bulk/API mortgage index, and even where one existed, Ohio's recorded index carries no maturity date at all. Do not re-propose this as a free build."
+metadata:
+  type: reference
+---
+
+**Do not re-propose mortgage-maturity mining as a free/automatable off-market signal.** Piloted 2026-09-18 against Franklin County OH (chosen as the easiest case — ORA's densest ownership cluster). Result: infeasible as designed, and the reasons are structural, not Franklin-specific.
+
+**Why it fails:**
+1. **No bulk access anywhere.** Both Franklin County recorder portals (Kofile `franklin.oh.publicsearch.us`, legacy `countyfusion5.kofiletech.us`) block automated access (`robots.txt: Disallow: /`); no API, no bulk extract, no data layer in the GIS catalogue; the county's own bulk parcel drop carries zero lien files.
+2. **Surveyed all nine other ORA target markets — none has a free bulk path either.** Some (Marion IN — Fidlar Laredo; Richmond VA — $50/mo statutory SRA) have NO free path at all. Kent MI (Grand Rapids) went from free to $2,000/yr in June 2026. **The constraint is structural: county recorders sell document access as their revenue model, not free data.** This is the inverse of the auditor/assessor layer `county-parcel-screen` already mines, which IS reliably bulk-accessible everywhere — that asymmetry is exactly why the parcel screen works and this would not.
+3. **Even with access, the index has no maturity date.** Ohio's recorded mortgage index (grantor/grantee/instrument type/recording date/book-page) does not carry the note's term — that's inside the unrecorded document. The fallback of `recording_date + {5,7,10}yr` would only reproduce a band already derivable for free from the Auditor's own transfer-date data, adding nothing.
+
+**Real paths, if this is ever revisited (none attempted — read-only pilot, nobody contacted, no accounts created):**
+- **(A) Manual abstraction** of a short candidate list (e.g. the ring-screen's ~175 Franklin parcels) — free but unautomatable, ~25–45 hrs for that list.
+- **(B) Paid data**: CoStar Loans (~$750–2,400/user/mo) or Reonomy (~$500/mo) are the only paths to actual maturity dates, and both cover all nine markets at once rather than per-county.
+- **(C) One free ORC 149.43 public-records request** to the Franklin County Recorder ((614) 525-3930) — worth trying before any spend, though ORC 149.43(B)(6)'s commercial-solicitation carve-out is a live risk for a request whose purpose is sourcing acquisition targets.
+
+**Signal substitute considered and rejected:** UCC-1 filings (SOS-held) were the obvious fallback and are NOT a good substitute — ORC 1309.501 routes real-property fixture filings back to the same recorder anyway, and non-fixture UCC-1s are mostly equipment/blanket liens with a high base rate and low discriminating power for "seller in motion."
+
+**Better marginal use of the same effort:** deepen the free `Transfer*.xlsx` hold-period / `IsValid`-adjacent analysis already inside `county-parcel-screen` (long-hold owners are a free, reliable motivation proxy already partially mined) rather than chase mortgage maturity.
+
+**UPDATE 2026-09-19 — path (C) SENT.** A written ORC 149.43 request for the recorded-mortgage index (2016-01-01 → 2021-12-31, industrial/commercial, index fields only: grantor, grantee, instrument type, recording date, book/page) went to `recorder@franklincountyohio.gov` on 2026-09-19 13:01 ET at Gabriel's direction, sent as drafted **without counsel review** (the 149.43(B)(6) commercial-solicitation risk was flagged to him and he chose to send; the request states no purpose and asks for no contact information, only the index). **Awaiting a reply — none received as of this entry.** Ohio requires a "prompt" response but sets no fixed day count; if nothing arrives by about 2026-10-03, a phone follow-up to (614) 525-3930 is the natural next step. **If it is fulfilled**, the extract still has NO maturity dates (that lives in the unrecorded note) — its value would be the origination-date + lender list for the ~2016-2021 cohort, joinable to the ring-screen candidates, not a maturity calendar. **If it is denied under (B)(6)**, path (C) is dead and the choice is only manual abstraction (a HUMAN, not browser automation — both portals carry `robots.txt Disallow: /`) or a paid CoStar/Reonomy licence. Path (A) manual abstraction was deliberately NOT started: doing it by automated browser would be scaled automated access to a site that disallows it. Sent copy: Outlook Sent Items; draft + send record: `Claude_Workspace/02_Outputs/2026-09-18_FranklinRecorder_ORC14943Request_v01.md`.
+
+Full pilot report: `Claude_Workspace/02_Outputs/2026-09-18_SellerEventTriggers-FranklinOH_Feasibility_v01.md`. Related: this closes the "mortgage-maturity mining" item from the 2026-09-18 sourcing-ideas brainstorm (both Claude's and Cowork's independent lists ranked it the top new signal — both were wrong about buildability, right about it being the strongest signal IF the data existed).
