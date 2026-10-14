@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 r"""ORA dispatch model-floor probe (OI-052) — deterministic, post-hoc.
 
-WHY THIS EXISTS. CLAUDE.md's "never below Fable" floor for confidential/
+WHY THIS EXISTS. CLAUDE.md's "never below Opus 5.5" floor (was "never below Fable" until 2026-10-05) for confidential/
 financial/governor and security-gate code is carried, per Gabriel's ratified
-Option C (2026-07-24), by the `model:'fable'` pin on the security-auditor Agent
+Option C (2026-07-24), by the `model:'opus'` pin on the security-auditor Agent
 dispatch — NOT by the scheduled task's own (server-pinned, inert) frontmatter.
 The DISPATCH INTEGRITY GATE asserts the pin was PASSED to the Agent call, but a
 pin is honored at SPAWN, not for the DURATION: on the 2026-07-31 and 2026-08-12
@@ -45,8 +45,8 @@ EXIT CODES:
       with no model-bearing lines)
 
 USAGE:
-  check-dispatch-model-floor.py --session <SESSION_ID> [--floor fable]
-  check-dispatch-model-floor.py --subagents-dir <PATH>  [--floor fable]
+  check-dispatch-model-floor.py --session <SESSION_ID> [--floor claude-opus-5-5]
+  check-dispatch-model-floor.py --subagents-dir <PATH>  [--floor claude-opus-5-5]
 
 Report-only: reads transcripts, prints a per-agent table, changes nothing.
 """
@@ -60,9 +60,10 @@ import sys
 PROJECT = "C--Users-Owner-OneDrive---Oxford-Capital-Partners"
 CLAUDE = os.environ.get("CLAUDE_HOME", r"C:\Users\Owner\.claude")
 
-# Model tier ranks. Higher = more capable. The Mythos-class tier (fable/mythos,
-# same underlying model) sits ABOVE Opus, so opus-5 and every opus-4.x, sonnet,
-# and haiku are all BELOW the Fable floor. An UNKNOWN model ranks below the floor
+# Model tier ranks. Higher = more capable. The default floor is Opus 5.5
+# (2026-10-05, Gabriel: Fable retired from dispatch). The Mythos-class tier
+# (fable/mythos) still ranks above it so old transcripts and any Fable run stay
+# compliant; opus-5 and every opus-4.x, sonnet, and haiku are BELOW the floor. An UNKNOWN model ranks below the floor
 # by construction (fail-closed): a model we can't place must not read as "held".
 MODEL_RANK = {
     "claude-mythos-5": 100,
@@ -70,12 +71,12 @@ MODEL_RANK = {
     "claude-fable-5-1": 100,
     # claude-fable-5 is superseded (2026-09-02) but stays LOAD-BEARING, not just
     # a courtesy for old transcripts: floor_rank() below builds "claude-%s-5" %
-    # floor, so the default `--floor fable` shorthand resolves through THIS key.
-    # There is no short-name form for fable-5-1 yet -- only the full id
-    # (--floor claude-fable-5-1) resolves it. Deleting this entry breaks the
-    # default floor invocation (exit 2, TOOLING ERROR -- fails closed, but loud).
+    # floor, so the explicit `--floor fable` shorthand resolves through THIS key
+    # (the default floor is now the full id claude-opus-5-5; NB `--floor opus`
+    # now aliases to claude-opus-5-5).
+    # Deleting this entry breaks `--floor fable` (exit 2, TOOLING ERROR).
     "claude-fable-5": 100,
-    "claude-opus-5-5": 95,  # 2026-09-22 -- above opus-5, still below the Fable floor
+    "claude-opus-5-5": 95,  # 2026-09-22 -- above opus-5; the default floor since 2026-10-05
     "claude-opus-5": 90,
     "claude-opus-4-8": 80,
     "claude-opus-4.8": 80,
@@ -98,6 +99,8 @@ def model_rank(model):
 def floor_rank(floor):
     """Resolve a floor NAME (e.g. 'fable') to its rank. Unknown floor is a usage
     error, surfaced by the caller — here we return None so main() can exit 2."""
+    if floor == "opus":  # the Agent-tool alias means Opus 5.5 (the floor), not the claude-opus-5 that "%s-5" would build
+        floor = "claude-opus-5-5"
     key = "claude-%s-5" % floor if not floor.startswith("claude-") else floor
     return MODEL_RANK.get(key)
 
@@ -243,8 +246,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="ORA dispatch model-floor probe (OI-052)")
     ap.add_argument("--session", help="session id; resolves the canonical subagents dir")
     ap.add_argument("--subagents-dir", help="explicit path to a session's subagents dir")
-    ap.add_argument("--floor", default="fable",
-                    help="model floor name (default: fable) or full model id")
+    ap.add_argument("--floor", default="claude-opus-5-5",
+                    help="model floor name (e.g. fable) or full model id (default: claude-opus-5-5)")
     args = ap.parse_args(argv)
 
     fr = floor_rank(args.floor)

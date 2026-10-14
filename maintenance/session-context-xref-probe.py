@@ -144,6 +144,8 @@ def search_roots(memory_dir):
         # LAMS/Cowork fleet store + the two OneDrive homes session-context.md points into
         os.path.join(ONEDRIVE, "Documents", "Claude", "Scheduled"),
         os.path.join(ONEDRIVE, "Business", "Investment Candidates -- 2026"),
+        # owner-outreach artifacts (e.g. outreach-ratification.json); READ-ONLY root
+        os.path.join(ONEDRIVE, "Business", "Investment Candidates -- 2026", "Claude outputs"),
         os.path.join(ONEDRIVE, "Claude_Workspace"),
     ] + extra_roots()
 

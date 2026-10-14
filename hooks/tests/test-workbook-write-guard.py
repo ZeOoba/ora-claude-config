@@ -376,6 +376,91 @@ def test_shell_openpyxl_readonly_allowed():
     check("Bash read-only openpyxl load on master ALLOWED", rc == 0, repr(err[:200]))
 
 
+def test_shell_readonly_heredoc_with_comparison_operator_allowed():
+    """2026-10-06 false positive: a bare `>` / `>=` (python comparison) inside a
+    read-only openpyxl heredoc was read as a shell redirect and blocked the sanctioned
+    read path. Comparisons are not redirects."""
+    for cmp_line in ("    if i>48: break", "if k>=maxr: pass", "x = a > b"):
+        cmd = ("python - <<'EOF'\nimport openpyxl\n"
+               "wb=openpyxl.load_workbook(r'%s',data_only=True,read_only=True)\n"
+               "%s\nEOF" % (WB, cmp_line))
+        rc, err = run("Bash", {"command": cmd})
+        check("read-only heredoc with comparison %r ALLOWED" % cmp_line.strip(),
+              rc == 0, repr(err[:160]))
+
+
+def test_shell_cd_prefixed_python_heredoc_with_comparison_allowed():
+    cmd = ("cd \"C:/Users/Owner/OneDrive - Oxford Capital Partners/eric spreadsheets\" "
+           "&& python - <<'EOF'\nimport openpyxl\n"
+           "wb=openpyxl.load_workbook(r'%s',data_only=True,read_only=True)\n"
+           "for i,r in enumerate(wb['A'].iter_rows(values_only=True)):\n"
+           "    if i>48: break\nEOF" % WB)
+    rc, err = run("Bash", {"command": cmd})
+    check("cd-prefixed python heredoc with comparison ALLOWED", rc == 0, repr(err[:160]))
+
+
+def test_shell_redirect_to_master_still_blocks():
+    """The fix must not open real redirects aimed at the master workbook."""
+    for form in ('echo x > "%s"', 'echo x >> "%s"', 'type a.bin >"%s"',
+                 'python gen.py > "%s"'):
+        rc, err = run("Bash", {"command": form % WB})
+        check("redirect to master blocks: %s" % (form % "<master>"),
+              blocked(rc, err), repr(err[:160]))
+    cmd = ("python - <<'EOF'\nimport openpyxl\nif 3>2: pass\nEOF\n"
+           "echo x > \"%s\"" % WB)
+    rc, err = run("Bash", {"command": cmd})
+    check("comparison plus a real redirect to master still blocks",
+          blocked(rc, err), repr(err[:160]))
+
+
+def test_shell_redirect_via_indirection_still_blocks():
+    """REFUTE 2026-10-06 (adversarial review): judging '>' by whether the same line
+    names the workbook let these through. Only quoted-heredoc BODIES are exempt."""
+    q = WB_NAME
+    cases = [
+        'f=%s; echo x > "$f"' % q,
+        'f=%s\necho x > "$f"' % q,
+        'export W=C:/d/%s\npython gen.py > "$W"' % q,
+        'ls %s && cat t.xlsx > master-stand*.xlsx' % q,
+        'n=%s; echo x > "$(printf %%s "$n")"' % q,
+        'f=%s; echo "a>b" > $f' % q,
+        "python - <<'EOF'\nif 3>2: pass\nEOF\nf=%s; cat t > $f" % q,
+        # unquoted delimiter: body can run $(...), so it is NOT neutralized
+        'python - <<EOF\n$(echo x > $f)\nEOF\nf=%s' % q,
+        # an opener inside an open quote is not a heredoc
+        'echo "<<\'EOF\'"\nf=%s; echo x > $f\nEOF' % q,
+        # round-2 review (REAL, executed in git-bash): bash never opens a heredoc here,
+        # so the next-line redirect runs
+        "true # <<'EOF'\necho x > %s" % q,
+        "cat <<<'EOF'\necho x > %s" % q,
+        "echo $((1<<'3'))\necho x > %s" % q,
+        "cat <<'E'OF\nbody\nEOF\necho x > %s" % q,
+        "echo \"it's\" '<<\\EOF'\necho x > %s" % q,
+        # a body line equal to the delimiter ends the heredoc early in bash
+        "python - <<'EOF'\nx=1\nEOF\necho x > %s\nEOF" % q,
+        # trailing shell after the terminator / leading shell before the opener
+        "python - <<'EOF'\nif 3>2: pass\nEOF\necho x > %s" % q,
+        "echo hi\npython - <<'EOF'\nif 3>2: pass\nEOF\nf=%s; cat t > $f" % q,
+        # round-3 review (REAL): the redirect sits in a python string a shell later runs
+        "python - <<'EOF'\nimport os\nos.system('echo x > %s')\nEOF" % q,
+        "python - <<'EOF'\nimport subprocess\nsubprocess.run('type t.xlsx > %s', shell=True)\nEOF" % q,
+        "python - <<'EOF'\nimport os\nos.popen('cmd /c echo x > %s')\nEOF" % q,
+        "python - <<'EOF'\nimport os\np='%s'\nos.system('cat t.xlsx > '+p)\nEOF" % q,
+        # a body that does not tokenize keeps the old (block) behavior
+        "python - <<'EOF'\n# %s\nif 3>2: (\nEOF" % q,
+        # REFUTE 2026-10-13: `#` in the unquoted cd arg starts a bash comment, so no heredoc
+        # opens and the body redirect really runs
+        "cd #&& python - <<'EOF'\necho x > %s\nEOF" % q,
+        "cd #x && python - <<'EOF'\necho x > %s\nEOF" % q,
+        "cd #&& python - <<'EOF'\ncat t.xlsx > %s\nEOF" % q,
+        # opener line itself carries a redirect
+        "python - <<'EOF' > %s\nif 3>2: pass\nEOF" % q,
+    ]
+    for c in cases:
+        rc, err = run("Bash", {"command": c})
+        check("indirect redirect blocks: %r" % c[:60], blocked(rc, err), repr(err[:120]))
+
+
 def test_shell_excel_com_write_allowed():
     """Excel COM is the sanctioned WRITE path -- must stay open."""
     cmd = ('powershell -NoProfile -Command "$x=New-Object -ComObject '
@@ -482,6 +567,10 @@ if __name__ == "__main__":
     test_excel_mcp_write_to_other_workbook_allowed()
     test_shell_openpyxl_save_blocks()
     test_shell_openpyxl_readonly_allowed()
+    test_shell_readonly_heredoc_with_comparison_operator_allowed()
+    test_shell_cd_prefixed_python_heredoc_with_comparison_allowed()
+    test_shell_redirect_to_master_still_blocks()
+    test_shell_redirect_via_indirection_still_blocks()
     test_shell_excel_com_write_allowed()
     test_shell_heredoc_openpyxl_save_blocks()
     test_shell_save_on_other_workbook_allowed()
