@@ -10,8 +10,8 @@ live filesystem. Nothing here runs on its own — it is read and executed by Cla
 itself (or by Windows Task Scheduler / GitHub Actions for the few off-fleet jobs noted
 below) on the machine where `~/.claude` lives.
 
-> Point-in-time doc, verified against `origin/main` on 2026-10-03 (counts below were
-> taken with `git ls-files` at that commit). Treat every count and path as directional:
+> Point-in-time doc, verified against `origin/main` on 2026-10-03; counts in §3 re-run on
+> 2026-10-06 with `git ls-tree origin/main` at `11cce1d` (only the memory count had moved). Treat every count and path as directional:
 > re-verify against `git ls-files`, `docs/system-inventory.md` (overwritten by
 > `ora-weekly-hygiene` Block H — check its own "Generated" stamp before trusting it),
 > and `python maintenance/fleet-status.py --summary` for live fleet state.
@@ -85,7 +85,8 @@ registries are the authority. The live directory is upstream of GitHub — nothi
 
 ## 3. Directory structure
 
-Verified against `git ls-files` at `origin/main` (2026-10-03) and the files' own headers.
+Verified against `git ls-files` at `origin/main` (2026-10-03; counts re-run 2026-10-06 at
+`11cce1d`) and the files' own headers.
 
 | Path | What it actually contains |
 |---|---|
@@ -95,17 +96,17 @@ Verified against `git ls-files` at `origin/main` (2026-10-03) and the files' own
 | `commands/` | 13 slash-command definitions — the Engineering-OS lanes (`build`, `debug`, `refactor`, `research`, `ship`, `plan`) and session utilities (`heavy`, `ram`, `solo`, `handoff`, `open-sessions`, `cleardisk`, `cleardisk-sessions`). |
 | `agents/` | 17 custom sub-agent definitions (`adversarial-reviewer`, `comms-qc-reviewer`, `dd-package-sweep`, `deal-flow-triage`, `deal-recon`, `estoppel-reconciler`, `insurance-declaration-checker`, `lease-abstract-verifier`, `noi-opportunity-scout`, `open-items-triage`, `portfolio-anomaly-scout`, `psa-redline-checker`, `repro-isolator`, `security-auditor`, `site-qc-reviewer`, `tax-appeal-scout`, `underwriting-checker`). |
 | `skills/` | 8 ORA-authored skills (`adversarial-merge-gate`, `branch-catchup`, `county-parcel-screen`, `county-sales-monitor`, `evidence-dossier-drafting`, `external-artifact-intake`, `ora-setup-audit`, `security-and-hardening`), some with `references/`, `scripts/` or `workflows/` subfolders, plus two `_archive_*` folders of retired skills. **Not** the full skill catalog — most `anthropic-skills:*` skills are Cowork-synced runtime content; ORA-built skill source lives in `ZeOoba/ora-skills`. |
-| `maintenance/` | 91 top-level scripts/configs (Python probes, PowerShell engines, three onboarding `.cmd` launchers) and 97 test files across `maintenance/`, `_tests/`, `tests/` and `headless/`. Subfolders: `_shared/` (store discovery, fleet-pause helpers, acknowledgement allowlists, `scheduler-stores.json`), `_state/` (tracked probe state), `_applied/`, `_archive/`, `headless/` (Windows-Task-Scheduler twins of selected fleet checks, in parallel burn-in per `headless/CUTOVER.md`), `windows-task-xml/` (exported definitions of the 8 off-fleet Windows tasks). |
+| `maintenance/` | 91 top-level scripts/configs (Python probes, PowerShell engines, three onboarding `.cmd` launchers) and 96 `test-*`/`test_*` files across `maintenance/`, `_tests/`, `tests/` and `headless/`. Subfolders: `_shared/` (store discovery, fleet-pause helpers, acknowledgement allowlists, `scheduler-stores.json`), `_state/` (tracked probe state), `_applied/`, `_archive/`, `headless/` (Windows-Task-Scheduler twins of selected fleet checks, in parallel burn-in per `headless/CUTOVER.md`), `windows-task-xml/` (exported definitions of the 8 off-fleet Windows tasks). |
 | `scheduled-tasks/` | One folder per CC/MCP task spec: 55 task folders, 27 dated `_archive_*` folders of retired/completed specs, one `_draft-*` folder, and `_shared/` (the Outlook COM send helper `send-via-outlook.ps1`, `outlook-sent-probe.ps1`, the double-fire `block-sentinel.py`, and their docs/tests). **Mostly** only `SKILL.md` is tracked; a short allow-list of task engines and references is also tracked (`ora-task-integrity-guard/guard.ps1` + `membership-guard.ps1`, `ora-pm-ledger/*_snapshot_diff.py` etc., `ora-appsec-sweep/suppressions.md`, `ora-renewal-hubspot-reconcile/read_rent_roll.py`). Runtime state, logs and `.bak` files are not. |
 | `_scheduled_tasks_backup/` | A derived mirror of task `SKILL.md` specs (139 task folders + one archive folder), written by `scheduled-tasks/ora-task-integrity-guard/guard.ps1` (§4b). Canonical specs are authoritative; this mirror is used only to restore a canonical spec that has gone **absent**. |
 | `workflows/` | 3 multi-agent `Workflow` scripts (`cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`), `README-cc-self-audit.md`, and a `_tests/` prompt-snapshot rig. |
 | `mcp-servers/` | 2 self-authored, single-file, read-only MCP servers: `fred/` (St. Louis Fed FRED API) and `census/` (U.S. Census Bureau Data API). |
 | `obsidian-fleet-mirror/` | Scripts that render live fleet state into the Obsidian vault (`write-fleet.ps1`, run every 60 s by the `ClaudeFleetMirror` Windows task via `run-hidden.vbs`); the rendered state files are untracked. |
 | `prompts/` | Standing prompt templates for recurring autonomous runs, their extract/verify helpers, and an `_archive/`. |
-| `docs/` | `system-inventory.md` (weekly overwrite snapshot), `MIGRATION_RUNBOOK.md` (cold-start/restore), `authority-registry.md`, `review-lenses.md`, dated build reports/specs, `plans/`, `agent-references/`, and `superpowers/` (8 design specs + 19 implementation plans for the Engineering-OS and remediation work). |
+| `docs/` | `system-inventory.md` (weekly overwrite snapshot), `MIGRATION_RUNBOOK.md` (cold-start/restore), `diagrams/` (six standalone Mermaid `.mmd` detail diagrams, §4), `authority-registry.md`, `review-lenses.md`, dated build reports/specs, `plans/`, `agent-references/`, and `superpowers/` (8 design specs + 19 implementation plans for the Engineering-OS and remediation work). |
 | `_proposed/` | A staged, not-yet-applied `settings.json` proposal from the hooks audit (`settings.json`, `settings.diff`, `APPLY.md`, `confguard-matcher.md`). Merging it changes nothing; it is applied as a separate, explicit step. |
-| `.github/workflows/` | 2 workflows: `fleet-deadman.yml` (scheduled off-box dead-man, §4b) and `claude-ci-fix.yml` (event-driven auto-fix responder on failed PR checks, change-requested reviews, or `@claude` / CodeRabbit comments). |
-| `projects/…/memory/` | The ORA memory system — only `projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/` is tracked (401 files: `MEMORY.md` index, `event_log.md`, `open-items-tracker.md`, dated feedback/project/reference notes). Session transcripts (`.jsonl`) are **not** tracked. |
+| `.github/workflows/` | 2 workflows: `fleet-deadman.yml` (scheduled off-box dead-man, §4b) and `claude-ci-fix.yml` (event-driven auto-fix responder on failed PR checks, change-requested reviews, or `@claude` / CodeRabbit comments; `@claude` fires only for the repo owner, actions are SHA-pinned, and the workflow token is `contents: read` — pushes use the Claude GitHub App token). |
+| `projects/…/memory/` | The ORA memory system — only `projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/` is tracked (421 files at 2026-10-06 and growing daily: `MEMORY.md` index, `event_log.md`, `open-items-tracker.md`, dated feedback/project/reference notes). Session transcripts (`.jsonl`) are **not** tracked. |
 | `_archive/` | Superseded config, a retired plugin bundle, and pre-trim snapshots — files are moved here rather than deleted. |
 | `confidential-repos.json` | A small roster naming which *other* ORA repos require confidentiality gating on code-review tooling, plus the rule text — see §5; contents not enumerated here. |
 | `keybindings.json`, `.gitattributes`, `daily-setup-audit-prompt.md` | Small standalone config/reference files, individually opted in. |
@@ -117,6 +118,18 @@ Everything else on disk (`cache/`, `sessions/`, `worktrees/`, `telemetry/`,
 secret, machine-specific, confidential, or freely regenerable.
 
 ## 4. Architecture
+
+The inline diagrams below are the overview. Six standalone detail diagrams (verified
+2026-10-06, each citing its source `file:line` in a `%%` header) live in `docs/diagrams/`:
+
+| File | Covers |
+|---|---|
+| `01_hook_lifecycle.mmd` | All six hook events, dispatcher internals (fail-closed on a missing guard, in-process then subprocess fallback, telemetry), direct matchers incl. `workbook-write-guard`, PostToolUse marker stores; `posttooluse-dispatcher` shown as unwired |
+| `02_prepush_gates.mmd` | Untracked pre-push shim, push callers, per-gate override-ability / fail-closed; no test workflow in Actions |
+| `03_claim_preflight_flow.mmd` | Preflight verdicts and exit codes, claim TTLs, the two claim stores, claim-lock, release |
+| `04_scheduled_fleets.mmd` | Both fleets, task-output sinks, heartbeat/dead-man chain, `system-inventory.md` freshness |
+| `05_event_log_memory_writers.mmd` | Event-log appender (spool / in-place fallback), rollover, memory direct edits, commit sweep, OI allocator |
+| `06_backup_and_landing.mmd` | Worktree landing, backup leg, merge-forward refusal conditions, missing offsite copy of untracked state |
 
 ### 4a. Hook gate chain
 
