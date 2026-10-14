@@ -1596,6 +1596,20 @@ for _i in range(2000):
 expect_eq("review r10: raw anchor computed once for 2000 windows over one file", 1, _G._raw_anchor.cache_info().misses)
 expect_eq("review r10: normalized anchor computed once for 2000 windows over one file", 1, _G._norm_anchor.cache_info().misses)
 
+# --- Refute wf_34b9b0ce-815 on 6067c75 (all LOW): a bare numeric term vs Indian lakh grouping.
+# Mirrors the 'lakh grouping' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_RL = {
+    "deal-n": {"label": "Deal N", "active": True, "always": ["4250000"]},
+    "deal-p": {"label": "Deal P", "active": True, "always": ["250000"]},
+}
+for _lbl, _txt, _want in (
+    ("Indian lakh grouping", "price Rs 42,50,000 total", "Deal N"),
+    ("lakh grouping of the shorter figure", "fee 2,50,000 due", "Deal P"),
+    ("pair-grouped with spaces", "sum 25 00 00 only", "Deal P"),
+    ("a bigger number that merely contains the digits (no hit)", "total 12,250,000 and 1,250,000", None),
+):
+    expect_eq("review r11: numeric term vs %s" % _lbl, _want, nhit(_txt, _RL))
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 total = len(results)
