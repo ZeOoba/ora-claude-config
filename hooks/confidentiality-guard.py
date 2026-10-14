@@ -695,7 +695,9 @@ def _forms_contain(forms, raw_term):
     bare = re.sub(r"^\$\s*", "", d_terms[0])
     if _RE_ALL_DIGITS.fullmatch(bare):
         pat = _numeric_term_re(bare)
-        return any(pat.search(h) for h in texts)
+        # Also the digit forms: the canonical digit-run form folds odd groupings (Indian lakh 42,50,000,
+        # 25 00 00) back to the plain digits. Only adds matches.
+        return any(pat.search(h) for h in texts) or any(pat.search(h) for h in digits)
     return any(d in h for h in digits for d in d_terms)
 
 
