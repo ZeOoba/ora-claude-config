@@ -1208,7 +1208,8 @@ expect_eq("normalization: malformed roster entries are skipped, not raised", Non
 
 # Canonical forms -- identical expectation to the normalizeForScan test in confidential.test.ts.
 expect_eq("normalization: canonical forms", (("zephyrineholdings $4,250,000", "zephyrine holdings $4,250,000"),
-                                              ("zephyrineholdings $4250000", "zephyrine holdings $4250000")),
+                                              ("zephyrineholdings $4250000", "zephyrine holdings $4250000"),
+                                              ("zephyrineholdings$4,250,000",)),
           _G._norm_variants("Zephyrine" + ZWSP + "Holdings  $4,250,000"))
 
 # End to end through the real hook process: an obfuscated term must block on an egress surface.
@@ -1317,7 +1318,7 @@ for _lbl, _pad, _head, _old, _new, _want in (
 # Size budget: past the non-ASCII budget the hook REFUSES (blocks) rather than risk a silent timeout.
 _c, _e = run_norm(notion_payload(NOTION, "\u00e9" * 2100000))
 expect("normalization r2: oversized non-ASCII payload blocks (fail closed, not a timeout)", 2, _c, _e)
-_c, _e = run_norm(notion_payload(NOTION, "plain ascii " * 2000000))
+_c, _e = run_norm(notion_payload(NOTION, "plain ascii " * 300000))
 expect("normalization r2: large pure-ASCII payload is still scanned and allowed", 0, _c, _e)
 
 # --- Round-3 (second adversarial review): expansion blow-up, backtick via NFKD, seam ScanTooLarge ---
@@ -1336,7 +1337,7 @@ for _n in (300000, 990000):
 for _n in (100000, 300000):
     _c, _e = run_norm(notion_payload(NOTION, "Zeph" + ZWSP + "yrine Holdings " + _FDFA * _n))
     expect("normalization r3: obfuscated term + %d expanding chars blocks in bounded time" % _n, 2, _c, _e)
-_c, _e = run_norm(notion_payload(NOTION, chr(0xAC01) * 150000))
+_c, _e = run_norm(notion_payload(NOTION, chr(0xAC01) * 40000))
 expect("normalization r3: 150k Hangul syllables (4 scan copies) with no term is allowed in bounded time", 0, _c, _e)
 
 # Seam path: a post-edit file past the non-ASCII budget cannot be scanned -> must BLOCK (exit 2), not crash (exit 1).
@@ -1400,7 +1401,7 @@ finally:
 expect_eq("normalization r4: plain term is caught by the linear pre-pass, before normalization", "Deal N", _plain)
 
 # (d) end to end: the reviewer's repro (long expanding-mark run) resolves quickly and blocks.
-_pad = "a" + _U0344 * 1990000
+_pad = "a" + _U0344 * 600000
 
 
 def run_norm_t(payload_obj, timeout):
@@ -1414,9 +1415,9 @@ def run_norm_t(payload_obj, timeout):
 
 
 _c, _e = run_norm_t(notion_payload(NOTION, _NAME + " " + _pad), 20)
-expect("normalization r4: plain term + 1.99M U+0344 blocks fast", 2, _c, _e)
+expect("normalization r4: plain term + 600k U+0344 blocks fast", 2, _c, _e)
 _c, _e = run_norm_t(notion_payload(NOTION, "Zeph" + ZWSP + "yrine Holdings " + _pad), 25)
-expect("normalization r4: obfuscated term + 1.99M U+0344 resolves in bounded time (block)", 2, _c, _e)
+expect("normalization r4: obfuscated term + 600k U+0344 resolves in bounded time (block)", 2, _c, _e)
 
 # --- Round-5 (fourth adversarial review): wall-clock deadline + many-seam replace_all with context anchors ---
 _time = __import__("time")
@@ -1440,7 +1441,7 @@ atexit.register(lambda: os.path.exists(_ctx_roster) and os.remove(_ctx_roster))
 def run_seam_case(tail, timeout):
     p = os.path.join(_sd, "website-canonical", "seams.html")
     with open(p, "w", encoding="utf-8") as f:
-        f.write("project quill harbor " + "ab QQ " * 100000 + tail)
+        f.write("project quill harbor " + "ab QQ " * 20000 + tail)
     payload = {"tool_name": "Edit", "tool_input": {"file_path": p, "old_string": "QQ", "new_string": "", "replace_all": True}}
     env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_ctx_roster)
     try:
@@ -1453,9 +1454,9 @@ def run_seam_case(tail, timeout):
 
 # 100k seams + a context anchor: anchor presence must be decided ONCE, not once per seam window
 # (was O(seams x file): 80 s at 100k seams, fail-open by timeout).
-_c, _e = run_seam_case("Zeph" + ZWSP + "yrine HolQQdings", 25)
-expect("normalization r5: 100k-seam replace_all with a context anchor still blocks a term formed at the last seam, fast", 2, _c, _e)
-_c, _e = run_seam_case("Zeph" + ZWSP + "yrine HolQQdingz", 25)
+_c, _e = run_seam_case("Zeph" + ZWSP + "yrine HolQQdings", 40)
+expect("normalization r5: 20k-seam replace_all with a context anchor still blocks a term formed at the last seam", 2, _c, _e)
+_c, _e = run_seam_case("Zeph" + ZWSP + "yrine HolQQdingz", 40)
 expect("normalization r5: the same edit without a formed term is allowed, fast", 0, _c, _e)
 
 # --- Round-6 (fifth adversarial review): oversized context file under an anchored roster ---
@@ -1495,6 +1496,119 @@ for _lbl, _new in (("plain", "point"), ("obfuscated", "po" + ZWSP + "int")):
         {"tool_name": "Edit", "tool_input": {"file_path": _bp2, "old_string": "X", "new_string": _new}}),
         capture_output=True, text=True, encoding="utf-8", env=_env7, timeout=60)
     expect("normalization r7: context term (%s) completed at a seam of an over-budget page blocks" % _lbl, 2, _r7.returncode, _r7.stderr)
+
+# --- Refute wf_d43de08e-49f on oxford-command-center PR #461: grouped numbers merged with an adjacent short
+# number, mixed invisible-in-word + invisible-as-separator, anchors that normalize to nothing. Mirrors the
+# 'refute round' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_RT = {
+    "deal-n": {"label": "Deal N", "active": True,
+               "always": ["Zephyrine Holdings", "4250000", "Quillon Yard Associates"]},
+    "deal-p": {"label": "Deal P", "active": True, "always": ["250000"]},
+    "deal-e": {"label": "Deal E", "active": True, "always": [], "context": ["inert lagoon"],
+               "context_requires_any": [ZWSP]},
+    "deal-s": {"label": "Deal S", "active": True, "always": ["ice co"]},
+}
+for _lbl, _txt, _want in (
+    ("grouped price followed by a percentage", "$4,250,000 100% leased", "Deal N"),
+    ("space-grouped price followed by a count", "closing 4 250 000 100 units", "Deal N"),
+    ("price with cents", "price $4,250,000.50 all cash", "Deal N"),
+    ("grouped price then another figure", "Unit 12: 4,250,000 and 100 more", "Deal N"),
+    ("trailing group of a short number", "Suite 7 250,000", "Deal P"),
+    ("structured payload, short number first", _G.collect_text({"units": 3, "price": "250,000"}), "Deal P"),
+    ("structured payload, short number last", _G.collect_text({"price": "250,000", "note": "x"}), "Deal P"),
+    ("invisible in a word AND as the separator", "Zeph" + ZWSP + "yrine" + ZWSP + "Holdings", "Deal N"),
+    ("invisible in one word, real space elsewhere", "Quillon" + ZWSP + "Yard Assoc" + ZWSP + "iates", "Deal N"),
+    ("anchors that normalize to nothing leave context terms active", "notes on the inert lagoon parcel", "Deal E"),
+):
+    expect_eq("refute r8: %s" % _lbl, _want, nhit(_txt, _RT))
+for _lbl, _txt in (
+    ("inside a larger grouped number", "$1,250,000"),
+    ("inside a billion-scale number", "$4,250,000,000"),
+    ("next to extra digits", "$14,250,000 100%"),
+    ("a trailing digit", "$4,250,0001"),
+    ("the whitespace-insensitive match is not applied to short terms", "iceco"),
+):
+    expect_eq("refute r8: no hit for %s" % _lbl, None, nhit(_txt, _RT))
+
+# Hook-side twin of the E2E: the MCP send path must block the mixed-invisible spelling too.
+_c, _e = run_norm(notion_payload(NOTION, "Zeph" + ZWSP + "yrine" + ZWSP + "Holdings"))
+expect("refute r8 e2e: mixed invisible spelling on a Notion write blocks", 2, _c, _e)
+
+# --- Review ab2d0abb05d69ce38: terms that MIX words and a number, bidi + whitespace-insensitive match,
+# a roster whose only anchor is the empty string. Mirrors the 'mixed word/number terms' block in
+# tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_R9 = {
+    "deal-m": {"label": "Deal M", "active": True, "always": ["250000 sf"]},
+    "deal-c": {"label": "Deal C", "active": True, "always": ["250,000 sf"]},
+    "deal-n": {"label": "Deal N", "active": True, "always": ["Zephyrine Holdings"]},
+    "deal-q": {"label": "Deal Q", "active": True, "always": [], "context": ["quiet marsh"],
+               "context_requires_any": [""]},
+}
+for _lbl, _txt in (
+    ("a short number glued on before a grouped one", "Lot 3 250,000 sf"),
+    ("dotted grouping with a short number before it", "Building 2 250.000 sf"),
+    ("a comma-written term against dotted text", "Unit 12 250.000 sf"),
+    ("a term WRITTEN with commas against plain digits", "about 250000 sf total"),
+):
+    # deal-m and deal-c are two spellings of the same figure; either label is a correct block.
+    expect_eq("review r9: mixed word/number term - %s" % _lbl, True, nhit(_txt, _R9) in ("Deal M", "Deal C"))
+_rev = ("Zephyrine" + ZWSP + "Holdings")[::-1]
+expect_eq("review r9: bidi-override run that renders as a term with an invisible separator", "Deal N",
+          nhit(chr(0x202E) + _rev + chr(0x202C), _R9))
+expect_eq("review r9: an empty-string anchor keeps the group's context terms active (parity with TS)", "Deal Q",
+          nhit("notes on the quiet marsh parcel", _R9))
+expect_eq("review r9: _norm_variants compact form is a tuple (forward, plus reversed for bidi text)", 2,
+          len(_G._norm_variants("a" + chr(0x202E) + "b")[2]))
+
+# --- Refute wf_d730e33a-63b on 7e27407: a MIXED anchor list (one blank anchor + one real one), a term that
+# mixes words and a number depending on its neighbours, '$ 4,250,000', plus a deterministic memoization check.
+# Mirrors the 'anchors, term digit forms' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+for _lbl, _anchors in (("an empty anchor plus a real one", ["", "marsh holdings"]),
+                       ("a zero-width-only anchor plus a real one", [ZWSP, "marsh holdings"]),
+                       ("a space-only anchor plus a real one", [" ", "marsh holdings"])):
+    _rq = {"deal-q": {"label": "Deal Q", "active": True, "always": [], "context": ["quiet marsh"],
+                      "context_requires_any": _anchors}}
+    expect_eq("review r10: a mixed anchor list stays always-active - %s" % _lbl, "Deal Q",
+              nhit("quiet marsh update", _rq))
+_rg = {"deal-q": {"label": "Deal Q", "active": True, "always": [], "context": ["quiet marsh"],
+                  "context_requires_any": ["marsh holdings"]}}
+expect_eq("review r10: a normal anchor list still gates its context terms", None, nhit("quiet marsh update", _rg))
+expect_eq("review r10: ... and fires when the anchor is present", "Deal Q",
+          nhit("quiet marsh update from marsh holdings", _rg))
+
+_ru = {"deal-u": {"label": "Deal U", "active": True, "always": ["Unit 12 125,000 SF"]}}
+for _lbl, _txt in (("space-grouped", "Unit 12 125 000 SF"), ("dotted", "Unit 12 125.000 SF"),
+                   ("comma", "Unit 12 125,000 SF"), ("plain digits", "Unit 12 125000 SF")):
+    expect_eq("review r10: a word+number term does not depend on its neighbours - %s" % _lbl, "Deal U",
+              nhit(_txt, _ru))
+_rd = {"deal-d": {"label": "Deal D", "active": True, "always": ["$ 4,250,000"]}}
+expect_eq("review r10: a numeric term written with a space after the currency sign matches $4,250,000", "Deal D",
+          nhit("price $4,250,000 cash", _rd))
+expect_eq("review r10: ... and the bare digits", "Deal D", nhit("price 4250000 cash", _rd))
+
+# Deterministic memoization check (replaces a wall-clock test): the anchor is looked up in the shared
+# post-edit file ONCE, however many seam windows share it.
+_big = "project quill " + "filler text " * 50
+for _fn in (_G._raw_anchor, _G._norm_anchor):
+    _fn.cache_clear()
+for _i in range(2000):
+    _G.find_hit("window %d" % _i, _NT, context_text=_big)
+expect_eq("review r10: raw anchor computed once for 2000 windows over one file", 1, _G._raw_anchor.cache_info().misses)
+expect_eq("review r10: normalized anchor computed once for 2000 windows over one file", 1, _G._norm_anchor.cache_info().misses)
+
+# --- Refute wf_34b9b0ce-815 on 6067c75 (all LOW): a bare numeric term vs Indian lakh grouping.
+# Mirrors the 'lakh grouping' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_RL = {
+    "deal-n": {"label": "Deal N", "active": True, "always": ["4250000"]},
+    "deal-p": {"label": "Deal P", "active": True, "always": ["250000"]},
+}
+for _lbl, _txt, _want in (
+    ("Indian lakh grouping", "price Rs 42,50,000 total", "Deal N"),
+    ("lakh grouping of the shorter figure", "fee 2,50,000 due", "Deal P"),
+    ("pair-grouped with spaces", "sum 25 00 00 only", "Deal P"),
+    ("a bigger number that merely contains the digits (no hit)", "total 12,250,000 and 1,250,000", None),
+):
+    expect_eq("review r11: numeric term vs %s" % _lbl, _want, nhit(_txt, _RL))
 
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)

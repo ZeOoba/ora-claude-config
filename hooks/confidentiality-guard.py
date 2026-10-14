@@ -539,11 +539,23 @@ _T_TIGHT_N = {c: v for c, v in _T_TIGHT.items() if c >= 128}
 _T_SPACED_N = {c: v for c, v in _T_SPACED.items() if c >= 128}
 _T_POST_N = {c: v for c, v in _T_POST.items() if c >= 128}
 _RE_NONASCII = re.compile("[^\u0000-\u007f]+")
+_RE_ASCII_WS_ODD = re.compile("[\u0009-\u000d\u001c-\u001f]|  ")
 _RE_ASCII_FMT = re.compile("[" + "".join(re.escape(chr(c)) for c in sorted(_T_TIGHT_A)) + "]")
 _RE_BIDI = re.compile("[\u202a-\u202e\u2066-\u2069]")
 # 1-3 digits then 1+ (separator + exactly 3 digits); not touching other digits, so 12.50 stays.
-_RE_GROUPED_NUM = re.compile("(?<![0-9])[0-9]{1,3}(?:[,. '_\u00a0\u2009\u202f][0-9]{3})+(?![0-9])")
-_RE_GROUP_SEP = re.compile("[,. '_\u00a0\u2009\u202f]")
+# Digit-group separators: , . _ ' space NBSP thin-space narrow-NBSP and the Arabic thousands separator.
+_SEP_CLASS = "[,._' \u00a0\u2009\u202f\u066c]"
+# ONE separator character used throughout (a backreference), so "4,250,000 100%" is the number
+# 4,250,000 followed by 100, not 4250000100.
+_RE_GROUPED_NUM = re.compile(r"(?<![0-9])[0-9]{1,3}(" + _SEP_CLASS + r")[0-9]{3}(?:\1[0-9]{3})*(?![0-9])")
+# Shortest compact term the whitespace-insensitive match applies to (short terms would over-match).
+_COMPACT_MIN = 8
+
+# Canonical digit-run form: ANY separator between two digits is dropped. Over-merges ("3 250,000" ->
+# 3250000, "4.25" -> 425) on purpose, and is used SYMMETRICALLY (term and haystack) only for terms that
+# mix words and a number, so the match never depends on how a neighbouring number happens to be written;
+# the over-merge can only add matches (fail closed).
+_RE_DIGIT_SEP = re.compile("(?<=[0-9])" + _SEP_CLASS + "(?=[0-9])")
 _RE_ANY_DIGIT = re.compile("[0-9]")
 _RE_ALL_DIGITS = re.compile("[0-9]+")
 _SEAM_WALK_CAP = 400000
@@ -587,7 +599,12 @@ def _nfkd_chunked(run, produced):
 
 def _variant(s, table_a, table_n, ascii_fmt_to):
     if s.isascii():
-        return " ".join(s.translate(_T_PRE_A).lower().translate(table_a).split())
+        c = s.translate(_T_PRE_A).lower().translate(table_a)
+        # split()/join builds a list of every word (millions, on a big payload). Only needed when the
+        # text carries whitespace other than single spaces; a trim is enough otherwise.
+        if _RE_ASCII_WS_ODD.search(c) is None:
+            return c.strip(" ")
+        return " ".join(c.split())
     if len(s.encode("utf-8", "surrogatepass")) - len(s) > _NONASCII_BUDGET:
         raise ScanTooLarge("non-ASCII input too large to normalize within the hook's time budget")
     produced = [0]
@@ -614,40 +631,79 @@ def _spaced_form(s):
 def _digits_form(s):
     if not _RE_ANY_DIGIT.search(s):
         return s
-    return _RE_GROUPED_NUM.sub(lambda m: _RE_GROUP_SEP.sub("", m.group(0)), s)
+    return _RE_GROUPED_NUM.sub(lambda m: m.group(0).replace(m.group(1), ""), s)
+
+
+def _digits_form_canon(s):
+    if not _RE_ANY_DIGIT.search(s):
+        return s
+    return _RE_DIGIT_SEP.sub("", s)
 
 
 @functools.lru_cache(maxsize=4)
 def _norm_variants(s):
-    """(text_forms, digit_forms) for a haystack. Cached: seam windows re-use one post-edit file."""
-    tight, spaced = _tight_form(s), _spaced_form(s)
+    """(text_forms, digit_forms, compact_forms) for a haystack. Cached: seam windows re-use one post-edit file."""
+    tight = _tight_form(s)
+    # An ASCII text with no invisible characters has nothing for the "spaced" variant to change.
+    spaced = tight if (s.isascii() and _RE_ASCII_FMT.search(s) is None) else _spaced_form(s)
     texts = [tight] if tight == spaced else [tight, spaced]
+    # compact: the tight form with every space removed -- matches a long multi-word term whatever mix
+    # of invisible characters and spaces separates its words.
+    compacts = [tight.replace(" ", "")]
     if _RE_BIDI.search(s):
+        # What a bidi-override run renders as: the text reversed (both variants, and the compact form).
         texts.append(tight[::-1])
+        if spaced != tight:
+            texts.append(spaced[::-1])
+        compacts.append(tight[::-1].replace(" ", ""))
     texts = tuple(texts)
-    return texts, tuple(dict.fromkeys(_digits_form(t) for t in texts))
+    digits = tuple(dict.fromkeys(f(t) for t in texts for f in (_digits_form, _digits_form_canon)))
+    return texts, digits, tuple(compacts)
+
+
+_OPT_SEP = _SEP_CLASS + "?"
+_UNAMBIGUOUS_SEP = "[,._']"
+
+
+def _numeric_term_re(bare):
+    """Regex for a purely numeric roster term written against the haystack as TEXT: the term's digits in
+    groups of three from the right, each pair of groups allowed an optional separator. Anchored so it is
+    a whole number: not touching another digit, not the tail of a larger grouped number (1,250,000 does
+    not carry 250000), not the head of one (4,250,000,000 does not carry 4250000). A SPACE before it is
+    deliberately allowed: "Suite 7 250,000" is ambiguous and fails toward matching."""
+    groups, end = [], len(bare)
+    while end > 0:
+        groups.insert(0, bare[max(0, end - 3):end])
+        end -= 3
+    return re.compile("(?<![0-9])(?<![0-9]" + _UNAMBIGUOUS_SEP + ")" + _OPT_SEP.join(groups)
+                      + "(?![0-9])(?!" + _UNAMBIGUOUS_SEP + "[0-9]{3}(?![0-9]))")
 
 
 def _forms_contain(forms, raw_term):
-    texts, digits = forms
+    texts, digits, compact = forms
     tight = _tight_form(raw_term)
     if not tight:
         return False
     if any(tight in h for h in texts):
         return True
-    d_term = _digits_form(tight)
-    bare = d_term[1:] if d_term.startswith("$") else d_term
+    compact_term = tight.replace(" ", "")
+    if compact_term != tight and len(compact_term) >= _COMPACT_MIN and any(compact_term in c for c in compact):
+        return True
+    # The TERM gets both digit forms too (as the haystack does), so a term mixing words and a number
+    # does not depend on how its neighbours happen to be written.
+    d_terms = tuple(dict.fromkeys((_digits_form(tight), _digits_form_canon(tight))))
+    bare = re.sub(r"^\$\s*", "", d_terms[0])
     if _RE_ALL_DIGITS.fullmatch(bare):
-        # In the digit-group-stripped form a purely numeric term must match a WHOLE number: 250000 is
-        # not found inside 4,250,000. (The plain-substring check above is the legacy behavior.)
-        pat = re.compile("(?<![0-9])" + bare + "(?![0-9])")
-        return any(pat.search(h) for h in digits)
-    return any(d_term in h for h in digits)
+        pat = _numeric_term_re(bare)
+        # Also the digit forms: the canonical digit-run form folds odd groupings (Indian lakh 42,50,000,
+        # 25 00 00) back to the plain digits. Only adds matches.
+        return any(pat.search(h) for h in texts) or any(pat.search(h) for h in digits)
+    return any(d in h for h in digits for d in d_terms)
 
 
 # In-hook wall-clock budget. This hook has no timeout of its own and a timed-out hook does NOT block,
 # so past this many seconds the scan raises ScanTooLarge and every caller turns that into a block.
-_SCAN_SECONDS = 15
+_SCAN_SECONDS = 25
 _DEADLINE = [None]
 
 
@@ -717,7 +773,15 @@ def find_hit(text, terms, context_text=None):
             if _forms_contain(forms, t):
                 return (deal.get("label", key), t)
         reqs = tuple(_str_terms(deal, "context_requires_any"))
-        if reqs and _norm_anchor(ctx_src, reqs):
+        # An anchor that normalizes to nothing (empty, whitespace or invisible-only) matches everywhere;
+        # fail closed and treat the group as unanchored. Computed from the RAW list, since _str_terms
+        # drops empty strings (the TypeScript twin keeps them).
+        raw_anchors = deal.get("context_requires_any")
+        raw_anchors = [r for r in raw_anchors if isinstance(r, str)] if isinstance(raw_anchors, list) else []
+        # ANY blank anchor leaves the group unanchored (a blank anchor matches everywhere, as '' always
+        # did); it must not be skipped just because a real anchor sits next to it.
+        unanchored = any(not _tight_form(r) for r in raw_anchors)
+        if unanchored or (reqs and _norm_anchor(ctx_src, reqs)):
             for t in _str_terms(deal, "context"):
                 if _forms_contain(forms, t):
                     return (deal.get("label", key), t)
