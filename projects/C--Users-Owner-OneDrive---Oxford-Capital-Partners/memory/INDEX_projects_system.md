@@ -86,3 +86,5 @@ metadata:
 - ✅ [3700 Kinsman Blvd FedEx — walk-price breach, RESOLVED 08-24](project_fedex_kinsman_walk_price_breach_2026-08-23.md) — Gabriel let the $3.8M LOI lapse, never transmitted; confirmed via ora-deal-aging-sla 08-26 pull
 
 - **⛔ [Automation Audit Rev 27 09-22](project_automation_audit_rev27_2026-09-22.md)** — Architecture pass: no comps/listings store; ~48% of the fleet is self-maintenance; 4 never-fired tasks; plan pending. Chains Rev 26
+
+- **⛔ [Automation Audit Rev 30 10-07](project_automation_audit_rev30_2026-10-07.md)** — nothing clearly dead; fleet 16/86 enabled (the 7 "never run" were recreated 10-06, not late); first remediation tranche done 10-08, guarded config edits held for Gabriel; D1/D3/D4/D5 settled, D2 pending

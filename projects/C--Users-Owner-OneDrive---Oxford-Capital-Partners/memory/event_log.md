@@ -5,12 +5,40 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-16T00:24:57.745Z
+  modified: 2026-10-16T16:04:04.643Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-10-16 -- solar-lease-underwriting v1.3 reimport confirmed
+
+solar-lease-underwriting v1.3 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-16 -- annual-cycle v1.1 reimport confirmed
+
+annual-cycle v1.1 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-16 -- market-monitor v1.7 reimport confirmed
+
+market-monitor v1.7 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-16 -- rent-roll-qc v1.1 reimport confirmed
+
+rent-roll-qc v1.1 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-16 -- ora-millage-lookup v1.2 reimport confirmed
+
+ora-millage-lookup v1.2 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-16 -- lease-renewal-pipeline v1.3 reimport confirmed
+
+lease-renewal-pipeline v1.3 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-16 -- lease-abstraction-pipeline v2.8 reimport confirmed
+
+lease-abstraction-pipeline v2.8 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
 
 ## 2026-10-15 -- exhibit-package-builder reimport confirmed
 
