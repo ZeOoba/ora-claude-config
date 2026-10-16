@@ -5,12 +5,43 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-09T00:21:14.048Z
+  modified: 2026-10-16T00:24:57.745Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-10-15 -- exhibit-package-builder reimport confirmed
+
+exhibit-package-builder reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-15 -- estoppel-request-generation v1.3 reimport confirmed
+
+estoppel-request-generation v1.3 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-15 -- deal-execution v1.10 reimport confirmed
+
+deal-execution v1.10 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-13 — Architecture-review remediation: ora-full-gate-weekly registered; ora-setup-audit v1.18 install confirmed; Actions billing block found
+
+- **Registered** `ora-full-gate-weekly` (CC/MCP, `30 11 * * 1`, Gabriel-approved in chat 2026-10-13; verified via `list_scheduled_tasks`, next fire 2026-10-19 11:33 ET). OI-254. Gabriel declined PR-blocking CI: no self-hosted runner, no `schedule:` trigger.
+- **Confirmed Save-skill install: ora-setup-audit v1.18.** Gabriel reported the re-import 2026-10-13; verified: store `SKILL.md` mtime 2026-10-13 18:16, body byte-identical to `ora-skills` origin/main after EOL normalization except the platform's own `name: "ora-setup-audit"` quoting; `references/guardrails-telemetry.md` hash-identical; frontmatter description (574 chars) hash-identical. The old "v1.12 ... Changelog" description text is not in v1.18's frontmatter, so the shortened description is the repo's, not a store regression. `_staging/*.md` are gitignored local ledgers (`.gitignore:30`), not repo-tracked.
+- **Finding (OI-254 context):** GitHub Actions hosted jobs on this account fail to start: "recent account payments have failed or your spending limit needs to be increased" (ora-county-sales-monitor run 38489261246). Affects every hosted-runner repo incl. ora-pm CI/deploy. Needs Gabriel on GitHub Billing.
+- PRs opened, none merged: ora-county-sales-monitor #2 #3 #4; Website #163 (chat model, no preview, no deploy).
+
+## 2026-10-13 — Live checkout caught up to origin/main (dirty-tree triage follow-through)
+PRs merged: #313 (10 settled untracked files), #314 (workbook-write-guard: `#` in the unquoted cd arg of the exempt heredoc failed open — a redirect onto the master workbook passed; found by adversarial review of the catch-up merge, fixed + re-reviewed), #315 (ora-passed-deal-tracker full Ops Hub UUID). Live live/primary-checkout merged origin/main (event_log: rolled-over side kept, all 102 main-only headings are in _archive) and fast-forwarded to 5e214634, 0 behind / 8 ahead. Discarded two stale/redundant tracked edits under override (Gabriel option 1; backups hash-verified in maintenance/_archive/2026-10-13_dirty-tree-triage/), removed one identical untracked archive dir (backed up), token deleted. Held back, still untracked: ora-agent-usage-report-monthly, ora-site-market-snapshot-refresh, ora-edge-mfg-scout-weekly, ora-edge-news-overlay-refresh (email without a run guard; fail test_scheduled_task_run_guard). Untouched: 10-06 14:13 bulk-modified batch (CLAUDE.md, settings.json, ~25 task specs), oxford-command-center financial-gate WIP, wt-token-binding hooks WIP.
+
+## 2026-10-13 — Dirty-tree triage (~/.claude)
+Scanned 4 repos (84 dirty entries). Isolated-committed 14 settled untracked files (`68c37947`, live/primary-checkout): 5 agents, 5 scheduled-task SKILL.mds, xlsx-warehouse-importer, 3 maintenance scripts. Left untouched: 10-06 14:13 bulk-modified batch (incl. CLAUDE.md, settings.json; unattributed), deleted ora-notion-trial-expiry-reminder, event_log.md, oxford-command-center financial-gate WIP, wt-token-binding hooks WIP. Untracked `_archive*` dirs left in place (already archives). Branch divergence (ahead 5/behind 16) unresolved — Gabriel's call.
+
+## 2026-10-13 - Edge news overlay refresh
+- 0 signals changed; asOf not bumped (BLS Aug metro Table 3 unreachable); ACS 2025 1-yr date still undetermined.
+
+## 2026-10-13 - Edge mfg scout weekly
+1 new row (GSK PA), 1 update note (Nucor), 9 feeds unreachable; pending file mfg_announcements_pending_2026-10-13.json; email sent to ggoldberg.
 
 ## 2026-10-08 - Edge news overlay Q3 broker fold-in
 - 2 signals changed (Detroit, Omaha), 11 notes refreshed from CBRE/C&W Q3 2026. Email sent.
