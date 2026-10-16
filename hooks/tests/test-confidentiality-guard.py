@@ -1116,6 +1116,500 @@ if _live:
     expect_eq("settings.json confidentiality-guard matcher routes every classified send surface "
               "(gaps: %s)" % ", ".join(t.rsplit("__", 1)[1] for t in _gaps), [], _gaps)
 
+# --- Matching normalization (2026-10-13; refute wf_d42a89c6-fe5 on PR #457) -------------------------
+# Mirror of the vectors in oxford-command-center/tests/unit/confidential.test.ts -- keep in step.
+# SYNTHETIC roster only. Built with chr() so this file never carries an invisible literal.
+_G = _load_guard_module()
+ZWSP, ZWNJ, ZWJ, WJ, SHY, BOM, LRM = (chr(c) for c in (0x200B, 0x200C, 0x200D, 0x2060, 0x00AD, 0xFEFF, 0x200E))
+NBSP, THIN, NNBSP, IDEO = (chr(c) for c in (0x00A0, 0x2009, 0x202F, 0x3000))
+CURLY, ENDASH, EMDASH, ACUTE, MODAPOS, MINUS, CLL = (
+    chr(c) for c in (0x2019, 0x2013, 0x2014, 0x00B4, 0x02BC, 0x2212, 0x0332))
+_NAME, _PLAZA, _PRICE = "Zephyrine Holdings", "O'Malley-Brandt Plaza", "4250000"
+_NT = {
+    "_meta": {"note": "synthetic"},
+    "deal-n": {"label": "Deal N", "active": True, "always": [_NAME, _PLAZA, _PRICE],
+               "context": ["harbor point"], "context_requires_any": ["project quill"]},
+}
+
+
+def nhit(text, terms=_NT):
+    h = _G.find_hit(text, terms)
+    return h[0] if h else None
+
+
+_obf = {
+    "zwsp mid-word": "Zeph" + ZWSP + "yrine Holdings",
+    "zwnj": "Zephyrine Hold" + ZWNJ + "ings",
+    "zwj": "Z" + ZWJ + "ephyrine Holdings",
+    "word joiner": "Zephyrine" + WJ + " Holdings",
+    "soft hyphen": "Zephy" + SHY + "rine Holdings",
+    "bom": BOM + "Zephyrine Holdings",
+    "lrm": "Zephyrine" + LRM + " Holdings",
+    "zwsp as separator": "Zephyrine" + ZWSP + "Holdings",
+    "zwsp padded separator": "Zephyrine" + ZWSP + " " + ZWSP + "Holdings",
+    "combining low line": "Zeph" + CLL + "yrine Holdings",
+    "nbsp": "Zephyrine" + NBSP + "Holdings",
+    "thin space": "Zephyrine" + THIN + "Holdings",
+    "narrow nbsp": "Zephyrine" + NNBSP + "Holdings",
+    "ideographic space": "Zephyrine" + IDEO + "Holdings",
+    "tab/newline/run": "Zephyrine\t\n   Holdings",
+    "fullwidth": "".join(chr(ord(c) + 0xFEE0) if c != " " else " " for c in _NAME),
+    "math bold Z": chr(0x1D419) + "ephyrine Holdings",
+    "mixed case": "zEPHYRINE hOLDINGS",
+    "60x zwsp padding": (ZWSP * 60).join(_NAME),
+    "curly apostrophe + en dash": "O" + CURLY + "Malley" + ENDASH + "Brandt Plaza",
+    "acute + em dash + nbsp": "O" + ACUTE + "Malley" + EMDASH + "Brandt" + NBSP + "Plaza",
+    "modifier apostrophe + minus": "O" + MODAPOS + "Malley" + MINUS + "Brandt Plaza",
+}
+for _lbl, _txt in _obf.items():
+    expect_eq("normalization: %s is caught" % _lbl, "Deal N", nhit(_txt))
+    expect_eq("normalization: %s is caught when nested in a payload" % _lbl, "Deal N",
+              nhit(_G.collect_text({"a": [{"t": "Re: " + _txt + " - update"}]})))
+
+for _lbl, _txt in {
+    "plain": "4250000", "US commas": "$4,250,000", "de-DE dots": "4.250.000", "spaces": "4 250 000",
+    "nbsp groups": "4" + NBSP + "250" + NBSP + "000", "nnbsp groups": "4" + NNBSP + "250" + NNBSP + "000",
+    "curly-apostrophe groups": "4" + CURLY + "250" + CURLY + "000", "underscores": "4_250_000",
+    "zwsp inside number": "4,250," + ZWSP + "000", "sentence": "Purchase price of $4,250,000 (all cash).",
+}.items():
+    expect_eq("normalization: numeric term vs %s" % _lbl, "Deal N", nhit(_txt))
+
+_np = {"deal-p": {"label": "Deal P", "active": True, "always": ["$1,875,000"]}}
+expect_eq("normalization: roster term with separators matches the bare number", "Deal P", nhit("closing at 1875000", _np))
+expect_eq("normalization: roster term with separators matches dotted groups", "Deal P", nhit("at 1.875.000", _np))
+_nq = {"deal-q": {"label": "Deal Q", "active": True, "always": ["250000"]}}
+for _txt in ("$4,250,000", "$2,500,000", "$1,250,000 and $250,001"):
+    expect_eq("normalization: numeric term 250000 is not found inside %r" % _txt, None, nhit(_txt, _nq))
+expect_eq("normalization: numeric term 250000 matches $250,000", "Deal Q", nhit("$250,000", _nq))
+
+_nr = {"deal-m": {"label": "Deal M", "active": True,
+                  "always": ["Quillon" + NBSP + "Yard", "St" + CURLY + "s Landing", "Ｖesper Gate"]}}
+for _txt in ("the quillon yard lease", "st's landing", "Vesper Gate parcel"):
+    expect_eq("normalization: roster-side folding for %r" % _txt, "Deal M", nhit(_txt, _nr))
+
+for _txt in (
+    "A zephyr is a gentle breeze; Holdings Inc. reported earnings.", "Holdings Zephyrine",
+    "The plaza on O" + CURLY + "Malley Street and the Brandt building",
+    "$14,250,000 and $42,500,000 and $4,250 per month",
+    "Rent is $12.50 per SF NNN; 1,234.56 sq ft; suite 4 100",
+    "Café Müller naïve résumé - Columbus, Ohio - industrial/flex 4,250 SF",
+    "Call 614-555-0142 or 513.555.0199 on 2026-10-13", "Occupancy 94.2%, WALT 3.7 yrs, DSCR 1.31x, LTV 38%",
+    "", ZWSP + NBSP + BOM, "Zephyrine" + ZWSP + ZWSP + "Properties", "Holdings" + ZWSP + "Zephyrine",
+):
+    expect_eq("normalization: no false positive on %r" % _txt[:40], None, nhit(_txt))
+
+expect_eq("normalization: obfuscated anchor + context term hits", "Deal N",
+          nhit("proj" + ZWSP + "ect" + NBSP + "quill: harbor" + THIN + "point"))
+expect_eq("normalization: context term alone stays clean", None, nhit("harbor" + NBSP + "po" + ZWSP + "int"))
+expect_eq("normalization: inactive deal stays skipped", None,
+          nhit("Inert" + ZWSP + " Name", {"deal-off": {"label": "Off", "active": False, "always": ["Inert Name"]}}))
+expect_eq("normalization: malformed roster entries are skipped, not raised", None,
+          nhit("anything", {"d": {"label": "x", "always": [5, None, ["y"]], "context_requires_any": [3]}}))
+
+# Canonical forms -- identical expectation to the normalizeForScan test in confidential.test.ts.
+expect_eq("normalization: canonical forms", (("zephyrineholdings $4,250,000", "zephyrine holdings $4,250,000"),
+                                              ("zephyrineholdings $4250000", "zephyrine holdings $4250000"),
+                                              ("zephyrineholdings$4,250,000",)),
+          _G._norm_variants("Zephyrine" + ZWSP + "Holdings  $4,250,000"))
+
+# End to end through the real hook process: an obfuscated term must block on an egress surface.
+_nfd, _npath = tempfile.mkstemp(prefix="synthetic-norm-terms-", suffix=".json")
+with os.fdopen(_nfd, "w", encoding="utf-8") as _f:
+    json.dump(_NT, _f)
+atexit.register(lambda: os.path.exists(_npath) and os.remove(_npath))
+
+
+def run_norm(payload_obj):
+    env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_npath)
+    p = subprocess.run([sys.executable, GUARD], input=json.dumps(payload_obj), capture_output=True,
+                       text=True, encoding="utf-8", env=env, timeout=60)
+    return p.returncode, p.stderr
+
+
+for _lbl in ("zwsp mid-word", "nbsp", "zwsp as separator", "fullwidth", "curly apostrophe + en dash"):
+    _c, _e = run_norm(notion_payload(NOTION, _obf[_lbl]))
+    expect("normalization e2e: Notion write with %s blocks" % _lbl, 2, _c, _e)
+_c, _e = run_norm(notion_payload(NOTION, "Price is $4,250,000 per the term sheet"))
+expect("normalization e2e: Notion write with a formatted price blocks", 2, _c, _e)
+_c, _e = run_norm(notion_payload(NOTION, "Columbus industrial update, $14,250,000 and a zephyr breeze"))
+expect("normalization e2e: clean Notion write is allowed", 0, _c, _e)
+
+# Seam: the existing file text carries a term prefix padded with far more zero-width characters than
+# any raw-character window would cover; the Edit supplies only the tail. Must still block.
+_sd = tempfile.mkdtemp(prefix="norm-seam-")
+atexit.register(lambda: __import__("shutil").rmtree(_sd, ignore_errors=True))
+_sp = os.path.join(_sd, "website-canonical", "page.html")
+os.makedirs(os.path.dirname(_sp))
+with open(_sp, "w", encoding="utf-8") as _f:
+    _f.write("<p>" + (ZWSP * 400).join("Zephyrine Hol") + ZWSP * 400 + "XX</p>")
+_c, _e = run_norm({"tool_name": "Edit", "tool_input": {"file_path": _sp, "old_string": "XX", "new_string": "dings"}})
+expect("normalization seam: term completed across a zero-width-padded prefix blocks", 2, _c, _e)
+_c, _e = run_norm({"tool_name": "Edit", "tool_input": {"file_path": _sp, "old_string": "XX", "new_string": "zz"}})
+expect("normalization seam: a harmless completion of the same page is allowed", 0, _c, _e)
+
+# --- Round-2 vectors (adversarial review of 2026-10-13): invisible/control chars, bidi, accents, dashes,
+# digit scripts, superscripts, table pin, seam significance, size budget. Mirrors confidential.test.ts.
+TABLES_SHA = "5899947863b6aafde85357d8f0f52f3e81b0c03169edd8d601eea675cad3b149"
+expect_eq("normalization: fixed Unicode table hash (must equal the TypeScript twin's)", TABLES_SHA,
+          _G.normalization_tables_sha256())
+
+_cc = lambda *cs: "".join(chr(c) for c in cs)
+_r2 = {
+    "NUL inside the term": "Zephy" + chr(0) + "rine Holdings",
+    "SOH / DEL / C1 controls": "Zeph" + _cc(1, 0x7F, 0x80, 0x9F) + "yrine Holdings",
+    "unassigned default-ignorable U+2065": "Zephyrine" + chr(0x2065) + " Holdings",
+    "unassigned default-ignorable U+FFF0": "Zephyr" + chr(0xFFF0) + "ine Holdings",
+    "tag character": "Zephyrine" + chr(0xE0041) + " Holdings",
+    "variation selector": "Zephyrine" + chr(0xFE0F) + " Holdings",
+    "hangul filler": "Zephyrine" + chr(0x3164) + " Holdings",
+    "halfwidth voiced mark": "Zeph" + chr(0xFF9E) + "yrine Holdings",
+    "right-to-left override (reversed run)": chr(0x202E) + _NAME[::-1] + chr(0x202C),
+    "acute accent on e": "Z\u00e9phyrine Holdings",
+    "combining acute after a zero-width space": "Ze" + ZWSP + chr(0x0301) + "phyrine Holdings",
+    "diaeresis padding as a separator": "Zephyrine" + chr(0xA8) * 200 + "Holdings",
+    "armenian hyphen": "O" + CURLY + "Malley" + chr(0x058A) + "Brandt Plaza",
+    "supplemental punctuation dash": "O" + CURLY + "Malley" + chr(0x2E3A) + "Brandt Plaza",
+    "price with a footnote superscript": "$4,250,000" + chr(0xB9),
+    "price in Arabic-Indic digits": "".join(chr(0x660 + int(d)) for d in "4250000"),
+    "price in fullwidth digits": "".join(chr(0xFF10 + int(d)) for d in "4250000"),
+}
+for _lbl, _txt in _r2.items():
+    expect_eq("normalization r2: %s is caught" % _lbl, "Deal N", nhit(_txt))
+
+for _txt in ("Bel\u00e9anger and caf\u00e9 menus", "x" + chr(0xB2) + " area, 12" + chr(0xB3) + " volume",
+             "Zephyrine" + chr(0xA8) * 5 + "Properties", "\u202e" + "gnirtsrednu" + "\u202c"):
+    expect_eq("normalization r2: no false positive on %r" % _txt[:30], None, nhit(_txt))
+
+# Differential: the per-run fast path must equal the plain whole-string algorithm.
+import unicodedata as _ud, random as _random
+
+
+def _ref_form(s, spaced):
+    t = _ud.normalize("NFKD", s.translate(_G._T_PRE)).replace(chr(96), "'").lower()
+    t = t.translate(_G._T_SPACED if spaced else _G._T_TIGHT).translate(_G._T_POST)
+    return " ".join(t.split())
+
+
+_rnd = _random.Random(7)
+_pool = list("abZ 09,.$'`-") + [chr(c) for c in (
+    0x200B, 0xAD, 0xA0, 0x2009, 0x3000, 0x0301, 0x0332, 0x2018, 0x2019, 0x2013, 0xFF21, 0xFF41, 0x1D419,
+    0xE9, 0x130, 0xDF, 0x3A3, 0x3C2, 0xFB01, 0x2460, 0x215B, 0x216B, 0x660, 0xB9, 0x202E, 0x1, 0x7F, 0x85, 0xFF40, 0x1FEF, 0xFDFA)]
+_bad = 0
+for _ in range(3000):
+    _s = "".join(_rnd.choice(_pool) for _ in range(_rnd.randint(1, 30)))
+    if _G._tight_form(_s) != _ref_form(_s, False) or _G._spaced_form(_s) != _ref_form(_s, True):
+        _bad += 1
+expect_eq("normalization r2: per-run fast path equals the whole-string reference (3000 random strings)", 0, _bad)
+
+# Seam significance: reviewer repros (halfwidth voiced mark / diaeresis pads normalize AWAY or to space
+# but counted as 'significant' in the first cut).
+for _lbl, _pad, _head, _old, _new, _want in (
+    ("halfwidth mark pad", chr(0xFF9E) * 200, "Zeph", "yrinX Holdings", "yrine Holdings", 2),
+    ("diaeresis pad", chr(0xA8) * 200, "Zephyrine", "Hxldings", "Holdings", 2),
+    ("zero-width pad", ZWSP * 1000, "Zeph", "yrinX Holdings", "yrine Holdings", 2),
+    ("harmless completion", chr(0xFF9E) * 200, "Zeph", "yrinX Holdings", "yrinz Holdings", 0),
+):
+    _sp2 = os.path.join(_sd, "website-canonical", "pad.html")
+    with open(_sp2, "w", encoding="utf-8") as _f:
+        _f.write("<p>" + _head + _pad + _old + "</p>")
+    _c, _e = run_norm({"tool_name": "Edit", "tool_input": {"file_path": _sp2, "old_string": _old, "new_string": _new}})
+    expect("normalization seam r2: %s" % _lbl, _want, _c, _e)
+
+# Size budget: past the non-ASCII budget the hook REFUSES (blocks) rather than risk a silent timeout.
+_c, _e = run_norm(notion_payload(NOTION, "\u00e9" * 2100000))
+expect("normalization r2: oversized non-ASCII payload blocks (fail closed, not a timeout)", 2, _c, _e)
+_c, _e = run_norm(notion_payload(NOTION, "plain ascii " * 300000))
+expect("normalization r2: large pure-ASCII payload is still scanned and allowed", 0, _c, _e)
+
+# --- Round-3 (second adversarial review): expansion blow-up, backtick via NFKD, seam ScanTooLarge ---
+_FDFA = chr(0xFDFA)
+_nbt = {"deal-b": {"label": "Deal B", "active": True, "always": ["O'Brannagh Yard"]}}
+for _lbl, _cc2 in (("fullwidth grave U+FF40", 0xFF40), ("greek varia U+1FEF", 0x1FEF), ("ascii backtick", 0x60)):
+    expect_eq("normalization r3: apostrophe written as %s is caught" % _lbl, "Deal B",
+              (lambda h: h[0] if h else None)(_G.find_hit("the O" + chr(_cc2) + "Brannagh Yard lease", _nbt)))
+
+# Plain terms are caught by the linear pre-pass no matter how much slow-to-normalize padding follows.
+for _n in (300000, 990000):
+    _c, _e = run_norm(notion_payload(NOTION, _NAME + " " + _FDFA * _n))
+    expect("normalization r3: plain term + %d expanding chars blocks (linear pre-pass)" % _n, 2, _c, _e)
+# An obfuscated term next to heavy padding must still resolve (hit or fail-closed refusal), inside the
+# subprocess timeout -- never a silent timeout.
+for _n in (100000, 300000):
+    _c, _e = run_norm(notion_payload(NOTION, "Zeph" + ZWSP + "yrine Holdings " + _FDFA * _n))
+    expect("normalization r3: obfuscated term + %d expanding chars blocks in bounded time" % _n, 2, _c, _e)
+_c, _e = run_norm(notion_payload(NOTION, chr(0xAC01) * 40000))
+expect("normalization r3: 150k Hangul syllables (4 scan copies) with no term is allowed in bounded time", 0, _c, _e)
+
+# Seam path: a post-edit file past the non-ASCII budget cannot be scanned -> must BLOCK (exit 2), not crash (exit 1).
+_sp3 = os.path.join(_sd, "website-canonical", "big.html")
+with open(_sp3, "w", encoding="utf-8") as _f:
+    _f.write("<p>X" + chr(0x4E2D) * 1100000 + "</p>")
+_c, _e = run_norm({"tool_name": "Edit", "tool_input": {"file_path": _sp3, "old_string": "X", "new_string": "Y"}})
+# Since the round-5 fix an over-budget context file no longer refuses the edit: the anchor counts as
+# present and the small window is judged on its own. What must hold is "never exit 1" (a crash is a
+# silent fail-open); the term-inserted case blocking is asserted in the r6 tests below.
+expect("normalization r3: edit of an over-budget page is judged on its window (exit 0), never exit 1", 0, _c, _e)
+
+# --- Round-4 (third adversarial review): combining-mark expansion, and tests that FAIL if the
+# pre-pass / chunking / output budget are reverted (deterministic -- call counts, not wall time) ---
+import unicodedata as _ud4
+
+_U0344 = chr(0x0344)
+# (a) chunking: a long run of the expanding mark is cut into bounded NFKD calls, not one huge call.
+_calls = []
+_real_norm = _ud4.normalize
+
+
+def _spy(form, text):
+    _calls.append(len(text))
+    return _real_norm(form, text)
+
+
+_G.unicodedata.normalize = _spy
+try:
+    _G._nfkd_chunked("a" + _U0344 * 6000, [0])
+finally:
+    _G.unicodedata.normalize = _real_norm
+expect_eq("normalization r4: a 6000-mark U+0344 run is NFKD'd in bounded pieces", True,
+          len(_calls) >= 3 and max(_calls) <= 2048 + 512)
+
+# (b) output budget: expansion past the budget refuses instead of grinding.
+_old_budget = _G._NFKD_OUT_BUDGET
+_G._NFKD_OUT_BUDGET = 1000
+try:
+    _G._tight_form("x" + _FDFA * 100)
+    _refused = False
+except _G.ScanTooLarge:
+    _refused = True
+finally:
+    _G._NFKD_OUT_BUDGET = _old_budget
+expect_eq("normalization r4: NFKD output past the budget raises ScanTooLarge", True, _refused)
+
+# (c) pre-pass: a plain, unobfuscated term is found without ANY normalization.
+_real_nv = _G._norm_variants
+
+
+def _boom(_s):
+    raise AssertionError("normalization must not run for a plain-term hit")
+
+
+_G._norm_variants = _boom
+try:
+    _plain = nhit("see " + _NAME + " " + _FDFA * 1000)
+finally:
+    _G._norm_variants = _real_nv
+expect_eq("normalization r4: plain term is caught by the linear pre-pass, before normalization", "Deal N", _plain)
+
+# (d) end to end: the reviewer's repro (long expanding-mark run) resolves quickly and blocks.
+_pad = "a" + _U0344 * 600000
+
+
+def run_norm_t(payload_obj, timeout):
+    env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_npath)
+    try:
+        p = subprocess.run([sys.executable, GUARD], input=json.dumps(payload_obj), capture_output=True,
+                           text=True, encoding="utf-8", env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 99, "timed out after %ss" % timeout
+    return p.returncode, p.stderr
+
+
+_c, _e = run_norm_t(notion_payload(NOTION, _NAME + " " + _pad), 20)
+expect("normalization r4: plain term + 600k U+0344 blocks fast", 2, _c, _e)
+_c, _e = run_norm_t(notion_payload(NOTION, "Zeph" + ZWSP + "yrine Holdings " + _pad), 25)
+expect("normalization r4: obfuscated term + 600k U+0344 resolves in bounded time (block)", 2, _c, _e)
+
+# --- Round-5 (fourth adversarial review): wall-clock deadline + many-seam replace_all with context anchors ---
+_time = __import__("time")
+_G._DEADLINE[0] = _time.monotonic() - 1
+try:
+    _G.find_hit("anything", _NT)
+    _dl = False
+except _G.ScanTooLarge:
+    _dl = True
+finally:
+    _G._DEADLINE[0] = None
+expect_eq("normalization r5: an expired in-hook deadline raises ScanTooLarge (callers block)", True, _dl)
+
+_ctx_fd, _ctx_roster = tempfile.mkstemp(prefix="synthetic-r5-terms-", suffix=".json")
+with os.fdopen(_ctx_fd, "w", encoding="utf-8") as _f:
+    json.dump({"deal-n": {"label": "Deal N", "active": True, "always": [_NAME],
+                          "context": ["harbor point"], "context_requires_any": ["project quill"]}}, _f)
+atexit.register(lambda: os.path.exists(_ctx_roster) and os.remove(_ctx_roster))
+
+
+def run_seam_case(tail, timeout):
+    p = os.path.join(_sd, "website-canonical", "seams.html")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("project quill harbor " + "ab QQ " * 20000 + tail)
+    payload = {"tool_name": "Edit", "tool_input": {"file_path": p, "old_string": "QQ", "new_string": "", "replace_all": True}}
+    env = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_ctx_roster)
+    try:
+        r = subprocess.run([sys.executable, GUARD], input=json.dumps(payload), capture_output=True, text=True,
+                           encoding="utf-8", env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 99, "timed out after %ss" % timeout
+    return r.returncode, r.stderr
+
+
+# 100k seams + a context anchor: anchor presence must be decided ONCE, not once per seam window
+# (was O(seams x file): 80 s at 100k seams, fail-open by timeout).
+_c, _e = run_seam_case("Zeph" + ZWSP + "yrine HolQQdings", 40)
+expect("normalization r5: 20k-seam replace_all with a context anchor still blocks a term formed at the last seam", 2, _c, _e)
+_c, _e = run_seam_case("Zeph" + ZWSP + "yrine HolQQdingz", 40)
+expect("normalization r5: the same edit without a formed term is allowed, fast", 0, _c, _e)
+
+# --- Round-6 (fifth adversarial review): oversized context file under an anchored roster ---
+_bp = os.path.join(_sd, "website-canonical", "bigcjk.html")
+with open(_bp, "w", encoding="utf-8") as _f:
+    _f.write("<p>X" + chr(0x4E2D) * 1100000 + "</p>")
+_env6 = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_ctx_roster)
+_r6 = subprocess.run([sys.executable, GUARD], input=json.dumps(
+    {"tool_name": "Edit", "tool_input": {"file_path": _bp, "old_string": "X", "new_string": "Y"}}),
+    capture_output=True, text=True, encoding="utf-8", env=_env6, timeout=60)
+expect("normalization r6: a 3.3 MB CJK page edited under an anchored roster is allowed (anchor treated as present)",
+       0, _r6.returncode, _r6.stderr)
+_r6 = subprocess.run([sys.executable, GUARD], input=json.dumps(
+    {"tool_name": "Edit", "tool_input": {"file_path": _bp, "old_string": "X", "new_string": "Zeph" + ZWSP + "yrine Holdings"}}),
+    capture_output=True, text=True, encoding="utf-8", env=_env6, timeout=60)
+expect("normalization r6: ... but a term inserted into that same page still blocks", 2, _r6.returncode, _r6.stderr)
+
+# --- Round-7 (sixth adversarial review): the seam-path ScanTooLarge guard, and context terms in over-budget pages ---
+# An Edit whose new text expands past the NFKD output budget raises ScanTooLarge INSIDE the seam scan;
+# main() must turn that into a block (exit 2). Without the try/except around the seam find_hit it
+# would be an uncaught exception = exit 1 = a silent fail-open.
+_sp4 = os.path.join(_sd, "website-canonical", "expand.html")
+with open(_sp4, "w", encoding="utf-8") as _f:
+    _f.write("<p>X</p>")
+_c, _e = run_norm({"tool_name": "Edit", "tool_input": {"file_path": _sp4, "old_string": "X", "new_string": _FDFA * 300000}})
+expect("normalization r7: an expanding Edit that exceeds the scan budget BLOCKS (exit 2), never exit 1", 2, _c, _e)
+expect_eq("normalization r7: ... and says why (the seam scan failed closed)", True, "edit seam scan failed" in _e)
+
+# A CONTEXT term formed across a seam in an over-budget page: the anchor is treated as present, so the
+# term must still be found in the small window around the seam.
+_bp2 = os.path.join(_sd, "website-canonical", "bigctx.html")
+with open(_bp2, "w", encoding="utf-8") as _f:
+    _f.write("<p>harbor X" + chr(0x4E2D) * 1100000 + "</p>")
+_env7 = dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_ctx_roster)
+for _lbl, _new in (("plain", "point"), ("obfuscated", "po" + ZWSP + "int")):
+    _r7 = subprocess.run([sys.executable, GUARD], input=json.dumps(
+        {"tool_name": "Edit", "tool_input": {"file_path": _bp2, "old_string": "X", "new_string": _new}}),
+        capture_output=True, text=True, encoding="utf-8", env=_env7, timeout=60)
+    expect("normalization r7: context term (%s) completed at a seam of an over-budget page blocks" % _lbl, 2, _r7.returncode, _r7.stderr)
+
+# --- Refute wf_d43de08e-49f on oxford-command-center PR #461: grouped numbers merged with an adjacent short
+# number, mixed invisible-in-word + invisible-as-separator, anchors that normalize to nothing. Mirrors the
+# 'refute round' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_RT = {
+    "deal-n": {"label": "Deal N", "active": True,
+               "always": ["Zephyrine Holdings", "4250000", "Quillon Yard Associates"]},
+    "deal-p": {"label": "Deal P", "active": True, "always": ["250000"]},
+    "deal-e": {"label": "Deal E", "active": True, "always": [], "context": ["inert lagoon"],
+               "context_requires_any": [ZWSP]},
+    "deal-s": {"label": "Deal S", "active": True, "always": ["ice co"]},
+}
+for _lbl, _txt, _want in (
+    ("grouped price followed by a percentage", "$4,250,000 100% leased", "Deal N"),
+    ("space-grouped price followed by a count", "closing 4 250 000 100 units", "Deal N"),
+    ("price with cents", "price $4,250,000.50 all cash", "Deal N"),
+    ("grouped price then another figure", "Unit 12: 4,250,000 and 100 more", "Deal N"),
+    ("trailing group of a short number", "Suite 7 250,000", "Deal P"),
+    ("structured payload, short number first", _G.collect_text({"units": 3, "price": "250,000"}), "Deal P"),
+    ("structured payload, short number last", _G.collect_text({"price": "250,000", "note": "x"}), "Deal P"),
+    ("invisible in a word AND as the separator", "Zeph" + ZWSP + "yrine" + ZWSP + "Holdings", "Deal N"),
+    ("invisible in one word, real space elsewhere", "Quillon" + ZWSP + "Yard Assoc" + ZWSP + "iates", "Deal N"),
+    ("anchors that normalize to nothing leave context terms active", "notes on the inert lagoon parcel", "Deal E"),
+):
+    expect_eq("refute r8: %s" % _lbl, _want, nhit(_txt, _RT))
+for _lbl, _txt in (
+    ("inside a larger grouped number", "$1,250,000"),
+    ("inside a billion-scale number", "$4,250,000,000"),
+    ("next to extra digits", "$14,250,000 100%"),
+    ("a trailing digit", "$4,250,0001"),
+    ("the whitespace-insensitive match is not applied to short terms", "iceco"),
+):
+    expect_eq("refute r8: no hit for %s" % _lbl, None, nhit(_txt, _RT))
+
+# Hook-side twin of the E2E: the MCP send path must block the mixed-invisible spelling too.
+_c, _e = run_norm(notion_payload(NOTION, "Zeph" + ZWSP + "yrine" + ZWSP + "Holdings"))
+expect("refute r8 e2e: mixed invisible spelling on a Notion write blocks", 2, _c, _e)
+
+# --- Review ab2d0abb05d69ce38: terms that MIX words and a number, bidi + whitespace-insensitive match,
+# a roster whose only anchor is the empty string. Mirrors the 'mixed word/number terms' block in
+# tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_R9 = {
+    "deal-m": {"label": "Deal M", "active": True, "always": ["250000 sf"]},
+    "deal-c": {"label": "Deal C", "active": True, "always": ["250,000 sf"]},
+    "deal-n": {"label": "Deal N", "active": True, "always": ["Zephyrine Holdings"]},
+    "deal-q": {"label": "Deal Q", "active": True, "always": [], "context": ["quiet marsh"],
+               "context_requires_any": [""]},
+}
+for _lbl, _txt in (
+    ("a short number glued on before a grouped one", "Lot 3 250,000 sf"),
+    ("dotted grouping with a short number before it", "Building 2 250.000 sf"),
+    ("a comma-written term against dotted text", "Unit 12 250.000 sf"),
+    ("a term WRITTEN with commas against plain digits", "about 250000 sf total"),
+):
+    # deal-m and deal-c are two spellings of the same figure; either label is a correct block.
+    expect_eq("review r9: mixed word/number term - %s" % _lbl, True, nhit(_txt, _R9) in ("Deal M", "Deal C"))
+_rev = ("Zephyrine" + ZWSP + "Holdings")[::-1]
+expect_eq("review r9: bidi-override run that renders as a term with an invisible separator", "Deal N",
+          nhit(chr(0x202E) + _rev + chr(0x202C), _R9))
+expect_eq("review r9: an empty-string anchor keeps the group's context terms active (parity with TS)", "Deal Q",
+          nhit("notes on the quiet marsh parcel", _R9))
+expect_eq("review r9: _norm_variants compact form is a tuple (forward, plus reversed for bidi text)", 2,
+          len(_G._norm_variants("a" + chr(0x202E) + "b")[2]))
+
+# --- Refute wf_d730e33a-63b on 7e27407: a MIXED anchor list (one blank anchor + one real one), a term that
+# mixes words and a number depending on its neighbours, '$ 4,250,000', plus a deterministic memoization check.
+# Mirrors the 'anchors, term digit forms' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+for _lbl, _anchors in (("an empty anchor plus a real one", ["", "marsh holdings"]),
+                       ("a zero-width-only anchor plus a real one", [ZWSP, "marsh holdings"]),
+                       ("a space-only anchor plus a real one", [" ", "marsh holdings"])):
+    _rq = {"deal-q": {"label": "Deal Q", "active": True, "always": [], "context": ["quiet marsh"],
+                      "context_requires_any": _anchors}}
+    expect_eq("review r10: a mixed anchor list stays always-active - %s" % _lbl, "Deal Q",
+              nhit("quiet marsh update", _rq))
+_rg = {"deal-q": {"label": "Deal Q", "active": True, "always": [], "context": ["quiet marsh"],
+                  "context_requires_any": ["marsh holdings"]}}
+expect_eq("review r10: a normal anchor list still gates its context terms", None, nhit("quiet marsh update", _rg))
+expect_eq("review r10: ... and fires when the anchor is present", "Deal Q",
+          nhit("quiet marsh update from marsh holdings", _rg))
+
+_ru = {"deal-u": {"label": "Deal U", "active": True, "always": ["Unit 12 125,000 SF"]}}
+for _lbl, _txt in (("space-grouped", "Unit 12 125 000 SF"), ("dotted", "Unit 12 125.000 SF"),
+                   ("comma", "Unit 12 125,000 SF"), ("plain digits", "Unit 12 125000 SF")):
+    expect_eq("review r10: a word+number term does not depend on its neighbours - %s" % _lbl, "Deal U",
+              nhit(_txt, _ru))
+_rd = {"deal-d": {"label": "Deal D", "active": True, "always": ["$ 4,250,000"]}}
+expect_eq("review r10: a numeric term written with a space after the currency sign matches $4,250,000", "Deal D",
+          nhit("price $4,250,000 cash", _rd))
+expect_eq("review r10: ... and the bare digits", "Deal D", nhit("price 4250000 cash", _rd))
+
+# Deterministic memoization check (replaces a wall-clock test): the anchor is looked up in the shared
+# post-edit file ONCE, however many seam windows share it.
+_big = "project quill " + "filler text " * 50
+for _fn in (_G._raw_anchor, _G._norm_anchor):
+    _fn.cache_clear()
+for _i in range(2000):
+    _G.find_hit("window %d" % _i, _NT, context_text=_big)
+expect_eq("review r10: raw anchor computed once for 2000 windows over one file", 1, _G._raw_anchor.cache_info().misses)
+expect_eq("review r10: normalized anchor computed once for 2000 windows over one file", 1, _G._norm_anchor.cache_info().misses)
+
+# --- Refute wf_34b9b0ce-815 on 6067c75 (all LOW): a bare numeric term vs Indian lakh grouping.
+# Mirrors the 'lakh grouping' block in tests/unit/confidential.test.ts. SYNTHETIC roster only. ---
+_RL = {
+    "deal-n": {"label": "Deal N", "active": True, "always": ["4250000"]},
+    "deal-p": {"label": "Deal P", "active": True, "always": ["250000"]},
+}
+for _lbl, _txt, _want in (
+    ("Indian lakh grouping", "price Rs 42,50,000 total", "Deal N"),
+    ("lakh grouping of the shorter figure", "fee 2,50,000 due", "Deal P"),
+    ("pair-grouped with spaces", "sum 25 00 00 only", "Deal P"),
+    ("a bigger number that merely contains the digits (no hit)", "total 12,250,000 and 1,250,000", None),
+):
+    expect_eq("review r11: numeric term vs %s" % _lbl, _want, nhit(_txt, _RL))
+
 # --- summary ---------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
 total = len(results)
