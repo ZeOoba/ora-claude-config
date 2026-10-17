@@ -77,6 +77,13 @@ Verify the base actually is the merge-base and that main has not moved past the 
 Record both SHAs in the findings table — a verdict without the SHA it applies to is not a
 verdict.
 
+**Main moves during a long gate, not just the branch.** A multi-round gate can span hours.
+Re-run `git fetch` and re-read `origin/main` before EVERY dispatch (including re-runs after
+a fix), not only the first. If main advanced (a README-only PR landed mid-gate on PR #127),
+merge it in server-side (`gh pr update-branch`), fast-forward locally, and re-pin: the base
+SHA and the diff both change, and reviewers must be told which changes are main's and not
+the PR's.
+
 **Before dispatching, check who else holds the branch.** In a shared checkout, enumerate
 live claims and in-flight worktrees. This is not hygiene; it decides whether Step 4 is
 even permitted.
@@ -104,11 +111,7 @@ Scope and staging is substrate-independent, which is part of why it yields most.
 All five in **one message** so they run concurrently. Prompt templates:
 `agent-prompts.md` in this directory.
 
-Right before dispatch (after writing any override of your own), list
-`~/.claude/hooks/sessions/<your session>/` and `overrides/` with names, modification
-times and the contents of any `override`. Step 4 compares against this listing.
-
-Four clauses every mandate needs, and the reason each exists:
+Three clauses every mandate needs, and the reason each exists:
 
 1. **Read-only, worktree-scoped, live tree named as forbidden.** Otherwise agents edit
    what you told them to review.
@@ -117,26 +120,16 @@ Four clauses every mandate needs, and the reason each exists:
 3. **Zero findings is a valid and expected outcome; manufacturing one is a mandate
    failure and will be discarded.** Without this an agent under a "find problems" framing
    reliably produces something. This clause is what makes a clean pass mean anything.
-4. **Guard surface is off limits.** Never create, edit or move anything under
-   `~/.claude/hooks/` (override markers, tokens, claims), and never encode, obfuscate or
-   split command text to get past a guard. A blocked command is reported, not worked
-   around. If a repo has a sanctioned workaround for a known false positive (such as
-   the scratchpad-glob pattern for site-marker reads), name it in the dispatch prompt;
-   reviewers use only the workarounds you name. Reviewers run as subagents of your
-   session, so a marker one of them writes exempts *your* session from that gate for
-   the rest of the run. In the PR #89 gate a test-validity reviewer blocked by
-   `eos-plan-gate` on its scratch harness scripts wrote the override marker itself,
-   and base64-encoded a site path in one command, which would have got it past the
-   site-write guard. Only the orchestrating session writes an override, and only
-   where that gate's own rules allow it (the site-write token needs the user's
-   in-turn go-ahead).
 
-   `eos-plan-gate` counts every code-file Write/Edit in the session, scratch copies
-   included, and denies the 4th. Reviewers share your session, so a swarm with a
-   mutation harness will hit it. When a mandate will write scratch code, write the
-   plan-gate `override` yourself before dispatch, with the reason (e.g. "merge gate
-   PR #N: throwaway mutation-harness scripts outside the repo"), rather than leaving
-   the reviewer to stall or improvise.
+### Ask for the outcome a user sees, not only that the parts exist
+
+A reviewer told to "check the map loads" confirms pins and tiles exist and reports clean.
+On PR #127 four review rounds did exactly that while a bare `?view=map` link opened the map
+at world zoom (every pin stacked) — found only by loading the live page afterwards. For any
+UI, redirect or generated-output change, put the observable result in the mandate: the zoom
+or framing, the final URL after redirects, the text a visitor reads, the file's bytes. Count
+what a user would see, and test the deep link and the empty/zero-size start, not only the
+happy path.
 
 ### When a mandate has no surface
 
@@ -177,21 +170,6 @@ does not, and the difference is invisible until you run the tool name against it
 
 ## Step 4 — Consolidate, then STOP before fixing
 
-Before consolidating, check the swarm against clause 4. List
-`~/.claude/hooks/sessions/<your session>/` again and compare it with the Step 3
-listing. The bypass markers are `override`, `plan-approved` and anything under
-`overrides/`; any of them that is new or changed since that listing is a breach.
-Counters, logs, `touched-files.txt` and `gate-green` are written by the hooks during
-normal tool use and are expected. Archive a breach marker (never delete) to
-`~/.claude/hooks/sessions/_archive_override_tokens/`, the folder
-`override-token-frequency-probe.py` reads and the weekly sweep archives into:
-- `overrides/<tier>` goes to `<session>_overrides_<tier>`, so the probe counts it.
-- A plain `override` goes to `<session>_override.breach-<YYYY-MM-DD>`. The suffix
-  stops the weekly sweep (`Move-Item -Force` to `<session>_override`) from later
-  overwriting the evidence with a legitimate override of yours.
-
-Report every breach to the user alongside the findings.
-
 One table, most severe first:
 
 | Sev | Agent | file:line | Reproduction | Proposed fix | Verdict |
@@ -221,6 +199,21 @@ except their assigned file. Then re-pin the new head and re-run the **full** swa
 Merge only on a clean pass: zero CONFIRMED findings, every mandate reporting either
 findings-resolved or no-surface-with-evidence.
 
+**Stop reviewers a fix has superseded.** When a fix re-pins the head, in-flight reviewers
+on the old SHA are reviewing a diff nobody will merge. Stop them (TaskStop) instead of
+letting them finish, keep any finding they had already reported, and dispatch the new swarm
+on the new pin. Running both generations at once only burns RAM and muddies which SHA each
+verdict applies to.
+
+**Scoped re-run: a user decision, never the default.** The default stays the full swarm.
+When the only CONFIRMED findings are LOW, cosmetic, or confined to one file's write path,
+the user may explicitly authorize re-running only (a) the mandates that reported and (b)
+any mandate whose surface the fix touches. Never choose this yourself. When used, the
+verdict must record, per mandate, the SHA it last passed on and why it was not re-run, so
+the delta no mandate saw is on the page. A comment-only or test-cleanup tidy after the
+last pass is the same kind of unreviewed delta: verify it with the build and tests, and
+list it in the verdict as unreviewed.
+
 ## Common mistakes
 
 | Mistake | Why it breaks the gate |
@@ -230,7 +223,10 @@ findings-resolved or no-surface-with-evidence.
 | Omitting "zero findings is valid" | Guarantees manufactured findings; clean pass becomes meaningless |
 | Seeding your own suspicion as fact | Agent confirms it; you lose the chance to be corrected |
 | Fixing UNCONFIRMED findings | Damages a working branch on a guess |
-| Re-running only the mandates that fired | Misses regressions introduced by the fixes |
+| Re-running only the mandates that fired | Misses regressions introduced by the fixes (a scoped re-run is allowed only when the user explicitly authorizes it; see Step 5) |
+| Reviewers verify parts exist, not the visible result | A deep-link framing bug passed four rounds that all confirmed "pins and tiles load" |
+| Fetching main once at the start | Main moves during a long gate; the base SHA and diff go stale |
+| Letting superseded reviewers finish | Their verdict applies to a diff nobody will merge |
 | Running the swarm on a trivial diff | Trains everyone to ignore the gate |
 | Treating a green bot check as a review | A bot check is never a review verdict |
 
@@ -239,7 +235,7 @@ findings-resolved or no-surface-with-evidence.
 - "The branch is probably stable, I'll skip pinning."
 - "This finding is obviously right, no need to reproduce it."
 - "Another session owns this branch but the fix is small."
-- "Only mandate 4 fired, no need to re-run the others."
+- "Only mandate 4 fired, no need to re-run the others." (Unless the user explicitly chose a scoped re-run, Step 5.)
 - "The agent found nothing, it must not have tried hard enough." — **A well-evidenced
   no-findings result is a pass, not a failure.** Re-dispatching until an agent produces a
   finding manufactures one.
