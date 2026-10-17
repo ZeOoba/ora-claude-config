@@ -1,6 +1,6 @@
 ---
 name: ora-prepush-gate-sweep
-description: Weekly Thursday 11:00 ET — runs the three pre-push gates against ~/.claude WITHOUT pushing, so a broken gate or a stale live-state test is found on a schedule instead of at someone's next push. Silent when clean; emails ggoldberg only on a failure. Read-only: never pushes, never commits, never mints an override token. [MODEL: claude-sonnet-5 | set 2026-09-17]
+description: Weekly Thursday 11:00 ET — runs the three pre-push gates against ~/.claude WITHOUT pushing, so a broken gate or a stale live-state test is found on a schedule instead of at someone's next push. Silent when clean; emails ggoldberg only on a failure. Read-only: never pushes, never commits, never mints an override token. [MODEL: claude-sonnet-5-5 | set 2026-10-06]
 ---
 
 ORA weekly pre-push gate sweep. Registered 2026-09-17 (Gabriel-directed) after three separate defects surfaced in one day ONLY because someone happened to push: a stale hardcoded baseline in test_check_open_items_duplicate_ids.py that blocked every session's pushes, and eos-review-gate silently failing OPEN because hooks/lib/git_probe_common.py was missing on the branch. Both had been broken for days with nothing watching. This task is the watcher.

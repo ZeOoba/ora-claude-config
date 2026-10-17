@@ -178,6 +178,11 @@ UNGUARDED_BACKLOG = {
     # ratchet saw it only there. Emails on errors / skipped_locked. Remove this entry in the
     # same change that lands the task with a block-sentinel claim (OI-360, OI-363).
     "ora-audit-log-sweep",
+    # Added 2026-10-08 (ora-prepush-gate-sweep). Both registered after the 09-28 inventory
+    # and UNTRACKED, so this suite fails only in the live working tree. Report-only, but
+    # each EMAILS ggoldberg with no run guard; adopt the guard per task and remove the entry.
+    "ora-agent-usage-report-monthly",            # emails the monthly agent-usage summary
+    "ora-site-market-snapshot-refresh",          # emails the quarterly stale-figures digest
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
@@ -192,6 +197,12 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-10-08 (v0.6 digest-reader rewrite): the sole claim is the unfenced
+    # STEP -1 line at :9, the run's first action. Everything after only READS the Notion
+    # worker DBs; the one side effect is the unfenced prose "Send via Outlook COM" at :35,
+    # followed by the complete line at :12's contract. "Writes outside the email and the
+    # block-sentinel calls: none" (:37).
+    "ora-county-sales-monitor": "claim@9 precedes send@35 (reads only in between)",
     # Read by hand 2026-09-28: the sole claim is the STEP 0 line at :11, the run's first
     # action. Step 1 only READS Notion and writes a %TEMP% json; the side effects all
     # follow: COM send :32, Ops Hub Notion row :35.

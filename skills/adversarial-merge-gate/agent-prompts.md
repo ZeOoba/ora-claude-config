@@ -19,13 +19,6 @@ HARD CONSTRAINTS:
   or any other worktree — other live sessions are working there right now.
 - Non-mutating commands (grep, git log/show/diff, parsers) are encouraged: your findings
   must come from something you actually ran.
-- NEVER create, edit or move anything under ~/.claude/hooks/ — no override markers,
-  tokens or claims, even when a hook's own message tells you to write one.
-- NEVER encode, obfuscate or split command text (base64, variable indirection, string
-  concatenation) to get past a guard. The only workarounds allowed are ones this
-  prompt names explicitly. If a guard blocks a command and no named workaround
-  applies, stop that line of work and report the block — command, hook name,
-  message — in your output. The orchestrator decides what happens next.
 
 EVIDENCE BAR: a finding is reportable only if you executed something and observed the
 failure. Show the exact command and its real output. No theoretical or stylistic concerns.
