@@ -1,6 +1,6 @@
 ---
 name: ora-pr-land-watch
-description: Every 3h, 09:35–21:35 ET: polls the pr-land-watch queue (maintenance/pr-land-watch.py, run from origin/main) and runs each hash-pinned "do Y once PR X lands" payload once its PR merges. Silent when nothing is due; otherwise one summary email to ggoldberg only. Registered 2026-09-23 (ora-claude-config PR #279). [MODEL: UNVERIFIABLE | checked 2026-09-23]
+description: Every 3h, 09:35–21:35 ET: polls the pr-land-watch queue (maintenance/pr-land-watch.py, run from origin/main) and runs each hash-pinned "do Y once PR X lands" payload once its PR merges. Silent when nothing is due; otherwise one summary email to ggoldberg only. Registered 2026-09-23 (ora-claude-config PR #279). [MODEL: claude-sonnet-5-5 | set 2026-10-06]
 ---
 
 Recurring and unattended (cron `35 9-21/3 * * *`: 09:35, 12:35, 15:35, 18:35 and 21:35 ET). Drains the pr-land-watch queue. That queue holds "do Y once PR X lands" follow-ups that supervised sessions register, and the task runs each payload once its PR merges. Never fabricate. Registered 2026-09-23 (ora-claude-config PR #279).
