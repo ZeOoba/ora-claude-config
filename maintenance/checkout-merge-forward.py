@@ -276,6 +276,18 @@ def incoming_paths(repo, target_sha):
     return [n for n in names.split("\0") if n] + conflicted
 
 
+def foreign_staged_paths(repo, incoming):
+    """Staged paths that are NOT part of this run's incoming merge, or None if the index
+    cannot be read. A clean `merge --no-commit` stages only incoming paths, so anything
+    else staged since step 0 belongs to another session. Case-insensitive, like
+    overlapping_paths()."""
+    rc, out, _ = _git(["diff", "--cached", "--name-only", "--no-renames", "-z"], repo)
+    if rc != 0:
+        return None
+    inc = {c.casefold() for c in incoming}
+    return [p for p in out.split("\0") if p and p.casefold() not in inc]
+
+
 def hidden_dirty_paths(repo):
     """Index entries `git status` cannot see as dirty but `git merge` still refuses over:
     assume-unchanged (lowercase `ls-files -v` tag) always, skip-worktree (`S`) only when
@@ -498,6 +510,21 @@ def sync(repo=None, canonical=None):
         ["merge", "--no-commit", "--no-ff", "-m",
          "Merge remote-tracking branch '%s'" % target, target_sha], repo)
     if rc == 0:
+        # M51: another session may have staged work since step 0. A bare `git commit` would
+        # sweep it into the merge commit. Unstage (index only; the working tree is untouched
+        # and, because these paths are not incoming, HEAD's version equals the merge result).
+        foreign = foreign_staged_paths(repo, incoming)
+        if foreign:
+            _git(["reset", "-q", "--"] + foreign, repo)
+            if foreign_staged_paths(repo, incoming):
+                # Never abort here: `merge --abort` would discard the foreign staged content.
+                out["status"] = "ERROR"
+                out["unstaged_foreign"] = foreign
+                out["detail"] = ("foreign staged paths could not be unstaged (%s); merge LEFT "
+                                 "IN PROGRESS to avoid discarding another session's work -- "
+                                 "resolve by hand" % ", ".join(foreign[:10]))
+                return out
+            out["unstaged_foreign"] = foreign
         rc2, _, commit_err = _git(["commit", "--no-edit"], repo)
         if rc2 != 0:
             # Never return with the merge still staged: a mid-merge shared
@@ -514,6 +541,16 @@ def sync(repo=None, canonical=None):
         out["commits_merged"] = behind
         out["sha"] = sha if rc3 == 0 else None
         out["detail"] = "merged %d commit(s) from %s" % (behind, target)
+        if foreign:
+            out["detail"] += "; UNSTAGED %d foreign path(s): %s" % (len(foreign), ", ".join(foreign[:10]))
+        # Post-commit audit of the residual window between the recheck and the commit.
+        rc4, names, _ = _git(["diff", "--name-only", "--no-renames", "-z", "HEAD^1", "HEAD"], repo)
+        if rc4 == 0:
+            inc = {c.casefold() for c in incoming}
+            leaked = [p for p in names.split("\0") if p and p.casefold() not in inc]
+            if leaked:
+                out["foreign_in_commit"] = leaked
+                out["detail"] += "; WARNING non-incoming path(s) in merge commit: %s" % ", ".join(leaked[:10])
         return out
 
     raw = "\n".join(s for s in (merge_err, merge_out) if s)
