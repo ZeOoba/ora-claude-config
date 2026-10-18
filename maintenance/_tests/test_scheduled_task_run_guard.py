@@ -203,6 +203,10 @@ ORDERING_VERIFIED_BY_HAND = {
     # followed by the complete line at :12's contract. "Writes outside the email and the
     # block-sentinel calls: none" (:37).
     "ora-county-sales-monitor": "claim@9 precedes send@35 (reads only in between)",
+    # Read by hand 2026-10-18: the sole claim is STEP -1 (first action). Steps 1-3 only READ
+    # ora-skills cowork-settings versions and the governance copy; the side effects are the
+    # step 4 email and step 5 Notion completion row, both after the claim.
+    "ora-cowork-settings-quarterly-review": "claim@STEP -1 precedes email@step 4 and Notion@step 5; steps 1-3 read-only",
     # Read by hand 2026-10-17: the sole claim is STEP -1 (first action). STEP 0-3 only crawl
     # the public site read-only; the one side effect is the STEP 4 regression email, after it.
     "ora-site-seo-crawl-weekly": "claim@STEP -1 precedes email@STEP 4; crawl is read-only",
