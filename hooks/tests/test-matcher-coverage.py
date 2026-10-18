@@ -246,6 +246,20 @@ def test_ascii_only_guard_wiring():
                   "ascii-only-guard" not in routed(settings, chains, tool, anchored))
 
 
+def test_live_state_is_applied():
+    """R-02 (Gabriel, 2026-10-18): the hooks-audit proposal is APPLIED to the
+    tracked settings.json and _proposed/ is archived under
+    _archive/2026-10-18_settings-proposed-fold/. Pin that, so a revert of the
+    settings half alone (old PostToolUse entries back, tests left as-is) turns
+    this suite red instead of silently going back to in-memory judging."""
+    live = load_live()
+    st = settings_proposal.state(live)
+    check("L0 tracked settings.json reads as applied (R-02)", st == "applied",
+          "state=%s" % st)
+    check("L1 _proposed/ is archived (no live _proposed/settings.json)",
+          not os.path.exists(os.path.join(REPO, "_proposed", "settings.json")))
+
+
 def test_live_differs_by_exactly_the_proposal():
     live = load_live()
     chains = load_chains()
@@ -429,6 +443,7 @@ if __name__ == "__main__":
         sys.exit(demo_live_confidentiality_gap())
     test_real_tool_names_reach_intended_guards()
     test_ascii_only_guard_wiring()
+    test_live_state_is_applied()
     test_live_differs_by_exactly_the_proposal()
     test_proposed_artifact_matches_rendered_proposal()
     test_proposal_state_is_exact()
