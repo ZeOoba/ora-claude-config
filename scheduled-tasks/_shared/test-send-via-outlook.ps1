@@ -260,11 +260,13 @@ Assert-Case -Name "internal send with attachment is NOT blocked by that rule" `
 
 Write-Host "`nAudit-log integrity"
 $env:ORA_SEND_LOG_PATH = $LogFile
+$env:ORA_SEND_SKIP_PREFLIGHT = "1"
 $canonicalBefore = "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt"
 $sizeBefore = if (Test-Path $canonicalBefore) { (Get-Item $canonicalBefore).Length } else { 0 }
 & powershell -NoProfile -File $Target -To $To -Subject "LogRedirect" -Body "x" -WhatIf | Out-Null
 $sizeAfter = if (Test-Path $canonicalBefore) { (Get-Item $canonicalBefore).Length } else { 0 }
 Remove-Item Env:\ORA_SEND_LOG_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:\ORA_SEND_SKIP_PREFLIGHT -ErrorAction SilentlyContinue
 if ($sizeBefore -eq $sizeAfter) {
     Write-Host "  PASS  -WhatIf + ORA_SEND_LOG_PATH did not touch the canonical send log"; $script:Pass++
 } else {
