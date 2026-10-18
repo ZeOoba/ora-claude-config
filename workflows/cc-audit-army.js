@@ -37,6 +37,11 @@ if (typeof args === 'object' && args && 'brief' in args && !BRIEF) {
   throw new Error('args.brief must be a non-empty string (got ' + typeof args.brief + ') — refusing to fall back to the baked oxford-command-center ground truth against ' + WT + ' (fail closed).');
 }
 const GENERIC = !!BRIEF;
+// Report-header label only (prompts/reads still use WT). In brief mode without an explicit args.worktree the
+// default command-center path is not the audited target, so label it from the brief instead of mislabelling.
+const TARGET_LABEL = (GENERIC && !(typeof args === 'object' && args && args.worktree))
+  ? '(target per args.brief; no args.worktree given, default path ' + WT + ' is NOT the audited target) ' + BRIEF.slice(0, 160)
+  : WT;
 // Optional model floor: e.g. { forceModel: 'opus' } pins every dispatch (orient/audit/dedup/verify/rank)
 // to one model regardless of each dimension's default — for standing per-repo model-tier overrides
 // (e.g. website-canonical work requires opus-only, never sonnet/haiku dispatch). No-op if omitted.
@@ -334,7 +339,7 @@ const orderedRanked = (rank.ranked || []).filter((r) => byId[r.id]).slice().sort
 const unranked = confirmed.filter((f) => !rankById[f.id]);
 const ordered = orderedRanked.map((r) => byId[r.id]).concat(unranked);
 const SEV_ORDER = ['critical', 'high', 'medium', 'low'];
-let md = '# Audit Report — ' + WT + '\n\n' + rank.summary + '\n\n**Counts:** ' + confirmed.length + ' confirmed (' + SEV_ORDER.map((s) => confirmed.filter((f) => f.severity === s).length + ' ' + s).join(' / ') + ')' + (unranked.length ? ' — ' + unranked.length + ' finding(s) missing from the ranking, appended last' : '') + '\n';
+let md = '# Audit Report — ' + TARGET_LABEL + '\n\n' + rank.summary + '\n\n**Counts:** ' + confirmed.length + ' confirmed (' + SEV_ORDER.map((s) => confirmed.filter((f) => f.severity === s).length + ' ' + s).join(' / ') + ')' + (unranked.length ? ' — ' + unranked.length + ' finding(s) missing from the ranking, appended last' : '') + '\n';
 for (const sev of SEV_ORDER) {
   const group = ordered.filter((f) => f.severity === sev);
   if (!group.length) continue;
