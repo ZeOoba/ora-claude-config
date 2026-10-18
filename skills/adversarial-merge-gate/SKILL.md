@@ -82,7 +82,7 @@ Re-run `git fetch` and re-read `origin/main` before EVERY dispatch (including re
 a fix), not only the first. If main advanced (a README-only PR landed mid-gate on PR #127),
 merge it in server-side (`gh pr update-branch`), fast-forward locally, and re-pin: the base
 SHA and the diff both change, and reviewers must be told which changes are main's and not
-the PR's.
+the PR's. Only do this if no other session holds the branch (next paragraph).
 
 **Before dispatching, check who else holds the branch.** In a shared checkout, enumerate
 live claims and in-flight worktrees. This is not hygiene; it decides whether Step 4 is
@@ -242,7 +242,9 @@ findings-resolved or no-surface-with-evidence.
 on the old SHA are reviewing a diff nobody will merge. Stop them (TaskStop) instead of
 letting them finish, keep any finding they had already reported, and dispatch the new swarm
 on the new pin. Running both generations at once only burns RAM and muddies which SHA each
-verdict applies to.
+verdict applies to. Before the new dispatch, run the Step 4 breach check against the
+stopped generation's Step 3 listing, so a marker a stopped reviewer wrote is reported
+rather than absorbed into the new pre-dispatch listing.
 
 **Scoped re-run: a user decision, never the default.** The default stays the full swarm.
 When the only CONFIRMED findings are LOW, cosmetic, or confined to one file's write path,
