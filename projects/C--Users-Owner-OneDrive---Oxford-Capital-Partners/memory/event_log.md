@@ -12,6 +12,9 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-10-17 — Two-basis financing convention: Gabriel approval recorded
+- Gabriel confirmed in-turn (2026-10-17, dirty-tree-triage session): he approves the two-basis financing convention (portfolio-LTV numerator = all-cash; with-refi LTV informational) behind commits 71fa176c / 323028da (agents/underwriting-checker.md, ora-skills #130/#135). Invariant 4 permission now on record. Governor constants (DSCR 1.25 / LTV 40 / 65) unchanged. Independent refute pass on those two commits dispatched same day; result to be logged.
+
 ## 2026-10-16 -- solar-lease-underwriting v1.3 reimport confirmed
 
 solar-lease-underwriting v1.3 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
