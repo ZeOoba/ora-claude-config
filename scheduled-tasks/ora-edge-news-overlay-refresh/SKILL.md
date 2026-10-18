@@ -3,6 +3,12 @@ name: ora-edge-news-overlay-refresh
 description: Weekly refresh of news_overlay.json (per-market BLS jobs and sourced news signals) so the Edge tab overlay never goes stale under the 7-day rule; archives the prior file and emails Gabriel a change summary. [MODEL: UNVERIFIABLE | checked 2026-10-08]
 ---
 
+## STEP -1 — DOUBLE-FIRE ENTRY GUARD (run first)
+python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-edge-news-overlay-refresh --block main --run-id <run_id> --period week --ttl-min 45
+- Exit 10 = this week already completed; Exit 11 = another fire is live. Stand down: no research, no file writes, no email; report a NORMAL skip.
+- Exit 0 = proceed.
+After the email sends: `... block-sentinel.py complete --task ora-edge-news-overlay-refresh --block main --run-id <run_id> --period week --email-sent-at <ISO8601>`. On abort (including the unreadable-folder failure path): `... fail ... --error "<what broke>"`. Only the claim holder calls complete/fail. ALWAYS pass `--period week`.
+
 You are running the weekly refresh of the Oxford Edge news overlay for Gabriel Goldberg (Oxford Realty Advisors). The overlay is a dated annotation layer read by the Command Center Edge tab. It never changes a series value, a rank or a score.
 
 RUN DATE: compute once with `date '+%A %Y-%m-%d'`; the ISO date part becomes the new `asOf`.
