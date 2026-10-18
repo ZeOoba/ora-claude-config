@@ -14,7 +14,10 @@ to be clean first (unlike actually switching HEAD to `main`, which is what
 
 SAFETY MODEL -- this repo is shared across a dozen+ concurrent sessions, so
 every step is designed to either land a clean merge commit or leave the
-checkout in EXACTLY the state it was found in. Never a partial/stuck state.
+checkout in EXACTLY the state it was found in. The one deliberate exception: the
+M51 commit-tree/CAS failure paths leave the checkout mid-merge (reported ERROR;
+later runs report BLOCKED_OP_IN_PROGRESS) rather than abort, because an abort
+would destroy another session's staged work -- a human resolves those.
 
   0a. Refuse if a merge, cherry-pick, revert, rebase, paused cherry-pick/revert
       sequence or bisect is ALREADY in progress (MERGE_HEAD / CHERRY_PICK_HEAD /
@@ -301,25 +304,38 @@ def _commit_expected_tree(repo, head0, exp, target_sha, msg):
     """Commit the expected merge tree `exp` as the merge (parents head0 + target_sha)
     WITHOUT touching the index or worktree, CAS-advance HEAD from head0, then forget the
     merge state. Used for every clean merge, so a foreign stage can never be swept in
-    and no abort is ever needed. Returns (sorted foreign staged paths, None) or
-    (None, error). Never aborts or resets."""
+    and no abort is ever needed. MERGE_HEAD must still be OUR merge both before
+    commit-tree and immediately before update-ref: otherwise another session aborted or
+    reset it and the index/worktree no longer match `exp`. Returns (foreign staged paths,
+    new commit sha, None) or (None, None, error). Never aborts or resets."""
+    def ours():
+        return ref_state(repo, "MERGE_HEAD") == ("present", target_sha)
+    changed = ("merge state changed by another session (MERGE_HEAD no longer ours); HEAD NOT "
+               "advanced, nothing aborted or reset")
+    if not ours():
+        return None, None, changed
     rc, names, _ = _git(["diff", "--cached", "--name-only", "--no-renames", "-z", exp], repo)
     if rc != 0:
-        return None, "diff against expected tree failed; merge left in progress"
+        return None, None, "diff against expected tree failed; merge left in progress"
     foreign = sorted(p for p in names.split("\0") if p)
     rc, new, _ = _git(["commit-tree", exp, "-p", head0, "-p", target_sha, "-m", msg], repo)
     if rc != 0 or not new:
-        return None, "commit-tree failed; merge left in progress"
+        return None, None, "commit-tree failed; merge left in progress"
+    if not ours():
+        return None, None, changed
     rc, _, _ = _git(["update-ref", "-m", "merge-forward", "HEAD", new, head0], repo)
     if rc != 0:
-        return None, ("update-ref failed (HEAD moved off %s or ref locked); HEAD NOT advanced, "
-                      "merge left in progress" % head0[:12])
+        if ref_state(repo, "MERGE_HEAD")[0] == "present":
+            return None, None, ("update-ref failed (HEAD moved off %s or ref locked); HEAD NOT "
+                                "advanced, merge left in progress" % head0[:12])
+        return None, None, ("update-ref failed and another session concluded or aborted this "
+                            "merge; verify HEAD/status")
     rc, _, _ = _git(["merge", "--quit"], repo)
     state, _ = ref_state(repo, "MERGE_HEAD")
     if rc != 0 or state != "absent":
-        return None, ("HEAD WAS advanced to %s but merge --quit failed: MERGE_HEAD/merge state "
-                      "remains" % new[:12])
-    return foreign, None
+        return None, None, ("HEAD WAS advanced to %s but merge --quit failed: MERGE_HEAD/merge "
+                            "state remains" % new[:12])
+    return foreign, new, None
 
 
 def hidden_dirty_paths(repo):
@@ -546,12 +562,12 @@ def sync(repo=None, canonical=None):
     rch, head0, _ = _git(["rev-parse", "HEAD"], repo)
     exp = expected_merge_tree(repo, head0, target_sha) if rch == 0 and head0 else None
     rc, merge_out, merge_err = _git(
-        ["merge", "--no-commit", "--no-ff", "-m", merge_msg, target_sha], repo)
+        ["merge", "--no-commit", "--no-ff", "--no-autostash", "-m", merge_msg, target_sha], repo)
     if rc == 0:
         # Another session may have staged work since step 0 or during the merge. The index
         # is NEVER modified and a bare `git commit` is never used when E is known: E is
         # always committed directly; foreign staged content stays staged.
-        foreign = None
+        foreign, new_sha = None, None
         if exp is None:
             out["recheck"] = "unavailable"
             rc2, _, commit_err = _git(["commit", "--no-edit"], repo)
@@ -566,7 +582,7 @@ def sync(repo=None, canonical=None):
                     commit_err[:400])
                 return out
         else:
-            foreign, err = _commit_expected_tree(repo, head0, exp, target_sha, merge_msg)
+            foreign, new_sha, err = _commit_expected_tree(repo, head0, exp, target_sha, merge_msg)
             if err:
                 out["status"] = "ERROR"
                 out["merge_aborted"] = False
@@ -574,10 +590,12 @@ def sync(repo=None, canonical=None):
                                  "any foreign staged content preserved -- a human must "
                                  "resolve" % err)
                 return out
-        rc3, sha, _ = _git(["rev-parse", "HEAD"], repo)
+        if exp is None:
+            rc3, new_sha, _ = _git(["rev-parse", "HEAD"], repo)
+            new_sha = new_sha if rc3 == 0 else None
         out["status"] = "MERGED"
         out["commits_merged"] = behind
-        out["sha"] = sha if rc3 == 0 else None
+        out["sha"] = new_sha
         out["detail"] = "merged %d commit(s) from %s" % (behind, target)
         if foreign:
             out["foreign_staged_preserved"] = foreign
