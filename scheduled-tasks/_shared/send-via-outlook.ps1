@@ -175,6 +175,12 @@ $MaxAttachmentBytes = 20MB
 
 function Write-Log {
     param([string]$Level, [string]$Message)
+    # R-05: this is the single place a log line is built, so every user-controlled field
+    # (Subject, To, Cc, attachment paths, dedup values) is neutralized here. Control chars
+    # and the Unicode line separators become '?' in the LOGGED text only; the message that
+    # is actually sent is never touched. Without this, a newline in a field writes a second
+    # record that a later reader (dedup key=, status) would trust.
+    $Message = $Message -replace '[\x00-\x1F\x7F\x85\u2028\u2029]', '?'
     $ts = Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"
     $line = "$ts [$Level] $Message"
     try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 } catch {}
