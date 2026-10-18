@@ -53,6 +53,7 @@ function getPrefixDir() {
 }
 
 function shimContent(name, guardPathForShim) {
+  name = name.replace(/^ntl/, "netlify"); // ntl is an alias of netlify: identical guard shim
   if (name === "netlify.cmd") {
     return `@ECHO off
 GOTO start
@@ -138,7 +139,7 @@ function main() {
     process.exit(1);
   }
 
-  const names = ["netlify.cmd", "netlify", "netlify.ps1"];
+  const names = ["netlify.cmd", "netlify", "netlify.ps1", "ntl.cmd", "ntl", "ntl.ps1"];
   const existing = names.filter((name) => fs.existsSync(path.join(prefixDir, name)));
 
   for (const name of names) {
