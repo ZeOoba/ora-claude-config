@@ -520,6 +520,81 @@ def test_recreated_task_future_first_slot_not_overdue():
           "expected not overdue, got %r" % (data,))
 
 
+def _run_main(fs, argv, regs):
+    """Run fs.main() in-process with discover_registries stubbed; return (exit_code, json)."""
+    import io, contextlib
+    fs.discover_registries = lambda: regs
+    old_argv, buf = sys.argv, io.StringIO()
+    sys.argv = ["fleet-status.py"] + argv
+    code = 0
+    try:
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                fs.main()
+            except SystemExit as e:
+                code = e.code or 0
+    finally:
+        sys.argv = old_argv
+    try:
+        return code, json.loads(buf.getvalue())
+    except ValueError:
+        return code, None
+
+
+def _write_registry(d, name, tasks):
+    p = os.path.join(d, name)
+    with open(p, "w", encoding="utf-8") as fh:
+        json.dump({"scheduledTasks": tasks, "recordedSkips": {}}, fh)
+    return p
+
+
+def test_partial_view_missing_fleet_flagged():
+    fs = _load_fs()
+    with tempfile.TemporaryDirectory() as d:
+        cc = _write_registry(d, "cc.json", [task("t1", cron="0 6 * * *", last_run=recent_iso())])
+        code, data = _run_main(fs, ["--json"], [("cc", cc)])
+    check("partial: exit stays 0 by default", code == 0, repr(code))
+    check("partial: lams reported missing", data and data["fleets_missing"] == ["lams"], repr(data and data.get("fleets_missing")))
+    check("partial: verdict is not OK", data and data["verdict"].startswith("ATTENTION") and "PARTIAL VIEW" in data["verdict"], repr(data and data.get("verdict")))
+
+
+def test_partial_view_unreadable_registry_flagged():
+    fs = _load_fs()
+    with tempfile.TemporaryDirectory() as d:
+        cc = _write_registry(d, "cc.json", [task("t1", cron="0 6 * * *", last_run=recent_iso())])
+        bad = os.path.join(d, "lams.json")
+        with open(bad, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        code, data = _run_main(fs, ["--json"], [("cc", cc), ("lams", bad)])
+    check("unreadable: lams listed", data and data["fleets_unreadable"] == ["lams"], repr(data and data.get("fleets_unreadable")))
+    check("unreadable: PARTIAL in verdict", data and "PARTIAL VIEW" in data["verdict"])
+
+
+def test_partial_view_both_present_is_unchanged():
+    fs = _load_fs()
+    with tempfile.TemporaryDirectory() as d:
+        cc = _write_registry(d, "cc.json", [task("t1", cron="0 6 * * *", last_run=recent_iso())])
+        lams = _write_registry(d, "lams.json", [task("t2", cron="0 7 * * *", last_run=recent_iso())])
+        code, data = _run_main(fs, ["--json"], [("cc", cc), ("lams", lams)])
+    check("both present: nothing missing/unreadable", data and data["fleets_missing"] == [] and data["fleets_unreadable"] == [])
+    check("both present: no PARTIAL flag", data and "PARTIAL" not in data["verdict"], repr(data and data.get("verdict")))
+
+
+def test_partial_view_forced_registry_not_flagged():
+    data, _ = run([task("t1", cron="0 6 * * *", last_run=recent_iso())])
+    check("forced --registry: no PARTIAL", data is not None and "PARTIAL" not in data["verdict"] and data["fleets_expected"] == [], repr(data))
+
+
+def test_partial_view_strict_exit_and_expect_override():
+    fs = _load_fs()
+    with tempfile.TemporaryDirectory() as d:
+        cc = _write_registry(d, "cc.json", [task("t1", cron="0 6 * * *", last_run=recent_iso())])
+        code, _ = _run_main(fs, ["--json", "--strict"], [("cc", cc)])
+        check("strict: exit 4 on PARTIAL", code == 4, repr(code))
+        code2, data2 = _run_main(fs, ["--json", "--strict", "--expect-fleets", "cc"], [("cc", cc)])
+        check("expect-fleets cc: strict exit 0 and no PARTIAL", code2 == 0 and "PARTIAL" not in data2["verdict"], repr((code2, data2 and data2.get("verdict"))))
+
+
 if __name__ == "__main__":
     test_all_healthy_is_ok()
     test_quarterly_not_yet_due_is_not_overdue()
@@ -545,6 +620,11 @@ if __name__ == "__main__":
     test_duplicate_id_overdue_reasons_are_not_collapsed()
     test_never_label_recreated_prefers_created_at()
     test_recreated_task_future_first_slot_not_overdue()
+    test_partial_view_missing_fleet_flagged()
+    test_partial_view_unreadable_registry_flagged()
+    test_partial_view_both_present_is_unchanged()
+    test_partial_view_forced_registry_not_flagged()
+    test_partial_view_strict_exit_and_expect_override()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
