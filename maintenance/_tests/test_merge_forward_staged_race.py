@@ -243,16 +243,50 @@ check("K: not aborted, merge left", r.get("merge_aborted") is False
       and cmf.ref_state(local, "MERGE_HEAD")[0] == "present", repr(r))
 td.cleanup()
 
-# L. commit-tree fails on the equal path (no bare commit / abort exists): no abort, foreign work intact
+# L. update-ref CAS lost: HEAD moves after head0 was captured (plumbing, mid-merge)
 td, local, origin = fresh()
-r, calls = sync_with(local, stage_fn=stage_new, fail_first="commit-tree")
+moved = {}
+def move_head(repo):
+    old = run(repo, "rev-parse", "HEAD").stdout.strip()
+    tree = run(repo, "rev-parse", "HEAD^{tree}").stdout.strip()
+    moved["sha"] = run(repo, "commit-tree", tree, "-p", old, "-m", "other session").stdout.strip()
+    run(repo, "update-ref", "HEAD", moved["sha"], old)
+r, calls = sync_with(local, stage_fn=stage_new, before_cmd=("update-ref", move_head))
 check("L: ERROR", r["status"] == "ERROR", repr(r))
 check("L: MERGE_HEAD present, merge_aborted False",
       cmf.ref_state(local, "MERGE_HEAD")[0] == "present" and r.get("merge_aborted") is False, repr(r))
-check("L: foreign file on disk", os.path.exists(os.path.join(local, "foreign.txt")))
-check("L: foreign file in index", "foreign.txt" in run(local, "ls-files").stdout.split())
-check("L: no bare commit / abort / reset issued",
-      not any(c[:1] in (["commit"], ["reset"]) or c[:2] == ["merge", "--abort"] for c in calls), repr(calls))
+check("L: detail says merge left in progress", "left in progress" in r.get("detail", ""), repr(r))
+check("L: HEAD unchanged by us (other session's commit)",
+      run(local, "rev-parse", "HEAD").stdout.strip() == moved.get("sha"))
+check("L: foreign staged file intact", "foreign.txt" in run(local, "diff", "--cached", "--name-only").stdout)
+check("L: no abort/reset", not any(c[:1] == ["reset"] or c[:2] == ["merge", "--abort"] for c in calls), repr(calls))
+td.cleanup()
+
+# N1-N3. another session aborts/resets the merge inside our window: never commit the merge tree
+def foreign_abort(repo):
+    run(repo, "merge", "--abort")
+def foreign_reset(repo):
+    run(repo, "reset", "-q", "--merge")
+for tag, kw in (("N1 abort right after merge", dict(stage_fn=foreign_abort)),
+                ("N2 abort before commit-tree", dict(before_cmd=("commit-tree", foreign_abort))),
+                ("N3 reset --merge before commit-tree", dict(before_cmd=("commit-tree", foreign_reset)))):
+    td, local, origin = fresh()
+    head0 = run(local, "rev-parse", "HEAD").stdout.strip()
+    r, _ = sync_with(local, **kw)
+    check(tag + ": ERROR", r["status"] == "ERROR", repr(r))
+    check(tag + ": HEAD not advanced", run(local, "rev-parse", "HEAD").stdout.strip() == head0)
+    check(tag + ": merge_aborted False, detail names other session",
+          r.get("merge_aborted") is False and "another session" in r.get("detail", ""), repr(r))
+    td.cleanup()
+
+# N5. merge.autoStash=true must not strand a dirty non-overlapping file in a stash
+td, local, origin = fresh()
+run(local, "config", "merge.autoStash", "true")
+write(local, "shared.txt", "base" + chr(10) + "DIRTY work of session Z" + chr(10))
+r, _ = sync_with(local)
+check("N5: MERGED", r["status"] == "MERGED", repr(r))
+check("N5: dirty file intact", "DIRTY work of session Z" in disk(local, "shared.txt"))
+check("N5: stash empty", run(local, "stash", "list").stdout.strip() == "", run(local, "stash", "list").stdout)
 td.cleanup()
 
 # M. foreign stage lands just before commit-tree (after the foreign list was taken)
