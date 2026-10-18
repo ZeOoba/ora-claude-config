@@ -216,18 +216,30 @@ if ($BodyFile) {
 }
 
 # --- Dedup key (R-05). Both flags or neither: a half-keyed call is a caller bug. ---
-if ([bool]$DedupTaskId -ne [bool]$DedupPeriodKey) {
+# "Passed" is decided by ContainsKey, not truthiness, so an explicitly empty value cannot
+# silently fall back to legacy mode. Echoed values are stripped of control characters so a
+# hostile value cannot split or forge a send-log record.
+$HasTaskId = $PSBoundParameters.ContainsKey('DedupTaskId')
+$HasPeriodKey = $PSBoundParameters.ContainsKey('DedupPeriodKey')
+if ($HasTaskId -ne $HasPeriodKey) {
     Write-Log "ERROR" "-DedupTaskId and -DedupPeriodKey must be passed together (both or neither)"
     exit 1
 }
-$ContractMode = [bool]$DedupTaskId
+$ContractMode = $HasTaskId
 if ($ContractMode) {
-    if ($DedupTaskId -cnotmatch '^[a-z0-9][a-z0-9-]{1,63}$') {
-        Write-Log "ERROR" "-DedupTaskId '$DedupTaskId' is not a task id (lowercase letters, digits and '-')"
+    if ([string]::IsNullOrWhiteSpace($DedupTaskId) -or [string]::IsNullOrWhiteSpace($DedupPeriodKey)) {
+        Write-Log "ERROR" "-DedupTaskId and -DedupPeriodKey must not be empty when passed"
         exit 1
     }
-    if ($DedupPeriodKey -cnotmatch '^[0-9A-Za-z][0-9A-Za-z_-]{3,39}$') {
-        Write-Log "ERROR" "-DedupPeriodKey '$DedupPeriodKey' is not a period key (e.g. 2026-10-18, 2026-W42, 2026-10, 2026-10-18-slot-12)"
+    # \z, not $: in .NET `$` also matches before a trailing newline.
+    if ($DedupTaskId -cnotmatch '^[a-z0-9][a-z0-9-]{1,63}\z') {
+        $shown = $DedupTaskId -replace '[\x00-\x1F\x7F\x85\u2028\u2029]', '?'
+        Write-Log "ERROR" "-DedupTaskId '$shown' is not a task id (lowercase letters, digits and '-')"
+        exit 1
+    }
+    if ($DedupPeriodKey -cnotmatch '^[0-9A-Za-z][0-9A-Za-z_-]{3,39}\z') {
+        $shown = $DedupPeriodKey -replace '[\x00-\x1F\x7F\x85\u2028\u2029]', '?'
+        Write-Log "ERROR" "-DedupPeriodKey '$shown' is not a period key (e.g. 2026-10-18, 2026-W42, 2026-10, 2026-10-18-slot-12)"
         exit 1
     }
 }
