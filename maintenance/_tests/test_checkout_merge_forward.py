@@ -359,6 +359,10 @@ def _with_lock_on(predicate):
     real = cmf._git
 
     def wrapped(args, repo):
+        # These tests exercise the LEGACY bare-commit failure path, reached only when the
+        # expected merge tree is unavailable (M51): fail the pre-merge E computation.
+        if args[:2] == ["merge-tree", "--write-tree"] and "--name-only" not in args:
+            return 129, "", "usage"
         if predicate(args):
             lock = os.path.join(repo, ".git", "index.lock")
             open(lock, "w").close()

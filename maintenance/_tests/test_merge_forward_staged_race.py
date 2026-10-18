@@ -59,7 +59,7 @@ def make_pair(td):
 
 
 
-def install_race(stage_fn=None, fail_first=None, mergetree_rc=None):
+def install_race(stage_fn=None, fail_first=None, mergetree_rc=None, before_merge=None, before_cmd=None):
     """Wrap cmf._git: right after the merge call succeeds, a 'foreign session' stages work.
     fail_first: git subcommand name (e.g. 'commit-tree') whose call is made to fail.
     mergetree_rc: make `merge-tree --write-tree` return this rc with no output."""
@@ -70,6 +70,10 @@ def install_race(stage_fn=None, fail_first=None, mergetree_rc=None):
             return 1, "", "boom"
         if mergetree_rc and args[:2] == ["merge-tree", "--write-tree"]:
             return mergetree_rc, "", "usage"
+        if before_merge and args[:2] == ["merge", "--no-commit"]:
+            before_merge(repo)
+        if before_cmd and args[:1] == [before_cmd[0]]:
+            before_cmd[1](repo)
         res = REAL_GIT(args, repo)
         if stage_fn and args[:2] == ["merge", "--no-commit"] and res[0] == 0:
             stage_fn(repo)
@@ -224,6 +228,39 @@ check("J: HEAD == returned sha", r.get("sha") == head, repr(r))
 check("J: second parent is origin tip",
       run(local, "rev-parse", "HEAD^2").stdout.strip() == run(origin, "rev-parse", "HEAD").stdout.strip())
 check("J: reflog entry", "merge-forward" in run(local, "reflog", "-n", "1", "HEAD").stdout)
+td.cleanup()
+
+# K. HEAD moves between E computation and the merge (another session commits)
+td, local, origin = fresh()
+def other_commit(repo):
+    commit(repo, "other.txt", "other session commit")
+r, _ = sync_with(local, before_merge=other_commit)
+in_tree = "other.txt" in run(local, "ls-tree", "-r", "--name-only", "HEAD").stdout.split()
+check("K: never a silent MERGED that loses the commit", r["status"] != "MERGED" or in_tree, repr(r))
+check("K: ERROR, HEAD moved", r["status"] == "ERROR" and "HEAD" in r.get("detail", ""), repr(r))
+check("K: other commit still in HEAD", in_tree)
+check("K: not aborted, merge left", r.get("merge_aborted") is False
+      and cmf.ref_state(local, "MERGE_HEAD")[0] == "present", repr(r))
+td.cleanup()
+
+# L. commit-tree fails on the equal path (no bare commit / abort exists): no abort, foreign work intact
+td, local, origin = fresh()
+r, calls = sync_with(local, stage_fn=stage_new, fail_first="commit-tree")
+check("L: ERROR", r["status"] == "ERROR", repr(r))
+check("L: MERGE_HEAD present, merge_aborted False",
+      cmf.ref_state(local, "MERGE_HEAD")[0] == "present" and r.get("merge_aborted") is False, repr(r))
+check("L: foreign file on disk", os.path.exists(os.path.join(local, "foreign.txt")))
+check("L: foreign file in index", "foreign.txt" in run(local, "ls-files").stdout.split())
+check("L: no bare commit / abort / reset issued",
+      not any(c[:1] in (["commit"], ["reset"]) or c[:2] == ["merge", "--abort"] for c in calls), repr(calls))
+td.cleanup()
+
+# M. foreign stage lands just before commit-tree (after the foreign list was taken)
+td, local, origin = fresh()
+r, _ = sync_with(local, before_cmd=("commit-tree", stage_new))
+check("M: MERGED", r["status"] == "MERGED", repr(r))
+check("M: not in merge commit", "foreign.txt" not in commit_files(local), repr(commit_files(local)))
+check("M: still staged", "A  foreign.txt" in porcelain(local), porcelain(local))
 td.cleanup()
 
 passed = sum(_results)
