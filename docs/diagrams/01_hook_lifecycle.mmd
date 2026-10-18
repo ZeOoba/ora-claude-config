@@ -44,12 +44,11 @@ flowchart TB
   RUN --> POST
 
   subgraph POSTH["PostToolUse (all non-blocking)"]
-    P1["Bash: ora-skills catch_up_main.py --hook;<br/>inline curl deploy check (greps 'deploy')"]
-    P2["Bash: eos-gate-sentinel"]
+    P1["Bash: posttooluse-dispatcher.py (timeout 360)<br/>runs P2 then catch-up-main (gh pr merge only)"]
+    P2["eos-gate-sentinel (in-process, via P1)"]
     P3["Bash|Task*|Edit|Write: fleet-session-hook (async)"]
     P4["Write|Edit|Skill: eos-plan-marker"]
     P5["Edit/Write/DC: commit-provenance-recorder,<br/>memory-nag-correction"]
-    P6["Netlify MCP: inline check"]
     P7["update_scheduled_task: postguard"]
   end
   POST --> POSTH
@@ -57,5 +56,4 @@ flowchart TB
   P4 -->|marker| PLAN[("plan marker<br/>(read by eos-plan-gate)")]
   P2 -->|marker| EVID[("test-ran marker<br/>(read by eos-evidence-gate)")]
 
-  NOTE["NOT WIRED: posttooluse-dispatcher.py<br/>(staged in _proposed/, would fold P1+P2 into one process)"]:::dim
-  classDef dim stroke-dasharray: 4 3,color:#777
+  P1 --> P2

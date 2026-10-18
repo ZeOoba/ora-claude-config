@@ -29,9 +29,11 @@
 !/skills/
 !/maintenance/
 # Reviewable settings.json proposals awaiting an explicit apply (hooks-audit
-# 2026-09-30; see _proposed/APPLY.md). Tracked so a proposal survives its
-# worktree and ships with the branch; archived once applied. Tests never read it
-# as a stand-in for settings.json (hooks/tests/lib/settings_proposal.py).
+# 2026-09-30). Tracked so a proposal survives its worktree and ships with the
+# branch; archived once applied (the hooks-audit one was applied 2026-10-18 and
+# lives at _archive/2026-10-18_settings-proposed-fold/APPLY.md). Kept for future
+# proposals. Tests never read it as a stand-in for settings.json
+# (hooks/tests/lib/settings_proposal.py).
 !/_proposed/
 !/docs/
 !/ora-ops-plugin/
