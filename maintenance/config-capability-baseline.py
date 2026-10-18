@@ -58,11 +58,11 @@ def _read(path):
 def collect_refs(root):
     refs = {"settings": set(), "agents": set(), "hooks": set()}
     refs["settings"] = extract_refs(_read(os.path.join(root, "settings.json")))
-    for p in glob.glob(os.path.join(root, "agents", "*.md")):
+    for p in glob.glob(os.path.join(glob.escape(root), "agents", "*.md")):
         for line in _read(p).splitlines():
             if line.lower().startswith(("tools:", "disallowedtools:")):
                 refs["agents"] |= extract_refs(line)
-    for p in glob.glob(os.path.join(root, "hooks", "*.py")):
+    for p in glob.glob(os.path.join(glob.escape(root), "hooks", "*.py")):
         if os.path.basename(p) in SKIP_NAMES:
             continue
         refs["hooks"] |= extract_refs(_read(p))
@@ -83,7 +83,7 @@ def discover_binaries(version_override):
         return [v.strip() for v in version_override.split(",") if v.strip()]
     found = []
     try:
-        p = subprocess.run(["claude", "--version"], capture_output=True, text=True, timeout=15)
+        p = subprocess.run(["claude", "--version"], capture_output=True, text=True, errors="replace", timeout=15)
         if parse_version(p.stdout):
             found.append(p.stdout.strip())
     except (OSError, subprocess.TimeoutExpired):
@@ -93,6 +93,12 @@ def discover_binaries(version_override):
         if parse_version(os.path.basename(d)):
             found.append(os.path.basename(d))
     return found
+
+
+def build_capabilities(low):
+    low_t = parse_version(low) if low else None
+    return [{"name": n, "min_version": ".".join(map(str, mv)), "confidence": conf,
+             "usable_on_lowest": (low_t >= mv) if low_t else None} for n, (mv, conf) in MIN_VERSION.items()]
 
 
 def main(argv=None):
@@ -106,14 +112,19 @@ def main(argv=None):
 
     versions = discover_binaries(a.version_override)
     low = lowest_binary(versions)
-    low_t = parse_version(low) if low else None
-    caps = [{"name": n, "min_version": ".".join(map(str, mv)), "confidence": conf,
-             "usable_on_lowest": bool(low_t and low_t >= mv)} for n, (mv, conf) in MIN_VERSION.items()]
+    caps = build_capabilities(low)
 
     refs = collect_refs(a.root)
     live = None
     if a.live_servers:
-        live = {l.strip() for l in _read(a.live_servers).splitlines() if l.strip()}
+        try:
+            with open(a.live_servers, encoding="utf-8") as fh:
+                live = {l.strip() for l in fh.read().splitlines() if l.strip()}
+        except OSError as e:
+            print("error: cannot read --live-servers file %s: %s" % (a.live_servers, e), file=sys.stderr)
+            return 2
+    elif a.strict:
+        print("warning: --strict given without --live-servers; no snapshot, dead-ref check skipped", file=sys.stderr)
     dead = dead_refs(refs, live) if live is not None else []
     report = {"binaries": versions, "lowest_binary": low, "capabilities": caps,
               "connector_refs": {k: sorted(v) for k, v in refs.items()},
@@ -124,7 +135,8 @@ def main(argv=None):
     else:
         print("lowest binary loading settings.json: %s  (all: %s)" % (low, ", ".join(versions) or "none found"))
         for c in caps:
-            print("  %-62s >=%s  %-10s usable-on-lowest=%s" % (c["name"], c["min_version"], c["confidence"], c["usable_on_lowest"]))
+            print("  %-62s >=%s  %-10s usable-on-lowest=%s" % (c["name"], c["min_version"], c["confidence"],
+                                                                  "unknown" if c["usable_on_lowest"] is None else c["usable_on_lowest"]))
         for where, ids in report["connector_refs"].items():
             print("refs in %-8s: %s" % (where, ", ".join(ids) or "-"))
         print("DEAD references: %s" % (", ".join("%s (%s)" % (d["ref"], d["where"]) for d in dead) or
