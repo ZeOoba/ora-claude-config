@@ -180,4 +180,8 @@ function main() {
     "`npm install -g netlify-cli` / `npm update -g netlify-cli`.");
 }
 
-main();
+if (require.main === module) {
+  main();
+} else {
+  module.exports = { shimContent };
+}
