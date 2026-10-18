@@ -10,7 +10,7 @@ Why it exists: REP status keeps roughly $1.2M a year of rental income out of NII
 ## Run date and guard
 Compute once: `date '+%A %Y-%m-%d'`. Exit silently unless today is the first weekday (Mon–Fri) of the month.
 
-## — DOUBLE-FIRE ENTRY GUARD (run first, after the first-weekday guard below: a skipped fire must not claim)
+## — DOUBLE-FIRE ENTRY GUARD (runs after the first-weekday guard above: a skipped fire must not claim)
 python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --ttl-min 30
 - Exit 10 = this month already completed; Exit 11 = another fire is live. Stand down: no Notion query or file write, no email; report a NORMAL skip.
 - Exit 0 = proceed.

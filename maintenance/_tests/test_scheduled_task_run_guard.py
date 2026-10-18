@@ -207,10 +207,10 @@ ORDERING_VERIFIED_BY_HAND = {
     # the public site read-only; the one side effect is the STEP 4 regression email, after it.
     "ora-site-seo-crawl-weekly": "claim@STEP -1 precedes email@STEP 4; crawl is read-only",
     # Read by hand 2026-10-17: the sole claim is the STEP 0 line (first action). STEP 1 only
-    # READS the pause file/workbook mtime; STEP 2 works in a throwaway worktree; the only write
+    # READS the pause file/workbook mtime; STEP 2 fetches and adds a detached worktree from the shared checkout's .git (after the claim) and runs npm ci there; the only write
     # before the claim-holder reports is the full-gate-weekly.json state file (STEP 3); the one
     # email is STEP 4, after STEP 0.
-    "ora-full-gate-weekly": "claim@STEP 0 precedes email@STEP 4; STEP 1-2 read-only/throwaway worktree",
+    "ora-full-gate-weekly": "claim@STEP 0 precedes email@STEP 4; STEP 1 reads only, STEP 2 fetch+worktree after claim",
     # Read by hand 2026-09-28: the sole claim is the STEP 0 line at :11, the run's first
     # action. Step 1 only READS Notion and writes a %TEMP% json; the side effects all
     # follow: COM send :32, Ops Hub Notion row :35.
