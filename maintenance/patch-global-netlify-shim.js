@@ -25,6 +25,13 @@
  * different from a project-local install's node_modules/.bin/, so this cannot reuse
  * website-canonical/scripts/patch-netlify-shim.js's relative-path assumptions verbatim.
  *
+ * LIVE-PATH SAFETY: the global shims are machine-wide, so this script REFUSES to point them
+ * at a guard script that is not under the live root (<home>/.claude; compared normalized,
+ * realpath-resolved, case-insensitive on Windows). Running it from a worktree or any other
+ * checkout exits 1 with a FATAL message. The ONLY escape hatch is the env var
+ * NGG_ALLOW_NONLIVE_PATCH=1, which exists for the regression tests (they redirect the npm
+ * prefix to a throwaway directory first) and is used by NO production path.
+ *
  * Same fail-loud philosophy as the per-repo patcher: if the global netlify-cli isn't
  * installed, or a shim can't be written, this exits non-zero rather than silently leaving
  * the global install unguarded with no visible signal.
@@ -32,6 +39,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { execFileSync } = require("child_process");
 
 const GUARD_PATH = path.join(__dirname, "..", "hooks", "bin", "netlify-guard-global.js");
@@ -123,7 +131,39 @@ exit $ret
   throw new Error("unknown shim name: " + name);
 }
 
+// Resolve symlinks for the longest existing prefix of p, then re-append the missing tail.
+function realResolve(p) {
+  let cur = path.resolve(p);
+  const tail = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync.native(cur);
+      return tail.length ? path.join(real, ...tail.reverse()) : real;
+    } catch (e) {
+      const parent = path.dirname(cur);
+      if (parent === cur) return path.resolve(p);
+      tail.push(path.basename(cur));
+      cur = parent;
+    }
+  }
+}
+
+// True only when guardPath sits inside <home>/.claude. Pure apart from filesystem realpath.
+function isLiveGuardPath(guardPath, home) {
+  const root = realResolve(path.join(home || os.homedir(), ".claude"));
+  const target = realResolve(guardPath);
+  const fold = (s) => (process.platform === "win32" ? s.toLowerCase() : s);
+  const rel = path.relative(fold(root), fold(target));
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
 function main() {
+  if (process.env.NGG_ALLOW_NONLIVE_PATCH !== "1" && !isLiveGuardPath(GUARD_PATH)) {
+    console.error("[patch-global-netlify-shim] FATAL: refusing to patch the machine-wide shims to " +
+      GUARD_PATH + " -- it is not under the live root " + path.join(os.homedir(), ".claude") +
+      ". Run the patcher from the live checkout only.");
+    process.exit(1);
+  }
   if (!fs.existsSync(GUARD_PATH)) {
     console.error("[patch-global-netlify-shim] FATAL: guard script not found at " + GUARD_PATH +
       " -- refusing to patch shims to point at a file that doesn't exist.");
@@ -183,5 +223,5 @@ function main() {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { shimContent };
+  module.exports = { shimContent, isLiveGuardPath };
 }
