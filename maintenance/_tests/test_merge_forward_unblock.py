@@ -241,12 +241,37 @@ def test_rolls_back_when_the_merge_does_not_land():
           "got %r" % read(os.path.join(repo, RESTORE[0])))
 
 
+def test_error_with_merge_head_present_does_not_claim_restore():
+    """sync ERROR with MERGE_HEAD present (M51 CAS-failure paths leave the merge in
+    progress): the blockers must NOT be put back over the merge, and the report must say
+    so; rolled_back stays False."""
+    print("\ntest_error_with_merge_head_present_does_not_claim_restore")
+    mod = load_module()
+    repo = make_repo()
+
+    def stuck_sync(r):
+        head = git(r, "rev-parse", "HEAD")[1]
+        with open(os.path.join(r, ".git", "MERGE_HEAD"), "w") as fh:
+            fh.write(head + "\n")
+        return {"status": "ERROR", "detail": "staged-set safe commit failed",
+                "merge_aborted": False}
+    r = mod.unblock(repo, UNTRACKED, RESTORE, sync_fn=stuck_sync)
+    check("status is ERROR", r["status"] == "ERROR", repr(r["status"]))
+    check("rolled_back stays False", r.get("rolled_back") is False)
+    check("detail says LEFT MID-MERGE", "LEFT MID-MERGE" in (r.get("detail") or ""), repr(r.get("detail")))
+    check("detail says blockers NOT restored", "NOT restored" in (r.get("detail") or ""))
+    check("detail names the archive dir", (r.get("archive_dir") or "?") in (r.get("detail") or ""))
+    check("drafts were not copied back over the merge",
+          not os.path.exists(os.path.join(repo, UNTRACKED[0])))
+
+
 def main():
     for t in (test_refuses_when_index_is_not_empty,
               test_refuses_when_an_untracked_path_is_not_on_the_canonical_ref,
               test_refuses_when_a_restore_path_differs_beyond_the_ignored_keys,
               test_happy_path_archives_restores_and_the_merge_actually_lands,
-              test_rolls_back_when_the_merge_does_not_land):
+              test_rolls_back_when_the_merge_does_not_land,
+              test_error_with_merge_head_present_does_not_claim_restore):
         try:
             t()
         except Exception as e:  # noqa: BLE001 -- a crashing test is a failing test
