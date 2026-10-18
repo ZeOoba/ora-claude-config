@@ -33,8 +33,8 @@ STEP 4 - REPORT:
     Send ONE email to ggoldberg@oxfordra.net ONLY (no cc, never ze@) via: powershell -NoProfile -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1
     Subject: "[ACTION] full gate FAILING - <date> -- <first failing stage>" (or "full gate STALE INPUT - <date>" / "full gate INPUT UNAVAILABLE - <date>"); any repeat tag appended at the very end, never between the stem and the date.
     Body: failing stages with exit code and first ~25 lines of each stage's output, origin/main SHA, workbook mtime, new vs repeating, and which stages were NOT-EXERCISED.
-    Non-zero send exit: retry ONCE, then flag loudly (block-sentinel fail --error "send failed") and DO NOT halt worktree cleanup. The automation-health-monitor producer-beacon check catches a silent send.
-    Then: block-sentinel.py complete ... --email-sent-at <ISO8601>.
+    Non-zero send exit: retry ONCE, then flag loudly, call block-sentinel fail --error "send failed" and do NOT call complete (a complete after a fail records emailSentAt=None and suppresses the rest of the day), and DO NOT halt worktree cleanup. The automation-health-monitor producer-beacon check catches a silent send.
+    On a successful send: block-sentinel.py complete ... --email-sent-at <ISO8601>.
   Always remove the worktree (git worktree remove --force). If the run aborts early call: block-sentinel.py fail --task ora-full-gate-weekly --block main --run-id <run_id> --error "<what broke>".
 
 Escalation: any data gap you cannot resolve goes in the email under QUESTIONS FOR GABRIEL; never fabricate. Event-log entries only via python ~/.claude/maintenance/append-event-log.py with header `## YYYY-MM-DD - <title>`.
