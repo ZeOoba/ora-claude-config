@@ -12,6 +12,15 @@ metadata:
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
 
+## 2026-10-18 -- CLAUDE.md Release-bullet change (bbb20b21): Gabriel approval recorded
+- Gabriel approved the CLAUDE.md Release-bullet change in commit bbb20b21 in-turn on 2026-10-17 ("Proceed with recommendation") after reviewing the CLAUDE.md diff. Recorded here at the dirty-tree-triage parent session's request. No governor constants touched; CLAUDE.md word count 1849 (limit 1850).
+
+## 2026-10-18 — Dirty-tree triage follow-ups: decisions recorded
+- Gabriel (in-turn): accepts the two independent Opus reviews as the refute pass for the two-basis LTV commits 71fa176c/323028da (agents/underwriting-checker.md; no wf_ run id; check:refute applies only to oxford-command-center source); constants unchanged (governor-drift-probe OK).
+- Archived (never deleted) stale untracked skills/synced/…/acquisition-underwriting (v4.20, old with-refi numerator) to archive/2026-10-18_synced-acquisition-underwriting-v4.20/ (live runtime copy v4.31).
+- LTV Fix 1 (pending-debt register / refi-time test) held on ora-skills branch claude/fix-ltv-enforcement-2026-10-17-f355fb (5 REFUTE rounds not clean; KNOWN_ISSUES.md); Fix 2 wording PR in progress; register to be redesigned as one piece.
+- CodeRabbit usage-based billing: declined. OI-278 archive tags on ora-pm origin kept (fix already on main via PR #26).
+
 ## 2026-10-17 — Two-basis financing convention: Gabriel approval recorded
 - Gabriel confirmed in-turn (2026-10-17, dirty-tree-triage session): he approves the two-basis financing convention (portfolio-LTV numerator = all-cash; with-refi LTV informational) behind commits 71fa176c / 323028da (agents/underwriting-checker.md, ora-skills #130/#135). Invariant 4 permission now on record. Governor constants (DSCR 1.25 / LTV 40 / 65) unchanged. Independent refute pass on those two commits dispatched same day; result to be logged.
 
