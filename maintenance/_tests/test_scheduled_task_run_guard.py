@@ -203,6 +203,14 @@ ORDERING_VERIFIED_BY_HAND = {
     # followed by the complete line at :12's contract. "Writes outside the email and the
     # block-sentinel calls: none" (:37).
     "ora-county-sales-monitor": "claim@9 precedes send@35 (reads only in between)",
+    # Read by hand 2026-10-17: the sole claim is STEP -1 (first action). STEP 0-3 only crawl
+    # the public site read-only; the one side effect is the STEP 4 regression email, after it.
+    "ora-site-seo-crawl-weekly": "claim@STEP -1 precedes email@STEP 4; crawl is read-only",
+    # Read by hand 2026-10-17: the sole claim is the STEP 0 line (first action). STEP 1 only
+    # READS the pause file/workbook mtime; STEP 2 works in a throwaway worktree; the only write
+    # before the claim-holder reports is the full-gate-weekly.json state file (STEP 3); the one
+    # email is STEP 4, after STEP 0.
+    "ora-full-gate-weekly": "claim@STEP 0 precedes email@STEP 4; STEP 1-2 read-only/throwaway worktree",
     # Read by hand 2026-09-28: the sole claim is the STEP 0 line at :11, the run's first
     # action. Step 1 only READS Notion and writes a %TEMP% json; the side effects all
     # follow: COM send :32, Ops Hub Notion row :35.
