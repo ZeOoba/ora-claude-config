@@ -113,7 +113,10 @@ All five in **one message** so they run concurrently. Prompt templates:
 
 Right before dispatch (after writing any override of your own), list
 `~/.claude/hooks/sessions/<your session>/` and `overrides/` with names, modification
-times and the contents of any `override`. Step 4 compares against this listing.
+times and the contents of any `override`; list `reviews/` recursively; and record the
+value of `code-edits.count`, the listing of `~/.claude/hooks/active-work/`, and the
+`touched-files.txt` of every other session holding a claim. Step 4 compares against this
+listing.
 
 Four clauses every mandate needs, and the reason each exists:
 
@@ -195,11 +198,17 @@ does not, and the difference is invisible until you run the tool name against it
 ## Step 4 — Consolidate, then STOP before fixing
 
 Before consolidating, check the swarm against clause 4. List
-`~/.claude/hooks/sessions/<your session>/` again and compare it with the Step 3
-listing. The bypass markers are `override`, `plan-approved` and anything under
-`overrides/`; any of them that is new or changed since that listing is a breach.
-Counters, logs, `touched-files.txt` and `gate-green` are written by the hooks during
-normal tool use and are expected. Archive a breach marker (never delete) to
+`~/.claude/hooks/sessions/<your session>/` and `overrides/` again, with names,
+modification times and the contents of any `override`, and compare it with the Step 3
+listing. The bypass markers are `override`, `plan-approved`, `allow-foreign-commit`,
+anything under `overrides/` and anything under `reviews/` (listed recursively); any of
+them that is new or changed since that listing is a breach. So is any new, changed or
+deleted file under `~/.claude/hooks/active-work/`, and any change to another session's
+`touched-files.txt`, that this run did not cause. A decrease or deletion of `code-edits.count`
+is a breach (it resets the plan gate's edit limit) unless `plan-gate-resets.log` has a
+matching new reset line. Other counters, logs, `touched-files.txt` of this session and
+`gate-green` are written by the hooks during normal tool use and are expected. A user prompt with two or more "Phase N:" headers
+also makes the router write `plan-approved`; attribute it to that prompt, not a swarm agent. Archive a breach marker (never delete) to
 `~/.claude/hooks/sessions/_archive_override_tokens/`, the folder
 `override-token-frequency-probe.py` reads and the weekly sweep archives into:
 - `overrides/<tier>` goes to `<session>_overrides_<tier>`, so the probe counts it.
@@ -233,7 +242,11 @@ no gate, because it launders the guess as a verdict.
 ## Step 5 — Fix and re-run
 
 Fix agents get one confirmed finding each and the same read-only discipline everywhere
-except their assigned file. Then re-pin the new head and re-run the **full** swarm.
+except their assigned file. Their prompts carry the two NEVER lines at
+`agent-prompts.md` preamble lines 22-28 (no create/edit/move under `~/.claude/hooks/`; no
+encoding or splitting command text to pass a guard), verbatim, plus: do not invoke lane
+skills (/plan, /build, /debug, /refactor, /research, /ship) and do not write under
+`docs/superpowers/plans/` or `.claude/plans/` (either writes `plan-approved`). Then re-pin the new head and re-run the **full** swarm.
 
 Merge only on a clean pass: zero CONFIRMED findings, every mandate reporting either
 findings-resolved or no-surface-with-evidence.
@@ -242,9 +255,15 @@ findings-resolved or no-surface-with-evidence.
 on the old SHA are reviewing a diff nobody will merge. Stop them (TaskStop) instead of
 letting them finish, keep any finding they had already reported, and dispatch the new swarm
 on the new pin. Running both generations at once only burns RAM and muddies which SHA each
-verdict applies to. Before the new dispatch, run the Step 4 breach check against the
-stopped generation's Step 3 listing, so a marker a stopped reviewer wrote is reported
-rather than absorbed into the new pre-dispatch listing.
+verdict applies to. Once the fix agents have finished and the superseded reviewers are
+stopped (confirm they and any background jobs they started have ended), run the Step 4
+breach check against the previous generation's listing BEFORE writing any override of your
+own for the next round and before taking the new pre-dispatch listing, so a marker a fix
+agent or a stopped reviewer wrote is reported rather than absorbed into the new baseline.
+If a fix needs a plan-gate override mid-Step 5, first stop or wait out every in-flight fix
+agent and reviewer (and their background jobs), run the check, then write the override and
+re-list immediately. That re-list replaces the previous listing as the baseline for the
+end-of-Step 5 check; anything that changed before the check is a breach.
 
 **Scoped re-run: a user decision, never the default.** The default stays the full swarm.
 When the only CONFIRMED findings are LOW, cosmetic, or confined to one file's write path,
