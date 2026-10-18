@@ -52,6 +52,10 @@ function getPrefixDir() {
     { encoding: "utf8" }).trim();
 }
 
+// All three shim flavours clear NODE_OPTIONS and OPENSSL_CONF before node starts (2026-10-18
+// review): node processes both before any JS, so the guard cannot see or stop them itself.
+// Side effect: .cmd and .ps1 clear them in the calling shell session too (sh scopes it to
+// the shim's own process); a legitimate NODE_OPTIONS for netlify must be set per-invocation elsewhere.
 function shimContent(name, guardPathForShim) {
   name = name.replace(/^ntl/, "netlify"); // ntl is an alias of netlify: identical guard shim
   if (name === "netlify.cmd") {
@@ -71,7 +75,7 @@ IF EXIST "%dp0%\\node.exe" (
   SET PATHEXT=%PATHEXT:;.JS;=;%
 )
 
-endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "${guardPathForShim}" %*
+endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set "NODE_OPTIONS=" & set "OPENSSL_CONF=" & "%_prog%"  "${guardPathForShim}" %*
 `;
   }
   if (name === "netlify") {
@@ -86,6 +90,17 @@ case \`uname\` in
     ;;
 esac
 
+# Git Bash env names are case-sensitive but node.exe reads them case-insensitively, so
+# unset every case variant (an \`env -u\` of the upper-case name alone leaves node_options).
+# Shell builtins only, after dropping any exported function: a loop calling env/cut/grep can
+# be defeated from the environment (BASH_FUNC_grep%%, GREP_OPTIONS=-v).
+\\unset -f compgen 2>/dev/null
+for v in $(compgen -e); do
+  case "$v" in
+    [Nn][Oo][Dd][Ee]_[Oo][Pp][Tt][Ii][Oo][Nn][Ss]|[Oo][Pp][Ee][Nn][Ss][Ss][Ll]_[Cc][Oo][Nn][Ff]) unset "$v";;
+  esac
+done
+
 if [ -x "$basedir/node" ]; then
   exec "$basedir/node"  "${guardPathForShim}" "$@"
 else
@@ -96,6 +111,9 @@ fi
   if (name === "netlify.ps1") {
     return `#!/usr/bin/env pwsh
 $basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent
+# Startup-time node vectors (--require, --snapshot-blob, OpenSSL provider modules) run before
+# the guard's first line and cannot be detected from inside it: clear them here.
+Remove-Item Env:NODE_OPTIONS, Env:OPENSSL_CONF -ErrorAction SilentlyContinue
 
 $exe=""
 if ($PSVersionTable.PSVersion -lt "6.0" -or $IsWindows) {
@@ -180,4 +198,8 @@ function main() {
     "`npm install -g netlify-cli` / `npm update -g netlify-cli`.");
 }
 
-main();
+if (require.main === module) {
+  main();
+} else {
+  module.exports = { shimContent }; // for hooks/tests/test-netlify-guard-global.py
+}
