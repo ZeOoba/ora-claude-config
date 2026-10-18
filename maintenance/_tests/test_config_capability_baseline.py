@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for config-capability-baseline.py. Run: python _tests/test_config_capability_baseline.py"""
+import hashlib
 import importlib.util
 import json
 import os
@@ -32,6 +33,23 @@ check("extract_refs real-world ids (single underscores, hyphens, bare server)",
       == {"Desktop_Commander", "claude_ai_Notion", "scheduled-tasks",
           "plugin_desktop-commander_desktop-commander", "excel", "claude-in-chrome"})
 
+caps_none = ccb.build_capabilities(None)
+check("build_capabilities None -> unknown", all(c["usable_on_lowest"] is None for c in caps_none), repr(caps_none))
+_f = lambda low: [c for c in ccb.build_capabilities(low) if c["name"] == "onFailure:block"][0]["usable_on_lowest"]
+check("build_capabilities 2.1.299 -> True", _f("2.1.299") is True)
+check("build_capabilities 2.1.278 -> False", _f("2.1.278") is False)
+
+
+def snapshot(base):
+    out = {}
+    for dp, _dn, fns in os.walk(base):
+        for fn in fns:
+            fp = os.path.join(dp, fn)
+            with open(fp, "rb") as fh:
+                out[os.path.relpath(fp, base)] = hashlib.sha256(fh.read()).hexdigest()
+    return out
+
+
 with tempfile.TemporaryDirectory() as root:
     os.makedirs(os.path.join(root, "agents"))
     os.makedirs(os.path.join(root, "hooks"))
@@ -58,6 +76,7 @@ with tempfile.TemporaryDirectory() as root:
     dead = ccb.dead_refs(refs, {"notion", "context7"})
     check("dead ref census in agents", [(d["ref"], d["where"]) for d in dead] == [("census", "agents")], repr(dead))
 
+    before = snapshot(root)
     p = subprocess.run([sys.executable, SCRIPT, "--root", root, "--live-servers", live,
                         "--version-override", "2.1.278,2.1.295", "--json"], capture_output=True, text=True)
     check("cli exits 0 by default", p.returncode == 0, p.stderr)
@@ -69,7 +88,14 @@ with tempfile.TemporaryDirectory() as root:
     p2 = subprocess.run([sys.executable, SCRIPT, "--root", root, "--live-servers", live,
                          "--version-override", "2.1.295", "--strict"], capture_output=True, text=True)
     check("strict exits 3 with a dead ref", p2.returncode == 3, str(p2.returncode))
-    check("probe wrote nothing", sorted(os.listdir(root)) == sorted(["agents", "hooks", "_confidential-staging", "settings.json", "live.txt"]))
+    p3 = subprocess.run([sys.executable, SCRIPT, "--root", root, "--live-servers", os.path.join(root, "nope.txt"),
+                         "--version-override", "2.1.295"], capture_output=True, text=True)
+    check("missing live-servers file exits 2", p3.returncode == 2, str(p3.returncode))
+    check("missing live-servers: no DEAD list on stdout, message on stderr", "DEAD" not in p3.stdout and p3.stderr.strip() != "", p3.stdout + "|" + p3.stderr)
+    p4 = subprocess.run([sys.executable, SCRIPT, "--root", root, "--version-override", "2.1.295", "--strict"],
+                        capture_output=True, text=True)
+    check("strict without snapshot warns on stderr, exits 0", p4.returncode == 0 and "snapshot" in p4.stderr.lower(), p4.stderr)
+    check("probe wrote nothing (recursive sha256 snapshot identical)", snapshot(root) == before)
 
 print("\ncapability-baseline tests: %d/%d passed" % (sum(_ok), len(_ok)))
 sys.exit(0 if all(_ok) else 1)
