@@ -251,6 +251,15 @@ def unblock(repo, untracked=DEFAULT_UNTRACKED, restore=DEFAULT_RESTORE,
     out["merge"] = result
     out["status"] = result.get("status")
     out["detail"] = result.get("detail")
+    if out["status"] == "ERROR" and _merge_head_present(repo):
+        # The merge was deliberately LEFT IN PROGRESS (checkout-merge-forward M51 paths):
+        # copying drafts back over a live merge would corrupt it. Archived copies are the
+        # restore source once a human resolves the merge.
+        out["rolled_back"] = False
+        out["detail"] = ("LEFT MID-MERGE -- blockers NOT restored; local copies archived at %s; "
+                         "restore from the archive after resolving the merge. %s"
+                         % (rel_archive, out["detail"]))
+        return out
     if out["status"] not in SYNCED:
         _rollback(repo, moved, copied)
         out["rolled_back"] = True
@@ -258,6 +267,14 @@ def unblock(repo, untracked=DEFAULT_UNTRACKED, restore=DEFAULT_RESTORE,
                          "so the ORA Headless tasks keep running. %s"
                          % (out["status"], out["detail"]))
     return out
+
+
+def _merge_head_present(repo):
+    """True unless MERGE_HEAD is provably absent (rev-parse exit 1): an unreadable ref
+    counts as present so a possibly-live merge is never overwritten."""
+    p = subprocess.run(["git", "-C", repo, "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+                       capture_output=True, text=True)
+    return p.returncode != 1
 
 
 def _rollback(repo, moved, copied):
