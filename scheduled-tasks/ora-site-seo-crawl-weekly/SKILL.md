@@ -9,7 +9,7 @@ STEP -1. — DOUBLE-FIRE ENTRY GUARD (run first)
 python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-site-seo-crawl-weekly --block main --run-id <run_id> --period week --ttl-min 30
 - Exit 10 = this week already completed; Exit 11 = another fire is live. Stand down: no crawl, no email; report a NORMAL skip.
 - Exit 0 = proceed.
-After the run finishes (at baseline: no email, `complete` with no --email-sent-at; on a regression email: with it): `... block-sentinel.py complete --task ora-site-seo-crawl-weekly --block main --run-id <run_id> --period week --email-sent-at <ISO8601> (only when a regression email was sent)`. On abort, and on a send that still fails after its one retry: `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at` when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period week`.
+After the run finishes (at baseline: no email, `complete` with no --email-sent-at; on a regression email: with it): `... block-sentinel.py complete --task ora-site-seo-crawl-weekly --block main --run-id <run_id> --period week --email-sent-at <ISO8601> (only when an email was sent: a regression or a STEP 1/2 tooling-failure email)`. On abort, and on a send that still fails after its one retry: `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at` when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period week`.
 
 STEP 0. Compute the run date and weekday once: `date '+%A %Y-%m-%d'`. Reuse it everywhere.
 
