@@ -64,16 +64,17 @@ checkout in EXACTLY the state it was found in. Never a partial/stuck state.
       dirty-tree-triage's mtime settlement and breaking live sessions' Read->Edit.
       If the overlap cannot be computed: ERROR, never a blind merge.
   4. Attempt `git merge --no-commit --no-ff origin/<canonical>`.
-       - Exit 0 (no conflicts): the expected merge tree was precomputed with
-         `merge-tree --write-tree` before the merge; `git write-tree` of the
-         index is compared to it. Equal -> `git commit --no-edit`. Different ->
-         another session staged work in the window: the expected tree is
-         committed directly (`commit-tree` with both parents, `update-ref` CAS
-         on the old HEAD, `merge --quit`), the index/worktree are NEVER touched,
-         foreign staged content stays staged (foreign_staged_preserved). Any
-         failure there -> ERROR with the merge left in progress, no abort/reset.
-         Expected tree unavailable (git < 2.38) -> bare commit, recheck=unavailable. MERGED, report the new sha and how many
-         commits it closed. If the COMMIT fails (routinely: a concurrent
+       - Exit 0 (no conflicts): HEAD is pinned once (head0) and the expected
+         merge tree E is precomputed on it with `merge-tree --write-tree`.
+         When E is known it is ALWAYS committed directly (`commit-tree` with
+         parents head0 + target, `update-ref` CAS on head0, `merge --quit`);
+         the index/worktree are NEVER touched, so anything another session
+         staged stays staged (foreign_staged_preserved) and is never swept in,
+         and a HEAD that moved makes the CAS fail. Any failure there -> ERROR
+         with the merge left in progress, no abort/reset. E unavailable
+         (merge-tree failed or reported conflicts) -> legacy bare
+         `git commit --no-edit`, recheck=unavailable. MERGED, report the new sha and how many
+         commits it closed. If the legacy COMMIT fails (routinely: a concurrent
          session's git command holding .git/index.lock at that instant), the
          merge is ABORTED and verified gone before returning ERROR. Before
          this fix it returned ERROR with MERGE_HEAD still present, leaving the
@@ -282,11 +283,12 @@ def incoming_paths(repo, target_sha):
     return [n for n in names.split("\0") if n] + conflicted
 
 
-def expected_merge_tree(repo, target_sha):
-    """Tree sha of the CLEAN merge of target_sha into HEAD, computed without touching the
-    index or working tree, or None (merge-tree --write-tree absent, i.e. git < 2.38, or
-    the merge is not clean). Must be called while HEAD is still the pre-merge HEAD."""
-    rc, out, _ = _git(["merge-tree", "--write-tree", "HEAD", target_sha], repo)
+def expected_merge_tree(repo, head0, target_sha):
+    """Tree sha of the CLEAN merge of target_sha into the pinned commit head0 (never the
+    symbolic HEAD), computed without touching the index or working tree, or None
+    (merge-tree failed, e.g. git < 2.38, or it reported conflicts the real merge may
+    still resolve)."""
+    rc, out, _ = _git(["merge-tree", "--write-tree", head0, target_sha], repo)
     if rc != 0 or not out:
         return None
     first = out.splitlines()[0].strip()
@@ -295,29 +297,28 @@ def expected_merge_tree(repo, target_sha):
     return None
 
 
-def _commit_expected_tree(repo, exp, target_sha, target, msg):
-    """Index holds extra staged work beyond the expected merge tree `exp`. Commit `exp`
-    as the merge (parents HEAD, target_sha) WITHOUT touching the index or worktree, then
-    forget the merge state. Returns (sorted foreign paths, None) or (None, error). Never
-    aborts or resets: on any failure the merge is left in progress with the foreign
-    content still staged."""
-    rc, old, _ = _git(["rev-parse", "HEAD"], repo)
-    if rc != 0 or not old:
-        return None, "rev-parse HEAD failed"
+def _commit_expected_tree(repo, head0, exp, target_sha, msg):
+    """Commit the expected merge tree `exp` as the merge (parents head0 + target_sha)
+    WITHOUT touching the index or worktree, CAS-advance HEAD from head0, then forget the
+    merge state. Used for every clean merge, so a foreign stage can never be swept in
+    and no abort is ever needed. Returns (sorted foreign staged paths, None) or
+    (None, error). Never aborts or resets."""
     rc, names, _ = _git(["diff", "--cached", "--name-only", "--no-renames", "-z", exp], repo)
     if rc != 0:
-        return None, "diff against expected tree failed"
+        return None, "diff against expected tree failed; merge left in progress"
     foreign = sorted(p for p in names.split("\0") if p)
-    rc, new, _ = _git(["commit-tree", exp, "-p", old, "-p", target_sha, "-m", msg], repo)
+    rc, new, _ = _git(["commit-tree", exp, "-p", head0, "-p", target_sha, "-m", msg], repo)
     if rc != 0 or not new:
-        return None, "commit-tree failed"
-    rc, _, _ = _git(["update-ref", "-m", "merge-forward", "HEAD", new, old], repo)
+        return None, "commit-tree failed; merge left in progress"
+    rc, _, _ = _git(["update-ref", "-m", "merge-forward", "HEAD", new, head0], repo)
     if rc != 0:
-        return None, "update-ref failed (HEAD moved or locked)"
+        return None, ("update-ref failed (HEAD moved off %s or ref locked); HEAD NOT advanced, "
+                      "merge left in progress" % head0[:12])
     rc, _, _ = _git(["merge", "--quit"], repo)
     state, _ = ref_state(repo, "MERGE_HEAD")
     if rc != 0 or state != "absent":
-        return None, "merge --quit failed (HEAD already advanced to %s)" % new[:12]
+        return None, ("HEAD WAS advanced to %s but merge --quit failed: MERGE_HEAD/merge state "
+                      "remains" % new[:12])
     return foreign, None
 
 
@@ -540,44 +541,39 @@ def sync(repo=None, canonical=None):
     # in between would otherwise make this run's own MERGE_HEAD fail the check below,
     # stranding its own conflict as "someone else's".
     merge_msg = "Merge remote-tracking branch '%s'" % target
-    exp = expected_merge_tree(repo, target_sha)  # M51: HEAD is still pre-merge here
+    # M51: pin HEAD ONCE; E is computed on, and the commit parented to / CAS'd against, this
+    # sha -- never a re-read HEAD (a session committing in between would be reverted).
+    rch, head0, _ = _git(["rev-parse", "HEAD"], repo)
+    exp = expected_merge_tree(repo, head0, target_sha) if rch == 0 and head0 else None
     rc, merge_out, merge_err = _git(
         ["merge", "--no-commit", "--no-ff", "-m", merge_msg, target_sha], repo)
     if rc == 0:
-        # M51: another session may have staged work since step 0. A bare `git commit` would
-        # sweep it into the merge commit. The index is NEVER modified here: if it differs
-        # from the expected merge tree, commit the expected tree directly and leave the
-        # foreign staged content staged.
+        # Another session may have staged work since step 0 or during the merge. The index
+        # is NEVER modified and a bare `git commit` is never used when E is known: E is
+        # always committed directly; foreign staged content stays staged.
         foreign = None
-        preserve_failed = None
         if exp is None:
             out["recheck"] = "unavailable"
-        else:
-            rcw, idx_tree, _ = _git(["write-tree"], repo)
-            if rcw != 0 or not idx_tree:
-                preserve_failed = "write-tree failed"
-            elif idx_tree.strip() != exp:
-                foreign, preserve_failed = _commit_expected_tree(repo, exp, target_sha, target, merge_msg)
-        if preserve_failed:
-            out["status"] = "ERROR"
-            out["merge_aborted"] = False
-            out["detail"] = ("staged-set recheck failed (%s); merge LEFT IN PROGRESS, nothing "
-                             "aborted or reset, any foreign staged content preserved -- a human "
-                             "must resolve" % preserve_failed)
-            return out
-        rc2, commit_err = 0, ""
-        if foreign is None:
             rc2, _, commit_err = _git(["commit", "--no-edit"], repo)
-        if rc2 != 0:
-            # Never return with the merge still staged: a mid-merge shared
-            # checkout blocks every other session's pathspec commits.
-            aborted = abort_merge(repo)
-            out["status"] = "ERROR"
-            out["merge_aborted"] = aborted
-            out["detail"] = "merge staged cleanly but commit failed (%s): %s" % (
-                "merge aborted, tree restored" if aborted else _mid_merge_note(repo),
-                commit_err[:400])
-            return out
+            if rc2 != 0:
+                # Never return with the merge still staged: a mid-merge shared
+                # checkout blocks every other session's pathspec commits.
+                aborted = abort_merge(repo)
+                out["status"] = "ERROR"
+                out["merge_aborted"] = aborted
+                out["detail"] = "merge staged cleanly but commit failed (%s): %s" % (
+                    "merge aborted, tree restored" if aborted else _mid_merge_note(repo),
+                    commit_err[:400])
+                return out
+        else:
+            foreign, err = _commit_expected_tree(repo, head0, exp, target_sha, merge_msg)
+            if err:
+                out["status"] = "ERROR"
+                out["merge_aborted"] = False
+                out["detail"] = ("staged-set safe commit failed (%s); nothing aborted or reset, "
+                                 "any foreign staged content preserved -- a human must "
+                                 "resolve" % err)
+                return out
         rc3, sha, _ = _git(["rev-parse", "HEAD"], repo)
         out["status"] = "MERGED"
         out["commits_merged"] = behind
@@ -588,7 +584,8 @@ def sync(repo=None, canonical=None):
             out["detail"] += "; PRESERVED %d foreign staged path(s) (still staged): %s" % (
                 len(foreign), ", ".join(foreign[:10]))
         if out.get("recheck") == "unavailable":
-            out["detail"] += "; staged-set recheck unavailable (merge-tree --write-tree), bare commit used"
+            out["detail"] += ("; expected merge tree unavailable (merge-tree failed or reported "
+                              "conflicts), bare commit used")
         return out
 
     raw = "\n".join(s for s in (merge_err, merge_out) if s)
@@ -696,7 +693,8 @@ def main(argv=None):
     if args.json:
         print(json.dumps(r, indent=2))
     else:
-        print("%s %s (%s): %s" % (r["status"], r["repo"], r["canonical"], r["detail"]))
+        extra = "".join(" [%s=%s]" % (k, r[k]) for k in ("foreign_staged_preserved", "recheck") if r.get(k))
+        print("%s %s (%s): %s%s" % (r["status"], r["repo"], r["canonical"], r["detail"], extra))
     return 0 if r["status"] in ("MERGED", "NOOP_CLEAN") else (2 if r["status"] == "ERROR" else 1)
 
 
