@@ -168,6 +168,30 @@ if ($WhatIf -and $env:ORA_SEND_LOG_PATH) { $LogPath = $env:ORA_SEND_LOG_PATH }
 # cases exited 3 because the live Outlook was momentarily not Responding). Honored ONLY under
 # -WhatIf, like ORA_SEND_LOG_PATH above.
 $SkipPreflight = [bool]($WhatIf -and $env:ORA_SEND_SKIP_PREFLIGHT -eq '1')
+# R-05 test seams for the send job, honored ONLY under -WhatIf (every line that reads one
+# names $WhatIf; maintenance/_tests/test_send_contract_suite.py S1 enforces that).
+# ORA_SEND_SIMULATE swaps the Outlook COM objects inside the send job for a scripted fake,
+# as a comma list with one step per attempt. It is the only way to exercise the
+# timeout/marker classification without Outlook.
+$SimRaw     = if ($WhatIf) { [string]$env:ORA_SEND_SIMULATE } else { "" }
+$TimeoutRaw = if ($WhatIf) { [string]$env:ORA_SEND_TIMEOUT_SEC } else { "" }
+$DelayRaw   = if ($WhatIf) { [string]$env:ORA_SEND_RETRY_DELAY_SEC } else { "" }
+$SimPlan = @($SimRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$Simulating = $SimPlan.Count -gt 0
+# A simulated run writes a REAL-looking '[OK] Sent' line. It must never land in the canonical
+# log, where every '[OK] Sent' reader (and the contract-mode dedup) would count it as a delivery.
+# Checked before any Write-Log call, so this refusal cannot touch the canonical log either.
+if ($Simulating -and -not $env:ORA_SEND_LOG_PATH) {
+    [Console]::Error.WriteLine("ORA_SEND_SIMULATE requires ORA_SEND_LOG_PATH: a simulated send must never write the canonical send log")
+    exit 1
+}
+$TimeoutSec = 15
+$RetryDelaySec = 5
+if ($Simulating) {
+    $n = 0
+    if ([int]::TryParse($TimeoutRaw, [ref]$n) -and $n -ge 1 -and $n -le 15) { $TimeoutSec = $n }
+    if ([int]::TryParse($DelayRaw, [ref]$n) -and $n -ge 0 -and $n -le 10) { $RetryDelaySec = $n }
+}
 
 # Cap chosen to fail FAST with a readable message rather than let Exchange reject
 # the message with an opaque COM HRESULT (typical Exchange ceiling is 25 MB).
@@ -200,6 +224,51 @@ function Get-SubjectHash {
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try { $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text)) } finally { $sha.Dispose() }
     return (-join ($bytes | ForEach-Object { $_.ToString('x2') })).Substring(0, 16)
+}
+# HRESULT 0x80010001 as the Int32 COM reports (Windows PowerShell 5.1 hex literals are Int32).
+$RPC_E_CALL_REJECTED = [Convert]::ToInt32('80010001', 16)
+
+function Read-SendPhases {
+    # The send job appends one phase per line. A file we cannot read is NOT "not invoked":
+    # it maps to 'unreadable', which Resolve-SendOutcome treats as state unknown.
+    param([string]$Path)
+    # A marker file we cannot read is never evidence that Send() was not invoked. That covers a
+    # sharing violation, access denied, an I/O error AND a missing file: the job writes 'started'
+    # before anything else, so a missing file means the write failed or the file was removed
+    # (temp cleaner, antivirus), and either way the state is not provable. All map to
+    # 'unreadable', which Resolve-SendOutcome turns into exit 6.
+    try { return @([System.IO.File]::ReadAllLines($Path) | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+    catch { return @('unreadable') }
+}
+
+function Resolve-SendOutcome {
+    # Pure: maps (timed out?, job errored?, phase markers) to the R-05 exit contract.
+    # 0 sent; 2 failed BEFORE Send() (or RPC_E_CALL_REJECTED, refused by the callee);
+    # 4 timed out BEFORE Send(); 6 Send() was invoked and not confirmed. The ORDER below is
+    # load-bearing: 'returned' wins, then any evidence that Send() ran makes the state
+    # unknown, and only with no such evidence is a timeout or failure retry-safe.
+    param([bool]$TimedOut, [bool]$JobErrored, [string[]]$Phases)
+    $p = @($Phases)
+    if (-not $TimedOut -and -not $JobErrored) { return @{ Code = 0; State = 'SENT' } }
+    if ($p -contains 'returned') { return @{ Code = 0; State = 'SENT' } }
+    $atSend = @($p | Where-Object { $_ -like 'error-at-send *' })
+    if ($atSend.Count -gt 0) {
+        if ($atSend[0] -eq 'error-at-send 0x80010001') {
+            return @{ Code = 2; State = 'REJECTED'; HResult = $RPC_E_CALL_REJECTED }
+        }
+        return @{ Code = 6; State = 'UNKNOWN'; Reason = "Send() threw ($($atSend[0]))" }
+    }
+    if (($p -contains 'invoked') -or ($p -contains 'unreadable')) {
+        $why = if ($p -contains 'unreadable') { 'the send-phase marker file was missing or unreadable' }
+               elseif ($TimedOut) { 'COM call exceeded the timeout after Send() was invoked' }
+               else { 'the send job ended after Send() was invoked without confirming it returned' }
+        return @{ Code = 6; State = 'UNKNOWN'; Reason = $why }
+    }
+    if ($TimedOut) { return @{ Code = 4; State = 'NOT_INVOKED' } }
+    $before = @($p | Where-Object { $_ -like 'error-before 0x*' })
+    $hr = $null
+    if ($before.Count -gt 0) { $hr = [Convert]::ToInt32($before[0].Substring(15), 16) }
+    return @{ Code = 2; State = 'NOT_INVOKED'; HResult = $hr }
 }
 # --- end R-05 helpers ---
 
@@ -254,12 +323,23 @@ $DedupKey = if ($ContractMode) { "$DedupTaskId/$DedupPeriodKey/$SubjectHash" } e
 # Appended to every send-path log line so the dedup and quarantine scans can find them.
 $TagLog = " shash=$SubjectHash" + $(if ($ContractMode) { " key=$DedupKey" } else { "" })
 
+$ValidSim = @('ok', 'slow-ok', 'hang-before-send', 'throw-before-send', 'hang-after-send', 'throw-at-send', 'reject-at-send', 'returned-late', 'block-before-send', 'invoke-during-stop')
+if ($SimRaw.Trim() -and -not $Simulating) {
+    Write-Log "ERROR" "ORA_SEND_SIMULATE '$SimRaw' contains no simulation step"
+    exit 1
+}
+foreach ($s in $SimPlan) {
+    if ($ValidSim -notcontains $s) {
+        Write-Log "ERROR" "ORA_SEND_SIMULATE step '$s' is not one of: $($ValidSim -join ', ')"
+        exit 1
+    }
+}
+
 # --- Validate attachments (2026-09-18) ---
 # Fail-closed by design: a message whose body promises an attachment must never
 # go out without it, so ANY bad entry rejects the whole send before Outlook is
 # touched. Same exit code as the other argument faults above (1) -- the exit
-# contract (0 sent / 1 bad args / 2 COM / 3 wizard / 4 timeout / 5 outbound
-# refused) is deliberately NOT widened, so no existing caller changes meaning.
+# contract (see .NOTES) is deliberately NOT widened by this check: it reuses exit 1.
 $ResolvedAttachments = @()
 if ($PSBoundParameters.ContainsKey('Attachment')) {
     # Under `powershell -File` -- how the whole fleet invokes this script -- a
@@ -460,44 +540,99 @@ if ($externalRecipients.Count -gt 0) {
     Write-Log "OK" "OUTBOUND-CHECK: authorized external recipient(s) [$($externalRecipients -join ', ')] -- $($checkOutput -join ' | ')"
 }
 
-if ($WhatIf) {
+if ($WhatIf -and -not $Simulating) {
     $ccLog = if ($Cc) { $Cc } else { "none" }
     Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`"$AttachLog$TagLog (no Outlook COM call made)"
     exit 0
 }
 
 function Invoke-OutlookSend {
-    # $AttachJoined is a '|'-delimited string of ALREADY-RESOLVED absolute paths,
-    # not an array: an array passed as the last -ArgumentList element is splatted
-    # into the remaining job parameters by PowerShell, which would silently drop
-    # or misbind attachments. '|' cannot occur in a Windows filename.
-    param($To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined)
+    # $AttachJoined is a '|'-delimited string of ALREADY-RESOLVED absolute paths, not an
+    # array: an array passed as an -ArgumentList element is splatted into the remaining job
+    # parameters by PowerShell, which would silently drop or misbind attachments.
+    #
+    # R-05 (M19): the job appends phase markers to a per-call status file. 'invoked' is on
+    # disk BEFORE Send() is called (AppendAllText has written and closed the file), so a
+    # Send() that ran can never be reported as "not invoked". Stop-Job cannot recall a
+    # message Outlook already accepted. That is why a post-invoke timeout is exit 6, never 4.
+    param($To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined, [string]$SimMode, [int]$TimeoutSec)
+    $statusPath = Join-Path ([System.IO.Path]::GetTempPath()) ("ora-send-" + [guid]::NewGuid().ToString("N") + ".status")
     $job = Start-Job -ScriptBlock {
-        param($To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined)
-        $Outlook = New-Object -ComObject Outlook.Application
-        $Mail = $Outlook.CreateItem(0)  # 0 = olMailItem
-        $Mail.To = $To
-        if ($Cc) { $Mail.CC = $Cc }
-        $Mail.Subject = $Subject
-        if ($BodyFormat -eq "html") { $Mail.HTMLBody = $Body } else { $Mail.Body = $Body }
-        if ($AttachJoined) {
-            foreach ($p in ($AttachJoined -split '\|')) {
-                if ($p) { $Mail.Attachments.Add($p) | Out-Null }
+        param($To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined, $StatusPath, $SimMode)
+        $ErrorActionPreference = "Stop"
+        function Mark([string]$Phase) { [System.IO.File]::AppendAllText($StatusPath, $Phase + "`n") }
+        Mark 'started'
+        try {
+            if ($SimMode) {
+                if ($SimMode -eq 'hang-before-send') { Start-Sleep -Seconds 60 }
+                # Uninterruptible: Stop-Job cannot cut a .NET call short. The stop lands once the call
+                # returns, at the next pipeline boundary (Mark 'invoked'), so Send() is never reached.
+                if ($SimMode -eq 'block-before-send') { [System.Threading.Thread]::Sleep(8000) }
+                # The ordering guard: ONE uninterruptible call that blocks past the timeout and then
+                # writes 'invoked' itself (what a blocked COM call that proceeds into Send() looks
+                # like to the parent). Only a marker read made AFTER Stop-Job returns can see it.
+                if ($SimMode -eq 'invoke-during-stop') {
+                    Add-Type -TypeDefinition 'public static class OraSimHelper { public static void SleepThenAppend(string path, int ms, string text) { System.Threading.Thread.Sleep(ms); System.IO.File.AppendAllText(path, text); } }'
+                    [OraSimHelper]::SleepThenAppend($StatusPath, 8000, "invoked`n")
+                }
+                if ($SimMode -eq 'throw-before-send') { throw (New-Object System.Runtime.InteropServices.COMException('simulated COM failure before Send()', -2147467259)) }
+                if ($SimMode -eq 'slow-ok') { Start-Sleep -Seconds 2 }
+            } else {
+                $Outlook = New-Object -ComObject Outlook.Application
+                $Mail = $Outlook.CreateItem(0)  # 0 = olMailItem
+                $Mail.To = $To
+                if ($Cc) { $Mail.CC = $Cc }
+                $Mail.Subject = $Subject
+                if ($BodyFormat -eq "html") { $Mail.HTMLBody = $Body } else { $Mail.Body = $Body }
+                if ($AttachJoined) {
+                    foreach ($p in ($AttachJoined -split '\|')) {
+                        if ($p) { $Mail.Attachments.Add($p) | Out-Null }
+                    }
+                }
             }
+        } catch {
+            Mark ('error-before 0x{0:X8}' -f $_.Exception.HResult)
+            throw
         }
-        $Mail.Send()
-    } -ArgumentList $To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined
+        Mark 'invoked'
+        try {
+            if ($SimMode) {
+                if ($SimMode -eq 'hang-after-send') { Start-Sleep -Seconds 60 }
+                if ($SimMode -eq 'throw-at-send') { throw (New-Object System.Runtime.InteropServices.COMException('simulated failure inside Send()', -2147467259)) }
+                if ($SimMode -eq 'reject-at-send') { throw (New-Object System.Runtime.InteropServices.COMException('simulated RPC_E_CALL_REJECTED', -2147418111)) }
+            } else {
+                $Mail.Send()
+            }
+        } catch {
+            Mark ('error-at-send 0x{0:X8}' -f $_.Exception.HResult)
+            throw
+        }
+        Mark 'returned'
+        if ($SimMode -eq 'returned-late') { Start-Sleep -Seconds 60 }
+    } -ArgumentList $To, $Cc, $Subject, $Body, $BodyFormat, $AttachJoined, $statusPath, $SimMode
 
-    if (Wait-Job $job -Timeout 15) {
-        $errVar = $null
+    $completed = [bool](Wait-Job $job -Timeout $TimeoutSec)
+    $errVar = $null
+    $jobEnded = $false
+    if ($completed) {
         Receive-Job $job -ErrorVariable errVar -ErrorAction SilentlyContinue | Out-Null
-        Remove-Job $job -Force
-        if ($errVar) { return @{ Success = $false; Error = $errVar[0] } }
-        return @{ Success = $true }
+        # A job that ended Failed/Stopped/Broken without surfacing an error record is still not a send.
+        $jobEnded = ($job.State -ne 'Completed')
     } else {
-        Stop-Job $job; Remove-Job $job -Force
-        return @{ Success = $false; Timeout = $true }
+        Stop-Job $job
+        # Stop-Job does not interrupt a blocked .NET/COM call: it waits for that call to return
+        # (up to PowerShell's own ~120s cap), then the stop lands at the next pipeline boundary.
+        # A blocked call that proceeds into Send() therefore leaves 'invoked' on disk, so the
+        # markers are read only AFTER Stop-Job returns (case L25 guards this ordering), plus one
+        # second of grace for any append in flight.
+        Start-Sleep -Milliseconds 1000
     }
+    Remove-Job $job -Force
+    $phases = Read-SendPhases -Path $statusPath
+    Remove-Item -LiteralPath $statusPath -Force -ErrorAction SilentlyContinue
+    $outcome = Resolve-SendOutcome -TimedOut (-not $completed) -JobErrored ([bool]$errVar -or $jobEnded) -Phases $phases
+    if ($errVar) { $outcome.Message = $errVar[0].Exception.Message }
+    return $outcome
 }
 
 # --- COLD-START GUARD (2026-09-23) -- root cause of the recurring "TIMEOUT: COM call exceeded 15s".
@@ -532,39 +667,46 @@ function Ensure-OutlookReady {
     Write-Log "WARN" "OUTLOOK-COLDSTART: COM not ready after 120s; attempting send anyway"
 }
 
-Ensure-OutlookReady
-$attempt = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined
-
-if ($attempt.Timeout) {
-    Write-Log "ERROR" "TIMEOUT: COM call exceeded 15s (Outlook likely blocked)"
-    exit 4
-}
-elseif (-not $attempt.Success) {
-    $hresult = $attempt.Error.Exception.HResult
-    if ($hresult -eq 0x80010001) {
-        # RPC_E_CALL_REJECTED - one bounded retry after a short cooldown
-        Start-Sleep -Seconds 5
-        $retry = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined
-        if ($retry.Timeout) {
-            Write-Log "ERROR" "TIMEOUT on retry: COM call exceeded 15s (Outlook likely blocked)"
-            exit 4
-        } elseif (-not $retry.Success) {
-            Write-Log "ERROR" ("Outlook COM failed (retry exhausted, HRESULT=0x{0:X8}): {1}" -f $retry.Error.Exception.HResult, $retry.Error.Exception.Message)
-            exit 2
-        } else {
-            $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
-            $ccLog = if ($Cc) { $Cc } else { "none" }
-            Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog (after 1 retry)"
-            exit 0
-        }
-    } else {
-        Write-Log "ERROR" ("Outlook COM failed (HRESULT=0x{0:X8}): {1}" -f $hresult, $attempt.Error.Exception.Message)
-        exit 2
+if (-not $Simulating) { Ensure-OutlookReady }
+$attemptNo = 0
+while ($true) {
+    $attemptNo++
+    $sim = $null
+    if ($Simulating) { $sim = if ($SimPlan.Count -ge $attemptNo) { $SimPlan[$attemptNo - 1] } else { $SimPlan[-1] } }
+    if ($WhatIf -and -not $sim) {
+        # Belt and braces: -WhatIf must never reach a real COM send.
+        Write-Log "ERROR" "internal: -WhatIf reached the send loop without a simulation step -- refusing"
+        exit 1
     }
-}
-else {
-    $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
-    $ccLog = if ($Cc) { $Cc } else { "none" }
-    Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog"
-    exit 0
+    $o = Invoke-OutlookSend -To $To -Cc $Cc -Subject $Subject -Body $Body -BodyFormat $BodyFormat -AttachJoined $AttachJoined -SimMode $sim -TimeoutSec $TimeoutSec
+    $retryNote = if ($attemptNo -gt 1) { " (after 1 retry)" } else { "" }
+    if ($o.Code -eq 0) {
+        $bytes = [System.Text.Encoding]::UTF8.GetByteCount($Body)
+        $ccLog = if ($Cc) { $Cc } else { "none" }
+        Write-Log "OK" "Sent to=$To cc=$ccLog subject=`"$Subject`" bytes=$bytes format=$BodyFormat$AttachLog$retryNote$TagLog"
+        exit 0
+    }
+    if ($o.Code -eq 6) {
+        Write-Log "ERROR" "SEND-STATE-UNKNOWN: $($o.Reason) -- the message MAY have been sent. Do NOT retry (exit 6); check Outlook Sent Items by hand.$TagLog"
+        exit 6
+    }
+    if ($o.Code -eq 4) {
+        $msg = "TIMEOUT: COM call exceeded ${TimeoutSec}s before Send() was invoked (Outlook likely blocked; retry-safe)"
+    } elseif ($o.State -eq 'REJECTED') {
+        # Send() WAS called and Outlook refused it (RPC_E_CALL_REJECTED): retry-safe because the
+        # callee rejected the call, not because it was never made. Say so in the audit trail.
+        $msg = "Outlook COM failed (HRESULT=0x80010001): $($o.Message) -- Send() was rejected by Outlook (RPC_E_CALL_REJECTED; retry-safe)"
+    } else {
+        $hrText = if ($null -ne $o.HResult) { "0x{0:X8}" -f $o.HResult } else { "n/a" }
+        $msg = "Outlook COM failed (HRESULT=$hrText): $($o.Message) -- Send() was not invoked (retry-safe)"
+    }
+    $retryable = ($attemptNo -eq 1) -and (($o.Code -eq 2) -and ($o.HResult -eq $RPC_E_CALL_REJECTED))
+    if ($retryable) {
+        Write-Log "WARN" "$msg -- retrying once in ${RetryDelaySec}s$TagLog"
+        Start-Sleep -Seconds $RetryDelaySec
+        continue
+    }
+    $exhausted = if ($attemptNo -gt 1) { " (retry exhausted)" } else { "" }
+    Write-Log "ERROR" "$msg$exhausted$TagLog"
+    exit $o.Code
 }
