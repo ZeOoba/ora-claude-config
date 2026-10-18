@@ -22,15 +22,18 @@
  * `netlify`/`ntl` command, also resolved via PATH to the same global shims) go through
  * authorization from any directory that has NO project-local netlify install of its own.
  *
- * KNOWN RESIDUALS (not closed here; independent review 2026-10-18): (a) inside a project that
- * has its own node_modules/.bin, that LOCAL shim wins over this global one, so it is only as
- * strong as that project's own guard (website-canonical's patcher covers `netlify*` but not
- * `ntl*`, and its guard needs website-canonical PR #175's token-level parse); (b) invoking
+ * KNOWN RESIDUALS (not closed here; independent reviews 2026-10-18): (a) a bare `netlify`/`ntl`
+ * resolved via PATH hits this global shim even inside a project (conservative: the guard still
+ * runs), but a project's own node_modules/.bin shims bypass it, so they are only as strong as
+ * that project's own guard (the site repo's patcher covers `netlify*` but not `ntl*`, and its
+ * guard needs the site repo PR #175's token-level parse); (b) invoking
  * <globalroot>/netlify-cli/bin/run.js directly, fresh-download runners (`npx -p`, `pnpm dlx`,
- * `bunx`), NODE_OPTIONS=--require injection, and direct REST calls with NETLIFY_AUTH_TOKEN
- * never reach this file; (c) CLI subcommands that change live state (`sites:delete`,
- * `env:set/unset/clone`, `blobs:set/delete`) are not gated, although their `netlify api`
- * equivalents are; (d) CLAUDE_CODE_SESSION_ID is self-asserted (see override_tokens.py).
+ * `bunx`), and direct REST calls with NETLIFY_AUTH_TOKEN never reach this file, and
+ * NODE_OPTIONS=--require injection subverts this file's own process; (c) CLI subcommands that
+ * change live state are not gated, e.g. `sites:delete`, `env:set/unset/clone/import`,
+ * `blobs:set/delete`, `agents:create`, `init`/`link`, `create`/`claim` (examples, not a complete
+ * list), although their `netlify api` equivalents are; (d) CLAUDE_CODE_SESSION_ID is
+ * self-asserted (see override_tokens.py).
  *
  * Same detection and authorization logic as the repo-local guard (deliberately duplicated
  * rather than shared as a Node module, since these are two independent entry points with
@@ -172,8 +175,10 @@ function main() {
   }
 
   try {
-    // -I (isolated): ignores PYTHON* env vars (PYTHONPATH/PYTHONSTARTUP/...) and the
-    // script directory / user site, so the validator cannot be redirected by environment.
+    // -I (isolated): ignores PYTHON* env vars (PYTHONPATH/PYTHONSTARTUP/...), the implicit
+    // script directory and the user site, so the validator cannot be redirected by environment.
+    // (The validator itself re-adds its own fixed lib directory to sys.path at import time;
+    // that is harmless -- it is the validator's own directory, not caller-controlled.)
     // ORA_OVERRIDE_SESSIONS_DIR is a test seam in override_tokens.py: drop it so a caller
     // cannot point the validator at a self-minted token directory.
     // Windows env names are case-insensitive, so match the key case-insensitively.
