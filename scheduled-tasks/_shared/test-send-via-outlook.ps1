@@ -34,11 +34,16 @@ Set-Content -Path $FileB -Value "hello" -Encoding UTF8
 New-Item -ItemType Directory -Path $SubDir -Force | Out-Null
 $Big = Join-Path $Work "big.bin"
 [System.IO.File]::WriteAllBytes($Big, (New-Object byte[] (21MB)))
+# Whole-suite guard (R-05): no case may write to the CANONICAL audit log. On 2026-10-18
+# the two -Command null probes below appended "Attachment path is null/empty" to it.
+$CanonicalLog = "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt"
+$CanonicalSizeAtStart = if (Test-Path $CanonicalLog) { (Get-Item $CanonicalLog).Length } else { 0 }
 
 function Invoke-Case {
     param([string[]]$ScriptArgs)
     if (Test-Path $LogFile) { Remove-Item $LogFile -Force }
     $env:ORA_SEND_LOG_PATH = $LogFile
+    $env:ORA_SEND_SKIP_PREFLIGHT = "1"
     $all = @("-NoProfile", "-File", $Target) + $ScriptArgs + @("-WhatIf")
     # stderr merged so an ERROR line is visible in $out as well as the log.
     # EAP must drop to Continue for this call: with the script-scoped "Stop", a
@@ -58,6 +63,7 @@ function Invoke-Case {
     } finally { $ErrorActionPreference = $prevEAP }
     $log = if (Test-Path $LogFile) { Get-Content $LogFile -Raw } else { "" }
     Remove-Item Env:\ORA_SEND_LOG_PATH -ErrorAction SilentlyContinue
+    Remove-Item Env:\ORA_SEND_SKIP_PREFLIGHT -ErrorAction SilentlyContinue
     return @{ Code = $code; Log = $log; Out = $out }
 }
 
@@ -176,7 +182,7 @@ Assert-Case -Name "a directory is not a valid attachment" `
 # different layer than the in-script check. Assert on THAT mechanism, not on a
 # log line this path structurally cannot produce.
 $emptyBinder = Invoke-Case -ScriptArgs @("-To", $To, "-Subject", "Empty", "-Body", "x", "-Attachment", "")
-if ($emptyBinder.Code -eq 1 -and $emptyBinder.Out -like "*Missing an argument for parameter*Attachment*" -and $emptyBinder.Log -eq "") {
+if ($emptyBinder.Code -eq 1 -and $emptyBinder.Out -like "*MissingArgument,*" -and $emptyBinder.Out -like "*parameter 'Attachment'*" -and $emptyBinder.Log -eq "") {
     Write-Host "  PASS  a bare empty-string attachment is rejected by PowerShell's own binder (exit 1, no send)"; $script:Pass++
 } else {
     Write-Host "  FAIL  bare empty-string attachment -- expected a binder MissingArgument error with no log line, got exit $($emptyBinder.Code)"
@@ -207,6 +213,9 @@ Assert-Case -Name "an empty element from '||' hits the in-script empty check" `
 # Continue for the call, same as Invoke-Case does.
 $prevEAP2 = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
+# The -Command probes below inherit this; without it they wrote to the CANONICAL log.
+$env:ORA_SEND_LOG_PATH = $LogFile
+$env:ORA_SEND_SKIP_PREFLIGHT = "1"
 
 $nullCmd = "& '$Target' -To '$To' -Subject 'Null' -Body 'x' -Attachment `$null -WhatIf | Out-Null; exit `$LASTEXITCODE"
 & powershell -NoProfile -Command $nullCmd 2>&1 | Out-Null
@@ -229,6 +238,8 @@ if ($LASTEXITCODE -eq 1) {
 }
 
 $ErrorActionPreference = $prevEAP2
+Remove-Item Env:\ORA_SEND_LOG_PATH -ErrorAction SilentlyContinue
+Remove-Item Env:\ORA_SEND_SKIP_PREFLIGHT -ErrorAction SilentlyContinue
 
 Assert-Case -Name "oversize attachment exits 1 with a size message" `
     -ScriptArgs @("-To", $To, "-Subject", "Big", "-Body", "x", "-Attachment", $Big) `
@@ -258,6 +269,13 @@ if ($sizeBefore -eq $sizeAfter) {
     Write-Host "  PASS  -WhatIf + ORA_SEND_LOG_PATH did not touch the canonical send log"; $script:Pass++
 } else {
     Write-Host "  FAIL  canonical send log grew during a redirected dry run"; $script:Fail++
+}
+
+$CanonicalSizeAtEnd = if (Test-Path $CanonicalLog) { (Get-Item $CanonicalLog).Length } else { 0 }
+if ($CanonicalSizeAtEnd -eq $CanonicalSizeAtStart) {
+    Write-Host "  PASS  the whole suite left the canonical send log untouched"; $script:Pass++
+} else {
+    Write-Host "  FAIL  the canonical send log grew by $($CanonicalSizeAtEnd - $CanonicalSizeAtStart) bytes during the suite"; $script:Fail++
 }
 
 Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue

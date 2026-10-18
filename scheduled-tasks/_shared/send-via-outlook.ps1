@@ -149,6 +149,12 @@ param(
     [ValidateSet("html","text")][string]$BodyFormat = "html",
     [string]$Cc,
     [string[]]$Attachment,
+    # R-05 send contract (ratified 2026-10-18). Names deliberately avoid the -T and -C
+    # prefixes: ora-autonomy-gate.py Gate 1 relies on $To being the ONLY parameter that
+    # starts with T (so `-T x@y` cannot slip past it), and -C must keep meaning -Cc.
+    [string]$DedupTaskId,
+    [string]$DedupPeriodKey,
+    [switch]$ForceResend,
     [switch]$WhatIf
 )
 
@@ -157,6 +163,11 @@ $LogPath = "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt"
 # Tests redirect the audit log, but ONLY under -WhatIf. A real send always writes
 # the canonical log, so this can never be used to blind the audit trail.
 if ($WhatIf -and $env:ORA_SEND_LOG_PATH) { $LogPath = $env:ORA_SEND_LOG_PATH }
+# R-05 test seam: skip the Outlook-process preflight so a dry run does not depend on whether
+# a real Outlook happens to be open, busy or on a wizard (2026-10-18: two existing dry-run
+# cases exited 3 because the live Outlook was momentarily not Responding). Honored ONLY under
+# -WhatIf, like ORA_SEND_LOG_PATH above.
+$SkipPreflight = [bool]($WhatIf -and $env:ORA_SEND_SKIP_PREFLIGHT -eq '1')
 
 # Cap chosen to fail FAST with a readable message rather than let Exchange reject
 # the message with an opaque COM HRESULT (typical Exchange ceiling is 25 MB).
@@ -172,6 +183,19 @@ function Write-Log {
     # line runs (bug found 2026-07-07: every ERROR path was silently collapsing to exit code 1).
     if ($Level -eq "ERROR") { Write-Error $Message -ErrorAction Continue } else { Write-Output $line }
 }
+
+# --- R-05 helpers (send contract, ratified 2026-10-18) ---
+function Get-SubjectHash {
+    # First 16 hex chars of SHA-256 over the UTF-8 bytes of the subject EXACTLY as bound.
+    # Exact, not normalized: the hash exists to recognize a RETRY of the same call, which
+    # re-sends the identical string. Same-day runs whose subjects differ (live counts in the
+    # tail) are block-sentinel.py's job, not this one.
+    param([string]$Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Text)) } finally { $sha.Dispose() }
+    return (-join ($bytes | ForEach-Object { $_.ToString('x2') })).Substring(0, 16)
+}
+# --- end R-05 helpers ---
 
 # --- Validate body source ---
 if (-not $Body -and -not $BodyFile) {
@@ -190,6 +214,27 @@ if ($BodyFile) {
     }
     $Body = Get-Content -Path $BodyFile -Raw -Encoding UTF8
 }
+
+# --- Dedup key (R-05). Both flags or neither: a half-keyed call is a caller bug. ---
+if ([bool]$DedupTaskId -ne [bool]$DedupPeriodKey) {
+    Write-Log "ERROR" "-DedupTaskId and -DedupPeriodKey must be passed together (both or neither)"
+    exit 1
+}
+$ContractMode = [bool]$DedupTaskId
+if ($ContractMode) {
+    if ($DedupTaskId -cnotmatch '^[a-z0-9][a-z0-9-]{1,63}$') {
+        Write-Log "ERROR" "-DedupTaskId '$DedupTaskId' is not a task id (lowercase letters, digits and '-')"
+        exit 1
+    }
+    if ($DedupPeriodKey -cnotmatch '^[0-9A-Za-z][0-9A-Za-z_-]{3,39}$') {
+        Write-Log "ERROR" "-DedupPeriodKey '$DedupPeriodKey' is not a period key (e.g. 2026-10-18, 2026-W42, 2026-10, 2026-10-18-slot-12)"
+        exit 1
+    }
+}
+$SubjectHash = Get-SubjectHash $Subject
+$DedupKey = if ($ContractMode) { "$DedupTaskId/$DedupPeriodKey/$SubjectHash" } else { $null }
+# Appended to every send-path log line so the dedup and quarantine scans can find them.
+$TagLog = " shash=$SubjectHash" + $(if ($ContractMode) { " key=$DedupKey" } else { "" })
 
 # --- Validate attachments (2026-09-18) ---
 # Fail-closed by design: a message whose body promises an attachment must never
@@ -277,7 +322,7 @@ $AttachLog = if ($ResolvedAttachments.Count -gt 0) {
 # hung ~2min/call on the blocked COM job instead of fast-failing exit 3 all day -- added
 # "New Profile" plus a generic "Profile" catch-all so any future profile-wizard variant
 # fast-fails too, since Outlook's normal window title never contains that word.)
-$existingOutlook = Get-Process OUTLOOK -ErrorAction SilentlyContinue
+$existingOutlook = if ($SkipPreflight) { $null } else { Get-Process OUTLOOK -ErrorAction SilentlyContinue }
 if ($existingOutlook) {
     foreach ($proc in $existingOutlook) {
         if ((-not $proc.Responding) -or ($proc.MainWindowTitle -match 'Welcome to Microsoft Outlook|Choose Profile|New Profile|Profile')) {
@@ -399,7 +444,7 @@ if ($externalRecipients.Count -gt 0) {
 
 if ($WhatIf) {
     $ccLog = if ($Cc) { $Cc } else { "none" }
-    Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`"$AttachLog (no Outlook COM call made)"
+    Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`"$AttachLog$TagLog (no Outlook COM call made)"
     exit 0
 }
 
