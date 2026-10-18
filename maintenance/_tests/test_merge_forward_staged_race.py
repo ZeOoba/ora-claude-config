@@ -59,7 +59,7 @@ def make_pair(td):
 
 
 
-def install_race(stage_fn=None, fail_first=None, mergetree_rc=None, before_merge=None, before_cmd=None):
+def install_race(stage_fn=None, fail_first=None, mergetree_rc=None, before_merge=None, before_cmd=None, after_cmd=None):
     """Wrap cmf._git: right after the merge call succeeds, a 'foreign session' stages work.
     fail_first: git subcommand name (e.g. 'commit-tree') whose call is made to fail.
     mergetree_rc: make `merge-tree --write-tree` return this rc with no output."""
@@ -75,6 +75,8 @@ def install_race(stage_fn=None, fail_first=None, mergetree_rc=None, before_merge
         if before_cmd and args[:1] == [before_cmd[0]]:
             before_cmd[1](repo)
         res = REAL_GIT(args, repo)
+        if after_cmd and args[:len(after_cmd[0])] == after_cmd[0]:
+            after_cmd[1](repo)
         if stage_fn and args[:2] == ["merge", "--no-commit"] and res[0] == 0:
             stage_fn(repo)
         return res
@@ -255,7 +257,7 @@ r, calls = sync_with(local, stage_fn=stage_new, before_cmd=("update-ref", move_h
 check("L: ERROR", r["status"] == "ERROR", repr(r))
 check("L: MERGE_HEAD present, merge_aborted False",
       cmf.ref_state(local, "MERGE_HEAD")[0] == "present" and r.get("merge_aborted") is False, repr(r))
-check("L: detail says merge left in progress", "left in progress" in r.get("detail", ""), repr(r))
+check("L: detail says merge left in progress", "left in progress" in r.get("detail", "").lower(), repr(r))
 check("L: HEAD unchanged by us (other session's commit)",
       run(local, "rev-parse", "HEAD").stdout.strip() == moved.get("sha"))
 check("L: foreign staged file intact", "foreign.txt" in run(local, "diff", "--cached", "--name-only").stdout)
@@ -265,6 +267,10 @@ td.cleanup()
 # N1-N3. another session aborts/resets the merge inside our window: never commit the merge tree
 def foreign_abort(repo):
     run(repo, "merge", "--abort")
+def foreign_abort_tolerant(repo):
+    REAL_GIT(["merge", "--abort"], repo)
+
+
 def foreign_reset(repo):
     run(repo, "reset", "-q", "--merge")
 for tag, kw in (("N1 abort right after merge", dict(stage_fn=foreign_abort)),
@@ -287,6 +293,56 @@ r, _ = sync_with(local)
 check("N5: MERGED", r["status"] == "MERGED", repr(r))
 check("N5: dirty file intact", "DIRTY work of session Z" in disk(local, "shared.txt"))
 check("N5: stash empty", run(local, "stash", "list").stdout.strip() == "", run(local, "stash", "list").stdout)
+td.cleanup()
+
+# N6-N8. foreign abort / reset --merge / stash injected immediately before update-ref:
+# HEAD advances but the index holds a staged revert -> must be ERROR, never MERGED.
+def foreign_stash(repo):
+    REAL_GIT(["stash", "push", "-q", "-u"], repo)
+for tag, fn in (("N6 abort before update-ref", foreign_abort),
+                ("N7 reset --merge before update-ref", foreign_reset),
+                ("N8 stash push before update-ref", foreign_stash)):
+    td, local, origin = fresh()
+    r, calls = sync_with(local, before_cmd=("update-ref", fn))
+    check(tag + ": ERROR not MERGED", r["status"] == "ERROR", repr(r))
+    check(tag + ": detail says MERGE_HEAD vanished", "MERGE_HEAD vanished" in r.get("detail", ""), repr(r))
+    check(tag + ": merge_aborted False, not left in progress",
+          r.get("merge_aborted") is False and r.get("merge_left_in_progress") is False, repr(r))
+    check(tag + ": we issued no abort/reset",
+          not any(c[:1] == ["reset"] or c[:2] == ["merge", "--abort"] for c in calls), repr(calls))
+    td.cleanup()
+
+# N6b/N7b. state flag on the earlier ERROR paths
+td, local, origin = fresh()
+r, _ = sync_with(local, stage_fn=stage_new, fail_first="commit-tree")
+check("flag: commit-tree failure reports merge_left_in_progress True",
+      r.get("merge_left_in_progress") is True and "left in progress" in r.get("detail", "").lower(), repr(r))
+td.cleanup()
+
+# R8. abort AFTER merge --quit has run is harmless: still MERGED, tree clean
+td, local, origin = fresh()
+r, _ = sync_with(local, after_cmd=(["merge", "--quit"], foreign_abort_tolerant))
+check("R8: MERGED", r["status"] == "MERGED", repr(r))
+check("R8: tree clean", porcelain(local) == "", porcelain(local))
+td.cleanup()
+
+# N9. foreign abort then a DIFFERENT merge started before commit-tree: MERGE_HEAD present
+# but not ours (kills the "present"-only mutant of the target-sha comparison).
+td, local, origin = fresh()
+run(origin, "checkout", "-q", "-b", "side")
+commit(origin, "side.txt", "side" + chr(10))
+run(origin, "checkout", "-q", "main")
+run(local, "fetch", "-q", "origin", "side:refs/remotes/origin/side")
+side_sha = run(local, "rev-parse", "origin/side").stdout.strip()
+def swap_merge(repo):
+    run(repo, "merge", "--abort")
+    run(repo, "merge", "--no-commit", "--no-ff", "origin/side")
+head0 = run(local, "rev-parse", "HEAD").stdout.strip()
+r, _ = sync_with(local, before_cmd=("commit-tree", swap_merge))
+check("N9: ERROR", r["status"] == "ERROR", repr(r))
+check("N9: foreign MERGE_HEAD intact", cmf.ref_state(local, "MERGE_HEAD") == ("present", side_sha), repr(r))
+check("N9: HEAD not advanced", run(local, "rev-parse", "HEAD").stdout.strip() == head0)
+check("N9: left in progress flag", r.get("merge_left_in_progress") is True, repr(r))
 td.cleanup()
 
 # M. foreign stage lands just before commit-tree (after the foreign list was taken)

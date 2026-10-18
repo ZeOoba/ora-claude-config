@@ -312,24 +312,28 @@ def _commit_expected_tree(repo, head0, exp, target_sha, msg):
         return ref_state(repo, "MERGE_HEAD") == ("present", target_sha)
     changed = ("merge state changed by another session (MERGE_HEAD no longer ours); HEAD NOT "
                "advanced, nothing aborted or reset")
-    if not ours():
+    if not ours():  # early exit only; the load-bearing checks are the two below
         return None, None, changed
     rc, names, _ = _git(["diff", "--cached", "--name-only", "--no-renames", "-z", exp], repo)
     if rc != 0:
-        return None, None, "diff against expected tree failed; merge left in progress"
+        return None, None, "diff against expected tree failed"
     foreign = sorted(p for p in names.split("\0") if p)
     rc, new, _ = _git(["commit-tree", exp, "-p", head0, "-p", target_sha, "-m", msg], repo)
     if rc != 0 or not new:
-        return None, None, "commit-tree failed; merge left in progress"
+        return None, None, "commit-tree failed"
     if not ours():
         return None, None, changed
     rc, _, _ = _git(["update-ref", "-m", "merge-forward", "HEAD", new, head0], repo)
     if rc != 0:
         if ref_state(repo, "MERGE_HEAD")[0] == "present":
             return None, None, ("update-ref failed (HEAD moved off %s or ref locked); HEAD NOT "
-                                "advanced, merge left in progress" % head0[:12])
+                                "advanced" % head0[:12])
         return None, None, ("update-ref failed and another session concluded or aborted this "
                             "merge; verify HEAD/status")
+    if not ours():
+        return None, None, ("HEAD advanced to %s but MERGE_HEAD vanished (another session "
+                            "aborted/reset the merge): index may hold a staged revert of the "
+                            "incoming paths -- verify `git status` before any commit" % new[:12])
     rc, _, _ = _git(["merge", "--quit"], repo)
     state, _ = ref_state(repo, "MERGE_HEAD")
     if rc != 0 or state != "absent":
@@ -586,9 +590,12 @@ def sync(repo=None, canonical=None):
             if err:
                 out["status"] = "ERROR"
                 out["merge_aborted"] = False
-                out["detail"] = ("staged-set safe commit failed (%s); nothing aborted or reset, "
-                                 "any foreign staged content preserved -- a human must "
-                                 "resolve" % err)
+                left = ref_state(repo, "MERGE_HEAD")[0] != "absent"
+                out["merge_left_in_progress"] = left
+                out["detail"] = ("staged-set safe commit failed (%s); nothing aborted or reset by "
+                                 "us, foreign staged content untouched; %s" % (
+                                     err, "merge LEFT IN PROGRESS -- a human must resolve"
+                                     if left else "no merge in progress now -- verify git status"))
                 return out
         if exp is None:
             rc3, new_sha, _ = _git(["rev-parse", "HEAD"], repo)
