@@ -1,6 +1,6 @@
 ---
 name: branch-catchup
-description: Bring a long-lived branch up to date with origin/main safely when the checkout is shared and dirty. Use when Gabriel says "merge main into <branch>", "the branch is N commits behind main", "sync the feature branch", "resolve the conflicts after main moved", or when ora-checkout-merge-forward reports BLOCKED_CONFLICT or BLOCKED_DIRTY_OVERLAP. Worktree-isolated; resolves each conflict by which side is the reviewed superset; verifies before pushing. Code surface only. NOT for landing your own small change (isolated-commit) and NOT for a routine clean merge-forward (the daily corrector handles that).
+description: Bring a long-lived branch up to date with origin/main safely when the checkout is shared and dirty. Use when Gabriel says "merge main into [branch]", "the branch is N commits behind main", "sync the feature branch", "resolve the conflicts after main moved", or when ora-checkout-merge-forward reports BLOCKED_CONFLICT or BLOCKED_DIRTY_OVERLAP. Worktree-isolated; resolves each conflict by which side is the reviewed superset; verifies before pushing. Code surface only. NOT for landing your own small change (isolated-commit) and NOT for a routine clean merge-forward (the daily corrector handles that).
 license: ORA Internal
 ---
 
