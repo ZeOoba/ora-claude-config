@@ -205,9 +205,17 @@ function Write-Log {
     # is actually sent is never touched. Without this, a newline in a field writes a second
     # record that a later reader (dedup key=, status) would trust.
     $Message = $Message -replace '[\x00-\x1F\x7F\x85\u2028\u2029]', '?'
-    $ts = Get-Date -Format "yyyy-MM-ddTHH:mm:sszzz"
+    # InvariantCulture: the quarantine scan parses this stamp, and a non-Gregorian host culture
+    # (th-TH, ar-SA) would otherwise write a year the scan reads as ancient.
+    $ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture)
     $line = "$ts [$Level] $Message"
-    try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 } catch {}
+    # Add-Content opens the log write-shared only, so ANY concurrent reader (the quarantine scan,
+    # a health-guard tail) can make it throw a sharing violation for a few milliseconds. A swallowed
+    # error would silently drop the record (a SEND-STATE-UNKNOWN line is the quarantine's only
+    # evidence), so retry briefly before giving up.
+    for ($w = 1; $w -le 10; $w++) {
+        try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 -ErrorAction Stop; break } catch { if ($w -lt 10) { Start-Sleep -Milliseconds ([Math]::Min(20 * $w, 100)) } }
+    }
     # -ErrorAction Continue overrides the script-scoped $ErrorActionPreference="Stop" for this
     # call only; without it, Write-Error terminates the script before the caller's `exit N`
     # line runs (bug found 2026-07-07: every ERROR path was silently collapsing to exit code 1).
@@ -269,6 +277,94 @@ function Resolve-SendOutcome {
     $hr = $null
     if ($before.Count -gt 0) { $hr = [Convert]::ToInt32($before[0].Substring(15), 16) }
     return @{ Code = 2; State = 'NOT_INVOKED'; HResult = $hr }
+}
+
+$QuarantineMinutes = 60
+
+function ConvertTo-RecipientKey {
+    # Canonical form of a To value for quarantine comparison: control characters become '?' exactly
+    # as Write-Log does (so the logged and the live value compare equal), then the address list
+    # is split on ; and ,, trimmed, lower-cased, sorted and joined. Order, spacing and case of
+    # the same recipients therefore do not defeat the quarantine.
+    param([string]$Text)
+    $t = [string]$Text -replace '[\x00-\x1F\x7F\x85\u2028\u2029]', '?'
+    $parts = @($t -split '[;,]' | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Sort-Object)
+    return ($parts -join ';')
+}
+
+function Read-LogLinesShared {
+    # Reads the send-log WITHOUT blocking other writers: FileShare ReadWrite+Delete, so a
+    # concurrent Add-Content (whose errors Write-Log swallows) is never lost to our read. A
+    # sharing violation from a writer mid-append is retried briefly before it is called unreadable.
+    param([string]$Path)
+    for ($try = 1; $try -le 4; $try++) {
+        $fs = $null; $sr = $null
+        try {
+            $fs = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete))
+            $sr = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8, $true)
+            $all = New-Object System.Collections.Generic.List[string]
+            while ($null -ne ($l = $sr.ReadLine())) { $all.Add($l) }
+            return ,($all.ToArray())
+        }
+        catch {
+            if (-not ($_.Exception -is [System.IO.IOException] -or $_.Exception.InnerException -is [System.IO.IOException])) { throw }
+            # New-Object wraps the real exception (MethodInvocationException), so look inside it too.
+            $ex = if ($_.Exception.InnerException) { $_.Exception.InnerException } else { $_.Exception }
+            if ($ex -is [System.IO.FileNotFoundException] -or $ex -is [System.IO.DirectoryNotFoundException]) { throw }
+            if ($try -eq 4) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+        finally {
+            if ($sr) { $sr.Dispose() } elseif ($fs) { $fs.Dispose() }
+        }
+    }
+}
+
+function Get-QuarantineState {
+    # Is there a recent SEND-STATE-UNKNOWN line for THIS subject hash (and recipient)?
+    # Returns @{ State = 'NONE' | 'QUARANTINED' | 'UNREADABLE'; Stamp = <line timestamp or $null> }.
+    # FAIL CLOSED: a log that exists but cannot be read is UNREADABLE (the caller refuses the
+    # send); only a log that does not exist at all means "no history". Log lines are untrusted
+    # text, so a line counts only when its WHOLE grammar matches what this script writes:
+    #   <stamp> [ERROR] SEND-STATE-UNKNOWN: <reason> [to=<recipient>] shash=<hash>[ key=<k>]
+    # The match is on the 16-hex hash at the END of the line and the recipient, never on free
+    # text, and uses string operations (no regex over the whole line) so an oversized line
+    # costs linear time. The window is absolute time (UTC), so DST and offsets cannot skew it.
+    param([string]$Path, [string]$Hash, [string]$Recipient, [int]$Minutes)
+    $none = @{ State = 'NONE'; Stamp = $null }
+    if ($Hash -cnotmatch '\A[0-9a-f]{16}\z') { return $none }
+    try { $lines = Read-LogLinesShared -Path $Path }
+    catch [System.IO.FileNotFoundException] { return $none }
+    catch [System.IO.DirectoryNotFoundException] { return $none }
+    catch { return @{ State = 'UNREADABLE'; Stamp = $null } }
+    $marker = ' [ERROR] SEND-STATE-UNKNOWN: '
+    $tag = " shash=$Hash"
+    $now = [datetimeoffset]::UtcNow
+    for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+        $ln = $lines[$i]
+        $mi = $ln.IndexOf($marker, [System.StringComparison]::Ordinal)
+        if ($mi -lt 1 -or $mi -gt 40) { continue }
+        $stamp = $ln.Substring(0, $mi)
+        if ($stamp.IndexOf(' ') -ge 0) { continue }
+        $ti = $ln.LastIndexOf($tag, [System.StringComparison]::Ordinal)
+        if ($ti -lt $mi + $marker.Length) { continue }
+        $rest = $ln.Substring($ti)
+        if ($rest.Length -gt 200 -or $rest -cnotmatch ('\A shash=' + $Hash + '( key=[0-9a-z-]+/[0-9A-Za-z_-]+/' + $Hash + ')?\z')) { continue }
+        $mid = $ln.Substring($mi + $marker.Length, $ti - ($mi + $marker.Length))
+        $ri = $mid.IndexOf(' to=', [System.StringComparison]::Ordinal)
+        if ($ri -ge 0) {
+            if ((ConvertTo-RecipientKey $mid.Substring($ri + 4)) -ne (ConvertTo-RecipientKey $Recipient)) { continue }
+        }
+        $ts = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParseExact($stamp, [string[]]@('yyyy-MM-ddTHH:mm:sszzz', 'yyyy-MM-ddTHH:mm:ssK', 'yyyy-MM-ddTHH:mm:ss.FFFFFFFK'), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$ts)) {
+            # A line that matches the whole grammar but whose age cannot be established: fail closed.
+            return @{ State = 'QUARANTINED'; Stamp = $stamp }
+        }
+        $age = ($now - $ts).TotalMinutes
+        # A stamp up to a day ahead is clock skew (still recent); further ahead is implausible.
+        if ($age -lt $Minutes -and $age -gt -1440) { return @{ State = 'QUARANTINED'; Stamp = $stamp } }
+    }
+    return $none
 }
 # --- end R-05 helpers ---
 
@@ -667,6 +763,25 @@ function Ensure-OutlookReady {
     Write-Log "WARN" "OUTLOOK-COLDSTART: COM not ready after 120s; attempting send anyway"
 }
 
+# --- R-05 legacy quarantine. A caller WITHOUT a dedup key may still carry the old "retry once
+# on any non-zero exit" text. For 60 minutes after a SEND-STATE-UNKNOWN, refuse an identical
+# subject to the same recipient so that retry cannot double-send. Keyed callers get the stronger
+# per-period dedup inside the send loop instead. An unreadable send-log fails CLOSED.
+if ($ForceResend) {
+    Write-Log "WARN" "FORCE-RESEND: dedup and quarantine bypassed by -ForceResend (human-directed re-run only; a scheduled spec must never pass it)$TagLog"
+}
+if (-not $ContractMode -and -not $ForceResend) {
+    $qs = Get-QuarantineState -Path $LogPath -Hash $SubjectHash -Recipient $To -Minutes $QuarantineMinutes
+    if ($qs.State -eq 'UNREADABLE') {
+        Write-Log "ERROR" "QUARANTINE: the send-log could not be read, so a prior SEND-STATE-UNKNOWN for this subject cannot be ruled out -- refusing (exit 6). Check Outlook Sent Items by hand.$TagLog"
+        exit 6
+    }
+    if ($qs.State -eq 'QUARANTINED') {
+        Write-Log "ERROR" "QUARANTINE: an identical subject to this recipient ended SEND-STATE-UNKNOWN at $($qs.Stamp) (within $QuarantineMinutes min) -- refusing (exit 6) so a retry cannot double-send. Check Outlook Sent Items by hand.$TagLog"
+        exit 6
+    }
+}
+
 if (-not $Simulating) { Ensure-OutlookReady }
 $attemptNo = 0
 while ($true) {
@@ -687,7 +802,7 @@ while ($true) {
         exit 0
     }
     if ($o.Code -eq 6) {
-        Write-Log "ERROR" "SEND-STATE-UNKNOWN: $($o.Reason) -- the message MAY have been sent. Do NOT retry (exit 6); check Outlook Sent Items by hand.$TagLog"
+        Write-Log "ERROR" "SEND-STATE-UNKNOWN: $($o.Reason) -- the message MAY have been sent. Do NOT retry (exit 6); check Outlook Sent Items by hand. to=$To$TagLog"
         exit 6
     }
     if ($o.Code -eq 4) {

@@ -149,4 +149,163 @@ if ($haveClassifier) {
     Check "L23d unreadable markers can never resolve to exit 4" ((Code $true $false $locked) -eq 6)
 }
 
+Write-Host "`nR-05 legacy mode: 60-minute quarantine after a state-unknown send"
+$r = Invoke-Send -Log $log3 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L3 hang after"))
+Check "L8 a retry of the SAME subject after exit 6 is refused (exit 6 QUARANTINE), nothing sent" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:' -and $r.Log -notmatch '\[OK\] Sent') $r
+
+$r = Invoke-Send -Log $log3 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L9 different subject"))
+Check "L9 the quarantine is per subject: a different subject still sends" ($r.Code -eq 0 -and (Get-Count $r.Log '\[OK\] Sent to=') -eq 1) $r
+
+$h10 = Get-TestSubjectHash "L10 old unknown"
+$seed10 = @("$(Get-Stamp 61) [ERROR] SEND-STATE-UNKNOWN: seeded -- the message MAY have been sent. shash=$h10")
+$r = Invoke-Send -Log (New-TestLog -Seed $seed10) -Sim "ok" -ScriptArgs ($L + @("-Subject", "L10 old unknown"))
+Check "L10 the quarantine expires after 60 minutes" ($r.Code -eq 0 -and $r.Log -match '\[OK\] Sent to=') $r
+
+$h11 = Get-TestSubjectHash "L11 recent unknown"
+$seed11 = @("$(Get-Stamp 10) [ERROR] SEND-STATE-UNKNOWN: seeded -- the message MAY have been sent. shash=$h11")
+$log11 = New-TestLog -Seed $seed11
+$r = Invoke-Send -Log $log11 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L11 recent unknown"))
+Check "L11 a 10-minute-old unknown quarantines the subject" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:') $r
+
+$r = Invoke-Send -Log $log11 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L11 recent unknown", "-ForceResend"))
+Check "L30 -ForceResend bypasses the quarantine and logs FORCE-RESEND" ($r.Code -eq 0 -and $r.Log -match 'FORCE-RESEND:' -and $r.Log -match '\[OK\] Sent to=') $r
+
+# The exit-6 line written by the script itself must carry the recipient, so a legacy retry is
+# refused for the SAME recipient only.
+$logRcpt = New-TestLog
+$r = Invoke-Send -Log $logRcpt -Sim "hang-after-send" -ScriptArgs ($L + @("-Subject", "L31 per recipient"))
+Check "L31a exit 6 line records the recipient and subject hash" ($r.Code -eq 6 -and $r.Log -match "SEND-STATE-UNKNOWN: .* to=$([regex]::Escape($To)) shash=$(Get-TestSubjectHash 'L31 per recipient')\s*$") $r
+$r = Invoke-Send -Log $logRcpt -Sim "ok" -ScriptArgs @("-To", "other@oxfordra.net", "-Body", "x", "-Subject", "L31 per recipient")
+Check "L31b same subject to a DIFFERENT recipient is not quarantined" ($r.Code -eq 0 -and $r.Log -match '\[OK\] Sent to=other@oxfordra.net') $r
+$r = Invoke-Send -Log $logRcpt -Sim "ok" -ScriptArgs @("-To", $To.ToUpper(), "-Body", "x", "-Subject", "L31 per recipient")
+Check "L31c same subject, same recipient (case differs) IS quarantined" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:') $r
+
+# A keyed (contract) caller's exit-6 line ends with ' key=task/period/hash'; a legacy caller of the
+# same subject and recipient must still be refused.
+$h32 = Get-TestSubjectHash "L32 keyed unknown"
+$seed32 = @("$(Get-Stamp 5) [ERROR] SEND-STATE-UNKNOWN: seeded -- x. to=$To shash=$h32 key=ora-test-task/2026-10-18/$h32")
+$r = Invoke-Send -Log (New-TestLog -Seed $seed32) -Sim "ok" -ScriptArgs ($L + @("-Subject", "L32 keyed unknown"))
+Check "L32 a keyed-format unknown line also quarantines a legacy retry" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:') $r
+
+Write-Host "`nR-05 legacy mode: forged, partial and oversized log lines"
+$h33 = Get-TestSubjectHash "L33 forged"
+$ts5 = Get-Stamp 5
+$forged = @(
+    "$ts5 [INFO] note SEND-STATE-UNKNOWN: pretend shash=$h33",
+    "$ts5 [ERROR] SEND-STATE-UNKNOWN: shash=$h33 trailing text",
+    "$ts5 [ERROR] SEND-STATE-UNKNOWN: truncated line with no tag",
+    "garbage $ts5 [ERROR] SEND-STATE-UNKNOWN: junk shash=$h33",
+    "$ts5 [ERROR] SEND-STATE-UNKNOWN: upper shash=$($h33.ToUpper())",
+    "$ts5 [ERROR] SEND-STATE-UNKNOWN: short shash=$($h33.Substring(0,15))",
+    "$ts5 [OK] Sent to=$To subject=`"SEND-STATE-UNKNOWN: x shash=$h33`" shash=$h33"
+)
+$r = Invoke-Send -Log (New-TestLog -Seed $forged) -Sim "ok" -ScriptArgs ($L + @("-Subject", "L33 forged"))
+Check "L33 forged and partial lines (wrong level, wrong position, trailing text, wrong case, short hash, [OK] line) never quarantine" ($r.Code -eq 0 -and $r.Log -match '\[OK\] Sent to=') $r
+
+$h34 = Get-TestSubjectHash "L34 oversize"
+$seed34 = @(("$(Get-Stamp 5) [ERROR] SEND-STATE-UNKNOWN: " + ("A" * 2000000) + " shash=0000000000000000"), "$(Get-Stamp 4) [ERROR] SEND-STATE-UNKNOWN: real. to=$To shash=$h34")
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+$r = Invoke-Send -Log (New-TestLog -Seed $seed34) -Sim "ok" -ScriptArgs ($L + @("-Subject", "L34 oversize"))
+Check "L34 a 2 MB line in the log neither hangs the scan nor hides a genuine unknown line" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:' -and $sw.Elapsed.TotalSeconds -lt 60) $r
+
+$h35 = Get-TestSubjectHash "L35 bad stamp"
+$seed35 = @("2026-13-45T99:99:99+00:00 [ERROR] SEND-STATE-UNKNOWN: unparseable stamp. shash=$h35")
+$r = Invoke-Send -Log (New-TestLog -Seed $seed35) -Sim "ok" -ScriptArgs ($L + @("-Subject", "L35 bad stamp"))
+Check "L35 a matching unknown line with an unparseable timestamp fails CLOSED (quarantine)" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:') $r
+
+Write-Host "`nR-05 legacy mode: unreadable send-log fails closed"
+$lockLog = New-TestLog -Seed @("$(Get-Stamp 400) [INFO] seed")
+$fs = [System.IO.File]::Open($lockLog, 'Open', 'Read', 'None')
+try {
+    Set-Seams -Log $lockLog -Sim "ok"
+    $prevEAP = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $Target -To $To -Body x -Subject "L36 locked log" -WhatIf 2>&1 | Out-String -Width 4096
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prevEAP; Clear-Seams }
+} finally { $fs.Dispose() }
+Check "L36 a send-log that cannot be read refuses the send (exit 6), nothing sent" ($code -eq 6 -and $out -match 'QUARANTINE: .*could not be read' -and $out -notmatch '\[OK\] Sent') ([pscustomobject]@{ Code = $code; Log = $out })
+
+Write-Host "`nR-05 legacy mode: quarantine helper (in-process)"
+$haveQ = $haveClassifier -and ((Get-Content -LiteralPath $Target -Raw -Encoding UTF8) -match 'function Get-QuarantineState')
+Check "L37 Get-QuarantineState is present in the script helpers" $haveQ
+if ($haveQ) {
+    $hh = Get-TestSubjectHash "L38"
+    function QS { param([string[]]$Lines, [string]$Rcpt = $To, [int]$Min = 60)
+        $f = New-TestLog -Seed $Lines
+        return (Get-QuarantineState -Path $f -Hash $hh -Recipient $Rcpt -Minutes $Min).State
+    }
+    function Ln { param([string]$Stamp, [string]$Mid = "x.", [string]$Tail = "shash=$hh") return "$Stamp [ERROR] SEND-STATE-UNKNOWN: $Mid $Tail" }
+    $utcNow = [datetimeoffset]::UtcNow
+    function Fmt { param([datetimeoffset]$T, [string]$Off) $sg = if ($Off.StartsWith("-")) { -1 } else { 1 }; $ts = [timespan]::Parse($Off.Substring(1)); return $T.ToOffset([timespan]::FromTicks($sg * $ts.Ticks)).ToString("yyyy-MM-ddTHH:mm:sszzz") }
+    Check "L38a missing log file -> NONE (no history, nothing to quarantine)" ((Get-QuarantineState -Path (Join-Path $Work "nope.txt") -Hash $hh -Recipient $To -Minutes 60).State -eq 'NONE')
+    Check "L38b empty log -> NONE" ((QS @()) -eq 'NONE')
+    $dirPath = Join-Path $Work "adir"; New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
+    Check "L38c a path that cannot be read as a file (directory) -> UNREADABLE" ((Get-QuarantineState -Path $dirPath -Hash $hh -Recipient $To -Minutes 60).State -eq 'UNREADABLE')
+    $lf = New-TestLog -Seed @("x"); $lfs = [System.IO.File]::Open($lf, 'Open', 'Read', 'None')
+    try { $lst = (Get-QuarantineState -Path $lf -Hash $hh -Recipient $To -Minutes 60).State } finally { $lfs.Dispose() }
+    Check "L38d a locked log -> UNREADABLE" ($lst -eq 'UNREADABLE')
+    Check "L38e 59m50s old -> QUARANTINED, 60m10s old -> NONE (boundary)" ((QS @(Ln (Fmt $utcNow.AddSeconds(-3590) "+00:00"))) -eq 'QUARANTINED' -and (QS @(Ln (Fmt $utcNow.AddSeconds(-3610) "+00:00"))) -eq 'NONE')
+    # Offsets / DST: the window is absolute time. 30 min ago written with any offset quarantines;
+    # 90 min ago written with any offset (incl. a DST-style +/-1h shift) does not.
+    $okOff = $true
+    foreach ($off in @("-12:00", "-05:00", "-04:00", "+00:00", "+01:00", "+05:30", "+14:00")) {
+        if ((QS @(Ln (Fmt $utcNow.AddMinutes(-30) $off))) -ne 'QUARANTINED') { $okOff = $false; Write-Host "        30m ago at $off not quarantined" }
+        if ((QS @(Ln (Fmt $utcNow.AddMinutes(-90) $off))) -ne 'NONE') { $okOff = $false; Write-Host "        90m ago at $off wrongly quarantined" }
+        if ((QS @(Ln (Fmt $utcNow.AddMinutes(-59) $off))) -ne 'QUARANTINED') { $okOff = $false; Write-Host "        59m ago at $off not quarantined" }
+    }
+    Check "L38f the 60-minute window is absolute time across UTC offsets (no local-time or DST skew)" $okOff
+    Check "L38g a stamp a few minutes in the FUTURE (clock skew) quarantines" ((QS @(Ln (Fmt $utcNow.AddMinutes(5) "+00:00"))) -eq 'QUARANTINED')
+    Check "L38h a stamp days in the future (implausible/forged) is ignored" ((QS @(Ln (Fmt $utcNow.AddDays(3) "+00:00"))) -eq 'NONE')
+    Check "L38i a different recipient is not quarantined; the same recipient is" ((QS @(Ln (Fmt $utcNow.AddMinutes(-5) "+00:00") "msg. to=a@oxfordra.net") "b@oxfordra.net") -eq 'NONE' -and (QS @(Ln (Fmt $utcNow.AddMinutes(-5) "+00:00") "msg. to=a@oxfordra.net") "A@oxfordra.net") -eq 'QUARANTINED')
+    Check "L38j a To that itself contains ' to=' / 'shash=' text is compared whole (identical retry quarantined, a different recipient is not)" ((QS @(Ln (Fmt $utcNow.AddMinutes(-5) "+00:00") "msg. to=g@oxfordra.net to=a@oxfordra.net") "g@oxfordra.net to=a@oxfordra.net") -eq 'QUARANTINED' -and (QS @(Ln (Fmt $utcNow.AddMinutes(-5) "+00:00") "msg. to=g@oxfordra.net to=a@oxfordra.net") "a@oxfordra.net") -eq 'NONE')
+    Check "L38k an empty hash never matches" ((Get-QuarantineState -Path (New-TestLog -Seed @(Ln (Fmt $utcNow.AddMinutes(-5) "+00:00") "x." "shash=")) -Hash "" -Recipient $To -Minutes 60).State -eq 'NONE')
+}
+
+Write-Host "`nR-05 legacy mode: review fixes (control chars in To, share modes, recipient sets, stamp formats)"
+$logTab = New-TestLog
+$toTab = "$To`t"
+$r = Invoke-Send -Log $logTab -Sim "hang-after-send" -ScriptArgs @("-To", $toTab, "-Body", "x", "-Subject", "L39 tab in To")
+$r2 = Invoke-Send -Log $logTab -Sim "ok" -ScriptArgs @("-To", $toTab, "-Body", "x", "-Subject", "L39 tab in To")
+Check "L39 a To with a control character (logged as '?') is still quarantined on an identical retry" ($r.Code -eq 6 -and $r2.Code -eq 6 -and $r2.Log -match 'QUARANTINE:' -and $r2.Log -notmatch '\[OK\] Sent') $r2
+
+if ($haveQ) {
+    $srcAll0 = Get-Content -LiteralPath $Target -Raw -Encoding UTF8
+    $now2 = [datetimeoffset]::UtcNow
+    $hz = Get-TestSubjectHash "L40"
+    function QS2 { param([string[]]$Lines, [string]$Rcpt = $To)
+        return (Get-QuarantineState -Path (New-TestLog -Seed $Lines) -Hash $hz -Recipient $Rcpt -Minutes 60).State
+    }
+    function Ln2 { param([string]$Stamp, [string]$Mid = "x.") return "$Stamp [ERROR] SEND-STATE-UNKNOWN: $Mid shash=$hz" }
+    Check "L40a a writer holding the log open for append (share ReadWrite) does not make it UNREADABLE" $(
+        $f = New-TestLog -Seed @(Ln2 $now2.AddMinutes(-5).ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture))
+        $w = New-Object System.IO.FileStream($f, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+        try { (Get-QuarantineState -Path $f -Hash $hz -Recipient $To -Minutes 60).State -eq 'QUARANTINED' } finally { $w.Dispose() })
+    $wl = [regex]::Match($srcAll0, '(?s)function Write-Log [{].*?[\r\n]+[}]')
+    Invoke-Expression $wl.Value
+    $f40 = New-TestLog -Seed @("x")
+    $LogPath = $f40
+    $job = Start-Job -ScriptBlock { param($helpers, $f, $h)
+        Invoke-Expression $helpers
+        $end = (Get-Date).AddSeconds(5)
+        while ((Get-Date) -lt $end) { $null = Get-QuarantineState -Path $f -Hash $h -Recipient "ggoldberg@oxfordra.net" -Minutes 60; Start-Sleep -Milliseconds 60 }
+    } -ArgumentList $m.Value, $f40, $hz
+    $n40 = 0
+    while ($job.State -eq 'Running' -and $n40 -lt 300) { $null = Write-Log "INFO" "concurrent $n40"; $n40++ }
+    $null = Wait-Job $job -Timeout 30; Remove-Job $job -Force
+    $got = @(Get-Content -LiteralPath $f40 | Where-Object { $_ -like '*concurrent *' }).Count
+    Check "L40b Write-Log loses no line while a scan is reading continuously ($got of $n40 written)" ($wl.Success -and $got -eq $n40 -and $n40 -gt 20)
+    Check "L40c the scan itself leaves the log byte-identical" $(
+        $f = New-TestLog -Seed @(Ln2 $now2.AddMinutes(-5).ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture))
+        $before = (Get-FileHash -LiteralPath $f).Hash; $null = Get-QuarantineState -Path $f -Hash $hz -Recipient $To -Minutes 60
+        $before -eq (Get-FileHash -LiteralPath $f).Hash)
+    Check "L41a multi-address To: order and spacing of the same recipients still quarantine" ((QS2 @(Ln2 $now2.AddMinutes(-5).ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture) "m. to=b@oxfordra.net; a@oxfordra.net") "a@oxfordra.net;b@oxfordra.net") -eq 'QUARANTINED')
+    Check "L41b a different recipient SET is not quarantined" ((QS2 @(Ln2 $now2.AddMinutes(-5).ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture) "m. to=b@oxfordra.net; a@oxfordra.net") "a@oxfordra.net;c@oxfordra.net") -eq 'NONE')
+    Check "L42a a 'Z' stamp is parsed (recent -> quarantined, old -> not)" ((QS2 @(Ln2 $now2.AddMinutes(-5).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss") + "Z")) -eq 'QUARANTINED' -and (QS2 @(Ln2 $now2.AddDays(-3).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss") + "Z")) -eq 'NONE')
+    Check "L42b a fractional-seconds stamp is parsed (old -> not quarantined)" ((QS2 @(Ln2 $now2.AddDays(-3).ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", [System.Globalization.CultureInfo]::InvariantCulture))) -eq 'NONE')
+    $srcAll = Get-Content -LiteralPath $Target -Raw -Encoding UTF8
+    Check "L42c Write-Log stamps with InvariantCulture (no non-Gregorian year in the log)" ($srcAll -match 'ToString\("yyyy-MM-ddTHH:mm:sszzz", \[System\.Globalization\.CultureInfo\]::InvariantCulture\)')
+}
+
 Complete-Suite
