@@ -49,7 +49,7 @@ Render an interactive board via `mcp__visualize__show_widget` if available; othe
 
 **The sort is unchanged by the STEP 2b addition (2026-08-11).** Sorting by next-action date instead would bury a 33-day silent deal beneath a deal with a date next week, which inverts what this board is for — the ratified sort surfaces rot, and an imminent date is not rot. Surface imminent dated actions as a separate strip above the board (deals whose resolved date falls within ~10 days, ascending), not by reordering the board itself. Changing the ratified sort is a decision for Gabriel, not a side effect of adding a column.
 
-If you also send an email pointer, it MUST go via `send-via-outlook.ps1` (the sole COM send path) to `ggoldberg@oxfordra.net` ONLY — no cc, retry once on COM failure then flag loudly, never fall back to any other send mechanism.
+If you also send an email pointer, it MUST go via `send-via-outlook.ps1` (the sole COM send path) to `ggoldberg@oxfordra.net` ONLY — no cc, retry once on exit 2 or 4 then flag loudly; on exit 5 or 6 do NOT retry and never resend (send state unknown — the message MAY have gone out), flag loudly in the run summary and the failure record named above, never fall back to any other send mechanism.
 
 ## STEP 6 — Ops Hub posting (MANDATORY — added 2026-07-18, Plan 2 output-contract retrofit)
 

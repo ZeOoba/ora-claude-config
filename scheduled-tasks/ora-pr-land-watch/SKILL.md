@@ -74,7 +74,7 @@ Send through Outlook COM, the SOLE send path:
 powershell -File C:/Users/Owner/.claude/scheduled-tasks/_shared/send-via-outlook.ps1 -To ggoldberg@oxfordra.net -Subject "<subject>" -Body "<body>"
 ```
 - Send to ggoldberg@oxfordra.net ONLY, with no cc.
-- On a nonzero exit, retry once, then flag it loudly in the run summary. Do not halt.
+- On exit 2 or 4, retry once, then flag it loudly in the run summary. Do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 
 Subject: `[pr-land-watch] <N> ran · <M> need attention — <run date>`.
 

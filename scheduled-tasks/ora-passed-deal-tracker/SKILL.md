@@ -382,8 +382,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
 7. If trades detected: post block to Notion Ops Hub (`32b6ecd8-9e59-81f2-b329-df3fd0e25062` — always the FULL UUID; the 8-char prefix `32b6ecd8` also matches the retired "Cowork OS — Master Index" page `32b6ecd8-9e59-81a9-a566-e3ed1b1c9a9e`, which is where the 2026-10-13 sweep landed by mistake) and email summary via
    the SOLE send path `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`
-   (Composio removed 2026-06-11 — no fallback connector exists; on a non-zero COM exit
-   retry once, then flag, do not halt)
+   (Composio removed 2026-06-11 — no fallback connector exists; on COM exit 2 or 4
+   retry once, then flag, do not halt; on exit 5 or 6 do NOT retry and never resend (send state unknown — the message MAY have gone out), flag loudly in the run summary and the failure record named above)
    FROM ggoldberg@oxfordra.net TO ggoldberg@oxfordra.net ONLY (no egoldberg cc —
    routing canon: only the Daily Brief retains that exception),
    ending with a "QUESTIONS FOR GABRIEL" block for any unverifiable trades.

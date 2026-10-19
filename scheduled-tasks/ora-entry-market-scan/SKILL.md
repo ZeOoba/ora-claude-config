@@ -52,7 +52,7 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --t
 ```
 
 - `complete` after Step 5's digest lands (or after the Layer 2 probe reports ALREADY_SENT — see Step 5).
-- **`fail`, never `complete`, on any abort or non-zero exit** — a crash, an unusable doctrine-version check (the Step 2 stop-and-flag path), or a send path that failed both attempts. `fail` releases the claim immediately so a legitimate same-month re-run is possible; a `complete` on a broken run would lock the month out.
+- **`fail`, never `complete`, on any abort or non-zero exit** — a crash, an unusable doctrine-version check (the Step 2 stop-and-flag path), or a send path that failed. `fail` releases the claim immediately so a legitimate same-month re-run is possible; a `complete` on a broken run would lock the month out.
 - **Every early-exit path that occurs AFTER the claim must still close it.** A zero-qualifier run (no listings clear the buy-box in any of the 5 markets) and a Notion-MCP-unavailable run are both NORMAL completions under this task's own Invariants, not aborts: write the outputs summary / JSON fallback, send the digest stating the result explicitly per market, post the Ops Hub row where the Invariants call for one, then call `complete`. Do not exit silently leaving the claim open — it would hold the month for the full 45-minute TTL and then expire as if the run had crashed.
 - **Always pass `--period month` on every call** for this task. Omitting it addresses the day-keyed bucket instead and defeats the guard silently — no error, the claim just never persists across days.
 - **A scheduled fire must never pass `--force`.** That is a human-directed, in-session override only.
@@ -124,16 +124,16 @@ powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\
 - A scheduled fire never passes `-Force`.
 
 Send summary email via Outlook COM:
-- Script: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1
+- Script: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — pass `-DedupTaskId "ora-entry-market-scan" -DedupPeriodKey "<run date yyyy-MM-dd>"` (R-05 contract mode; <run date yyyy-MM-dd> = the date part of the run date computed once at run start)
 - To: ggoldberg@oxfordra.net ONLY (never cc egoldberg@, never ze@ addresses)
-- On COM failure: retry once, then log failure to Notion Ops Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062) — do NOT halt (that Ops Hub create follows the same look-for-it rule; never blind-retry a create — it produced a duplicate)
+- Exit handling (contract mode: the helper retries exit 2/4 once itself; the caller NEVER retries any exit code): on exit 1, 3 or 5 do NOT retry; on exit 6 (send state unknown — the message MAY have gone out) do NOT retry and never resend, flag it loudly in the run summary for a human to check Sent Items, per rules.md §2; on any failed send, log failure to Notion Ops Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062) — do NOT halt (that Ops Hub create follows the same look-for-it rule; never blind-retry a create — it produced a duplicate)
 - Subject: "ORA Entry Market Scan — [Month YYYY]: [N] New Candidates, [N] Watched, [N] Passed"
 - Body: RE-ENGAGE alerts first (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags) — for any GATE-FLAGGED Delmarva listing already carrying a `Gate Review` ratification, mark it "reviewed <date>" in the table instead of re-asking, then market summary, then data gaps / questions for Gabriel (genuinely new items only)
 
 ### Step 6 — CLOSE THE CLAIM (v1.8, 2026-09-19 — mandatory whenever STEP 0-B returned exit 0)
 Last action of the run, after the outputs summary is archived (see Invariants):
 - Digest sent, or Layer 2 reported ALREADY_SENT, or the run completed normally with zero qualifiers / a Notion fallback → `block-sentinel.py complete … --period month --email-sent-at <ISO8601>`.
-- Run aborted, crashed, or exited non-zero (incl. the Step 2 doctrine-version stop-and-flag, and a COM send that failed both attempts) → `block-sentinel.py fail … --period month --error "<what broke>"`. Never `complete` on a broken run.
+- Run aborted, crashed, or exited non-zero (incl. the Step 2 doctrine-version stop-and-flag, and a COM send that failed) → `block-sentinel.py fail … --period month --error "<what broke>"`. Never `complete` on a broken run.
 - Stood down at STEP 0-B with exit 10 or 11 → this run owns nothing; call NEITHER.
 
 ## Invariants
