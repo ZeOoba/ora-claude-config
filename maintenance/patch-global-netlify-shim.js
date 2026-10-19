@@ -202,4 +202,5 @@ if (require.main === module) {
   main();
 } else {
   module.exports = { shimContent }; // for hooks/tests/test-netlify-guard-global.py
+  module.exports = { shimContent };
 }
