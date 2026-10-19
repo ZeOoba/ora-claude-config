@@ -1158,8 +1158,8 @@ Email send path (per ORA standing rule — COM is PRIMARY):
     log the failure — do NOT halt. The automation-health-monitor producer-beacon check surfaces
     the silent send to Gabriel.
   Outlook only — never Gmail; never route to Composio (gone) or Rube (shut down).
-Subject: "ORA Deal-Sourcing Scan — [date] — [N] pursue / [P] pending price / [M] flagged". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
-Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the subject and everywhere else.
+Subject (FIXED per run day so the R-05 dedup key matches a same-day rerun; no counts or other run-dependent text): "ORA Deal-Sourcing Scan — [date]". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
+Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the body and everywhere else; the body opens with the counts line "[N] pursue / [P] pending price / [M] flagged" (counts never go in the subject).
 Body order:
   (1) PRICE CUT / RE-LIST flags first — the strongest motivation signals. Read them
       off the `Price Delta vs First Ask` formula; give prior ask, new ask, and %.

@@ -211,7 +211,7 @@
       "task_id": "ora-entry-market-scan",
       "fleet": "cc",
       "notion_output": "Deal Sourcing Log rows (9a6ae219…)",
-      "fallback_email_subject_pattern": "^(?=.*entry market scan)(?=.*{MONTH_YYYY})",
+      "fallback_email_subject_pattern": "^(?=.*entry market scan)(?=.*{DATE})",
       "must_not_match": "not run|coverage gap|skipped",
       "min_bytes": 4000,
       "min_bytes_basis": "observed full scans 8083 (09-02), 10430 (09-07)",
