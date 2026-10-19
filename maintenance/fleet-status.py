@@ -71,6 +71,12 @@ def discover_registries():
     return out
 
 
+def expected_fleet_gaps(found_labels, expected):
+    """Expected fleet labels with no discovered registry, in `expected` order."""
+    found = set(found_labels)
+    return [f for f in expected if f not in found]
+
+
 def load(path):
     d = json.load(open(path, encoding="utf-8"))
     tasks = d.get("scheduledTasks", []) or []
@@ -766,13 +772,20 @@ def main():
     ap.add_argument("--registry")
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--expect-fleets", default="cc,lams",
+                    help="fleets that must each have a readable registry (discovery mode only)")
+    ap.add_argument("--strict", action="store_true",
+                    help="exit 4 when the view is PARTIAL (a fleet registry is missing/unreadable)")
     args = ap.parse_args()
 
+    expected = [] if args.registry else [f.strip() for f in args.expect_fleets.split(",") if f.strip()]
     if args.registry:
         regs = [("forced", args.registry)]
     else:
         regs = discover_registries()
     regs = [(lbl, p) for lbl, p in regs if p and os.path.isfile(p)]
+    fleets_missing = expected_fleet_gaps([lbl for lbl, _ in regs], expected)
+    fleets_unreadable = []
     if not regs:
         sys.stderr.write("[ACTION] fleet-status: no live scheduled-task registry found. "
                          "Fleet health is UNKNOWN. Check the claude-code-sessions and "
@@ -785,6 +798,7 @@ def main():
             t, s = load(p)
         except Exception as e:
             sys.stderr.write("[ACTION] fleet-status: registry %s unreadable: %s\n" % (p, e))
+            fleets_unreadable.append(lbl)
             continue
         for x in t:
             x["_fleet"] = lbl
@@ -924,6 +938,10 @@ def main():
         verdict_flags.append("%d schedule collisions" % len(collisions))
     if cross_fleet_dups:
         verdict_flags.append("%d task(s) registered on BOTH fleets" % len(cross_fleet_dups))
+    partial_labels = sorted(set(fleets_missing) | set(fleets_unreadable))
+    if partial_labels:
+        verdict_flags.insert(0, "PARTIAL VIEW: fleet(s) %s registry missing/unreadable -- dual-fleet health UNKNOWN for them"
+                                % ", ".join(partial_labels))
     verdict = "OK" if not verdict_flags else "ATTENTION -- " + "; ".join(verdict_flags)
 
     generated_at_iso = datetime.datetime.now().isoformat(timespec="seconds")
@@ -941,6 +959,9 @@ def main():
             "eastern_offset_now": eastern_offset_now,
             "host_clock_shifted_from_eastern": host_clock_shifted,
             "registries": {lbl: p for lbl, p in regs},
+            "fleets_expected": expected,
+            "fleets_missing": fleets_missing,
+            "fleets_unreadable": fleets_unreadable,
             "per_fleet_enabled": {lbl: sum(1 for t in enabled if t.get("_fleet") == lbl)
                                   for lbl, _ in regs},
             "disabled_by_fleet": {lbl: sum(1 for t in disabled if t.get("_fleet") == lbl)
@@ -972,7 +993,7 @@ def main():
             "am_pileup_count": len(am_pileup),
             "verdict": verdict,
         }, indent=2))
-        sys.exit(0)
+        sys.exit(4 if (args.strict and partial_labels) else 0)
 
     print("ORA FLEET STATUS  (DUAL-FLEET: cc = claude-code-sessions/MCP · lams = local-agent-mode-sessions/Cowork)")
     print("generated_at: %s" % generated_at_iso)
@@ -1063,7 +1084,7 @@ def main():
     print("\n  VERDICT: %s" % verdict)
     if verdict != "OK":
         print("  !! %s snapshot at %s -- %s" % ("ATTENTION", generated_at_iso, STALENESS_NOTE))
-    sys.exit(0)
+    sys.exit(4 if (args.strict and partial_labels) else 0)
 
 
 if __name__ == "__main__":
