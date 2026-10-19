@@ -22,6 +22,17 @@
  * `netlify`/`ntl` command, also resolved via PATH to the same global shims) go through
  * authorization from ANY directory on the machine, not just from inside a project with its
  * own local guard.
+ * authorization from any directory that has NO project-local netlify install of its own.
+ *
+ * KNOWN RESIDUALS (not closed here; independent review 2026-10-18): (a) inside a project that
+ * has its own node_modules/.bin, that LOCAL shim wins over this global one, so it is only as
+ * strong as that project's own guard (website-canonical's patcher covers `netlify*` but not
+ * `ntl*`, and its guard needs website-canonical PR #175's token-level parse); (b) invoking
+ * <globalroot>/netlify-cli/bin/run.js directly, fresh-download runners (`npx -p`, `pnpm dlx`,
+ * `bunx`), NODE_OPTIONS=--require injection, and direct REST calls with NETLIFY_AUTH_TOKEN
+ * never reach this file; (c) CLI subcommands that change live state (`sites:delete`,
+ * `env:set/unset/clone`, `blobs:set/delete`) are not gated, although their `netlify api`
+ * equivalents are; (d) CLAUDE_CODE_SESSION_ID is self-asserted (see override_tokens.py).
  *
  * Same detection and authorization logic as the repo-local guard (deliberately duplicated
  * rather than shared as a Node module, since these are two independent entry points with
@@ -258,6 +269,17 @@ function main() {
     // cannot run inside the validator. Env is an ALLOWLIST (see validatorEnv).
     const output = execFileSync(PYTHON_EXE, ["-I", "-S", CHECK_SCRIPT, "--session", sessionId],
       { encoding: "utf8", env: validatorEnv() });
+    // -I (isolated): ignores PYTHON* env vars (PYTHONPATH/PYTHONSTARTUP/...) and the
+    // script directory / user site, so the validator cannot be redirected by environment.
+    // ORA_OVERRIDE_SESSIONS_DIR is a test seam in override_tokens.py: drop it so a caller
+    // cannot point the validator at a self-minted token directory.
+    // Windows env names are case-insensitive, so match the key case-insensitively.
+    const validatorEnv = {};
+    for (const k of Object.keys(process.env)) {
+      if (k.toUpperCase() !== "ORA_OVERRIDE_SESSIONS_DIR") validatorEnv[k] = process.env[k];
+    }
+    const output = execFileSync(PYTHON_EXE, ["-I", CHECK_SCRIPT, "--session", sessionId],
+      { encoding: "utf8", env: validatorEnv });
     log("authorized prod deploy for session " + sessionId + " -- " + output.trim());
   } catch (err) {
     const detail = (err.stderr && err.stderr.toString().trim()) || err.message;
@@ -272,4 +294,5 @@ if (require.main === module) {
   main();
 } else {
   module.exports = { isProdInvocation, preloadProblem, validatorEnv };
+  module.exports = { isProdInvocation };
 }
