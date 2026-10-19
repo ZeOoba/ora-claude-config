@@ -1,0 +1,5 @@
+{
+  "_doc": "R-06 scheduled-session allowlist for hooks/mcp-delete-guard.py. A row lets ONE scheduled task, matched by the scheduledTaskId in its Claude Desktop session record (never by self-asserted env), call ONE delete-shaped MCP tool (tool = suffix after the last '__') when every field in `match` is present in tool_input and fullmatches its regex (a list field: every element). Required: task_id, tool, match (non-empty), ratified ('YYYY-MM-DD Gabriel ...'), expires (YYYY-MM-DD, at most max_days after ratified), reason. An irreversible tool also needs irreversible_ack: true. Edits need Gabriel's ratification: this file is under hooks/, so config-write-guard requires an allow-config-write token in the live checkout. Empty on purpose: on 2026-10-19 no CC scheduled-task spec calls a delete-shaped MCP tool.",
+  "max_days": 90,
+  "entries": []
+}
