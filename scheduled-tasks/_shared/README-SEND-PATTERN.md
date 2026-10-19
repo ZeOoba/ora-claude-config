@@ -27,7 +27,14 @@ continuation and silently buffers the send until a stray blank line flushes it
    Add `-Cc "egoldberg@oxfordra.net"` ONLY for the Daily Brief (routing-canon
    exception). `-To` defaults to ggoldberg@oxfordra.net. Use `-DryRun` to validate
    the body build without sending. The wrapper prints `SENDEXIT=<code>` and exits
-   with it: 0 = sent OK, 1 = usage, 2 = Outlook COM failure.
+   with it: 0 = sent OK, 1 = usage, 2 = Outlook COM failure (historical; this wrapper is retired and
+   `send-via-outlook.ps1` does not print SENDEXIT -- read its exit code directly).
+
+   `send-via-outlook.ps1` exit codes (R-05 contract, 0-6): 0 = sent OK (or DEDUP-SKIP in contract
+   mode), 1 = usage error, 2 = Outlook COM failure before Send() or Send() rejected with
+   RPC_E_CALL_REJECTED (nothing sent), 3 = Outlook stuck on a startup wizard, 4 = timeout before
+   Send(), 5 = refused (external recipient or attachment + external), 6 = send state UNKNOWN (the
+   message MAY have gone out). Only 2 and 4 are ever retried; see step 3.
 
 3. On a non-zero exit, act on the code per memory `rules.md` section 2 (R-05 send contract,
    2026-10-18). In contract mode (`-DedupTaskId` + `-DedupPeriodKey`) never retry: the

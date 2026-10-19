@@ -308,4 +308,115 @@ if ($haveQ) {
     Check "L42c Write-Log stamps with InvariantCulture (no non-Gregorian year in the log)" ($srcAll -match 'ToString\("yyyy-MM-ddTHH:mm:sszzz", \[System\.Globalization\.CultureInfo\]::InvariantCulture\)')
 }
 
+Write-Host "`nR-05 legacy mode: exit 6 with an unwritable send-log fails closed through the sidecar marker (C3)"
+function Get-MarkerFile { param([string]$LogFile, [string]$Subject) return (Join-Path (Split-Path -Parent $LogFile) ([System.IO.Path]::GetFileNameWithoutExtension($LogFile) + ".unknown-" + (Get-TestSubjectHash $Subject))) }
+$subj43 = "L43 unknown, log unwritable"
+$log43 = New-TestLog -Seed @("seed")
+$mk43 = Get-MarkerFile $log43 $subj43
+Set-ItemProperty -LiteralPath $log43 -Name IsReadOnly -Value $true
+try { $r = Invoke-Send -Log $log43 -Sim "hang-after-send" -ScriptArgs ($L + @("-Subject", $subj43)) }
+finally { Set-ItemProperty -LiteralPath $log43 -Name IsReadOnly -Value $false }
+$mkText = if (Test-Path -LiteralPath $mk43) { Get-Content -LiteralPath $mk43 -Raw -Encoding UTF8 } else { "" }
+Check "L43a exit 6 whose log append fails: the log is untouched, a sidecar marker is written, stderr says so" ($r.Code -eq 6 -and $r.Log.Trim() -eq "seed" -and (Test-Path -LiteralPath $mk43) -and $r.Out -match 'could not be written to the send-log') $r
+Check "L43b the marker holds a stamp and a recipient hash only (no subject, no address)" ($mkText -match '\A\S+ rhash=[0-9a-f]{16}\r?\n?\z' -and $mkText -notmatch 'L43' -and $mkText -notmatch 'oxfordra') ([pscustomobject]@{ Code = 0; Log = $mkText })
+
+$r = Invoke-Send -Log $log43 -Sim "ok" -ScriptArgs ($L + @("-Subject", $subj43))
+Check "L43c a legacy retry of the SAME subject and recipient inside 60 min is refused (exit 6 QUARANTINE), nothing sent" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:' -and $r.Log -notmatch '\[OK\] Sent') $r
+
+$r = Invoke-Send -Log $log43 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L43 a different subject"))
+Check "L43d a different subject is not refused" ($r.Code -eq 0 -and $r.Log -match '\[OK\] Sent to=') $r
+
+$rhash43 = ($mkText.Trim() -split 'rhash=')[1]
+Set-Content -LiteralPath $mk43 -Value "$(Get-Stamp 61) rhash=$rhash43" -Encoding ASCII
+$r = Invoke-Send -Log $log43 -Sim "ok" -ScriptArgs ($L + @("-Subject", $subj43))
+Check "L43e after 61 minutes the marker no longer refuses: the retry sends" ($r.Code -eq 0 -and (Get-Count $r.Log '\[OK\] Sent to=ggoldberg@oxfordra.net') -ge 1) $r
+
+# Fail closed when the marker cannot be read; a forged or malformed marker never quarantines.
+$h44 = Get-TestSubjectHash "L44 locked marker"
+$log44 = New-TestLog -Seed @("seed")
+$mk44 = Get-MarkerFile $log44 "L44 locked marker"
+Set-Content -LiteralPath $mk44 -Value "$(Get-Stamp 5) rhash=$rhash43" -Encoding ASCII
+$mfs = [System.IO.File]::Open($mk44, 'Open', 'Read', 'None')
+try { $r = Invoke-Send -Log $log44 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L44 locked marker")) } finally { $mfs.Dispose() }
+Check "L44a a marker that cannot be read refuses the send (exit 6), nothing sent" ($r.Code -eq 6 -and $r.Log -match 'QUARANTINE:' -and $r.Log -notmatch '\[OK\] Sent') $r
+
+# Neither channel can record an unknown send (read-only log in a directory that denies new files): refuse BEFORE Send().
+$roDir = Join-Path $Work "ro-dir"
+New-Item -ItemType Directory -Path $roDir -Force | Out-Null
+$log49 = Join-Path $roDir "log-ro.txt"
+Set-Content -LiteralPath $log49 -Value "seed" -Encoding UTF8
+Set-ItemProperty -LiteralPath $log49 -Name IsReadOnly -Value $true
+& icacls $roDir /deny "$($env:USERNAME):(WD)" 2>&1 | Out-Null
+try { $r = Invoke-Send -Log $log49 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L49 nothing can record")) }
+finally { & icacls $roDir /remove:d $env:USERNAME 2>&1 | Out-Null; Set-ItemProperty -LiteralPath $log49 -Name IsReadOnly -Value $false }
+Check "L49 a legacy send whose log AND sidecar marker cannot be written is refused BEFORE Send() (exit 6, nothing sent)" ($r.Code -eq 6 -and $r.Out -match 'RECORD-CHANNELS-UNAVAILABLE' -and $r.Out -notmatch '\[OK\] Sent' -and $r.Log.Trim() -eq "seed") $r
+$r = Invoke-Send -Log $log49 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L49 channels back"))
+Check "L49b once the directory is writable again the same legacy send proceeds" ($r.Code -eq 0 -and $r.Log -match '\[OK\] Sent to=') $r
+
+# A concurrent READER of the log blocks Add-Content, so the probe must not be wider than the real writer.
+$roDir2 = Join-Path $Work "ro-dir2"
+New-Item -ItemType Directory -Path $roDir2 -Force | Out-Null
+$log50 = Join-Path $roDir2 "log-rd.txt"
+Set-Content -LiteralPath $log50 -Value "seed" -Encoding UTF8
+& icacls $roDir2 /deny "$($env:USERNAME):(WD)" 2>&1 | Out-Null
+$rd = New-Object System.IO.FileStream($log50, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+try { $r = Invoke-Send -Log $log50 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L50 reader holds the log")) }
+finally { $rd.Dispose(); & icacls $roDir2 /remove:d $env:USERNAME 2>&1 | Out-Null }
+Check "L50 a log held open by a reader (Add-Content cannot append) in a directory that denies new files is refused BEFORE Send()" ($r.Code -eq 6 -and $r.Out -match 'RECORD-CHANNELS-UNAVAILABLE' -and $r.Out -notmatch '\[OK\] Sent') $r
+
+# The fallback must test THIS subject's real marker file, not just "a file can be created here".
+$log51 = New-TestLog -Seed @("seed")
+$mk51 = Get-MarkerFile $log51 "L51 read-only marker"
+Set-Content -LiteralPath $mk51 -Value "$(Get-Stamp 90) rhash=$rhash43" -Encoding ASCII
+Set-ItemProperty -LiteralPath $mk51 -Name IsReadOnly -Value $true
+Set-ItemProperty -LiteralPath $log51 -Name IsReadOnly -Value $true
+try { $r = Invoke-Send -Log $log51 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L51 read-only marker")) }
+finally { Set-ItemProperty -LiteralPath $mk51 -Name IsReadOnly -Value $false; Set-ItemProperty -LiteralPath $log51 -Name IsReadOnly -Value $false }
+Check "L51 a read-only log AND a read-only marker file (folder still writable) is refused BEFORE Send()" ($r.Code -eq 6 -and $r.Out -match 'RECORD-CHANNELS-UNAVAILABLE' -and $r.Out -notmatch '\[OK\] Sent') $r
+
+# A healthy run leaves no marker or probe behind.
+$dir52 = Join-Path $Work "clean-dir"
+New-Item -ItemType Directory -Path $dir52 -Force | Out-Null
+$log52 = Join-Path $dir52 "log-ok.txt"
+Set-Content -LiteralPath $log52 -Value "seed" -Encoding UTF8
+$r = Invoke-Send -Log $log52 -Sim "ok" -ScriptArgs ($L + @("-Subject", "L52 healthy run"))
+Check "L52 a healthy legacy send leaves only the log in its directory (no marker, no probe file)" ($r.Code -eq 0 -and @(Get-ChildItem -LiteralPath $dir52).Count -eq 1) $r
+
+if ($haveQ) {
+    $hq = Get-TestSubjectHash "L46"
+    Check "L46a the marker path comes only from a 16-hex hash (path traversal and short hashes yield no path)" ($null -eq (Get-UnknownMarkerPath -LogFile (Join-Path $Work "x.txt") -Hash "..\..\evil") -and $null -eq (Get-UnknownMarkerPath -LogFile (Join-Path $Work "x.txt") -Hash "abc") -and $null -eq (Get-UnknownMarkerPath -LogFile (Join-Path $Work "x.txt") -Hash "$hq/"))
+    $p46 = Get-UnknownMarkerPath -LogFile "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt" -Hash $hq
+    Check "L46b for the live log the marker is send-log.unknown-<shash> in the same directory" ($p46 -ceq "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.unknown-$hq")
+    $log46 = New-TestLog -Seed @("seed")
+    $p46b = Get-UnknownMarkerPath -LogFile $log46 -Hash $hq
+    Check "L46c a test log derives its marker next to ITSELF in TEMP (never next to the live log)" ((Split-Path -Parent $p46b) -ceq (Split-Path -Parent $log46) -and $p46b.StartsWith([System.IO.Path]::GetTempPath(), [System.StringComparison]::OrdinalIgnoreCase))
+    $wrote = Write-UnknownMarker -LogFile $log46 -Hash $hq -Recipient $To
+    $wrote2 = Write-UnknownMarker -LogFile $log46 -Hash $hq -Recipient "b@oxfordra.net"
+    Check "L46d concurrent-style appends keep both recipients: each is quarantined, a third is not" ($wrote -and $wrote2 -and (Get-QuarantineState -Path $log46 -Hash $hq -Recipient $To -Minutes 60).State -eq 'QUARANTINED' -and (Get-QuarantineState -Path $log46 -Hash $hq -Recipient "B@oxfordra.net" -Minutes 60).State -eq 'QUARANTINED' -and (Get-QuarantineState -Path $log46 -Hash $hq -Recipient "c@oxfordra.net" -Minutes 60).State -eq 'NONE')
+    $log47 = New-TestLog -Seed @("seed")
+    $p47 = Get-UnknownMarkerPath -LogFile $log47 -Hash $hq
+    $tz = [datetimeoffset]::UtcNow
+    Set-Content -LiteralPath $p47 -Value ("$($tz.AddMinutes(-5).ToString('yyyy-MM-ddTHH:mm:sszzz')) rhash=" + (Get-RecipientHash $To)) -Encoding ASCII
+    Check "L46e a marker stamped with any offset inside the window quarantines (absolute time)" ((Get-QuarantineState -Path $log47 -Hash $hq -Recipient $To -Minutes 60).State -eq 'QUARANTINED')
+    Set-Content -LiteralPath $p47 -Value ("not-a-time rhash=" + (Get-RecipientHash $To)) -Encoding ASCII
+    Check "L46f a marker line for this recipient with an unparseable stamp fails CLOSED" ((Get-QuarantineState -Path $log47 -Hash $hq -Recipient $To -Minutes 60).State -eq 'QUARANTINED')
+    function MQ { param([string[]]$MLines, [string]$Rcpt = $To)
+        $lf = New-TestLog -Seed @("seed")
+        Set-Content -LiteralPath (Get-UnknownMarkerPath -LogFile $lf -Hash $hq) -Value $MLines -Encoding ASCII
+        return (Get-QuarantineState -Path $lf -Hash $hq -Recipient $Rcpt -Minutes 60).State }
+    $rhTo = Get-RecipientHash $To
+    Check "L47a a 59-minute-old marker still quarantines; a 61-minute-old one does not" ((MQ @("$(Get-Stamp 59) rhash=$rhTo")) -eq 'QUARANTINED' -and (MQ @("$(Get-Stamp 61) rhash=$rhTo")) -eq 'NONE')
+    Check "L47b the same subject to a DIFFERENT recipient is not quarantined by the marker" ((MQ @("$(Get-Stamp 5) rhash=$rhTo") "other@oxfordra.net") -eq 'NONE')
+    Check "L47c malformed marker lines (trailing text, short hash, garbage, double space, no stamp) never quarantine" ((MQ @("$(Get-Stamp 5) rhash=$rhTo extra", "$(Get-Stamp 5) rhash=SHORT", "garbage", "$(Get-Stamp 5)  rhash=$rhTo", "rhash=$rhTo")) -eq 'NONE')
+    $log48 = New-TestLog -Seed @("seed")
+    $p48 = Get-UnknownMarkerPath -LogFile $log48 -Hash $hq
+    Set-Content -LiteralPath $p48 -Value "$(Get-Stamp 61) rhash=$rhTo" -Encoding ASCII
+    $null = Get-QuarantineState -Path $log48 -Hash $hq -Recipient $To -Minutes 60
+    $freshKept = Test-Path -LiteralPath $p48
+    (Get-Item -LiteralPath $p48).LastWriteTime = (Get-Date).AddHours(-2)
+    $null = Get-QuarantineState -Path $log48 -Hash $hq -Recipient $To -Minutes 60
+    Check "L47d a stale marker is cleaned up only once its file time is also outside the window" ($freshKept -and -not (Test-Path -LiteralPath $p48))
+    Check "L47e a marker with only another recipient's fresh line (and an old line of ours) does not quarantine this recipient" ((MQ @("$(Get-Stamp 90) rhash=$rhTo", "$(Get-Stamp 5) rhash=$(Get-RecipientHash 'z@oxfordra.net')")) -eq 'NONE')
+}
+
 Complete-Suite

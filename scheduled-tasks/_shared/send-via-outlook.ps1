@@ -64,6 +64,12 @@
     yyyy-MM monthly, yyyy-Www weekly, or <etDate>-<block> (for example 2026-10-18-slot-12) for multi-fire tasks, built from
     block-sentinel's etDate and block. A bare block such as slot-12 repeats every day and would
     DEDUP-SKIP all later days.
+    RETENTION CAVEAT: the dedup record is a send-log line, and the nightly trim
+    (maintenance/ora-nightly-disk.ps1) keeps only the last ~500 lines, so a record survives for
+    days to a few weeks depending on send volume. A coarse key (yyyy-MM monthly, and to a lesser
+    degree yyyy-Www weekly) can age out inside its own period, and a re-fire after that sends
+    again. Prefer the ET date or a per-fire key (<etDate>-<block>); use yyyy-MM only where a
+    re-fire after the record has aged out cannot happen or is acceptable.
 
 .PARAMETER ForceResend
     Human-directed only: bypasses DEDUP-BLOCK, DEDUP-SKIP and the legacy quarantine after a
@@ -136,6 +142,19 @@
           or a fail-closed refusal in contract mode (send-log unreadable, dedup lock or SEND-INTENT
           record unavailable, send markers unreadable). The message MAY have gone out. NEVER
           retried; a human checks Sent Items and, only if it is absent, re-runs with -ForceResend.
+          Legacy mode ALSO refuses with exit 6 (QUARANTINE) when the send-log, or an unknown-send
+          sidecar marker, exists but cannot be read: a prior unknown send cannot be ruled out.
+          If the SEND-STATE-UNKNOWN line itself cannot be appended to the log (lock, ACL, full disk),
+          the script writes a sidecar marker <log name>.unknown-<shash> next to the log it is using
+          (for the live log: send-log.unknown-<shash>; a stamp and a recipient hash only) and prints
+          a stderr line; the legacy 60-minute quarantine honours the marker exactly like a log line.
+          If NEITHER the log nor the marker can be written (for example a read-only log in a
+          directory that denies new files), legacy mode refuses BEFORE Send() with exit 6
+          RECORD-CHANNELS-UNAVAILABLE (nothing sent). The check opens the log the way Write-Log's
+          Add-Content does and does not write to it. Residual: a channel that fails AFTER the check
+          and before the SEND-STATE-UNKNOWN append (that span includes the Outlook cold-start wait and
+          the send timeout, up to a few minutes) is unrecorded; so is a disk that fills in that span.
+          -ForceResend skips the check (human-directed).
     With -DedupTaskId + -DedupPeriodKey ("contract mode") the script itself retries exit 2/4
     ONCE, so the caller retries nothing. Without them ("legacy mode") the only internal retry
     is the existing one on RPC_E_CALL_REJECTED, a legacy caller may retry 2/4 once, and the
@@ -392,6 +411,111 @@ function Read-LogLinesShared {
     }
 }
 
+function Get-RecipientHash {
+    # First 16 hex chars of SHA-256 over the canonical recipient key. The unknown-send sidecar marker
+    # carries this and never the address itself.
+    param([string]$Recipient)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $b = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes((ConvertTo-RecipientKey $Recipient))) } finally { $sha.Dispose() }
+    return (-join ($b | ForEach-Object { $_.ToString('x2') })).Substring(0, 16)
+}
+
+function Get-UnknownMarkerPath {
+    # Second channel for SEND-STATE-UNKNOWN (C3): when the log append itself fails, this sidecar
+    # file next to the run's OWN log is the quarantine's evidence. Derived from the log path the
+    # run uses, so a test log under TEMP never writes next to the live log. For the live
+    # send-log.txt it is send-log.unknown-<shash>. The hash is re-validated here: it is the only
+    # variable part of the file name, so nothing but 16 lowercase hex can reach the path.
+    param([string]$LogFile, [string]$Hash)
+    if ($Hash -cnotmatch '\A[0-9a-f]{16}\z') { return $null }
+    $dir = [System.IO.Path]::GetDirectoryName($LogFile)
+    $stem = [System.IO.Path]::GetFileNameWithoutExtension($LogFile)
+    if (-not $dir -or -not $stem) { return $null }
+    return (Join-Path $dir ($stem + '.unknown-' + $Hash))
+}
+
+function Write-UnknownMarker {
+    # Appends "<ISO stamp> rhash=<recipient hash>" (no subject, no address). Returns $true when the line landed.
+    param([string]$LogFile, [string]$Hash, [string]$Recipient)
+    $mp = Get-UnknownMarkerPath -LogFile $LogFile -Hash $Hash
+    if (-not $mp) { return $false }
+    $ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:sszzz", [System.Globalization.CultureInfo]::InvariantCulture)
+    $line = "$ts rhash=$(Get-RecipientHash $Recipient)" + [Environment]::NewLine
+    for ($w = 1; $w -le 10; $w++) {
+        try { [System.IO.File]::AppendAllText($mp, $line, (New-Object System.Text.UTF8Encoding($false))); return $true } catch { if ($w -lt 10) { Start-Sleep -Milliseconds ([Math]::Min(20 * $w, 100)) } }
+    }
+    return $false
+}
+
+function Test-RecordChannelsAvailable {
+    # Can an unknown send be recorded AT ALL? True when the run's log accepts an append or, failing that,
+    # THIS subject's sidecar marker file can be opened for append. Both false means a SEND-STATE-UNKNOWN
+    # would leave no trace and a legacy retry could double-send, so the legacy gate refuses BEFORE Send().
+    # The log is opened with the access and sharing Add-Content (Write-Log) uses -- Write access, other
+    # writers only (FileShare.Write): a concurrent READER blocks Add-Content, and a probe opened with wider
+    # sharing would pass while the real write fails. Nothing is written to either file.
+    param([string]$LogFile, [string]$Hash)
+    for ($w = 1; $w -le 10; $w++) {
+        $fs = $null
+        try {
+            $fs = New-Object System.IO.FileStream($LogFile, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, [System.IO.FileShare]::Write)
+            return $true
+        } catch { } finally { if ($fs) { $fs.Dispose() } }
+        if ($w -lt 10) { Start-Sleep -Milliseconds ([Math]::Min(20 * $w, 100)) }
+    }
+    $mp = Get-UnknownMarkerPath -LogFile $LogFile -Hash $Hash
+    if (-not $mp) { return $false }
+    $existed = Test-Path -LiteralPath $mp
+    $ms = $null
+    try { $ms = New-Object System.IO.FileStream($mp, [System.IO.FileMode]::Append, [System.IO.FileAccess]::Write, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)) }
+    catch { return $false }
+    finally { if ($ms) { $ms.Dispose() } }
+    # A marker this check just created is empty; remove it so a healthy run leaves nothing behind.
+    if (-not $existed) { try { Remove-Item -LiteralPath $mp -Force -ErrorAction Stop } catch { } }
+    return $true
+}
+
+function Get-UnknownMarkerState {
+    # NONE | QUARANTINED | UNREADABLE for the sidecar of this subject hash. A line counts only when it has
+    # exactly the shape Write-UnknownMarker writes AND carries this recipient's hash; same absolute
+    # 60-minute window as the log scan. A matching line whose stamp cannot be parsed fails CLOSED.
+    # A marker that exists but cannot be read fails closed (UNREADABLE); a marker file with only
+    # stale lines is cleaned up (best effort).
+    param([string]$LogFile, [string]$Hash, [string]$Recipient, [int]$Minutes)
+    $mp = Get-UnknownMarkerPath -LogFile $LogFile -Hash $Hash
+    if (-not $mp) { return @{ State = 'NONE'; Stamp = $null } }
+    try { $lines = Read-LogLinesShared -Path $mp }
+    catch [System.IO.FileNotFoundException] { return @{ State = 'NONE'; Stamp = $null } }
+    catch [System.IO.DirectoryNotFoundException] { return @{ State = 'NONE'; Stamp = $null } }
+    catch { return @{ State = 'UNREADABLE'; Stamp = $null } }
+    $rh = Get-RecipientHash $Recipient
+    $now = [datetimeoffset]::UtcNow
+    $anyFresh = $false
+    foreach ($ln in $lines) {
+        if ($ln.Length -gt 120 -or $ln -cnotmatch '\A(\S{1,40}) rhash=([0-9a-f]{16})\z') { continue }
+        $stamp = $Matches[1]; $lrh = $Matches[2]
+        $ts = [datetimeoffset]::MinValue
+        if (-not [datetimeoffset]::TryParseExact($stamp, [string[]]@('yyyy-MM-ddTHH:mm:sszzz', 'yyyy-MM-ddTHH:mm:ssK', 'yyyy-MM-ddTHH:mm:ss.FFFFFFFK'), [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$ts)) {
+            if ($lrh -ceq $rh) { return @{ State = 'QUARANTINED'; Stamp = $stamp } }
+            continue
+        }
+        $age = ($now - $ts).TotalMinutes
+        if ($age -lt $Minutes -and $age -gt -1440) {
+            $anyFresh = $true
+            if ($lrh -ceq $rh) { return @{ State = 'QUARANTINED'; Stamp = $stamp } }
+        }
+    }
+    if (-not $anyFresh) {
+        # Nothing inside the window for ANY recipient: the marker has expired. Only delete a file whose own
+        # write time is also outside the window, so a line appended a moment ago is never lost.
+        try {
+            $fi = New-Object System.IO.FileInfo($mp)
+            if (($now - [datetimeoffset]$fi.LastWriteTimeUtc).TotalMinutes -ge $Minutes) { $fi.Delete() }
+        } catch { }
+    }
+    return @{ State = 'NONE'; Stamp = $null }
+}
+
 function Get-QuarantineState {
     # Is there a recent SEND-STATE-UNKNOWN line for THIS subject hash (and recipient)?
     # Returns @{ State = 'NONE' | 'QUARANTINED' | 'UNREADABLE'; Stamp = <line timestamp or $null> }.
@@ -402,9 +526,19 @@ function Get-QuarantineState {
     # The match is on the 16-hex hash at the END of the line and the recipient, never on free
     # text, and uses string operations (no regex over the whole line) so an oversized line
     # costs linear time. The window is absolute time (UTC), so DST and offsets cannot skew it.
+    # The unknown-send sidecar marker (Get-UnknownMarkerPath) is a second source, consulted when the log scan
+    # finds nothing: a SEND-STATE-UNKNOWN whose log append failed leaves only the marker.
     param([string]$Path, [string]$Hash, [string]$Recipient, [int]$Minutes)
     $none = @{ State = 'NONE'; Stamp = $null }
     if ($Hash -cnotmatch '\A[0-9a-f]{16}\z') { return $none }
+    $lr = Get-QuarantineStateFromLog -Path $Path -Hash $Hash -Recipient $Recipient -Minutes $Minutes
+    if ($lr.State -ne 'NONE') { return $lr }
+    return (Get-UnknownMarkerState -LogFile $Path -Hash $Hash -Recipient $Recipient -Minutes $Minutes)
+}
+
+function Get-QuarantineStateFromLog {
+    param([string]$Path, [string]$Hash, [string]$Recipient, [int]$Minutes)
+    $none = @{ State = 'NONE'; Stamp = $null }
     try { $lines = Read-LogLinesShared -Path $Path }
     catch [System.IO.FileNotFoundException] { return $none }
     catch [System.IO.DirectoryNotFoundException] { return $none }
@@ -931,11 +1065,19 @@ if ($ForceResend -and -not $ContractMode) {
 if (-not $ContractMode -and -not $ForceResend) {
     $qs = Get-QuarantineState -Path $LogPath -Hash $SubjectHash -Recipient $To -Minutes $QuarantineMinutes
     if ($qs.State -eq 'UNREADABLE') {
-        Write-Log "ERROR" "QUARANTINE: the send-log could not be read, so a prior SEND-STATE-UNKNOWN for this subject cannot be ruled out -- refusing (exit 6). Check Outlook Sent Items by hand.$TagLog"
+        Write-Log "ERROR" "QUARANTINE: the send-log (or its unknown-send marker) could not be read, so a prior SEND-STATE-UNKNOWN for this subject cannot be ruled out -- refusing (exit 6). Check Outlook Sent Items by hand.$TagLog"
         exit 6
     }
     if ($qs.State -eq 'QUARANTINED') {
         Write-Log "ERROR" "QUARANTINE: an identical subject to this recipient ended SEND-STATE-UNKNOWN at $($qs.Stamp) (within $QuarantineMinutes min) -- refusing (exit 6) so a retry cannot double-send. Check Outlook Sent Items by hand.$TagLog"
+        exit 6
+    }
+    if (-not (Test-RecordChannelsAvailable -LogFile $LogPath -Hash $SubjectHash)) {
+        # Neither the send-log nor its sidecar marker can be written: if this send ended SEND-STATE-UNKNOWN
+        # nothing would record it and a legacy "retry on non-zero" caller would double-send. Refuse now, nothing sent.
+        $why = "RECORD-CHANNELS-UNAVAILABLE: neither the send-log nor its unknown-send sidecar marker can be written, so a send whose state turns out unknown could not be recorded -- refusing before Send() (exit 6, nothing sent). Fix the permissions or space on the send-log directory; a human may re-run with -ForceResend only after checking Outlook Sent Items."
+        [Console]::Error.WriteLine($why)
+        Write-Log "ERROR" "$why$TagLog"
         exit 6
     }
 }
@@ -980,6 +1122,13 @@ while ($true) {
     }
     if ($o.Code -eq 6) {
         Write-Log "ERROR" "SEND-STATE-UNKNOWN: $($o.Reason) -- the message MAY have been sent. Do NOT retry (exit 6); check Outlook Sent Items by hand. to=$To$TagLog"
+        if (-not $script:LogWriteOk) {
+            # The log append failed (lock, ACL, full disk), so the legacy quarantine would never see this send.
+            # Fail closed through a second channel: a sidecar marker next to this run's log.
+            $mk = Write-UnknownMarker -LogFile $LogPath -Hash $SubjectHash -Recipient $To
+            $mkMsg = if ($mk) { "recorded in the sidecar marker $(Get-UnknownMarkerPath -LogFile $LogPath -Hash $SubjectHash)" } else { "the sidecar marker could not be written either, so NOTHING records this send" }
+            [Console]::Error.WriteLine("SEND-STATE-UNKNOWN could not be written to the send-log; $mkMsg. The message MAY have been sent: do NOT retry, check Outlook Sent Items by hand.")
+        }
         exit 6
     }
     if ($o.Code -eq 4) {
