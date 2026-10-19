@@ -1,0 +1,226 @@
+"""Tier table for the MCP destructive-delete gate (R-06; audit findings M18, M65).
+
+WHY. Hard-delete MCP tools (Notion delete-*, excel delete_*, delete_scheduled_task, ccd
+delete_session / discard_kept_worktree, ...) reached NO PreToolUse guard, and under
+defaultMode=bypassPermissions one call removes records for good. Hard Invariants 5 and 6:
+deleting in a business store needs Gabriel's permission, and the rule is "never delete --
+move to /archive/". hooks/mcp-delete-guard.py enforces; THIS module only answers "which
+tier is this call?", so the table is testable on its own.
+
+TIERS
+  irreversible -> deny unless a single-use allow-mcp-delete token names this exact call
+  recoverable  -> interactive: ask; scheduled/headless: deny unless allowlisted
+  exempt       -> allow; not a data delete, or another gate owns it (reason recorded)
+  unknown      -> delete-shaped name with no row: handled like recoverable
+  unrouted     -> not delete-shaped; the guard should never see it, and allows it
+
+Rows are keyed on the tool-name SUFFIX after the last "__", so a reinstalled connector
+with a new GUID stays classified. `verified` is True only when the suffix is present in
+hooks/tests/lib/mcp_tool_snapshot.json; test-mcp-delete-tiers.py asserts that
+equivalence, so the flag cannot drift from the evidence.
+
+SETTINGS_MATCHER is the exact settings.json matcher of the guard's entry;
+test-matcher-coverage.py asserts byte equality. Hook matchers are JavaScript regular
+expressions without inline flags, so case variants are spelled out.
+
+Stdlib only. ASCII-only. Windows (`python`).
+"""
+import hashlib
+import json
+import re
+
+IRREVERSIBLE = "irreversible"
+RECOVERABLE = "recoverable"
+EXEMPT = "exempt"
+UNKNOWN = "unknown"
+UNROUTED = "unrouted"
+_BY_INPUT = "by-input"
+
+SETTINGS_MATCHER = (
+    "mcp__.*__.*([Dd]elete|DELETE|[Tt]rash|TRASH|[Rr]emove|REMOVE|[Pp]urge|PURGE"
+    "|[Dd]iscard|DISCARD).*"
+    "|mcp__.*__(clean_up_worktrees|notion-calendar-cancel-events|sharepoint_move_item"
+    "|manage_segment|manage_campaign_objects)"
+)
+_MATCHER_RE = re.compile(SETTINGS_MATCHER)
+
+KEYWORD_RE = re.compile(r"delete|trash|remove|purge|discard", re.IGNORECASE)
+EXTRA_NAMES = frozenset((
+    "clean_up_worktrees", "notion-calendar-cancel-events", "sharepoint_move_item",
+    "manage_segment", "manage_campaign_objects",
+))
+READ_PREFIXES = (
+    "list_", "list-", "get_", "get-", "search_", "search-", "read_", "read-",
+    "query_", "query-", "fetch_", "fetch-", "restore", "undelete",
+    "notion-get-", "notion-list-", "notion-query-", "notion-search", "notion-fetch",
+    "notion-restore-",
+)
+# Keys that differ between two otherwise identical calls and must not change the digest
+# a token binds: _consent is set by the app after its card is approved;
+# instructions_version is Notion bookkeeping.
+VOLATILE_KEYS = frozenset(("_consent", "instructions_version"))
+
+_EXCEL = "excel MCP rewrites the workbook in place; no undo"
+_ABSENT = "named by the ratified design; absent from the current M365 connector"
+
+TIERS = {
+    "delete_scheduled_task": (IRREVERSIBLE, True,
+                              "removes the registry entry, cron and run history (pause with "
+                              "update_scheduled_task enabled:false; retire via the "
+                              "register-scheduled-task skill)"),
+    "delete_range": (IRREVERSIBLE, True, _EXCEL),
+    "delete_sheet_rows": (IRREVERSIBLE, True, _EXCEL),
+    "delete_sheet_columns": (IRREVERSIBLE, True, _EXCEL),
+    "delete_worksheet": (IRREVERSIBLE, True, _EXCEL),
+    "notion-delete-comment": (IRREVERSIBLE, True,
+                              "no restore tool for comments; the last one also removes its "
+                              "discussion"),
+    "delete_session": (IRREVERSIBLE, True,
+                       "transcript, record and worktree are removed for good (the app also "
+                       "shows a card)"),
+    "discard_kept_worktree": (IRREVERSIBLE, True,
+                              "uncommitted worktree changes are discarded for good (the app "
+                              "also shows a card)"),
+    "delete": (IRREVERSIBLE, True,
+               "docs-connector object delete; recoverability is undocumented"),
+    "notion-calendar-cancel-events": (IRREVERSIBLE, True,
+                                      "cancels calendar events and may notify attendees"),
+    "memory_delete": (IRREVERSIBLE, True, "Mnemoverse memory delete; no restore tool"),
+    "memory_delete_domain": (IRREVERSIBLE, True, "Mnemoverse domain delete; no restore tool"),
+    "outlook_batch_delete_messages": (IRREVERSIBLE, False, _ABSENT),
+    "outlook_delete_draft": (IRREVERSIBLE, False, _ABSENT),
+    "outlook_delete_label": (IRREVERSIBLE, False, _ABSENT),
+    "outlook_delete_filter": (IRREVERSIBLE, False, _ABSENT),
+    "outlook_delete_item": (IRREVERSIBLE, False,
+                            "pinned in test-confidentiality-guard.py; absent from the current "
+                            "M365 connector"),
+    "sharepoint_delete_item": (IRREVERSIBLE, False,
+                               "ratified as a hard delete; demote only after a live schema "
+                               "shows recycle-bin semantics"),
+    "notion-delete-pages": (RECOVERABLE, True, "Notion Trash; notion-restore-pages undoes it"),
+    "notion-delete-databases": (RECOVERABLE, True,
+                                "Notion Trash; notion-restore-pages undoes it"),
+    "delete_group": (RECOVERABLE, True, "sidebar group only; its sessions are untouched"),
+    "delete_section": (RECOVERABLE, True, "sidebar section only; its sessions are untouched"),
+    "outlook_trash_thread": (RECOVERABLE, False,
+                             "Deleted Items folder; pinned in test-confidentiality-guard.py"),
+    "sharepoint_move_item": (RECOVERABLE, False,
+                             "moves a business file out of place (Invariant 5); reversible "
+                             "by moving it back"),
+    "clean_up_worktrees": (_BY_INPUT, True, "decided by delete_sessions/include_uncommitted"),
+    "manage_segment": (_BY_INPUT, True, "decided by operation.type"),
+    "manage_campaign_objects": (_BY_INPUT, True, "decided by assetOperations[].action"),
+    "outlook_delete_event": (EXEMPT, False,
+                             "owned by ora-autonomy-gate Gate 1d (token event:<eventId>)"),
+    "image_remove_background": (EXEMPT, True,
+                                "Adobe image edit that returns a new image; deletes nothing"),
+}
+
+
+def _set(value):
+    """True for anything but an explicit False/None: a truthy string must not pass."""
+    return value is not None and value is not False
+
+
+def _clean_up_worktrees(ti):
+    if not isinstance(ti, dict):
+        return IRREVERSIBLE, "tool_input is not an object -- fails closed"
+    if _set(ti.get("delete_sessions")) or _set(ti.get("include_uncommitted")):
+        return IRREVERSIBLE, "deletes sessions or uncommitted worktree changes for good"
+    return RECOVERABLE, "removes inactive worktrees only; sessions and branches stay"
+
+
+_SEGMENT_OPS = {
+    "DeleteSegmentOperation": (RECOVERABLE, "RestoreSegmentOperation brings it back"),
+    "RemoveMembersOperation": (RECOVERABLE, "the removed record ids are in the payload"),
+    "RemoveAllMembersOperation": (IRREVERSIBLE, "empties a static segment; no restore"),
+    "CreateStaticSegmentOperation": (EXEMPT, "not a delete"),
+    "CreateDynamicSegmentOperation": (EXEMPT, "not a delete"),
+    "UpdateSegmentOperation": (EXEMPT, "not a delete"),
+    "AddMembersOperation": (EXEMPT, "not a delete"),
+    "RestoreSegmentOperation": (EXEMPT, "undoes a delete"),
+    "UpdateSegmentSuppressionOperation": (EXEMPT, "exclusion settings; no record removed"),
+}
+
+
+def _manage_segment(ti):
+    op = ti.get("operation") if isinstance(ti, dict) else None
+    if not isinstance(op, dict):
+        return IRREVERSIBLE, "operation is not an object -- fails closed"
+    row = _SEGMENT_OPS.get(op.get("type"))
+    if row is None:
+        return IRREVERSIBLE, "unknown segment operation type -- fails closed"
+    return row
+
+
+_CAMPAIGN_OPS = frozenset(("CAMPAIGN_CREATE", "CAMPAIGN_UPDATE", "CAMPAIGN_ASSET",
+                           "CAMPAIGN_ASSET_TYPES_LIST"))
+
+
+def _manage_campaign_objects(ti):
+    if not isinstance(ti, dict) or ti.get("operationType") not in _CAMPAIGN_OPS:
+        return IRREVERSIBLE, "unknown campaign operationType -- fails closed"
+    if ti["operationType"] != "CAMPAIGN_ASSET":
+        return EXEMPT, "not an asset removal"
+    req = ti.get("assetRequest")
+    ops = req.get("assetOperations") if isinstance(req, dict) else None
+    if not isinstance(ops, list) or not ops:
+        return IRREVERSIBLE, "assetOperations missing or malformed -- fails closed"
+    actions = set()
+    for op in ops:
+        if not isinstance(op, dict) or op.get("action") not in ("ADD", "REMOVE"):
+            return IRREVERSIBLE, "asset operation with an unknown action -- fails closed"
+        actions.add(op["action"])
+    if "REMOVE" in actions:
+        return RECOVERABLE, "dissociates campaign assets; re-adding restores them"
+    return EXEMPT, "asset additions only"
+
+
+_INPUT_CLASSIFIERS = {
+    "clean_up_worktrees": _clean_up_worktrees,
+    "manage_segment": _manage_segment,
+    "manage_campaign_objects": _manage_campaign_objects,
+}
+
+
+def short_name(tool_name):
+    if not isinstance(tool_name, str):
+        return ""
+    return tool_name.rsplit("__", 1)[-1]
+
+
+def is_routed(tool_name):
+    """Would the settings.json matcher send this tool to the guard?"""
+    return isinstance(tool_name, str) and _MATCHER_RE.search(tool_name) is not None
+
+
+def classify(tool_name, tool_input):
+    """(tier, reason, short). The guard still wraps the call."""
+    short = short_name(tool_name)
+    if not isinstance(tool_name, str) or not tool_name.startswith("mcp__"):
+        return UNROUTED, "not an MCP tool", short
+    row = TIERS.get(short)
+    if row is not None:
+        tier, _verified, reason = row
+        if tier == _BY_INPUT:
+            tier, reason = _INPUT_CLASSIFIERS[short](tool_input)
+        return tier, reason, short
+    if short.lower().startswith(READ_PREFIXES):
+        return EXEMPT, "read or restore verb", short
+    if KEYWORD_RE.search(short) or short in EXTRA_NAMES:
+        return UNKNOWN, "delete-shaped name with no tier row", short
+    return UNROUTED, "name is not in the delete class", short
+
+
+def target_digest(tool_input):
+    """sha256/16 of the canonical input, minus VOLATILE_KEYS."""
+    if isinstance(tool_input, dict):
+        tool_input = {k: v for k, v in tool_input.items() if k not in VOLATILE_KEYS}
+    blob = json.dumps(tool_input, sort_keys=True, separators=(",", ":"),
+                      ensure_ascii=True, default=repr)
+    return hashlib.sha256(blob.encode("ascii")).hexdigest()[:16]
+
+
+def target_label(short, tool_input):
+    """What an allow-mcp-delete token's `targets:` line must name."""
+    return "%s:%s" % (short, target_digest(tool_input))
