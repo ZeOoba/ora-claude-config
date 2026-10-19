@@ -1169,18 +1169,17 @@ STEP 6 — EMAIL DIGEST
 Send TO ggoldberg@oxfordra.net ONLY — per the 2026-05-15 routing directive, re-ratified 2026-06-10: only the Daily Brief cc's egoldberg.
 Email send path (per ORA standing rule — COM is PRIMARY):
   PRIMARY — Outlook COM via the shared helper. Write the HTML body to a temp file, then:
-    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "<temp>.html" -BodyFormat html
+    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "<temp>.html" -BodyFormat html -DedupTaskId "ora-deal-sourcing-scan" -DedupPeriodKey "<run date yyyy-MM-dd>"
     Exit 0 = sent (appended to _shared\send-log.txt). The helper uses the signed-in
     desktop Outlook profile — no OAuth/token. (When run inside the Bash tool, read the
-    send-log "[OK] Sent" line to confirm; a trailing $LASTEXITCODE echo may report a
+    send-log "[OK] Sent" (or "[OK] DEDUP-SKIP") line to confirm; a trailing $LASTEXITCODE echo may report a
     shell error that is NOT the helper's exit code.)
-  NO send fallback (Composio removed 2026-06-11). On a non-zero COM exit: retry once; if it
-    still fails, prefix the Notion Deal Sourcing Log digest title with ⚠️ [EMAIL FAILED] and
+  NO send fallback (Composio removed 2026-06-11). Contract mode (R-05): the helper dedups on task id + period + subject before Send() and itself retries exit 2/4 once, so the caller NEVER retries any exit code. <run date yyyy-MM-dd> = the date part of the run date computed once at run start (the same value used in the subject). On exit 1, 3 or 5: do NOT retry; flag it loudly in the run summary. On exit 6 (send state unknown — the message MAY have gone out; includes DEDUP-BLOCK/QUARANTINE and the fail-closed DEDUP-* refusals): do NOT retry and never resend; flag it loudly in the run summary for a human to check Sent Items, per rules.md §2. On any failed send, prefix the Notion Deal Sourcing Log digest title with ⚠️ [EMAIL FAILED] and
     log the failure — do NOT halt. The automation-health-monitor producer-beacon check surfaces
     the silent send to Gabriel.
   Outlook only — never Gmail; never route to Composio (gone) or Rube (shut down).
-Subject: "ORA Deal-Sourcing Scan — [date] — [N] pursue / [P] pending price / [M] flagged". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
-Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the subject and everywhere else.
+Subject (FIXED per run day so the R-05 dedup key matches a same-day rerun; no counts or other run-dependent text): "ORA Deal-Sourcing Scan — [date]". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
+Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the body and everywhere else; the body opens with the counts line "[N] pursue / [P] pending price / [M] flagged" (counts never go in the subject).
 Body order:
   (1) PRICE CUT / RE-LIST flags first — the strongest motivation signals. Read them
       off the `Price Delta vs First Ask` formula; give prior ask, new ask, and %.
