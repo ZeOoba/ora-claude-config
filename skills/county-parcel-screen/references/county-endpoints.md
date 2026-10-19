@@ -41,6 +41,25 @@
   Tax Accounting transfer-file drop (e.g. GIS showed sales through 08-14 while the newest Transfer* folder was
   still the 07-15 drop) — a windowed pull against Transfer*.txt alone will miss the most recent weeks' deeds
   until the next monthly folder posts. Not a bug, a recurring gap to diff against on repeat runs.
+- **Transfer files without the 43 MB xlsx (verified live 2026-10-02, county-sales-monitor worker v0.7):** the
+  `Tab-Delimited.zip` (121 MB) in each `YYYY-MM-DD Tax Accounting` folder honours HTTP `Range` (`Accept-Ranges:
+  bytes`, 206 on a ranged GET). Read the last 64 KB for the zip directory, then range-fetch just the entries:
+  `Transfer010.txt`, `Transfer020-277.txt`, `Transfer410-610.txt` (17.9 + 15.3 + 8.3 = 41.5 MB compressed; 83.5 +
+  69.9 + 40.9 MB inflated; deflate, no zip64). Industrial parcels span ALL THREE prefix files, not only 010-.
+  Streaming the three entries and filtering to ~215 parcels runs in ~5 s locally. UTF-8 (a handful of non-ASCII
+  bytes), tab-delimited, quoted strings, `MM/DD/YYYY`.
+  Columns: `Parcel Id, SaleDate, ConveyNumber, SaleAmount, ParcelCount, OwnerName1, OwnerName2, TransferType,
+  InstrumentType, ExemptType, SaleType, IsValid`. **OwnerName1/2 is the GRANTEE; there is no grantor column**, so a
+  seller can only be inferred as the previous grantee on the parcel (and not at all when a different grantee
+  recorded the same day). `SaleAmount` is the DEED total repeated on every parcel row of the deed, `ParcelCount`
+  is the deed's full parcel count and `ConveyNumber` groups the deed: use them to roll multi-parcel sales up for
+  real instead of inferring on (date, price, buyer) — that inference was wrong for at least one pair (one deed that the
+  inference left as two rows; cause not investigated). `InstrumentType` codes seen on industrial parcels: LW, GW, WD, QC, AF, RW, CB, FD, AG,
+  AN, AC; LW appears on both priced sales and $0 re-titlings, so it is NOT an arm's-length gate (nor is
+  `IsValid`, per the 2026-09-18 correction above). Join check on 215 industrial GIS sales: 199 matched on
+  parcel + date + price, every miss dated after the folder's data (the ~1-month lag); same-parcel same-day
+  deeds with identical price exist (chain / corrective deeds), so match on buyer too. The transfer history also
+  holds priced in-window sales the GIS last-sale field hides (G7): two $27-29M sales found on 2026-10-02.
 
 ## Hamilton County OH (Cincinnati) — RICH REST, NO COMMERCIAL SF
 - REST: https://services.arcgis.com/JyZag7oO4NteHGiq/arcgis/rest/services/Open_Data/FeatureServer/51
@@ -225,10 +244,11 @@
   cleanly — only 1 nominal <$25K transfer in the universe (far fewer $0 re-titlings than Ohio).
 - **CONVEY1 code (found via county-sales-monitor pilot, 2026-08-15):** a `CONVEY1` conveyance-type field exists
   on the layer and correlates strongly with null CONSIDR1 — in a 50-parcel industrial pull, `CONVEY1=4` accounted
-  for 23 of 25 no-consideration "transfers." The code's meaning is genuinely undocumented anywhere public found
-  so far (likely deeds of trust / corrective deeds / distributions / foreclosure-related, not sham sales — true
-  $0/<$25K nominal sales stayed rare, 0 of 50). Treat CONVEY1=4 as a strong null-consideration correlate, not a
-  confirmed non-sale-type classification, until the code is actually decoded.
+  for 23 of 25 no-consideration "transfers." **DECODED 2026-10-02:** the Socrata copy of SDAT
+  (opendata.maryland.gov `ed4q-f8tm`) ships the same field as text — code 4 = "Private non-arms-length transfer
+  such as a foreclosure, gift or auction (4)". It lumps gifts and intra-family transfers with foreclosures, so
+  treat it as a "transferred under non-market terms" screen, NOT a foreclosure flag. (Original finding kept:
+  true $0/<$25K nominal sales stayed rare, 0 of 50.)
 - **Seller/grantor name gap:** neither the state MdProperty layer nor the county `Property/MapServer/1` join
   exposes prior-owner/grantor — both are current-owner-only. Grantor-based nominal-transfer tests (shared
   surname) cannot run for Baltimore Co on this data; don't assume they can.
@@ -238,6 +258,10 @@
   the pull window running current. This is far worse than Franklin OH's ~1-month bulk-file lag. Treat this
   as the statewide MdProperty layer's normal behavior, not a one-off: **a windowed pull against this county
   will structurally read as "quiet" for the most recent 3-4 months even when real sales are happening.**
+  **RE-CHECK 2026-10-02 (conflicting, unresolved):** the newest transfer date per county in the SDAT Socrata copy
+  was Baltimore City 2026-08-20, Baltimore Co 08-18, Anne Arundel 08-18, Dorchester 08-12, Talbot 07-28, Wicomico
+  06-25, Howard 06-16 - about 6 weeks behind, not 4+ months. Either the lag has shortened or the Aug read was a
+  sampling artifact [UNVERIFIED which]. Keep the guard (judge freshness by newest date per pull), not the number.
   Do not read a string of low/zero recent-month counts here as a coverage regression on its own — check the
   distribution shape (a gradual multi-month taper, consistent with lag) against a genuine cutoff (a source
   that previously had current data and now returns nothing at all, which IS a real regression) before
@@ -289,7 +313,11 @@ Columbus/Cincinnati estate lists for the same contamination on next pass.
   Table has duplicate rows per parcel (identical) — dedupe on parcel_number (3,182 rows -> 2,420).
 - Delinquency: DLT (Delinquent Land Tax) judicial sale lists = seasonal PDFs at jacksongov.org
   Court Administration; site WAF-blocks plain urllib (works w/ full browser headers but pages move).
-  Manual pull each Aug/Sep. KCMO Socrata (data.kcmo.org): Dangerous Buildings ax3m-jhxx +
+  Manual pull each Aug/Sep. **UPDATE 2026-10-02:** the annual petition PDF is also published as a public notice
+  (molawyersmedia.com/files/2026/06/2026-Jackson-County-Delinquent-Tax-Petition.pdf, 579 suits, free, one GET);
+  the Aug 2026 sale was CANCELED by county executive order on 2026-07-13 (tax-bill re-verification), no new date.
+  DLT is a 16th Circuit court-run suit-based sale of 3+ yr delinquent parcels, not a Collector certificate sale.
+  Jackson has NO bulk building SF (`total_sqft` = land SF). Full source table: references/distress-feeds.md. KCMO Socrata (data.kcmo.org): Dangerous Buildings ax3m-jhxx +
   Property Violations tezm-fh2e (live, PIN-keyed) = secondary distress; Parcels 6g4y-sh3m
   (2023, assessed values, landusecode) covers KCMO city limits incl. Clay/Platte slivers.
 
@@ -313,7 +341,7 @@ Columbus/Cincinnati estate lists for the same contamination on next pass.
   DELQ_CODE (P/Y/2/3/S/SD/V/O — meanings unpublished, any non-null = distress-adjacent),
   VACANT (Y/null), LAND_USE (verbose text ~200 values), ACRE, ORIONID. maxRec 2000.
 - Layer 1 of SAME service = 'Tax Sale Eligible' (identical schema) — judicial tax-sale pipeline,
-  2,819 parcels, LIVE motivated-seller list. AGOL mirror of parcels (geometry only):
+  2,819 parcels (re-pulled 2026-10-02: 2,668; 30 industrial/warehouse use), LIVE motivated-seller list. AGOL mirror of parcels (geometry only):
   services1.arcgis.com/Qo2HHQp8vgPs2wg3/.../parcel_py. Landbank layer also on AGOL.
 - LAND_USE industrial core: 'Warehouse distribution / storage facility', 'Warehouse-office
   combination'/'strip / complex', 'Cold storage warehouse', 'Transit warehouse / truck terminal',
@@ -500,8 +528,8 @@ ORA county-parcel-screen pipeline · verified 2026-06-09
   `https://web.assess.co.polk.ia.us/info/web/exports/comm/inven/polk/POLKCOUNTY.csv` (~10 MB, 13,181 rows)
   Discovered via `https://web.assess.co.polk.ia.us/cgi-bin/web/tt/infoqry.cgi?tt=downloads/comm` (also per-jurisdiction and per-occupancy slices; parallel `downloads/res`, `downloads/ag` pages).
 - **Key inventory fields:** `dp` (14-digit district/parcel — primary key), `gp` (12-digit GIS geoparcel), `occupancy_group` (WHS/OFF/RTL/APT/LND/ATO/…), `occupancy` + `occupancy_descr` (46 Warehouse, 25C Office & Warehouse, 20A Industrial Light, 48 Warehouse Condo, 44 Warehouse Transit, 35C Retail & Warehouse, 47 Warehouse Mini = self-storage, 37 Auto Repair, 20B Industrial Heavy…), `class` (B Commercial / I Industrial / C Commercial Exempt / M Res3+ / combos), `land_full/bldg_full/total_full` (assessed @100% market), `*_adj` (post-board), `gross_area` (building SF — populated), `year_built`, `bldg_class`, `grade`, `condition`, `air_cond_area`, `sprinkle_area`, `land_area` (lot SF), `title_holder1/2`, `contract_buyer1/2` (Iowa contract sales — live contract purchasers), `transfer_th1` (current-owner deed date) + `book/pg`, full mail address block (`mail_name`, `mail_line1`, `mail_city/state/zip`), `occupant` (DBA), `x,y` (IA State Plane N, ft), `tif`, `zoning`, `school_district`, `jurisdiction`.
-- **Commercial sales (countywide, 1987→current, refreshed continuously):**
-  `https://web.assess.co.polk.ia.us/info/web/exports/comm/sales/polk/POLKCOUNTY.csv` (~13 MB, 21,324 rows)
+- **Commercial sales (countywide, 1987→current; claimed "refreshed continuously" — contradicted: the export's newest `initial_entry_date` was 2026-07-30 as of 2026-10-01, i.e. ~2 months stale; source: county-sales-monitor Worker coverage row `Polk|IA|2026-10-02` (run 2026-10-01 local / 2026-10-02 UTC), Notes "Newest county entry date in export: 2026-07-30"; newest `sale_date` in the same pull 2026-07-24. Treat Polk as lagging, not continuous, and judge freshness by `initial_entry_date`. Re-checked directly against the live export 2026-10-15: newest `initial_entry_date` still 2026-07-30, i.e. ~11 weeks stale; row count grew 21,324 → 21,444 with no newer entry dates):**
+  `https://web.assess.co.polk.ia.us/info/web/exports/comm/sales/polk/POLKCOUNTY.csv` (~13 MB, 21,444 rows as of 2026-10-15)
   Fields: `dp`, `gp`, `sale_date`, `price`, `instrument` (**Deed | Contract** — Iowa contract sales explicit), `seller`, `buyer`, `book/pg`, `quality` (Iowa DOR standard sale-validity classification — Arms Length / Landlord to Tenant / Family / Adjoining or Non-Res Adjacent Land / Partial Assessment / No Consideration / Foreclosure / Estate Transfer / etc. — **found via county-sales-monitor pilot, 2026-08-15, not previously documented here; a strong non-arms-length signal, use it before falling back to price/ratio heuristics**), plus the full CAMA snapshot of the sold parcel (`total_full`, `gross_area`, occupancy…), `dps`/`gps` (all parcels in multi-parcel sales), `initial_entry_date`.
 - **`gps` multi-parcel rollup gap (same pilot):** member parcel IDs in `gps` sometimes don't exist in the *current*
   inventory CSV snapshot (3 of 18 multi-parcel deeds in a 12-month pull) — Iowa assessors appear to retire old

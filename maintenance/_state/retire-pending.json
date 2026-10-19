@@ -7,6 +7,20 @@
       "ratified": "2026-09-22",
       "reason": "Superseded by ora-ar-feed-sweep (CC, weekly, live since 2026-08-17, imports Business/A.R. Reports via ar-import-headless.ts). Gabriel ruled 'Retire it' in the 2026-09-22 ground-truth audit decision form. Currently enabled:false; must NOT be re-enabled by the LAMS resume.",
       "executeFrom": "native on-device Cowork session"
+    },
+    {
+      "fleet": "lams",
+      "id": "ora-health-guard-fail-aging-nudge",
+      "ratified": "2026-09-22",
+      "reason": "Gabriel approved the once/week fleet audit ('yes, do the CC fixes and write the LAMS handoff'). Its 48h FAIL-aging check has nothing to measure once ora-health-guard runs weekly (Mon 05:15); a weekly retime would be vestigial. memory-integrity-probe.py is also run by ora-health-guard, so no producer is orphaned. Handoff: maintenance/_state/handoffs/2026-09-22_LAMS-once-weekly-cleanup_brief.md.",
+      "executeFrom": "native on-device Cowork session"
+    },
+    {
+      "fleet": "lams",
+      "id": "ora-lams-fleet-resume-20260911",
+      "ratified": "2026-09-22",
+      "reason": "Expired one-time resume (fired 2026-09-11). Registry row is dead weight. Same handoff brief.",
+      "executeFrom": "native on-device Cowork session"
     }
   ],
   "_completed": [
