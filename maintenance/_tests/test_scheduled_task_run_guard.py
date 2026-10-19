@@ -178,6 +178,11 @@ UNGUARDED_BACKLOG = {
     # ratchet saw it only there. Emails on errors / skipped_locked. Remove this entry in the
     # same change that lands the task with a block-sentinel claim (OI-360, OI-363).
     "ora-audit-log-sweep",
+    # Added 2026-10-08 (ora-prepush-gate-sweep). Both registered after the 09-28 inventory
+    # and UNTRACKED, so this suite fails only in the live working tree. Report-only, but
+    # each EMAILS ggoldberg with no run guard; adopt the guard per task and remove the entry.
+    "ora-agent-usage-report-monthly",            # emails the monthly agent-usage summary
+    "ora-site-market-snapshot-refresh",          # emails the quarterly stale-figures digest
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
@@ -192,6 +197,24 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-10-08 (v0.6 digest-reader rewrite): the sole claim is the unfenced
+    # STEP -1 line at :9, the run's first action. Everything after only READS the Notion
+    # worker DBs; the one side effect is the unfenced prose "Send via Outlook COM" at :35,
+    # followed by the complete line at :12's contract. "Writes outside the email and the
+    # block-sentinel calls: none" (:37).
+    "ora-county-sales-monitor": "claim@9 precedes send@35 (reads only in between)",
+    # Read by hand 2026-10-18: the sole claim is STEP -1 (first action). Steps 1-3 only READ
+    # ora-skills cowork-settings versions and the governance copy; the side effects are the
+    # step 4 email and step 5 Notion completion row, both after the claim.
+    "ora-cowork-settings-quarterly-review": "claim@STEP -1 precedes email@step 4 and Notion@step 5; steps 1-3 read-only",
+    # Read by hand 2026-10-17: the sole claim is STEP -1 (first action). STEP 0-3 only crawl
+    # the public site read-only; the one side effect is the STEP 4 regression email, after it.
+    "ora-site-seo-crawl-weekly": "claim@STEP -1 precedes email@STEP 4; crawl is read-only",
+    # Read by hand 2026-10-17: the sole claim is the STEP 0 line (first action). STEP 1 only
+    # READS the pause file/workbook mtime; STEP 2 fetches and adds a detached worktree from the shared checkout's .git (after the claim) and runs npm ci there; the only write
+    # before the claim-holder reports is the full-gate-weekly.json state file (STEP 3); the one
+    # email is STEP 4, after STEP 0.
+    "ora-full-gate-weekly": "claim@STEP 0 precedes email@STEP 4; STEP 1 reads only, STEP 2 fetch+worktree after claim",
     # Read by hand 2026-09-28: the sole claim is the STEP 0 line at :11, the run's first
     # action. Step 1 only READS Notion and writes a %TEMP% json; the side effects all
     # follow: COM send :32, Ops Hub Notion row :35.
