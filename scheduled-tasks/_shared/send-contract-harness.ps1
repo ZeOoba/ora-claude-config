@@ -16,7 +16,9 @@ $Work = Join-Path ([System.IO.Path]::GetTempPath()) ("send-contract-" + [guid]::
 New-Item -ItemType Directory -Path $Work -Force | Out-Null
 $To = "ggoldberg@oxfordra.net"
 $Keyed = @("-DedupTaskId", "ora-test-task", "-DedupPeriodKey", "2026-10-18")
-$script:SeamVars = @("ORA_SEND_LOG_PATH", "ORA_SEND_SKIP_PREFLIGHT", "ORA_SEND_SIMULATE", "ORA_SEND_TIMEOUT_SEC", "ORA_SEND_RETRY_DELAY_SEC")
+# Each suite run gets its own dedup lock name, so a suite never contends with a real fire's production lock.
+$script:MutexSuffix = [guid]::NewGuid().ToString("N").Substring(0, 12)
+$script:SeamVars = @("ORA_SEND_LOG_PATH", "ORA_SEND_SKIP_PREFLIGHT", "ORA_SEND_SIMULATE", "ORA_SEND_TIMEOUT_SEC", "ORA_SEND_RETRY_DELAY_SEC", "ORA_SEND_GATE_PAUSE_MS", "ORA_SEND_LOCK_WAIT_MS", "ORA_SEND_MUTEX_SUFFIX")
 
 function Get-TestSubjectHash {
     # Must stay byte-identical in behavior to Get-SubjectHash in send-via-outlook.ps1.
@@ -45,6 +47,7 @@ function Set-Seams {
     [Environment]::SetEnvironmentVariable("ORA_SEND_SIMULATE", $(if ($Sim) { $Sim } else { $null }))
     [Environment]::SetEnvironmentVariable("ORA_SEND_TIMEOUT_SEC", "6")
     [Environment]::SetEnvironmentVariable("ORA_SEND_RETRY_DELAY_SEC", "0")
+    [Environment]::SetEnvironmentVariable("ORA_SEND_MUTEX_SUFFIX", $script:MutexSuffix)
 }
 
 function Clear-Seams {
@@ -67,7 +70,9 @@ function Invoke-Send {
         $ErrorActionPreference = $prevEAP
         Clear-Seams
     }
-    $text = if (Test-Path -LiteralPath $Log) { Get-Content -LiteralPath $Log -Raw -Encoding UTF8 } else { "" }
+    # A case may deliberately hold the log locked (fail-closed tests); an unreadable log reads as "".
+    $text = ""
+    try { if (Test-Path -LiteralPath $Log) { $text = Get-Content -LiteralPath $Log -Raw -Encoding UTF8 } } catch { $text = "" }
     return @{ Code = $code; Log = $text; Out = $out }
 }
 
