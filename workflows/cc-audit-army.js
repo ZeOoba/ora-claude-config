@@ -1,6 +1,6 @@
 export const meta = {
   name: 'cc-audit-army',
-  description: 'Phase 1: 9-dimension read-only audit of a target repo/worktree (default oxford-command-center; pass args.brief to audit any repo) → mechanical verify → root-cause dedup → ranked Audit Report',
+  description: 'Phase 1: 9-dimension read-only audit of a target repo/worktree (default oxford-command-center; to audit any other repo pass args.brief naming the repo and its purpose, plus args.worktree = its path if it is a git worktree/checkout the scouts should ground against) → mechanical verify → root-cause dedup → ranked Audit Report',
   phases: [
     { title: 'Orient', detail: 'a scout grounds the audit: cc mode refreshes the baseline sha + newly-landed already-done onto the curated ground truth; generic mode derives full ground truth + per-dimension focus' },
     { title: 'Audit', detail: '9 dimension agents fan out read-only over the worktree' },
@@ -40,7 +40,7 @@ const GENERIC = !!BRIEF;
 // Report-header label only (prompts/reads still use WT). In brief mode without an explicit args.worktree the
 // default command-center path is not the audited target, so label it from the brief instead of mislabelling.
 const TARGET_LABEL = (GENERIC && !(typeof args === 'object' && args && args.worktree))
-  ? '(target per args.brief; no args.worktree given, default path ' + WT + ' is NOT the audited target) ' + BRIEF.slice(0, 160)
+  ? '(target per args.brief; no args.worktree given, default path ' + WT + ' is NOT the audited target) ' + BRIEF.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').slice(0, 160)
   : WT;
 // Optional model floor: e.g. { forceModel: 'opus' } pins every dispatch (orient/audit/dedup/verify/rank)
 // to one model regardless of each dimension's default — for standing per-repo model-tier overrides
