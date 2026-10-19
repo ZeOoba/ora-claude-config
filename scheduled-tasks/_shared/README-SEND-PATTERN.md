@@ -29,8 +29,10 @@ continuation and silently buffers the send until a stray blank line flushes it
    the body build without sending. The wrapper prints `SENDEXIT=<code>` and exits
    with it: 0 = sent OK, 1 = usage, 2 = Outlook COM failure.
 
-3. On non-zero exit: retry once, then flag loudly per the task's own failure path
-   (Notion Operations Hub completion row). Do NOT halt.
+3. On a non-zero exit, act on the code per memory `rules.md` section 2 (R-05 send contract,
+   2026-10-18). In contract mode (`-DedupTaskId` + `-DedupPeriodKey`) never retry: the
+   script already retried what is safe. In legacy mode retry ONLY exit 2 or 4, once. Never
+   retry 1, 3, 5 or 6. Then flag loudly (Notion Operations Hub completion row). Do NOT halt.
 
 ## Don't do this
 - Don't paste `$body = @" ... "@` into `interact_with_process` (the `>>` trap).
