@@ -3,8 +3,9 @@
 //        node test.mjs            -> run all tests (cc-mode byte-identical regression + generic mode)
 import { runWorkflow } from './harness.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPT = 'C:/Users/Owner/.claude/workflows/cc-audit-army.js';
+const SCRIPT = fileURLToPath(new URL('../cc-audit-army.js', import.meta.url));
 const SNAP = new URL('cc-mode-prompts.snapshot.json', import.meta.url);
 
 const failures = [];
@@ -124,6 +125,19 @@ console.log('Test E: cc-refresh scout death fails closed');
   let threw = false;
   try { await runWorkflow(SCRIPT, undefined, { 'cc-refresh': null }); } catch { threw = true; }
   check('cc-refresh=null throws (no stale-baked fallback)', threw);
+}
+
+// --- Test F: report header names the audited target, never mislabels it as the default worktree ---
+console.log('Test F: report header target label');
+{
+  const head = async (a) => (await runWorkflow(SCRIPT, a)).result.reportMarkdown.split('\n')[0];
+  check('cc default header = default worktree', (await head(undefined)) === '# Audit Report — C:/Users/Owner/oxford-command-center');
+  check('worktree header = that worktree', (await head({ worktree: 'C:/wt' })) === '# Audit Report — C:/wt');
+  const h = await head({ brief: 'Claude config repo at ~/.claude' });
+  check('brief-only header shows the brief and flags the default path as not audited', h.includes('Claude config repo at ~/.claude') && h.includes('NOT the audited target'));
+  const md = (await runWorkflow(SCRIPT, { brief: 'line1\nline2\r\n# injected\u0007x' })).result.reportMarkdown.split('\n');
+  check('brief with newlines/control chars stays on a single H1 line', md[0].startsWith('# Audit Report — ') && md[0].includes('line1') && md[0].includes('injected') && md[1] === '');
+  check('worktree+brief header = that worktree', (await head({ worktree: 'C:/wt', brief: 'b' })) === '# Audit Report — C:/wt');
 }
 
 console.log(failures.length === 0 ? '\nALL TESTS PASSED' : '\nFAILURES: ' + failures.length);
