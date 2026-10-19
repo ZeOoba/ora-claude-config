@@ -26,7 +26,7 @@ Run date: compute once with `date '+%A %Y-%m-%d'`, reuse everywhere.
    Subject: "Cowork Settings quarterly review — YYYY-MM-DD"
    Body: current version, days since, contradiction list (or "none found"),
    and the line "Run /cowork-settings in a supervised session to bump or log
-   'no changes needed'." On non-zero exit: retry once, then flag loudly in
+   'no changes needed'." On exit 2 (COM failure) or 4 (timeout): retry the send ONCE, then flag loudly in
    the Notion completion row (Ops Hub 32b6ecd8). Do NOT halt.
 5. Write a completion row to Notion Ops Hub 32b6ecd8. Before any retry of a
    create with no page ID, fetch the parent for an exact-title child.
