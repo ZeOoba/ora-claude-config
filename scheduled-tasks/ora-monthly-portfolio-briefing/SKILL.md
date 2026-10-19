@@ -37,7 +37,7 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --t
 
 TOOLING / CONVENTIONS
 - Python (if needed): use the FULL path C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe (bare `python` is NOT on PATH in scheduled sessions).
-- Email send: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — this is the SOLE automated send path (Outlook COM / M365 only; no Gmail; the Composio and Rube connectors are removed — never reference them). On a non-zero exit: retry ONCE, then flag loudly in the Notion completion row — do NOT halt.
+- Email send: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — this is the SOLE automated send path (Outlook COM / M365 only; no Gmail; the Composio and Rube connectors are removed — never reference them). On exit 2 or 4: retry ONCE, then flag loudly in the Notion completion row — do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 - Recipient: ggoldberg@oxfordra.net ONLY (per the 2026-05-15 routing directive, re-ratified 2026-06-10 — only the Daily Brief cc's Eric; this briefing does not).
 - Notion canon: Acquisition Pipeline bcfe4a03 · Tenant DB 8dbbaec0 · Operations Hub 32b6ecd8-9e59-81f2-b329-df3fd0e25062 (full UUID; the 8-char prefix also matches a retired page). Notion via the native mcp__c5f4869f-…__notion-* tools. HubSpot via the native mcp__a3e380ce-…__* tools (current tenants only).
 - Formatting: ORA Institutional Style Guide v1.0+ (institutional, structured, direct; no filler).
