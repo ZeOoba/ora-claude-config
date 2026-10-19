@@ -2,19 +2,17 @@
 name: county-sales-monitor
 description: >
   Use when Gabriel wants a recurring digest of recently RECORDED industrial
-  sales and transfers (bldg SF <150,000) across ORA target-market counties, or
-  new comps for the Notion comps database. Trigger on: recent industrial
-  sales, county sales tracker, sales digest, transaction monitor, comp
-  tracking, recent county transfers, industrial sales this month, what traded,
-  who's buying or selling industrial in a market, new comps since [date], set
-  up a sales feed — Franklin OH / Baltimore Co MD / Polk IA at launch, other
-  ORA markets are a documented next phase. MARKET INTELLIGENCE, not sourcing:
-  does NOT replace county-parcel-screen (off-market owner call lists,
-  motivated sellers, delinquent-tax/estate leads). Single-property comp grids
-  route to acquisition-underwriting COMPS mode.
+  sales and transfers (bldg SF under 150,000) across ORA target-market counties,
+  or new comps for the Notion comps database. Trigger on: recent industrial
+  sales, county sales tracker, sales digest, recent county transfers, what
+  traded, who's buying or selling industrial in a market, new comps since
+  [date], set up a sales feed. MARKET INTELLIGENCE, not sourcing: does NOT
+  replace county-parcel-screen (off-market owner call lists, motivated sellers,
+  delinquent-tax/estate leads). Single-property comp grids route to
+  acquisition-underwriting COMPS mode.
 ---
 
-# county-sales-monitor (v0.5)
+# county-sales-monitor (v0.9)
 
 Produce a recurring digest of recently recorded industrial sales and transfers
 across ORA's target-market counties, so Gabriel sees what actually traded — at
@@ -73,7 +71,8 @@ county verified individually before it's trusted in a real digest.
   not a coverage regression, and Step 8's regression check must not conflate
   the two (see Step 8 below).
 - **Polk IA** (Des Moines) — `POLKCOUNTY.csv` commercial sales export, 1987 to
-  current, refreshed continuously: `sale_date`, `price`, `instrument`
+  current, but lagging (newest `initial_entry_date` 2026-07-30 as of
+  2026-10-01): `sale_date`, `price`, `instrument`
   (Deed | Contract), `seller`, `buyer`, book/pg, plus the CAMA snapshot
   (`gross_area` = building SF, occupancy). The best assessor source found to
   date and the only one with clean grantor/grantee back three decades.
@@ -133,7 +132,7 @@ the digest header — a digest without its window is uninterpretable later.
 **Recording lag is real and it is the main correctness trap.** County data drops
 lag the actual deed recording by days to weeks, and different counties refresh
 on different cadences (Franklin's tax-accounting files are periodic bulk drops;
-Polk's sales CSV is continuous; Ottawa's is annual). A strict `sale_date IN
+Polk's sales CSV lags: newest `initial_entry_date` was 2026-07-30 as of 2026-10-01, so judge freshness by it, not by assumption; Ottawa's is annual). A strict `sale_date IN
 window` query will permanently miss every deed that posted late. So: query the
 window, **and also** diff the full recent-sales key set against the prior run's
 persisted key set, and surface late arrivals in a separate `LATE-POSTED` block
@@ -192,6 +191,16 @@ Flag `NONARMS` when any of:
 `NONARMS` rows appear in the digest with the flag visible and are excluded from
 any aggregate median $/SF the digest computes. Say the excluded count.
 
+**Worker split (v0.7):** the ratio band is weak evidence on its own (G8 stale
+assessed values trip it on genuine high-value sales). A real-priced row whose
+ONLY non-arm's-length signal is the ratio band carries `RATIO-REVIEW` instead of
+`NONARMS`: it keeps its Price PSF on the row but is excluded from the coverage
+median and the Clean $/SF count until a human validates it, and the digest lists
+those rows separately. $0 / under $25K, shared grantor/grantee stem and county
+validity codes stay hard `NONARMS`. Known gap: the worker's 0.5-4.0x band is
+global, while this skill requires per-county ratio tests (Baltimore Co assessments
+run ~64% below sales).
+
 ### 6. Roll up multi-parcel transactions
 One deed can span several parcels (Polk publishes `dps`/`gps`; Butler publishes
 `No Of Parcels`). Price is transaction-level; SF is parcel-level. Left unrolled,
@@ -200,6 +209,18 @@ deed/instrument number where published, sum SF across the parcels in the group,
 compute $/SF once at the transaction level, and flag `MULTI-PARCEL` with the
 parcel count. Where no instrument number is published, group on
 (county, sale date, price, grantee) and flag the grouping as INFERRED.
+
+**Franklin deed grouping (v0.7):** the Tax Accounting Transfer file publishes
+`ConveyNumber` and the deed's full `ParcelCount`, so the worker groups on the deed
+number (`MULTI-PARCEL`, not INFERRED) and keys the row on its lead parcel plus
+`+N` for the N additional member parcels (unchanged from the inferred key shape). A deed that covers more parcels than the feed holds is
+`MULTI-PARCEL` + `SF-INCOMPLETE` with no $/SF, and its assessed value is dropped
+so the ratio test cannot fire on a partial sum (G3). Because a deed number can
+fail to attach to one member (ambiguous same-day deeds, amount mismatch), any
+same-date, same-price row beside a deed group that is short of its published
+count is treated as a possible unnumbered member: `MULTI-PARCEL-INFERRED` +
+`SF-INCOMPLETE`, no $/SF. The 150K SF cap uses the known member SF even when the
+total is incomplete.
 
 ### 7. Compute and assemble
 `$/SF = price / building SF`, only where both are real and the transaction is
@@ -217,9 +238,10 @@ transaction with:
 | `bldg_sf` | integer or `unpublished` |
 | `sf_source` | in-layer / CAMA extract / footprint join / ECF study / none |
 | `price_psf` | blank if not derivable |
-| `buyer` / `seller` | where public; `not published` where the county scrubs names (Anne Arundel, Howard) or publishes grantee only |
+| `buyer` / `seller` | where public; `not published` where the county scrubs names (Anne Arundel, Howard) or publishes grantee only. Franklin (worker, v0.7): Seller is the INFERRED prior owner of the parcel, always labelled "(prior owner, inferred)", never a published grantor; blank when a different grantee recorded the same day (chain) or the deed is not matched. An inferred seller never feeds the shared-stem NONARMS test or ORA-AFFILIATED. |
+| `convey_number` / `instrument_type` | Worker rows: deed number (Franklin ConveyNumber) and raw instrument code (Franklin InstrumentType: LW, GW, WD, QC, AF ...; Polk Deed / Contract). Codes are shown raw and are NOT an arm's-length gate: LW appears on both priced sales and $0 re-titlings. |
 | `use_code` + `use_description` | native code and its meaning |
-| `flags` | NONARMS / CONTRACT-SALE / MULTI-PARCEL(n) / LATE-POSTED / ORA-AFFILIATED / SF-UNPUBLISHED |
+| `flags` | NONARMS / RATIO-REVIEW / CONTRACT-SALE / MULTI-PARCEL(n) / LATE-POSTED / ORA-AFFILIATED / SF-UNPUBLISHED (Worker rows also carry SF-INCOMPLETE and MULTI-PARCEL-INFERRED) |
 | `source` | county + layer/file the row came from, so any row is re-verifiable |
 
 Then a **per-county coverage block**: rows found, window queried, data source,
@@ -265,8 +287,43 @@ Recorded sales are public record, but the digest is ORA work product — it is n
 an external surface and must not be forwarded outside the firm without review
 (Invariant 3 applies to any row that touches an active confidential deal).
 
-### 9. Recurring execution — NOT part of this skill
-This skill defines pull + filter + format only. Making it recur goes through
+### 9. Recurring execution — digest scheduling is NOT part of this skill
+**As of v0.6 (2026-10-02) pull + filter + format run as a hosted Notion Worker**
+(`county-sales-monitor`, worker id `01a0fa61-6ca4-78f2-895d-5aafe648dbbf`, repo
+`C:\Users\Owner\ora-county-sales-monitor`), refreshing weekly a trailing
+365-day window (the 30-day digest window stays the digest's scope), Tier A
+comps only, writing to the two "(Worker)" databases under References. Worker
+semantics differ from §1/§5 where noted: LATE-POSTED means first seen more
+than 30 days after the sale date on any post-baseline cycle, and `Price PSF`
+is also blank on SF-INCOMPLETE rows. That makes the *store* current
+without the Desktop app or either scheduler fleet. It does not email: the
+monthly digest remains a separate reader of those databases.
+
+**Franklin Transfer-file ingest (v0.7, deployed 2026-10-02).** Each cycle the
+worker lists the auditor's newest "YYYY-MM-DD Tax Accounting" folder, reads the
+zip directory of `Tab-Delimited.zip` (121 MB) with HTTP Range, range-fetches only
+the three `Transfer*.txt` entries (~41 MB compressed), stream-inflates them and
+keeps only rows for the parcels the GIS pull returned (~5 s, +55 MB RSS locally;
+hosted executes 2-10 s; Notion publishes no worker memory or timeout limits).
+Rows join on parcel + sale date + price; when several same-day deeds fit, the GIS
+buyer must single one out or nothing is published for the row. The drop lags the
+GIS layer ~1 month: unmatched sales dated on or after the folder date are expected
+lag, not an error. Operating rules that follow from this:
+- **A failed or degraded transfer load emits NO Franklin comps that cycle** (the
+  coverage row shows WARN with the reason). Grouping would otherwise revert to the
+  inference and re-create rows the deed numbers retired (G11). Existing rows stay.
+- **Regroups retire stale rows only on proof.** When deed numbers show a sale was
+  grouped differently than the row the worker wrote earlier, the stale key is
+  deleted in the same execute that writes its replacement (or immediately when the
+  sale is now out of scope), and the earliest First Seen is carried to the new
+  key so the regroup is never mistaken for a late-posted deed. A row that merely
+  left the feed (parcel re-sold, last-sale overwrite) is history and is never
+  deleted.
+- **Upserts are stamped with the UTC day, so a re-upsert on the same UTC day is
+  skipped by Notion.** New fields and flags reach EXISTING rows on the first cycle
+  of a new UTC day; a same-day trigger only writes new keys and deletes.
+
+This skill defines pull + filter + format only. Making the digest recur goes through
 `register-scheduled-task` (supervised `create_scheduled_task` MCP tool only —
 JSON-splicing a registry is prohibited and has been proven to register-but-
 never-schedule), on the correct fleet, routed to `ggoldberg@oxfordra.net`.
@@ -336,7 +393,12 @@ G8 stale assessed values distort the arm's-length ratio test (the same F2 that
 bites county-parcel-screen — Baltimore Co's 1.639 @3yr vs 1.211 @5yr) |
 G9 use-code lag: a code says industrial after conversion, or vice versa |
 G10 grantor/grantee blank in the recent window specifically (Madison city
-conveyances post-mid-2023) — parties look missing when only the recent ones are.
+conveyances post-mid-2023) — parties look missing when only the recent ones are |
+G11 deed-grouping flap — a degraded deed-file load reverts grouping to the
+inference and re-creates rows the deed numbers retired (fix: emit nothing for that
+county that cycle; regroup deletes ride with their replacement) | G12 inferred
+seller read as a published grantor — the Franklin Seller is the prior owner on the
+parcel, labelled as inferred, and is never a classification input.
 
 ## References
 - **Notion database (LIVE, created 2026-08-15):** `County Sales Comps` —
@@ -348,6 +410,25 @@ conveyances post-mid-2023) — parties look missing when only the recent ones ar
   Sale Price, Building SF, SF Source, Price PSF, Buyer, Seller, Use Code, Use
   Description, Flags (multi-select), Source, Run Date. Upsert key = County +
   Parcel ID + Sale Date + Sale Price (match before insert, never blind-append).
+- **Worker-managed databases (LIVE, deployed 2026-10-02; nested under Knowledge
+  Base `3386ecd8`):**
+  - `County Sales Comps (Worker)` — database `3ed6ecd8-9e59-8168-a367-df08b6ff6d3b`,
+    data source `collection://28bae38c-f495-4c9e-9edc-b86c0ae2c413`. One row per
+    transaction; upsert key `County|Parcel|SaleDate|Price`; County options are
+    `Franklin` / `Baltimore County` / `Polk` (the legacy DB uses `Franklin OH` /
+    `Baltimore Co MD` / `Polk IA`). Adds `Comp Key`, `Parcel Count`,
+    `First Seen`, `Days to First Seen`, `Last Synced`, `Convey Number`,
+    `Instrument Type`, and the `SF-INCOMPLETE`, `MULTI-PARCEL-INFERRED` and
+    `RATIO-REVIEW` flags.
+  - `County Sales Coverage (Worker)` — database `3ed6ecd8-9e59-81b1-947b-dff540312cfc`,
+    data source `collection://f26e704a-9191-436b-85cf-fd64258928be`. One row per
+    county per cycle (3 Tier A + 4 Tier C = 7).
+  - Managed databases are read-only to everything but the worker; schema changes
+    go through a worker redeploy and can drop data. Ops: pause with
+    `ntn workers capabilities disable <sync>`; never delete the worker or the
+    databases.
+  - The legacy `County Sales Comps` database (above) is retained, unmodified,
+    pending Gabriel's decision on archiving.
 - `../county-parcel-screen/references/county-endpoints.v1.json` — machine-readable
   service URL / layer id / JURSCODE registry. Consume programmatically. Do not
   copy into this skill.
@@ -368,6 +449,142 @@ valuation input); Baltimore Co assessments run ~64% below recent industrial
 sales, so ratio-based arm's-length tests must be per-county, never global.
 
 ## Changelog
+- **v0.9 (2026-10-15):**
+  Closes the open Worker defect recorded in v0.8. Step 3's government/exempt
+  exclusion was implemented for Baltimore (`EXCLASS`) and Polk (DOR quality) but
+  not for Franklin, whose parcel layer carries no exempt field (`EXPLUC` empty on
+  all 219 industrial-class parcels sold since 2025-10-02; `TOTVALUEEXP` reflects partial exemptions; `PCLASS` is
+  "I" throughout). The fix is a current-owner (buyer) name test in the Worker's
+  Franklin adapter (`ZeOoba/ora-county-sales-monitor` PR #5, commit `fe32c9f`,
+  merged to `main` as `32abe0b`; `src/counties/exempt.ts`). Decisions (Gabriel,
+  2026-10-15): (A) scope is government plus PUBLIC institutions (state, city, county, authorities, public
+  colleges and schools); churches, other nonprofits and private institutions are
+  KEPT, so this is narrower than Polk's "Government or Exempt" class, which also
+  removed a church and a nonprofit; (B) rows already written are left in place,
+  not deleted; (C) a numbered deed with any government parcel is dropped whole.
+  Seller is never tested (Franklin Seller is inferred, and an inferred seller
+  never drives a flag). The filter runs after deed enrichment so exclusions cannot
+  trip the degraded-pull WARN, and an excluded sale is never reported as a
+  dropped group, so `planRegroup` cannot retire its existing rows. Coverage Notes
+  gain the line `N government/public-institution sale(s) excluded.` No change to
+  `rules.ts`, the schema, county labels or the key format. Pre-deploy evidence:
+  typecheck, lint and 57 of 57 tests clean; a read-only live pull of the Franklin
+  layer (window start 2025-10-15) went from 208 raw to 204 kept with 4 sales
+  excluded; the name test run on 91 distinct live Franklin owner names flagged 21,
+  all public bodies, and kept private owners such as OHIOHEALTH CORPORATION and
+  OHIO POWER COMPANY. The `simulate` comps cycle moved Franklin from 164 to 160
+  rows and the harness's own median from $117.77 to $113.14 (Columbus State
+  Community College, $236.05/SF, was the only excluded sale with a $/SF; see the
+  post-deploy note below for the Coverage-basis figures). **Orphaned rows:** the four existing
+  Franklin comps below were written before the filter and are now excluded, so
+  they stay in the Comps DB with a frozen `Last Synced` and no longer update.
+  Treat them as excluded when reading the database; do not count them toward
+  Franklin medians or volumes:
+  `Franklin|130-011588|2026-02-09|0` (State of Ohio),
+  `Franklin|520-165723|2026-05-19|0` (City of Columbus),
+  `Franklin|010-282683|2026-01-29|0` (Columbus Regional Airport Authority),
+  `Franklin|010-005337|2025-12-23|1950000` (Columbus State Community College,
+  the only one with a $/SF). Known limits (best effort, also in the Worker
+  README): a public body whose name contains a church-type word is kept; a
+  public body ending in the abbreviation "CO" is missed; a private college is
+  not recognised as public; a suffix-less private name that reads like a public
+  body (for example "STATE OF THE ART STORAGE") would be dropped. Known
+  unrelated issues: the Worker's `npm run simulate` fails a date-dependent
+  assertion in its own harness (`test/simulate.ts:73`), identically on unmodified
+  `main`; and GitHub Actions jobs die in about 3 seconds with no logs on every
+  run in both the Worker repo and ora-skills, so CI status is not evidence about
+  these changes. **Deployed 2026-10-15** from `main` at `32abe0b` with no schema
+  change; the existing Worker was updated, not duplicated (the same two managed
+  databases received the new cycle; no new databases appeared). **First
+  post-deploy cycle, run date 2026-10-15 (window start 2025-10-15), read from
+  Notion:** the Franklin Coverage row is OK and its Notes read "4
+  government/public-institution sale(s) excluded", as predicted. Franklin
+  Transactions 160 (167 on 2026-10-10), clean $/SF rows 40, NONARMS rows 90,
+  median $100.68. That median reproduces exactly from the Comps DB: the 40 clean
+  rows have a median of (100.64 + 100.71) / 2. The filter's own effect on it is
+  about $0.04 (removing the $236.05/SF college row moves the median from 100.71
+  to 100.68), so the filter is not what moved it from $117.77 on 2026-10-10. That
+  fall coincides with the window rolling forward five days and new sales posting
+  (the Comps DB now holds a $35.73/SF sale dated 2026-10-09), on a distribution
+  with a gap around the middle (100.71, 113.14, 117.77), where a few rows
+  crossing the window edge move the median this far; the exact rows that left the
+  window were not diffed. The `simulate` figures above (a $113.14
+  median) are on the harness basis, which includes RATIO-REVIEW rows and takes
+  the upper middle value, so they do not compare to the Coverage median. Comps DB
+  after the cycle: Franklin 172 rows / 172 distinct Comp Keys (160 upserted this
+  cycle, equal to the Coverage Transactions), Polk 64 / 64, Baltimore Co 38 / 38;
+  0 duplicate Comp Keys; 0 LATE-POSTED; `Price PSF` never 0 and blank on every
+  NONARMS, CONTRACT-SALE and SF-INCOMPLETE row. The four orphaned keys above are
+  present and unchanged (Last Synced 2026-10-10, same flags, the college row
+  still carrying its $236.05/SF).
+- **v0.8 (2026-10-15):** Post-deploy verification of the Worker databases and a
+  fresh parity run against the legacy pilot (read-only; no Worker or database
+  change). Worker DB state 2026-10-15: 273 comps (Franklin 171 / Baltimore Co 38
+  / Polk 64), 273 distinct Comp Keys, 0 duplicates, `Price PSF` never 0 and blank
+  on all 147 NONARMS / CONTRACT-SALE / SF-INCOMPLETE rows, 0 LATE-POSTED; Coverage
+  holds 7 rows per cycle (cycles 2026-10-02, 10-03, 10-10). Parity, window
+  2025-10-01 to 2026-08-15, strict County+Parcel+Date+Price: 189 matched of 258
+  legacy rows; 227 equivalent at transaction level. Strict misses are 17 Baltimore
+  Co rows with a NULL price in both databases (SQL NULL never equals NULL; 38 of
+  38 match once NULL-safe), 14 Polk rows where the legacy ID is the 14-digit `dp`
+  and the Worker lists the member `gp` PINs, and 7 Franklin legacy rows vs 14
+  Worker rows from multi-parcel deed granularity (priced deeds roll up in the
+  Worker; $0 NONARMS deeds emit one row per parcel and now carry SF). The 31
+  remaining legacy-only rows resolve to: 20 with SF >= 150K (Worker SF gate), 2
+  Franklin deeds legacy marked SF-UNPUBLISHED that are over the cap ($15.4M
+  Action Group parcel 010-000782 at 153,412 SF; $137.8M NLF Columbus parcel
+  495-286103 at 1,600,052 SF), 3 Franklin sales dated 2025-10-01 before the
+  Worker's first window start, 4 Franklin parcels (Westerville Rd, $0 on
+  2026-07-29) whose GIS `SALEDATE` was overwritten by a 2026-08-18 $13,005,000
+  resale (G7, verified against the live layer), and 2 Polk sales whose DOR
+  `quality` is "Government or Exempt" (a church and a nonprofit; verified in the
+  live CSV), which the Worker excludes by design. This closes the "1 Polk
+  unexplained" row in v0.6. The Coverage `Transactions` count runs below the
+  Comps row count by design: the Comps DB never deletes, so rows whose sale date
+  has aged past the rolling 365-day window stay (10-10: 167 / 37 / 62 vs 171 /
+  38 / 64; 4 / 1 / 2 rows dated before 2025-10-10). **Open defect (Worker, not
+  fixed here):** Step 3's government/exempt exclusion is implemented for Baltimore
+  (`EXCLASS`) and Polk (DOR quality) but NOT for Franklin; two $0 NONARMS rows
+  with government buyers (State of Ohio, City of Columbus) are in the Franklin
+  set. Ruled a Worker defect by Gabriel 2026-10-15; fix is a Worker change
+  (src/counties/franklin.ts) and needs a separate approved redeploy.
+- **v0.7 (2026-10-02):** Worker follow-ups ratified by Gabriel the same day.
+  (1) `RATIO-REVIEW` splits ratio-only trips out of `NONARMS` (Franklin 20 rows,
+  Baltimore Co 1, Polk 0 on the first run; coverage medians unchanged by design).
+  (2) Franklin Transfer ingest adds Convey Number, Instrument Type, deed-published
+  parcel counts and an inferred, labelled prior-owner Seller; deed-numbered groups
+  replace the buyer-name inference. First deployed cycle: Franklin 173 -> 169 rows
+  (5 superseded rows deleted, 1 regrouped row added; 3 of the 5 are large groups
+  now correctly over the 150K SF cap: a $117M Parsons Ave foundry, a $137.7M Shook
+  Rd group, a $15.4M Reynoldsburg-New Albany group, each with a single parcel above
+  the cap on its own), Baltimore 38 and Polk 64 unchanged, 194 of 215 sales
+  matched (199 before the same-day-deed ambiguity rule withheld 5; the other 16
+  unmatched are all dated after the 09-15 drop). Adversarial review took three
+  rounds; defects found and fixed before deploy: orphaned group keys, false
+  LATE-POSTED on regroup, doubled $/SF on a deed member left without a number,
+  deletes sent ahead of their replacement rows, SF cap bypass through the
+  multi-parcel guard. New failure modes G11, G12. Seller inferred rule left OFF
+  for the shared-stem test (Gabriel, 2026-10-02). IsValid remains unusable. Open:
+  per-county ratio bands; two priced in-window Franklin sales hidden by the GIS
+  last-sale field (G7) are findable via the transfer history if recovery is wanted.
+- **v0.6 (2026-10-02):** Pull, filter and format now run as a hosted Notion
+  Worker (`@notionhq/workers` locked at 0.9.2; two weekly incremental syncs; Tier A comps only;
+  no secrets). First cycle 2026-10-02: 275 comps (Franklin 173 / Baltimore Co 38
+  / Polk 64), 275 distinct keys, 0 LATE-POSTED (baseline cycle), `Price PSF`
+  blank on every NONARMS / CONTRACT-SALE / SF-INCOMPLETE row and never 0;
+  coverage database 7 rows. Clean $/SF medians (coverage rows): Franklin
+  $115.46, Baltimore Co $155.68, Polk $120.08. Parity vs the legacy pilot
+  (strict County+Parcel+Date+Price, 2025-10-01 to 2026-08-15; the worker's own
+  window starts 2025-10-02): 207 matched (Franklin 119 / Baltimore 38 / Polk
+  50); 51 legacy-only, 32 new-only. Legacy-only causes: multi-parcel
+  representation 23 (incl. 3 Franklin parcels the worker rolls into one
+  MULTI-PARCEL-INFERRED row), Franklin rows with SF >= 150K that the legacy
+  kept and the worker's SF gate drops 20, window edge 3, other 5 (4 Franklin
+  last-sale-only `SALEDATE` overwrites, G7; 1 Polk unexplained). Use-code lists and the 25D / 46A Polk
+  exclusions are unchanged from v0.5; the flag set (adds SF-INCOMPLETE and
+  MULTI-PARCEL-INFERRED), PSF blanking on SF-INCOMPLETE, the 365-day re-pull
+  and the First-Seen-based LATE-POSTED rule differ from the v0.5 manual
+  workflow. Polk sales export observation: see `county-endpoints.md`.
 - **v0.5 (2026-08-15):** Post-pilot QC pass on the live Notion data (304 rows
   queried directly, not just re-read from agent reports) confirmed row counts
   and key-uniqueness clean, but surfaced one real finding the original pilot

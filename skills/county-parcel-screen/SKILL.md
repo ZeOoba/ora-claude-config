@@ -1,21 +1,18 @@
 ---
 name: county-parcel-screen
 description: >
-  Use when the user mentions: parcel screen, county screen, off-market sourcing,
-  direct-to-owner, owner outreach list, cold call list, delinquent tax leads,
-  motivated sellers, estate owners, sellers in motion, long-hold owners, sibling
-  parcels, ring screen, county auditor data, assessor data, parcel data, or asks
-  to find off-market industrial acquisition candidates in ANY target market
-  (Columbus, Cincinnati, Kansas City, Indianapolis, Maryland, Madison, Grand
-  Rapids, Richmond, Des Moines, or a new county). Also trigger for "next market",
-  "run the screen on X", or any request to build owner-level lead lists from
-  public property records. Recorded-sales tracking routes to county-sales-monitor; a
-  single already-identified target routes to verified-deal-recon (the deal-recon agent
-  for a first look only); an inbound broker batch
-  routes to deal-flow-triage.
+  Use when the user mentions: parcel screen, county screen, ring screen,
+  off-market sourcing, owner outreach list, cold call list, delinquent tax
+  leads, motivated sellers, estate owners, long-hold owners, assessor or auditor
+  parcel data, or off-market industrial candidates in ANY target market or new
+  county. Also "next market", "run the screen on X", or owner-level lead lists
+  from public property records. Recorded-sales tracking routes to
+  county-sales-monitor; a single already-identified target routes to
+  verified-deal-recon (deal-recon agent for a first look only); an inbound
+  broker batch routes to deal-flow-triage.
 ---
 
-# county-parcel-screen (v1.3)
+# county-parcel-screen (v1.4)
 
 Generate off-market industrial acquisition leads for Oxford Realty Advisors from
 public county property data. The screen finds owners with the CAPACITY to sell at
@@ -331,6 +328,10 @@ row's score-breakdown cell and in the README sheet.
   consecutive transfer records (Franklin pattern).
 - Special-assessment arrears; rental-registry phone numbers; TIF flags
   (TIF distorts the value/basis math - flag, price in DD).
+- Foreclosure and tax-lien feeds (Franklin OH, Maryland, Jackson MO; added v1.4): read
+  references/distress-feeds.md first. Per-host access verdicts, join keys, calendars and proof-pull results
+  live there. Many feeds are MANUAL-ONLY or BLOCKED - honor that; never script around a robots.txt or terms bar.
+  Feed rows are lead inputs joined to the screen, not score inputs.
 
 ### 8. Verify before anyone calls
 Occupant web check per finalist - Columbus found auto-use (policy-blocked
@@ -376,6 +377,8 @@ volume + quarterly re-runs + signal-led call order is the strategy.
   other skills to consume programmatically without parsing prose. county-endpoints.md
   remains the source of truth on any conflict; regenerate the JSON from it.
 - references/hold-data-availability.md - per-market hold-signal verdicts.
+- references/distress-feeds.md - foreclosure and tax-lien sources by market (Franklin OH, Maryland, Jackson MO):
+  access verdicts, join keys, calendars, standing manual routines. Step 7.
 - references/scoring-rationale.md - hold-curve rationale + sibling-consolidation
   error profile (required in every QC sheet).
 - references/run-history.md - incident narratives behind the fail-loud floor,
@@ -384,6 +387,7 @@ volume + quarterly re-runs + signal-led call order is the strategy.
 - versions/CHANGELOG-v1.0-v1.3.md - full changelog text.
 
 ## Changelog
+- **v1.4 (2026-10-02):** Added references/distress-feeds.md (foreclosure and tax-lien sources for Franklin OH, Maryland, Jackson MO) and a step 7 pointer; county-endpoints.md: Jackson DLT cancellation/petition source, Wyandotte count refresh, Maryland `CONVEY1=4` decoded, recording-lag re-check flagged. Docs only. No scored constant changed.
 - **v1.3 (2026-09-18):** Hold/tenure scoring becomes a graduated curve (tau 8 yrs, cap 20 at 38 yrs); 16-point UNKNOWN-HOLD default RETIRED (coverage test, `HOLD-UNKNOWN` / `Hold ceiling`, >20% drops the component); `HOLD-PRE-NOMINAL` fallback; sibling-parcel consolidation closes F6 (`Relationships` sheet, graduated `multi`); hold-data-availability table by market; Maryland hold gap closed (`TRADATE`); Franklin re-scored (mean delta -4.1). **MOVES SCORES.** Full text: versions/CHANGELOG-v1.0-v1.3.md
 - **v1.2 (2026-09-18):** Sub-bands pinned from the Franklin OH pilot; Howard MD / Jackson MO missing-component rescales documented; counterparty floor made FAIL-LOUD on the canonical absolute guard path; Franklin `IsValid` and Jackson paging corrections in `county-endpoints.md`. No scored constant changed. Full text: versions/CHANGELOG-v1.0-v1.3.md
 - **v1.1 (2026-07-19):** Added references/county-endpoints.v1.json, live-verified against all 22 documented counties; Dane WI rename and Kent MI token-gate drifts fixed. Full text: versions/CHANGELOG-v1.0-v1.3.md
