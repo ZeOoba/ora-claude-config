@@ -150,6 +150,10 @@ obsidian-fleet-mirror/session-state.d/
 !/scheduled-tasks/_shared/test-block-sentinel.py
 !/scheduled-tasks/_shared/outlook-sent-probe.ps1
 !/scheduled-tasks/_shared/README-DOUBLE-FIRE-GUARD.md
+# (2026-10-18) R-05 send-contract suites. Same per-file rule as above, no glob.
+!/scheduled-tasks/_shared/send-contract-harness.ps1
+!/scheduled-tasks/_shared/test-send-contract-legacy.ps1
+!/scheduled-tasks/_shared/test-send-contract-keyed.ps1
 
 # 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
 #     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
