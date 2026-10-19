@@ -29,6 +29,15 @@ if (MODE !== 'legacy' && MODE !== 'generic') {
   throw new Error('args.mode must be "generic" (or absent for the legacy oxford-command-center behavior), got ' + JSON.stringify(MODE) + ' — fail closed.');
 }
 const GEN = MODE === 'generic';
+if (!GEN && typeof args === 'object' && args) {
+  // Legacy mode only reads args.worktree. Generic-mode keys (or args.brief, which this workflow never reads) would be
+  // silently ignored and the run would audit the default command-center repo (incident wf_2cae31dd-c6e) — fail closed.
+  // ALLOWLIST: only own enumerable keys count, and only worktree/mode are legitimate in legacy mode.
+  const stray = Object.keys(args).filter((k) => k !== 'worktree' && k !== 'mode');
+  if (stray.length) {
+    throw new Error('unexpected args.' + stray.join(', args.') + ' in legacy mode — legacy only honors args.worktree (and mode) and would audit the default oxford-command-center. Use only {worktree}, or pass {mode:"generic", target, artifacts[, ground, dimensions]} to evaluate another repo (fail closed).');
+  }
+}
 if (GEN) {
   if (typeof args.target !== 'string' || !args.target.trim()) {
     throw new Error('generic mode requires args.target (a non-empty path string) — refusing to fall back to the default worktree (fail closed).');
@@ -65,7 +74,11 @@ const SUBJECT = GEN ? 'the target ' + WT : 'the ORA command center';
 const DIM_LIST = GEN && Array.isArray(args.dimensions) ? args.dimensions : ['acquisition-velocity', 'ops-optimization', 'institutional-quality', 'analytics-digestibility', 'learn-from-data'];
 const MATRIX_SENTENCE = GEN ? 'VALIDATE/ADJUST any baseline plan or value matrix named in the supplied artifacts against the confirmed findings you read from them (do not re-derive it).' : 'VALIDATE/ADJUST the master plan F1-F13 value matrix against the confirmed audit findings you read from _run/ (do not re-derive it).';
 const HARDEN_CANDIDATES = GEN ? 'Prefer additive tests/docs/read-only tooling and single-location fixes with a written-first failing test and a runnable verify + rollback. ' : 'The two strongest candidates from the audit are likely (a) additive characterization/branch TESTS for the governor-surface acquisition engine and the NOI reconcile DB-join layer (rank12/rank13 — pure additive, zero behavior change, hardens financial-decision code), and (b) a tight YELLOW correctness fix such as the noi-variance phantom-shortfall (H5) or scenario-value basis-mix (H4) IF it can be fully test-gated. ';
-const HARDEN_RED_REFS = GEN ? '' : ' H1/rank8/governor';
+const GAP_XCHECK = GEN ? 'cross-checked against work already landed on the target\'s main branch — anything already there is not a gap' : 'cross-checked against ALREADY-DONE — anything on origin/main is not a gap';
+const MATRIX_ADJ_DESC = GEN ? 'how the audit validates/adjusts any baseline plan or value matrix named in the supplied artifacts; flag any now-stale item' : 'how the audit validates/adjusts the master-plan F1-F13 matrix; flag any now-stale item';
+const HARDENED_PLAN_DESC = GEN ? 'the full hardened improvement plan, ready to commit to the target repo\'s plans/docs location' : 'the full hardened improvement plan, ready to commit to docs/superpowers/plans/';
+const CAL_BUILD = GEN ? ' (build on any calibration/feedback design named in the supplied artifacts)' : ' (build on calibration-log-design)';
+const HARDEN_RED_REFS =GEN ? '' : ' H1/rank8/governor';
 const EXTEND_SENTENCE = GEN ? 'EXTENDS any baseline plan in the supplied artifacts (does not replace it)' : 'EXTENDS the master plan (does not replace it)';
 
 phase('Evaluate');
@@ -79,12 +92,12 @@ const EVAL_SCHEMA = {
     topGaps: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
       gap: { type: 'string' }, goalImpact: { type: 'string' }, evidence: { type: 'string' }, leverage: { type: 'string', enum: ['high', 'medium', 'low'] } },
       required: ['gap', 'goalImpact', 'evidence', 'leverage'] } },
-    matrixAdjustments: { type: 'string', description: 'how the audit validates/adjusts the master-plan F1-F13 matrix; flag any now-stale item' },
+    matrixAdjustments: { type: 'string', description: MATRIX_ADJ_DESC },
   },
   required: ['scorecardMarkdown', 'dimensionScores', 'topGaps', 'matrixAdjustments'],
 };
 const evalRes = await agent(
-  'You are the Phase-2 EVALUATION pass for ' + SUBJECT + '. ' + ARTIFACTS + '\n\n=== GROUND ===\n' + GROUND + '\n\nSynthesize a holistic assessment of the SETUP + CODE vs the ORA goals. Score the architecture 0-10 on EXACTLY these ' + DIM_LIST.length + ' dimensions: ' + DIM_LIST.join(', ') + '. ' + MATRIX_SENTENCE + ' Name the 5-8 HIGHEST-LEVERAGE gaps (cross-checked against ALREADY-DONE — anything on origin/main is not a gap). Output an Evaluation Scorecard (markdown) + the structured fields.',
+  'You are the Phase-2 EVALUATION pass for ' + SUBJECT + '. ' + ARTIFACTS + '\n\n=== GROUND ===\n' + GROUND + '\n\nSynthesize a holistic assessment of the SETUP + CODE vs the ORA goals. Score the architecture 0-10 on EXACTLY these ' + DIM_LIST.length + ' dimensions: ' + DIM_LIST.join(', ') + '. ' + MATRIX_SENTENCE + ' Name the 5-8 HIGHEST-LEVERAGE gaps (' + GAP_XCHECK + '). Output an Evaluation Scorecard (markdown) + the structured fields.',
   { label: 'evaluate', phase: 'Evaluate', model: 'opus', schema: EVAL_SCHEMA }
 );
 log('Evaluation done: ' + evalRes.dimensionScores.map((d) => d.dimension + '=' + d.score).join(' · '));
@@ -101,7 +114,7 @@ const PLAN_SCHEMA = {
       testStrategy: { type: 'string' }, tier: { type: 'string', enum: ['GREEN', 'YELLOW', 'RED'] },
       addressesFindings: { type: 'array', items: { type: 'string' } } },
       required: ['id', 'title', 'goal', 'value', 'effort', 'dependsOn', 'successCriteria', 'testStrategy', 'tier', 'addressesFindings'] } },
-    flywheelDesign: { type: 'string', description: 'the DESIGN-ONLY self-improvement/data-flywheel: telemetry, recurring re-audit, calibration loop (build on calibration-log-design), feedback capture, insight layer — with the closed-loop done-definition (append-only verdict log w/ inputs_version → outcome resolution → predicted-vs-actual measurement → re-ratification PROPOSAL that stops for Gabriel, never auto-applies). This run DESIGNS it; does not build/register it.' },
+    flywheelDesign: { type: 'string', description: 'the DESIGN-ONLY self-improvement/data-flywheel: telemetry, recurring re-audit, calibration loop' + CAL_BUILD + ', feedback capture, insight layer — with the closed-loop done-definition (append-only verdict log w/ inputs_version → outcome resolution → predicted-vs-actual measurement → re-ratification PROPOSAL that stops for Gabriel, never auto-applies). This run DESIGNS it; does not build/register it.' },
   },
   required: ['planMarkdown', 'initiatives', 'flywheelDesign'],
 };
@@ -140,7 +153,7 @@ phase('Harden');
 const HARDENED_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    hardenedPlanMarkdown: { type: 'string', description: 'the full hardened improvement plan, ready to commit to docs/superpowers/plans/' },
+    hardenedPlanMarkdown: { type: 'string', description: HARDENED_PLAN_DESC },
     residualRisks: { type: 'array', items: { type: 'string' } },
     tierATargets: { type: 'array', description: 'the ≤2 implementation targets for THIS run — additive-only GREEN OR a single-location correctness fix with a written-first failing test; NEVER a governor constant/confidential/external; one-review-sized', items: { type: 'object', additionalProperties: false, properties: {
       id: { type: 'string' }, title: { type: 'string' }, files: { type: 'array', items: { type: 'string' } },

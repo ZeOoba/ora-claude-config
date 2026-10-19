@@ -10,9 +10,11 @@ it on a cadence against a fresh worktree to keep the command center continuously
   (`counts.unverified` > 0 means a verifier agent died and those candidates were dropped, not refuted — re-run to verify them).
 - **`cc-eval-plan-premortem`** — Phases 2–4. Evaluation vs goals + master-plan matrix → extended
   tiered plan + design-only data-flywheel → adversarial pre-mortem → hardened plan + a
-  pressure-tested Tier-A selection. Reads the audit artifacts from `<worktree>/_run/`.
+  pressure-tested Tier-A selection. Legacy mode reads the audit artifacts from `<worktree>/_run/`.
 
-Both take the target via `args.worktree` (default `C:/Users/Owner/oxford-command-center`).
+`cc-audit-army` takes the target via `args.worktree` (default `C:/Users/Owner/oxford-command-center`) and/or
+`args.brief` for another repo. `cc-eval-plan-premortem` legacy mode takes only `args.worktree` (and `mode`);
+for any other repo use generic mode (below).
 
 ## Generic mode — auditing any repo (2026-07-16)
 `cc-audit-army` also runs against **any** repo: additionally pass `args.brief` (1–3 operator sentences —
@@ -31,8 +33,26 @@ byte-pins the cc-mode prompts — changing cc prompt content requires deliberate
     } })
 
 Caveats: still claim an isolated worktree first (single-writer rule applies to every repo);
-`cc-eval-plan-premortem` stays command-center-specific (F1–F13 matrix, master plan) — do **not** chain
-it after a generic-mode audit; the generic Rank phase still orders by the ORA goal hierarchy.
+the generic Rank phase still orders by the ORA goal hierarchy.
+
+**`cc-eval-plan-premortem` on another repo (generic mode).** Pass
+`{ mode: 'generic', target, artifacts: [...], ground?, dimensions? }`:
+
+- `target` (required) — path of the repo under evaluation; used in every prompt. `args.worktree` is NOT a
+  fallback in generic mode.
+- `artifacts` (required) — non-empty array of file paths every agent reads first (e.g. the saved Audit Report
+  from the `cc-audit-army` run, capability research, a baseline plan).
+- `ground` (optional string) — extra ground-truth text appended to the shared GROUND block.
+- `dimensions` (optional non-empty string array) — replaces the five default scoring dimensions.
+
+It fails closed before any agent runs if `target`/`artifacts` is missing or malformed, if `ground` or
+`dimensions` has the wrong type, or if `mode` is unknown. Legacy mode (no `mode`) accepts ONLY `worktree`
+(and `mode`); any other key (`brief`, `target`, a typo, ...) throws, so a brief about another repo can no
+longer silently evaluate the default command-center. Pairing: audit with `cc-audit-army` + `args.brief`
+(save `reportMarkdown` to a file), then run the pre-mortem with `{ mode: 'generic', target: <repo>,
+artifacts: [<saved audit report>, ...] }`. The command-center-specific text (F1–F13 matrix, master plan,
+`_run/` artifacts) is legacy-only. If `args` may not be delivered (hazard below), verify the first agent's
+prompt names the intended target — an undelivered `args` looks like a bare legacy run.
 
 > ⚠ **args-delivery hazard (2026-07-16):** on the Claude Code Desktop surface, `Workflow({name, args})`
 > did NOT deliver `args` to the script — proven on 4 runs (wf_ae4150f2, wf_9c31252e, wf_e40dd80a — two of
