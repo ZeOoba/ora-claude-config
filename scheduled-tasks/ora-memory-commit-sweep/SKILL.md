@@ -1,6 +1,6 @@
 ---
 name: ora-memory-commit-sweep
-description: Sweep memory/ for settled uncommitted changes and commit them, closing the head_orphans() index/content gap [MODEL: claude-opus-5 | set 2026-08-16]
+description: Sweep memory/ for settled uncommitted changes and commit them, closing the head_orphans() index/content gap [MODEL: claude-sonnet-5-5 | set 2026-10-06]
 ---
 
 Run this exact command and report only if it errors or exits non-zero:

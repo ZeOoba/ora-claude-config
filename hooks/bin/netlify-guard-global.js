@@ -269,17 +269,6 @@ function main() {
     // cannot run inside the validator. Env is an ALLOWLIST (see validatorEnv).
     const output = execFileSync(PYTHON_EXE, ["-I", "-S", CHECK_SCRIPT, "--session", sessionId],
       { encoding: "utf8", env: validatorEnv() });
-    // -I (isolated): ignores PYTHON* env vars (PYTHONPATH/PYTHONSTARTUP/...) and the
-    // script directory / user site, so the validator cannot be redirected by environment.
-    // ORA_OVERRIDE_SESSIONS_DIR is a test seam in override_tokens.py: drop it so a caller
-    // cannot point the validator at a self-minted token directory.
-    // Windows env names are case-insensitive, so match the key case-insensitively.
-    const validatorEnv = {};
-    for (const k of Object.keys(process.env)) {
-      if (k.toUpperCase() !== "ORA_OVERRIDE_SESSIONS_DIR") validatorEnv[k] = process.env[k];
-    }
-    const output = execFileSync(PYTHON_EXE, ["-I", CHECK_SCRIPT, "--session", sessionId],
-      { encoding: "utf8", env: validatorEnv });
     log("authorized prod deploy for session " + sessionId + " -- " + output.trim());
   } catch (err) {
     const detail = (err.stderr && err.stderr.toString().trim()) || err.message;
@@ -294,5 +283,4 @@ if (require.main === module) {
   main();
 } else {
   module.exports = { isProdInvocation, preloadProblem, validatorEnv };
-  module.exports = { isProdInvocation };
 }
