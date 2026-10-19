@@ -51,6 +51,25 @@
     The resolved paths are recorded in send-log.txt on the OK line, so the
     audit trail says exactly which bytes left the machine.
 
+.PARAMETER DedupTaskId
+    R-05 contract mode, always passed together with -DedupPeriodKey: the scheduled task id
+    (e.g. ora-am-brief). The dedup key is <task id>/<period key>/<subject hash>. It is checked
+    in send-log.txt BEFORE Send() (an already-sent key exits 0 with DEDUP-SKIP; a key whose
+    earlier state is unknown exits 6 with DEDUP-BLOCK), and the script then retries exit 2/4
+    once itself. A contract-mode caller never retries.
+
+.PARAMETER DedupPeriodKey
+    The cycle the send belongs to: the ET date yyyy-MM-dd for daily tasks (take block-sentinel.py's
+    etDate, or PowerShell Get-Date -Format yyyy-MM-dd; never a UTC date),
+    yyyy-MM monthly, yyyy-Www weekly, or <etDate>-<block> (for example 2026-10-18-slot-12) for multi-fire tasks, built from
+    block-sentinel's etDate and block. A bare block such as slot-12 repeats every day and would
+    DEDUP-SKIP all later days.
+
+.PARAMETER ForceResend
+    Human-directed only: bypasses DEDUP-BLOCK, DEDUP-SKIP and the legacy quarantine after a
+    person has checked Sent Items. A scheduled spec must never pass it
+    (R-05 Task 6 adds maintenance/_tests/test_send_contract_spec_lint.py, which fails on it).
+
 .EXAMPLE
     # Short message
     .\send-via-outlook.ps1 -To "ggoldberg@oxfordra.net" -Subject "Test" -Body "Hello"
@@ -102,10 +121,25 @@
     #     $m.Subject.ToCharArray() | % { "U+{0:X4}" -f [int]$_ }
 
 .NOTES
-    Exit codes: 0 = sent OK, 1 = usage error, 2 = Outlook COM failure,
-    3 = Outlook stuck on startup wizard (preflight-detected, no COM attempted),
-    4 = COM call timed out (>15s, Outlook likely blocked), 5 = external recipient(s) not
-    authorized (see OUTBOUND-ACTION CHECK below).
+    Exit codes (R-05 send contract, ratified 2026-10-18; memory rules.md section 2 is the
+    caller-facing table, aligned to this contract by R-05 Task 7):
+      0 = sent OK (or, with a dedup key, already sent this period: DEDUP-SKIP).
+      1 = usage error. Never retried.
+      2 = Outlook COM failure BEFORE Send() was invoked, or Send() rejected by the callee with
+          RPC_E_CALL_REJECTED (0x80010001, nothing was sent). Retry-safe.
+      3 = Outlook stuck on a startup/profile wizard (preflight-detected, no COM attempted). Never retried.
+      4 = COM call timed out BEFORE Send() was invoked (Outlook likely blocked). Retry-safe.
+      5 = refused: attachment + external recipient, or external recipient(s) not authorized
+          (see OUTBOUND-ACTION CHECK below). NEVER retried.
+      6 = send state UNKNOWN: Send() was invoked and did not confirm (timeout, or a throw inside
+          Send()), a DEDUP-BLOCK / QUARANTINE refusal of a send whose earlier state is unknown,
+          or a fail-closed refusal in contract mode (send-log unreadable, dedup lock or SEND-INTENT
+          record unavailable, send markers unreadable). The message MAY have gone out. NEVER
+          retried; a human checks Sent Items and, only if it is absent, re-runs with -ForceResend.
+    With -DedupTaskId + -DedupPeriodKey ("contract mode") the script itself retries exit 2/4
+    ONCE, so the caller retries nothing. Without them ("legacy mode") the only internal retry
+    is the existing one on RPC_E_CALL_REJECTED, a legacy caller may retry 2/4 once, and the
+    same subject to the same To is refused for 60 minutes after a logged SEND-STATE-UNKNOWN.
     All sends are appended to C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt
 
     OUTBOUND-ACTION CHECK (2026-07-17, OI-007). ora-autonomy-gate.py's PreToolUse Gate 1
@@ -188,7 +222,7 @@ $Simulating = $SimPlan.Count -gt 0
 # A simulated run writes a REAL-looking '[OK] Sent' line. It must never land in the canonical
 # log, where every '[OK] Sent' reader (and the contract-mode dedup) would count it as a delivery.
 # Checked before any Write-Log call, so this refusal cannot touch the canonical log either.
-if ($Simulating -and -not $env:ORA_SEND_LOG_PATH) {
+if ($WhatIf -and $Simulating -and -not $env:ORA_SEND_LOG_PATH) {
     [Console]::Error.WriteLine("ORA_SEND_SIMULATE requires ORA_SEND_LOG_PATH: a simulated send must never write the canonical send log")
     exit 1
 }
@@ -557,8 +591,8 @@ foreach ($s in $SimPlan) {
 # --- Validate attachments (2026-09-18) ---
 # Fail-closed by design: a message whose body promises an attachment must never
 # go out without it, so ANY bad entry rejects the whole send before Outlook is
-# touched. Same exit code as the other argument faults above (1) -- the exit
-# contract (see .NOTES) is deliberately NOT widened by this check: it reuses exit 1.
+# touched. Same exit code as the other argument faults above (1) -- attachment
+# faults never widen the exit contract (see .NOTES, codes 0-6): this check reuses exit 1.
 $ResolvedAttachments = @()
 if ($PSBoundParameters.ContainsKey('Attachment')) {
     # Under `powershell -File` -- how the whole fleet invokes this script -- a
