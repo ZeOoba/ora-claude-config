@@ -29,6 +29,7 @@ Read `C:\Users\Owner\.claude\projects\C--Users-Owner-OneDrive---Oxford-Capital-P
 3. Send an email to `ggoldberg@oxfordra.net` ONLY (never cc — this is not the ora-am-brief Daily Brief's sanctioned exception) via the sole send path `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`. Subject: "New Claude model detected: <old lineup> -> <new lineup>". Body: same old→new summary + the checklist (bump `~/.claude/settings.json` top-level default + `reference_scheduled_task_model_standard.md` same day; leave CLAUDE.md/ora-skills alone — alias-based; sweep `C:\Users\Owner\oxford-command-center` (server/ai/*.ts, om-extract.ts, index.ts, .env) and `C:\Users\Owner\ora-pm` for hardcoded model-ID literals via the claude-api skill's `shared/model-migration.md`; re-run the CC/MCP canary check for the #48976-pattern gap).
    - Exit 2 (COM failure) or 4 (timeout): retry the send once, then flag loudly in the Notion completion row if it still fails — do NOT halt.
    - Exit 1 (usage error) or 3 (stuck Outlook wizard needing a human): do NOT retry — flag immediately in the Notion row.
+   - Exit 5 or 6 (or any other code): do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out) — flag immediately in the Notion row, per rules.md §2.
 
 ## Never fabricate
 
