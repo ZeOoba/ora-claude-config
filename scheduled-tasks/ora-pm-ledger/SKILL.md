@@ -1317,14 +1317,17 @@ missed run is itself surfaced by `automation-health-monitor`.
   removed 2026-06-11 (connector gone) — do not attempt it, do not reference
   Rube (shut down). On a non-zero exit from the script: it already performs
   one bounded internal retry on `RPC_E_CALL_REJECTED` (HRESULT 0x80010001);
-  at the task level, do not retry beyond that — flag loudly (a note in the
+  at the task level, do not retry beyond that (a refused send, exit 5, or an unknown-state send, exit 6, is flagged and never repeated or resent: exit 6 = send state unknown — the message MAY have gone out; rules.md §2) — flag loudly (a note in the
   block's own Notion page + carry the failure forward into Block C's
   COVERAGE GAPS if C runs after) and continue to the next block. Do NOT
   halt the whole task on one block's send failure.
   - Exit codes: 0 = sent · 1 = usage error · 2 = COM failure (retry
     exhausted) · 3 = Outlook stuck on a startup/profile wizard (human must
     dismiss — do not attempt to work around this programmatically) · 4 = COM
-    call timed out (>15s).
+    call timed out BEFORE `Send()` (retry-safe, but this task still does not retry) · 5 = refused
+    (attachment + external recipient, or an unauthorized external recipient; never retry, never route
+    around) · 6 = send state unknown, the message MAY have gone out (never retry, never resend; a human
+    checks Outlook Sent Items).
 - **Fallback persistence (all three blocks, on any send failure):** write the
   block's HTML body to
   `C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\ORA\Briefs\outputs\{TODAY}_<block>.html` (path updated 2026-07-17 — `ORA\` moved under `Business\` per the OneDrive Business/Personal split)

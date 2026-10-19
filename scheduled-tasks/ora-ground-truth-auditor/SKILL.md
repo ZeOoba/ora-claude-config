@@ -64,7 +64,7 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
 **How this run closes the claim -- exactly one of these, on every path that got exit 0:**
 
 - **An audit digest reached STEP 8** -- sent, skipped because the Layer 2 probe found it
-  already in Sent Items, or unsent after the send retry but drafted and saved -- close
+  already in Sent Items, or unsent (send failed after its retry, or exit 5/6: no retry) but drafted and saved -- close
   with `complete`. Pass `--email-sent-at` only when this run's send actually succeeded.
   An unsent digest is still a complete run (flagged per STEP 8's exit-code canon),
   because re-running would repeat the whole verifier fan-out:
@@ -393,24 +393,24 @@ powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\
 powershell -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<the subject above>" -BodyFile "<path to the composed HTML>" -BodyFormat html
 ```
 
-Exit-code handling (canon): exit 2 (COM failure) or 4 (timeout) -- retry once, then flag
+Exit-code handling (canon): exit 2 (COM failure) or 4 (timeout before `Send()`) -- retry once, then flag
 loudly if it fails again (do not halt the task over a send failure once the digest is
 drafted and saved). Exit 1 (usage error) or 3 (stuck wizard) -- do not retry, flag
 immediately with the exact exit code and stderr.
 
-**Before the exit-4 retry, re-run the Sent-Items probe** (same command, same stem file).
-A timeout does not prove the message failed -- COM can deliver it after the helper gave
-up, and a blind retry then sends the digest twice. **Exit 10** -> the timed-out send
-landed: do NOT retry, log `MAIN_EMAIL_DELIVERED_DESPITE_TIMEOUT`, and close with
-`complete --email-sent-at <match.sentOn from the probe's JSON>` (the timestamp of the
-message actually in Sent Items, not the time of the failed call); for a could-not-start
-digest close with `fail` as above. **Exit 0** -> retry the send once. **Exit 1 or any
-other code** -> fail open and retry, naming the probe gap in STEP 9. A send whose
-timeout the re-probe proves delivered counts as "this run's send actually succeeded" for
-STEP 0b's `--email-sent-at` rule.
+**Exit 5 (refused: attachment + external recipient, or an unauthorized external recipient), exit 6 (send state
+unknown -- the message MAY have gone out), or any code other than 2 or 4** -- do NOT retry and never
+resend (rules.md section 2): flag loudly in STEP 9 with the exact exit code and stderr (for exit 6 quote the
+`SEND-STATE-UNKNOWN` / `DEDUP-BLOCK` / `QUARANTINE` line from send-log.txt) and say a human must check
+Outlook Sent Items. The claim closes as STEP 0b specifies for that digest type, never with
+`--email-sent-at` (this run's send did not confirm).
+
+No Sent-Items re-probe before the exit-4 retry: exit 4 now means the timeout hit BEFORE `Send()`, so the
+message cannot have gone out and the retry is safe (R-05 send contract). A timeout AFTER `Send()` is
+exit 6 and is never retried.
 
 Once the send has resolved, close the STEP 0b claim exactly as STEP 0b specifies, with
-`guard_run_id` (already done above if either probe returned 10 -- close once). If that
+`guard_run_id` (already done above if the probe returned 10 -- close once). If that
 close returns exit 12, report `guard_run_id` and the helper's JSON verbatim in STEP 9.
 
 ## STEP 9 -- completion note
