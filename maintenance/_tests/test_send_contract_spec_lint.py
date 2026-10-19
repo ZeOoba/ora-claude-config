@@ -12,6 +12,8 @@ the Daily Brief reaching egoldberg@ twice). This file fails on any in-repo spec 
       or WAIVED_PENDING_LANDING (specs present only in the live checkout that day);
   L3  passes -ForceResend, or any PowerShell abbreviation of it (-F, -Fo, -Force, ...), to the
       send script (human-directed re-runs only; a scheduled fire never does);
+  L5  re-invokes the send script from a fenced loop or if/while block on the strength of an exit
+      code ($LASTEXITCODE / $?), whatever the code (never waivable);
   L4  uses contract mode (-DedupTaskId) but passes only one of the two dedup flags, or still
       carries any L1/L2 retry text. A contract-mode spec can never be waived.
 
@@ -32,13 +34,21 @@ excuse a live "retry once"), and uses regexes with no nested ambiguous quantifie
 self-tests time several hostile shapes).
 
 Known limits (a lint, not a proof; every one is documented so nobody mistakes a pass for a proof):
-  missed - a retry described without the words in RETRY (resubmit, send it again, re-invoke); a send
-    script path held in a variable; an exit list with a gap ("exit 2, 4 but not 5 or 6", "any exit other
+  missed - a retry described without the words in RETRY (resubmit, re-invoke); a send
+    script path held in a variable (also inside a fenced if/loop: `if ($LASTEXITCODE) { & $send }`);
+    a fenced loop that retries without testing $LASTEXITCODE, or re-sends with changed arguments;
+    a retry whose success flag is a variable (`while (-not $ok)` after `$ok = ($LASTEXITCODE -eq 0)`), a bash
+    `until send; do` / `if ! send; then send`, cmd `for /L ... && goto`, and a subject variable reassigned between
+    two literally identical calls (flagged, fails closed); exit-code wording "exceeds 0", "greater than 0",
+    "returned > 0", "exit != zero"; and "status code is not 0" / "HTTP status > 0" about another system
+    beside a send is flagged;
+    L5 treats `continue`/next-item on failure and a different -Subject after a failed send as NOT a retry; an exit list with a gap ("exit 2, 4 but not 5 or 6", "any exit other
     than 0 or 6"); a table whose exit code sits in a bare cell; "exited with 6", "exit #6"; unusual
     negation ("never fail to retry"); -Force on the line after a statement with no backtick, and
     $p.Add('Force', $true); L4 reads dedup flags anywhere in the file, so a half-keyed invocation whose
     other flag is mentioned in prose elsewhere passes.
-  fails closed (a compliant spec is flagged and must be reworded) - doctrine pasted verbatim from
+  fails closed (a compliant spec is flagged and must be reworded) - "unsuccessful" / "does not succeed" about
+    any system (a Notion write) within a send-context window beside a retry word; doctrine pasted verbatim from
     rules.md that mentions -ForceResend or "retry on non-zero" as meta text; "a retry is forbidden" /
     "retrying is prohibited" next to exit 5/6; "exit 2 or 4 retry once, exit 5 or 6 never"; inside a
     send-context code fence, a variable such as F or FORCE assigned with "=", or a "# never pass
@@ -47,6 +57,7 @@ The review gate and the ratified spec batch remain the authority.
 
 Run: python maintenance/_tests/test_send_contract_spec_lint.py   (exit 0 = pass)
 """
+import bisect
 import glob
 import hashlib
 import os
@@ -74,7 +85,10 @@ SEND = re.compile(r"send-via-outlook\.ps1|Outlook COM|COM send|COM exit|send exi
 # "re-run" counts only when it is the send being re-run ("re-run the send", "re-run it"), not a probe.
 RETRY = re.compile(r"(?<![A-Za-z0-9])retr(?:y|ies|ied|ying)(?![A-Za-z0-9])|\bre-?send\b|\btry\s+again\b"
                    r"|\bre-?run\s+(?:it\b|the\s+(?:send|script|command|helper|same)|send-via)"
-                   r"|\bre-?attempt\b|\bsecond\s+attempt\b|\bonce\s+more\b|\bone\s+more\s+time\b",
+                   r"|\bre-?attempt\b|\bsecond\s+attempt\b|\bonce\s+more\b|\bone\s+more\s+time\b"
+                   r"|\b(?:run|call|invoke|execute|send|repeat)\s+(?:it|the\s+(?:send|script|command|helper)"
+                   r"|send-via-outlook(?:\.ps1)?)(?:\s+(?:a\s+)?(?:second\s+time|again))"
+                   r"|\brepeat\s+the\s+send\b",
                    re.I)
 # A negation binds to a retry/exit mention only when it sits directly before it ("do NOT retry",
 # "never exit 5/6", "NOT every failure retries", "no further retries", "without any retry").
@@ -103,10 +117,15 @@ _NUMSEP = r"(?:\s*[,/]\s*(?:(?:and|or)\s+)?|\s+(?:and|or)\s+|\s+)"
 EXPLICIT_56 = re.compile(
     r"(?:\bexit(?:s|ed)?(?:[\s-]*(?:codes?|status))?(?:\s+with\s+codes?)?|\b(?:return|error)\s*codes?"
     r"|\bstatus|\bcodes?|\bLASTEXITCODE|\berrorlevel|\breturn(?:s|ed)?)"
-    r"[\s-]*(?:of\s+|is\s+|=+\s*|:\s*|-eq\s+|-in\s+|\(\s*)?(?:\d+" + _NUMSEP + r")*[56]\b"
+    r"[\s-]*(?:of\s+|is\s+|=+\s*|:\s*|-eq\s+|-in\s+|\(\s*)?(?:\d+" + _NUMSEP + r")*(?:[56]|five|six)\b"
     r"|\bexit(?:\s+codes?)?\s*[1-5]\s*(?:-|to|through)\s*6\b", re.I)
 GENERIC = re.compile(r"\bnon[\s-]?zero|\bany\s+(?:send\s+)?(?:failure|error)|\bon\s+(?:any\s+)?error\b|"
                      r"\bon\s+(?:a\s+)?(?:COM\s+)?(?:send\s+)?failure|\bif\s+(?:the\s+)?send\s+fails|"
+                     r"\bunsuccessful(?:ly)?\b|\b(?:does|did|do)\s+not\s+succeed|\b(?:doesn't|didn't|don't)\s+succeed|"
+                     r"\bunless\s+(?:the\s+)?(?:exit(?:\s+code)?|status|code)\s+(?:is\s+|=+\s*)?(?:0|zero)\b|"
+                     r"\b(?:exit|code|status|LASTEXITCODE|errorlevel)\w*\W{1,12}>\s*0\b|"
+                     r"\b(?:exit|code|status)\w*\s+(?:is\s+|was\s+)?(?:not|isn't|wasn't)\s+(?:0|zero)\b|"
+                     r"\banything\s+(?:but|other\s+than|besides|except)\s+(?:0|zero)\b|\bfailure\s+code\b|"
                      r"\bif\s+it\s+fails\b(?!\s+again)|-ne\s*0\b|-gt\s*0\b|-ge\s*[1-5]\b|!=\s*0\b|>=\s*[1-5]\b", re.I)
 # Per-code wording that is compliant even though it names a generic failure phrase. Each form ties
 # the word "only" to the retry and a list of exit codes 1-4 (never 5/6): "retry only on exit 2 or 4",
@@ -335,9 +354,80 @@ def _force_hit(text, in_fence, has_send):
     return False
 
 
+EXIT_VAR = re.compile(r"\$LASTEXITCODE\b|\$\?", re.I)
+LOOP_KW = re.compile(r"(?<![\w$.-])(?:for|foreach|while|until|do)\b(?=\s*[({])|\bForEach-Object\b|\b1\s*\.\.\s*\d", re.I)
+# a condition that means "the send succeeded": the loop/if that stops on it is a retry loop
+SUCCESS_COND = re.compile(r"\$LASTEXITCODE\s*-(?:eq|le|lt)\s*[01]\b|\$LASTEXITCODE\s*-eq\s*0|^\s*\$\?\s*$|\$\?\s*-eq\s*\$true"
+                          r"|-not\s*\$LASTEXITCODE|!\s*\$LASTEXITCODE|\b0\s*-eq\s*\$LASTEXITCODE", re.I)
+IF_BREAK = re.compile(r"(?<![\w$.-])if\s*\(([^()]{0,200})\)\s*\{[^{}]{0,200}?(?<![\w$.-])(?:break|return)\b", re.I)
+LOOP_COND = re.compile(r"(?<![\w$.-])(?:while|until)\s*\(([^()]{0,200})\)", re.I)
+DO_BODY = re.compile(r"(?<![\w$.-])do\s*\{", re.I)
+CHAIN = re.compile(r"send-via-outlook[^\n]{0,300}?&&\s*(?:break|exit\s+0)\b", re.I)
+
+
+def _brace_body(text, start, limit=600):
+    """Text after an opening brace (at start-1) up to its matching close brace, capped at limit chars."""
+    depth, end = 1, min(len(text), start + limit)
+    for k in range(start, end):
+        if text[k] == "{":
+            depth += 1
+        elif text[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:k]
+    return text[start:end]
+
+
+def _send_calls(btext):
+    """[(position, normalized arguments up to the end of the statement)] for each send-script mention."""
+    out = []
+    for m in SEND_SCRIPT.finditer(btext):
+        seg = re.split(r"[\n;|}]|&&", btext[m.end(): m.end() + 400], maxsplit=1)[0]
+        out.append((m.start(), " ".join(seg.replace("'", "").replace('"', "").split()).lower()))
+    return out
+
+
+def _loop_hit(btext):
+    """True if a fenced block calls send-via-outlook.ps1 AGAIN on the strength of an exit-code test: the
+    same call repeated with an exit-code test between, a do/while/until loop whose condition reads the exit
+    code and whose body sends, a loop that stops (break/return) on a successful exit, or an `&& break` /
+    `|| <send>` chain. A different message (another -Subject) after a test, and a loop that moves on to the
+    next item on failure (continue), are not retries."""
+    if not SEND_SCRIPT.search(btext):
+        return False
+    if CHAIN.search(btext):
+        return True
+    for line in btext.split("\n"):  # `send ... || send ...` re-runs the SAME call (another -Subject is a different message)
+        if "||" in line and len(SEND_SCRIPT.findall(line)) > 1:
+            segs = [seg for _, seg in _send_calls(line)]
+            if segs[0] in segs[1:]:
+                return True
+    if not EXIT_VAR.search(btext):
+        return False
+    tests = [m.start() for m in EXIT_VAR.finditer(btext)]
+    groups = {}
+    for pos, seg in _send_calls(btext):
+        groups.setdefault(seg, []).append(pos)
+    for pos in groups.values():
+        k = bisect.bisect_right(tests, pos[0])  # an exit-code test strictly between the first and last identical call
+        if len(pos) > 1 and k < len(tests) and tests[k] < pos[-1]:
+            return True
+    for m in LOOP_COND.finditer(btext):
+        if EXIT_VAR.search(m.group(1)):
+            around = btext[max(0, m.start() - 600): m.start()] if re.match(r"until|while", m.group(0), re.I) else ""
+            body = _brace_body(btext, btext.find("{", m.end()) + 1) if btext.find("{", m.end()) >= 0 else ""
+            if SEND_SCRIPT.search(body) or (DO_BODY.search(around) and SEND_SCRIPT.search(around)):
+                return True
+    if LOOP_KW.search(btext):
+        for m in IF_BREAK.finditer(btext):
+            if EXIT_VAR.search(m.group(1)) and SUCCESS_COND.search(m.group(1)):
+                return True
+    return False
+
+
 def scan_text(text):
     lines = normalize(text).split("\n")
-    hits = {"explicit": [], "explicit_text": [], "generic": [], "force": []}
+    hits = {"explicit": [], "explicit_text": [], "generic": [], "force": [], "loop": []}
     for first, last, utext, in_fence in build_units(lines):
         ctx = "\n".join(lines[max(0, first - WINDOW): last + WINDOW + 1])
         kind = classify_text(utext, ctx)
@@ -352,6 +442,9 @@ def scan_text(text):
         if SEND.search("\n".join(lines[max(0, first - WINDOW): last + WINDOW + 1])) and (
                 FORCE_KEY.search(btext) or FORCE_SPLAT.search(btext) or FORCE_FULL.search(btext)):
             hits["force"].append(first + 1)
+    for first, last, btext in fenced_blocks(lines):
+        if _loop_hit(btext):
+            hits["loop"].append(first + 1)
     joined = "\n".join(lines)
     has_task = any(not DEDUP_NEG.search(joined[max(0, m.start() - 40):m.start()])
                    for m in DEDUP_TASK.finditer(joined))
@@ -369,6 +462,9 @@ def evaluate(name, text, waived_generic, waived_pending, reviewed):
     waived = name in waived_generic or name in waived_pending
     if h["force"]:
         out.append(("L3 %s never passes -ForceResend" % name, False, "lines %s" % h["force"]))
+    if h["loop"]:
+        out.append(("L5 %s has no fenced loop/if that re-invokes the send script on an exit code" % name, False,
+                    "lines %s -- a caller never re-invokes send-via-outlook.ps1 on any exit code" % h["loop"]))
     if h["contract"]:
         out.append(("L4 %s passes both dedup flags" % name, h["contract_complete"], ""))
         out.append(("L4 %s (contract mode) carries no retry text" % name,
@@ -485,6 +581,25 @@ FIXTURES = [
     ("send-via-outlook.ps1 on a non-zero exit retry once, except exit 6, which is retried only after the probe.", "explicit"),
     ("send-via-outlook.ps1: on exit 6 do not ever retry.", None),
     ("send-via-outlook.ps1: on exit 6 never automatically retry.", None),
+    # review finding C8: other ways to say "not successful" / "exit 6" and other ways to say "retry"
+    ("send-via-outlook.ps1: if unsuccessful, retry once.", "generic"),
+    ("send-via-outlook.ps1: unless exit 0, retry once.", "generic"),
+    ("send-via-outlook.ps1: if exit code > 0, retry once.", "generic"),
+    ("send-via-outlook.ps1: if exit is not 0, retry once.", "generic"),
+    ("send-via-outlook.ps1: when the send does not succeed, retry once.", "generic"),
+    ("send-via-outlook.ps1: if the exit code is anything but 0, repeat the send.", "generic"),
+    ("send-via-outlook.ps1: if it exits non-zero, run it again.", "generic"),
+    ("send-via-outlook.ps1: on any non-zero exit, send it again once.", "generic"),
+    ("send-via-outlook.ps1: exit six: retry once.", "explicit"),
+    ("send-via-outlook.ps1: on exit 6, call the script again.", "explicit"),
+    ("send-via-outlook.ps1: on exit 6, invoke send-via-outlook.ps1 a second time.", "explicit"),
+    ("send-via-outlook.ps1: if the exit code is five or six, retry once.", "explicit"),
+    ("send-via-outlook.ps1: if unsuccessful, never retry; flag it.", None),
+    ("send-via-outlook.ps1: on exit 6, never run it again; flag it.", None),
+    ("send-via-outlook.ps1: exit six means state unknown: do not retry.", None),
+    ("send-via-outlook.ps1: unless exit 0, flag it loudly and do not retry.", None),
+    ("Run send-via-outlook.ps1 last. Retry the Notion query if the row count > 0 is false.", None),
+    ("Run send-via-outlook.ps1 last. Retry the HubSpot sync when the row count is not 0.", None),
 ]
 for text, want in FIXTURES:
     got = classify([text], 0)
@@ -578,8 +693,45 @@ check("contract mode: one flag is incomplete",
 check("contract mode: an abbreviated flag still counts", scan_text(PS + " -DedupT t -DedupP k")["contract_complete"])
 check("contract mode: prose 'does not use -DedupTaskId yet' is not contract mode",
       not scan_text("This spec does not use -DedupTaskId yet. " + PS)["contract"])
+# review finding C8: a fenced loop or conditional that re-invokes the send script on an exit code
+_LOOP = "Send with send-via-outlook.ps1.\n\n```powershell\n%s\n```\n"
+for label, body, want in [
+    ("for loop that breaks on exit 0",
+     "for($i=0;$i -lt 2;$i++){ & C:/x/send-via-outlook.ps1 -To a -Subject s -Body b; if($LASTEXITCODE -eq 0){break} }", True),
+    ("while loop on the exit code",
+     "& send-via-outlook.ps1 -To a -Subject s -Body b\nwhile ($LASTEXITCODE -ne 0) { & send-via-outlook.ps1 -To a -Subject s -Body b }", True),
+    ("if on the exit code re-invokes the script",
+     "& send-via-outlook.ps1 -To a -Subject s -Body b\nif ($LASTEXITCODE -ne 0) { & send-via-outlook.ps1 -To a -Subject s -Body b }", True),
+    ("second invocation after an exit-code test",
+     "& send-via-outlook.ps1 -To a -Subject s -Body b\n$rc = $LASTEXITCODE\n& send-via-outlook.ps1 -To a -Subject s -Body b", True),
+    ("do/until on the exit code",
+     "do { & send-via-outlook.ps1 -To a -Subject s -Body b } until ($LASTEXITCODE -eq 0)", True),
+    ("pipeline loop that returns on success",
+     "1..2 | ForEach-Object { & send-via-outlook.ps1 -To a -Subject s -Body b; if ($LASTEXITCODE -eq 0) { return } }", True),
+    ("|| chain that runs the script again",
+     "& send-via-outlook.ps1 -To a -Subject s -Body b || & send-via-outlook.ps1 -To a -Subject s -Body b", True),
+    ("bash loop that breaks on success",
+     "for i in 1 2; do powershell -File send-via-outlook.ps1 -To a -Subject s -Body b && break; done", True),
+    ("|| chain with the SAME call (quotes differ)",
+     "& send-via-outlook.ps1 -To a -Subject 's' -Body b || & send-via-outlook.ps1 -To a -Subject \"s\" -Body b", True),
+    ("|| chain with a DIFFERENT message (failure notice)",
+     "& send-via-outlook.ps1 -To a -Subject 'R' -Body b || & send-via-outlook.ps1 -To a -Subject 'R FAILED' -Body f", False),
+    ("two DIFFERENT messages with an exit test between them",
+     "& send-via-outlook.ps1 -To a -Subject 'A' -Body b\nif ($LASTEXITCODE -ne 0) { Write-Host flag }\n& send-via-outlook.ps1 -To a -Subject 'B' -Body b", False),
+    ("one send per task, next item on failure (continue)",
+     "foreach ($t in $tasks) { & send-via-outlook.ps1 -To a -Subject $t -Body b; if ($LASTEXITCODE -ne 0) { continue } }", False),
+    ("a failure notice sent after a failed send is a different message",
+     "& send-via-outlook.ps1 -To a -Subject 'Report' -Body b\nif ($LASTEXITCODE -ne 0) { & send-via-outlook.ps1 -To a -Subject 'Report FAILED' -Body f }", False),
+    ("one invocation, then flag on a non-zero exit",
+     "& send-via-outlook.ps1 -To a -Subject s -Body b\nif ($LASTEXITCODE -ne 0) { Write-Host 'flag it' }", False),
+    ("one invocation with no exit-code test", "& send-via-outlook.ps1 -To a -Subject s -Body b", False),
+    ("loop with no send script in the block", "for($i=0;$i -lt 2;$i++){ Do-Work; if($LASTEXITCODE -eq 0){break} }", False),
+]:
+    check("L5 detection: %s" % label, bool(scan_text(_LOOP % body)["loop"]) == want)
+check("L5 detection: prose outside a fence is not a loop",
+      not scan_text("send-via-outlook.ps1: for(...) { if($LASTEXITCODE -eq 0){break} }")["loop"])
 check("no hits in an unrelated paragraph", scan_text("Notion create failed: retry once.\n") ==
-      {"explicit": [], "explicit_text": [], "generic": [], "force": [], "contract": False,
+      {"explicit": [], "explicit_text": [], "generic": [], "force": [], "loop": [], "contract": False,
        "contract_complete": False})
 
 # hostile input: every shape must scan in well under a second each (budget 20 s for all, generous for a loaded host; exponential patterns take minutes)
@@ -602,6 +754,9 @@ for _adv in (
     "send-via-outlook.ps1\n```\nf" + " " * 100000 + "x\n```\n",
     "send-via-outlook.ps1\n```\n$p[ 'f'" + " " * 100000 + "]" + " " * 100000 + "x\n```\n",
     "send-via-outlook.ps1\n```\nF" + "'" * 50000 + " " * 50000 + "x\n```\n",
+    "```\n" + "send-via-outlook.ps1 -To a $LASTEXITCODE\n" * 10000 + "```\n",
+    "```\n" + "if ($LASTEXITCODE -eq 0) { break } send-via-outlook.ps1 || " * 5000 + "```\n",
+    "```\n" + "send-via-outlook.ps1 &&" * 20000 + "```\n",
 ):
     scan_text(_adv)
 check("hostile 50-100 KB inputs scan in linear time (<20 s total)", time.time() - _t0 < 20.0,
@@ -628,6 +783,10 @@ GEN = "Send via send-via-outlook.ps1.\nOn non-zero COM exit: retry once, then fl
 EXP6 = "Send via send-via-outlook.ps1. On exit 6: retry once.\n"
 KEYED = PS + " -DedupTaskId t -DedupPeriodKey k\n"
 E = frozenset()
+check("L5 ratchet: a re-invoking loop fails even when the spec is waived",
+      "L5 a has no fenced loop/if that re-invokes the send script on an exit code" in failing(
+          evaluate("a", _LOOP % "for(;;){ & send-via-outlook.ps1 -To a; if($LASTEXITCODE -eq 0){break} }",
+                   frozenset({"a"}), E, {})))
 check("ratchet: clean spec passes", not failing(evaluate("a", CLEAN, E, E, {})))
 check("ratchet: new generic-retry spec fails (L2)",
       failing(evaluate("a", GEN, E, E, {})) == ["L2 a does not retry on any non-zero send exit"])
