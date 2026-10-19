@@ -96,6 +96,14 @@ def test_false_positive_and_read_pins():
         ("mcp__x__OUTLOOK_DELETE_MESSAGE", t.UNKNOWN),
         ("mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-restore-pages", t.EXEMPT),
         ("mcp__ccd_session_mgmt__archive_session", t.UNROUTED),
+        # C4: routed by the matcher but the text after the last "__" has no keyword; a
+        # routed name must never classify UNROUTED.
+        ("mcp__x__delete__all", t.UNKNOWN),
+        ("mcp__x__purge__everything", t.UNKNOWN),
+        # KNOWN LIMITATION (pinned, not endorsed): a read/restore prefix exempts the whole
+        # name, so a compound verb that starts with one is EXEMPT even though it deletes.
+        ("mcp__x__get_and_delete", t.EXEMPT),
+        ("mcp__x__restore_then_purge", t.EXEMPT),
         ("Bash", t.UNROUTED),
         (None, t.UNROUTED),
     ]
@@ -114,6 +122,11 @@ def test_input_classifiers():
         (cu, {"older_than_days": 30, "delete_sessions": True}, t.IRREVERSIBLE),
         (cu, {"older_than_days": 30, "include_uncommitted": "true"}, t.IRREVERSIBLE),
         (cu, ["not", "a", "dict"], t.IRREVERSIBLE),
+        # C9: any set value other than None/False is a delete request (not bool(value))
+        (cu, {"delete_sessions": 0}, t.IRREVERSIBLE),
+        (cu, {"include_uncommitted": ""}, t.IRREVERSIBLE),
+        (cu, {"delete_sessions": []}, t.IRREVERSIBLE),
+        (cu, {"delete_sessions": None}, t.RECOVERABLE),
     ]
     seg = "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__manage_segment"
     cases += [
@@ -124,6 +137,15 @@ def test_input_classifiers():
         (seg, {"operation": {"type": "SomethingNew"}}, t.IRREVERSIBLE),
         (seg, {"operation": "DeleteSegmentOperation"}, t.IRREVERSIBLE),
         (seg, {}, t.IRREVERSIBLE),
+        # C3: typed-wrong fields fail closed instead of raising
+        (seg, {"operation": {"type": ["DeleteSegmentOperation"]}}, t.IRREVERSIBLE),
+        (seg, {"operation": {"type": {"a": 1}}}, t.IRREVERSIBLE),
+        (seg, {"operation": {"type": 5}}, t.IRREVERSIBLE),
+        (seg, {"operation": {"type": None}}, t.IRREVERSIBLE),
+        (seg, {"operation": ["DeleteSegmentOperation"]}, t.IRREVERSIBLE),
+        (seg, {"operation": None}, t.IRREVERSIBLE),
+        (seg, "DeleteSegmentOperation", t.IRREVERSIBLE),
+        (seg, None, t.IRREVERSIBLE),
     ]
     camp = "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__manage_campaign_objects"
     rm = {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"campaignCrmObjectId": 1,
@@ -138,11 +160,40 @@ def test_input_classifiers():
         (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"assetOperations": [
             {"action": "DROP"}]}}, t.IRREVERSIBLE),
         (camp, {}, t.IRREVERSIBLE),
+        (camp, {"operationType": ["CAMPAIGN_ASSET"]}, t.IRREVERSIBLE),
+        (camp, {"operationType": {"a": 1}}, t.IRREVERSIBLE),
+        (camp, {"operationType": 5}, t.IRREVERSIBLE),
+        (camp, {"operationType": None}, t.IRREVERSIBLE),
+        (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"assetOperations": [
+            {"action": ["REMOVE"]}]}}, t.IRREVERSIBLE),
+        (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"assetOperations": [
+            {"action": {"x": 1}}, "junk"]}}, t.IRREVERSIBLE),
+        (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"assetOperations": "REMOVE"}},
+         t.IRREVERSIBLE),
+        (camp, None, t.IRREVERSIBLE),
     ]
     for name, ti, want in cases:
-        got = t.classify(name, ti)[0]
+        try:
+            got = t.classify(name, ti)[0]
+        except Exception as exc:  # classify must never raise
+            got = "RAISED %s" % type(exc).__name__
         check("T6 %s %s -> %s" % (name.rsplit("__", 1)[-1], json.dumps(ti)[:60], want),
               got == want, "got=%s" % got)
+    # C3: classify() never raises, for any tool_input shape, on every by-input tool
+    weird = [None, 0, 1, "", "x", [], [1], {}, {"operation": object()}, 1.5, True,
+             {"operation": {"type": {1, 2}}}, {"operationType": {1, 2}},
+             {"delete_sessions": object()}, {"operation": {"type": b"x"}}]
+    for name in (cu, seg, camp):
+        raised = []
+        for ti in weird:
+            try:
+                tier = t.classify(name, ti)[0]
+                if tier not in (t.RECOVERABLE, t.IRREVERSIBLE, t.EXEMPT):
+                    raised.append("%r->%s" % (ti, tier))
+            except Exception as exc:
+                raised.append("%r->%s" % (ti, type(exc).__name__))
+        check("T6b classify never raises for %s" % name.rsplit("__", 1)[-1],
+              not raised, "; ".join(raised[:3]))
 
 
 def test_matcher_models_agree():
@@ -153,6 +204,106 @@ def test_matcher_models_agree():
         documented = re.search(t.SETTINGS_MATCHER, name) is not None
         check("T7 anchored == documented routing for %s" % name, anchored == documented,
               "anchored=%s documented=%s" % (anchored, documented))
+
+
+def test_matcher_edge_names_classify_safely():
+    """C5. SETTINGS_MATCHER is unchanged. Its extra-name alternation is end-anchored only in
+    the fullmatch model: a suffix-extended name (manage_segment_v2, sharepoint_move_item2,
+    clean_up_worktrees_preview) is NOT routed by a fullmatch ("anchored") engine but IS
+    routed by an unanchored search ("documented") engine; a non-mcp prefix (xmcp__a__delete)
+    is the reverse of that concern: search routes it, fullmatch does not. The models are
+    allowed to disagree on these names. T7c checks ONLY what classify() returns; how an
+    anchored-engine settings.json would actually behave for these names is UNVERIFIED here.
+    What classify() must return, regardless of engine: never EXEMPT and never an IRREVERSIBLE tier row for a name that has
+    no row, and UNKNOWN (handled like recoverable) whenever the documented engine routes
+    it to the guard, UNROUTED only when neither engine routes it."""
+    names = ["mcp__x__manage_segment_v2", "mcp__x__sharepoint_move_item2",
+             "mcp__x__clean_up_worktrees_preview", "xmcp__a__delete"]
+    for name in names:
+        anchored = re.fullmatch(t.SETTINGS_MATCHER, name) is not None
+        documented = re.search(t.SETTINGS_MATCHER, name) is not None
+        tier = t.classify(name, {"delete_sessions": True})[0]
+        check("T7b %s: tier %s is safe (anchored=%s documented=%s)" % (
+              name, tier, anchored, documented),
+              tier == (t.UNKNOWN if documented and name.startswith("mcp__") else t.UNROUTED),
+              "tier=%s" % tier)
+        if anchored != documented:
+            check("T7c %s: classify() is non-EXEMPT/non-IRREVERSIBLE when engines disagree" % name,
+                  tier not in (t.EXEMPT, t.IRREVERSIBLE), "tier=%s" % tier)
+
+
+def test_keyword_names_are_routed_or_rowed():
+    """C6. Every snapshot name KEYWORD_RE hits and that is not read-prefixed must be sent to
+    the guard by SETTINGS_MATCHER, unless its TIERS row is EXEMPT (a row alone does not
+    gate anything, so non-EXEMPT rows must be routed)."""
+    for name in sorted(full_names(load_snapshot())):
+        short = t.short_name(name)
+        if not t.KEYWORD_RE.search(short) or short.lower().startswith(t.READ_PREFIXES):
+            continue
+        row = t.TIERS.get(short)
+        if row is not None and row[0] == t.EXEMPT:
+            continue  # explicit EXEMPT rows (outlook_delete_event, image_remove_background)
+        check("T10 delete-shaped %s is routed by SETTINGS_MATCHER" % short, t.is_routed(name))
+
+
+def test_routed_middle_segment_floor():
+    """Reviewer finding: a delete verb in an earlier '__' segment must floor the tier at
+    UNKNOWN even when the last segment is a read prefix or an EXEMPT/lenient row."""
+    camp_create = {"operationType": "CAMPAIGN_CREATE"}
+    cases = [
+        ("mcp__x__delete__list_all", {}),
+        ("mcp__x__DELETE__restore", {}),
+        ("mcp__x__delete__image_remove_background", {}),
+        ("mcp__x__delete__outlook_delete_event", {}),
+        ("mcp__x__purge_all__list_x", {}),
+        ("mcp__x__delete_all__manage_campaign_objects", camp_create),
+        ("mcp__my_srv-1__delete__get_thing", {}),
+    ]
+    for name, ti in cases:
+        got = t.classify(name, ti)[0]
+        check("T11 %s floors at UNKNOWN" % name, got == t.UNKNOWN, "got=%s" % got)
+    # never downgrades a stricter result
+    got = t.classify("mcp__x__delete__delete_range", {})[0]
+    check("T11b middle verb does not downgrade IRREVERSIBLE", got == t.IRREVERSIBLE, "got=%s" % got)
+    got = t.classify("mcp__x__delete__notion-delete-pages", {})[0]
+    check("T11c middle verb does not downgrade RECOVERABLE", got == t.RECOVERABLE, "got=%s" % got)
+    # server segment alone is not a middle segment; clean names unaffected
+    check("T11d server name with verb is not a middle segment",
+          t.classify("mcp__delete_srv__list_all", {})[0] == t.EXEMPT)
+    check("T11e benign middle segment leaves EXEMPT",
+          t.classify("mcp__x__tools__list_all", {})[0] == t.EXEMPT)
+
+
+def test_classifier_exception_fails_closed():
+    saved = dict(t._INPUT_CLASSIFIERS)
+    try:
+        def boom(ti):
+            raise RuntimeError("boom")
+        t._INPUT_CLASSIFIERS["manage_segment"] = boom
+        try:
+            got = t.classify("mcp__x__manage_segment", {"operation": {}})[0]
+        except Exception as exc:
+            got = "RAISED %s" % type(exc).__name__
+    finally:
+        t._INPUT_CLASSIFIERS.clear()
+        t._INPUT_CLASSIFIERS.update(saved)
+    check("T12 a raising by-input classifier yields IRREVERSIBLE", got == t.IRREVERSIBLE,
+          "got=%s" % got)
+
+
+def test_oversized_name_is_bounded():
+    import time
+    name = "mcp__" + "_" * 50000
+    start = time.time()
+    tier, reason, _short = t.classify(name, {})
+    elapsed = time.time() - start
+    check("T13 oversized mcp name -> UNKNOWN", tier == t.UNKNOWN, "tier=%s" % tier)
+    check("T13b oversized reason says so", "oversized" in reason, reason)
+    check("T13c oversized name classified in under 1s", elapsed < 1.0, "%.2fs" % elapsed)
+    check("T13d 512-char name is still evaluated normally",
+          t.classify("mcp__x__" + "a" * 400, {})[0] == t.UNROUTED)
+    check("T13e oversized non-mcp name stays UNROUTED",
+          t.classify("x" * 1000, {})[0] == t.UNROUTED)
 
 
 def test_target_digest():
@@ -193,6 +344,11 @@ if __name__ == "__main__":
     test_false_positive_and_read_pins()
     test_input_classifiers()
     test_matcher_models_agree()
+    test_matcher_edge_names_classify_safely()
+    test_keyword_names_are_routed_or_rowed()
+    test_routed_middle_segment_floor()
+    test_classifier_exception_fails_closed()
+    test_oversized_name_is_bounded()
     test_target_digest()
     test_tier_names_are_unique()
     if _failures:
