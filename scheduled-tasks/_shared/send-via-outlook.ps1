@@ -160,6 +160,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $LogPath = "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt"
+$CanonicalLogPath = $LogPath
 # Tests redirect the audit log, but ONLY under -WhatIf. A real send always writes
 # the canonical log, so this can never be used to blind the audit trail.
 if ($WhatIf -and $env:ORA_SEND_LOG_PATH) { $LogPath = $env:ORA_SEND_LOG_PATH }
@@ -176,6 +177,12 @@ $SkipPreflight = [bool]($WhatIf -and $env:ORA_SEND_SKIP_PREFLIGHT -eq '1')
 $SimRaw     = if ($WhatIf) { [string]$env:ORA_SEND_SIMULATE } else { "" }
 $TimeoutRaw = if ($WhatIf) { [string]$env:ORA_SEND_TIMEOUT_SEC } else { "" }
 $DelayRaw   = if ($WhatIf) { [string]$env:ORA_SEND_RETRY_DELAY_SEC } else { "" }
+# Widens the check-then-intent window inside the dedup gate so the mutex can be tested deterministically.
+$GatePauseRaw = if ($WhatIf) { [string]$env:ORA_SEND_GATE_PAUSE_MS } else { "" }
+# The dedup lock wait and the lock NAME are test seams too: a suite that holds the lock to prove the
+# fail-closed path must neither wait the full 10 s nor ever contend with a real fire's production lock.
+$LockWaitRaw = if ($WhatIf) { [string]$env:ORA_SEND_LOCK_WAIT_MS } else { "" }
+$MutexSuffixRaw = if ($WhatIf) { [string]$env:ORA_SEND_MUTEX_SUFFIX } else { "" }
 $SimPlan = @($SimRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $Simulating = $SimPlan.Count -gt 0
 # A simulated run writes a REAL-looking '[OK] Sent' line. It must never land in the canonical
@@ -185,12 +192,41 @@ if ($Simulating -and -not $env:ORA_SEND_LOG_PATH) {
     [Console]::Error.WriteLine("ORA_SEND_SIMULATE requires ORA_SEND_LOG_PATH: a simulated send must never write the canonical send log")
     exit 1
 }
+# ...and the redirected log must live under the user's TEMP folder. A simulated '[OK] Sent ... key=' line in the
+# canonical log would make a real fire of that key DEDUP-SKIP with exit 0 and no email. "Is it the canonical
+# file" cannot be decided from the spelling (UNC \\localhost\C$\..., \\?\ forms, junctions, hard links all
+# name the same file), so the rule is positive: only a plain local path under TEMP is accepted. The equality
+# check stays as a second, explicit barrier (a scratch copy of this script keeps its fake canonical path in TEMP).
+# $LogPath here is the already-redirected value, and a bad mutex-suffix seam value is refused, never ignored.
+if ($Simulating) {
+    # Drive-rooted only: '~', 'FileSystem::' and relative forms are resolved differently by .NET (the guard) and by
+    # the provider (Add-Content), so a guard on one reading could be writing another file.
+    $simLogFull = if ($LogPath -cmatch '\A[A-Za-z]:\\') { try { [System.IO.Path]::GetFullPath($LogPath) } catch { $null } } else { $null }
+    $simTemp = try { [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()) } catch { $null }
+    $simOk = $simLogFull -and $simTemp -and (-not $simLogFull.StartsWith('\\')) -and
+        $simLogFull.StartsWith($simTemp, [System.StringComparison]::OrdinalIgnoreCase) -and
+        (-not $simLogFull.Equals([System.IO.Path]::GetFullPath($CanonicalLogPath), [System.StringComparison]::OrdinalIgnoreCase))
+    if (-not $simOk) {
+        [Console]::Error.WriteLine("ORA_SEND_LOG_PATH must be a local path under TEMP and must not be the canonical send log: a simulated send must never write the canonical send log")
+        exit 1
+    }
+    # Reader, writer and guard now all use the one resolved path.
+    $LogPath = $simLogFull
+    if ($MutexSuffixRaw -and $MutexSuffixRaw -cnotmatch '\A[A-Za-z0-9-]{1,40}\z') {
+        [Console]::Error.WriteLine("ORA_SEND_MUTEX_SUFFIX must be 1-40 letters, digits or '-'")
+        exit 1
+    }
+}
 $TimeoutSec = 15
 $RetryDelaySec = 5
+$GatePauseMs = 0
+$DedupLockWaitMs = 10000
 if ($Simulating) {
     $n = 0
     if ([int]::TryParse($TimeoutRaw, [ref]$n) -and $n -ge 1 -and $n -le 15) { $TimeoutSec = $n }
     if ([int]::TryParse($DelayRaw, [ref]$n) -and $n -ge 0 -and $n -le 10) { $RetryDelaySec = $n }
+    if ([int]::TryParse($GatePauseRaw, [ref]$n) -and $n -ge 0 -and $n -le 5000) { $GatePauseMs = $n }
+    if ([int]::TryParse($LockWaitRaw, [ref]$n) -and $n -ge 100 -and $n -le 10000) { $DedupLockWaitMs = $n }
 }
 
 # Cap chosen to fail FAST with a readable message rather than let Exchange reject
@@ -213,8 +249,10 @@ function Write-Log {
     # a health-guard tail) can make it throw a sharing violation for a few milliseconds. A swallowed
     # error would silently drop the record (a SEND-STATE-UNKNOWN line is the quarantine's only
     # evidence), so retry briefly before giving up.
+    # $script:LogWriteOk tells a caller that MUST know (SEND-INTENT) whether the append landed.
+    $script:LogWriteOk = $false
     for ($w = 1; $w -le 10; $w++) {
-        try { Add-Content -Path $LogPath -Value $line -Encoding UTF8 -ErrorAction Stop; break } catch { if ($w -lt 10) { Start-Sleep -Milliseconds ([Math]::Min(20 * $w, 100)) } }
+        try { Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8 -ErrorAction Stop; $script:LogWriteOk = $true; break } catch { if ($w -lt 10) { Start-Sleep -Milliseconds ([Math]::Min(20 * $w, 100)) } }
     }
     # -ErrorAction Continue overrides the script-scoped $ErrorActionPreference="Stop" for this
     # call only; without it, Write-Error terminates the script before the caller's `exit N`
@@ -365,6 +403,91 @@ function Get-QuarantineState {
         if ($age -lt $Minutes -and $age -gt -1440) { return @{ State = 'QUARANTINED'; Stamp = $stamp } }
     }
     return $none
+}
+$DedupMutexName = 'ORA-send-via-outlook-dedup'
+if ($MutexSuffixRaw -cmatch '\A[A-Za-z0-9-]{1,40}\z') { $DedupMutexName += '-' + $MutexSuffixRaw }   # test seam, WhatIf only
+
+function Get-DedupState {
+    # Replays the send-log lines that belong to ONE dedup key and returns
+    #   @{ State = 'SENT' | 'UNKNOWN' | 'PROCEED' | 'UNREADABLE'; At = <stamp or $null> }
+    # Log lines are untrusted text (a subject or recipient can carry any characters except control
+    # characters, which Write-Log strips), so a line counts only when it has the shape THIS script
+    # writes: it ends with exactly ` shash=<hash> key=<Key>` (TagLog is always the last field, so a
+    # key-looking token inside a subject can never sit there) AND its record type sits at the very
+    # start, right after the stamp and level. The tail is compared as a whole string, so period
+    # 2026-10-1 never matches 2026-10-18 and task `x` never matches task `ax`.
+    # SENT if any line proves a send ([OK] Sent, or [OK] DEDUP-SKIP so the proof survives rotation of
+    # the original line); otherwise UNKNOWN if a SEND-STATE-UNKNOWN is unreset or a SEND-INTENT is
+    # unresolved; otherwise PROCEED. An existing log that cannot be read is UNREADABLE: the caller
+    # fails CLOSED (exit 6), because "no history" cannot be told apart from "history we cannot see".
+    # A log that does not exist yet is PROCEED.
+    param([string]$Path, [string]$Key)
+    try { $lines = Read-LogLinesShared -Path $Path }
+    catch [System.IO.FileNotFoundException] { return @{ State = 'PROCEED'; At = $null } }
+    catch [System.IO.DirectoryNotFoundException] { return @{ State = 'PROCEED'; At = $null } }
+    catch { return @{ State = 'UNREADABLE'; At = $null } }
+    $hash = $Key.Substring($Key.LastIndexOf('/') + 1)
+    $tail = " shash=$hash key=$Key"
+    $head = '\A(\S{1,40}) \[(OK|INFO|WARN|ERROR)\] (Sent to=|DEDUP-SKIP: |SEND-INTENT: |SEND-STATE-UNKNOWN: |FORCE-RESEND: |TIMEOUT: |Outlook COM failed )'
+    $open = $false; $unknown = $false; $at = $null
+    foreach ($ln in $lines) {
+        if (-not $ln.EndsWith($tail, [System.StringComparison]::Ordinal)) { continue }
+        $m = [regex]::Match($ln.Substring(0, [Math]::Min($ln.Length, 120)), $head)
+        if (-not $m.Success) { continue }
+        $stamp = $m.Groups[1].Value; $lvl = $m.Groups[2].Value; $typ = $m.Groups[3].Value
+        if ($lvl -ceq 'OK' -and ($typ -ceq 'Sent to=' -or $typ -ceq 'DEDUP-SKIP: ')) { return @{ State = 'SENT'; At = $stamp } }
+        if ($lvl -ceq 'WARN' -and $typ -ceq 'FORCE-RESEND: ') { $open = $false; $unknown = $false; continue }
+        if ($lvl -ceq 'INFO' -and $typ -ceq 'SEND-INTENT: ') { $open = $true; $at = $stamp; continue }
+        if ($lvl -ceq 'ERROR' -and $typ -ceq 'SEND-STATE-UNKNOWN: ') { $unknown = $true; $open = $false; $at = $stamp; continue }
+        if (($lvl -ceq 'ERROR' -or $lvl -ceq 'WARN') -and ($typ -ceq 'TIMEOUT: ' -or $typ -ceq 'Outlook COM failed ')) { $open = $false; continue }
+    }
+    if ($unknown -or $open) { return @{ State = 'UNKNOWN'; At = $at } }
+    return @{ State = 'PROCEED'; At = $null }
+}
+
+function Enter-DedupGate {
+    # Check-then-INTENT under one named mutex, so two concurrent fires with the same key cannot both
+    # PROCEED: the second sees the first's open SEND-INTENT and gets UNKNOWN. Fails CLOSED: a lock that
+    # is not acquired, a log that cannot be read, or an intent that cannot be written returns
+    # UNAVAILABLE and the caller refuses (exit 6). An ABANDONED mutex (holder died) is still ours.
+    # Returns @{ State = 'SENT' | 'UNKNOWN' | 'UNAVAILABLE' | 'PROCEED'; At; Reason }.
+    param([string]$Key, [switch]$Force)
+    $mutex = $null; $owned = $false
+    try {
+        # No fallback to a Local\ lock: it would silently be a DIFFERENT lock, and two same-key fires
+        # could both pass (a Global\ mutex that cannot be opened, e.g. one created at another integrity
+        # level, is exactly when the fallback would have engaged). Cannot open it -> fail closed.
+        try { $mutex = New-Object System.Threading.Mutex($false, "Global\$DedupMutexName") }
+        catch { return @{ State = 'UNAVAILABLE'; At = $null; Reason = "DEDUP-LOCK-UNAVAILABLE: the system-wide dedup lock could not be opened ($($_.Exception.Message)), so concurrent fires cannot be ruled out" } }
+        try { $owned = $mutex.WaitOne($DedupLockWaitMs) }
+        catch {
+            $abandoned = ($_.Exception -is [System.Threading.AbandonedMutexException]) -or ($_.Exception.InnerException -is [System.Threading.AbandonedMutexException])
+            if (-not $abandoned) { throw }
+            $owned = $true
+            Write-Log "WARN" "DEDUP-LOCK-ABANDONED: a previous holder died while holding the dedup lock; continuing under the re-acquired lock$TagLog" | Out-Null
+        }
+        if (-not $owned) { return @{ State = 'UNAVAILABLE'; At = $null; Reason = "DEDUP-LOCK-TIMEOUT: dedup lock not acquired in $([int]($DedupLockWaitMs / 1000))s, so a concurrent fire with this key cannot be ruled out" } }
+        # -ForceResend: no check, but the FORCE-RESEND reset and the intent are written under the SAME lock,
+        # so a concurrent keyed fire can never read the reset and proceed before the intent lands.
+        if ($Force) {
+            Write-Log "WARN" "FORCE-RESEND: dedup and quarantine bypassed by -ForceResend (human-directed re-run only; a scheduled spec must never pass it)$TagLog" | Out-Null
+            $state = @{ State = 'PROCEED'; At = $null }
+        } else {
+            $state = Get-DedupState -Path $LogPath -Key $Key
+        }
+        if ($state.State -eq 'UNREADABLE') { return @{ State = 'UNAVAILABLE'; At = $null; Reason = "DEDUP-UNAVAILABLE: the send-log could not be read, so a prior send for this key cannot be ruled out" } }
+        if ($state.State -eq 'PROCEED') {
+            if ($GatePauseMs -gt 0) { Start-Sleep -Milliseconds $GatePauseMs }   # test seam only (simulated runs)
+            Write-Log "INFO" "SEND-INTENT: key=$Key subject=`"$Subject`"$TagLog" | Out-Null
+            if (-not $script:LogWriteOk) { return @{ State = 'UNAVAILABLE'; At = $null; Reason = "DEDUP-INTENT-UNWRITTEN: could not append SEND-INTENT, and an unrecorded send cannot be deduplicated" } }
+        }
+        return $state
+    } catch {
+        return @{ State = 'UNAVAILABLE'; At = $null; Reason = "DEDUP-UNAVAILABLE: $($_.Exception.Message)" }
+    } finally {
+        if ($owned) { try { $mutex.ReleaseMutex() } catch { } }
+        if ($mutex) { $mutex.Dispose() }
+    }
 }
 # --- end R-05 helpers ---
 
@@ -638,7 +761,8 @@ if ($externalRecipients.Count -gt 0) {
 
 if ($WhatIf -and -not $Simulating) {
     $ccLog = if ($Cc) { $Cc } else { "none" }
-    Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`"$AttachLog$TagLog (no Outlook COM call made)"
+    $dedupLog = if ($ContractMode) { " dedup=" + (Get-DedupState -Path $LogPath -Key $DedupKey).State } else { "" }
+    Write-Log "OK" "DRY RUN: would send to=$To cc=$ccLog subject=`"$Subject`"$AttachLog$dedupLog$TagLog (no Outlook COM call made)"
     exit 0
 }
 
@@ -767,7 +891,7 @@ function Ensure-OutlookReady {
 # on any non-zero exit" text. For 60 minutes after a SEND-STATE-UNKNOWN, refuse an identical
 # subject to the same recipient so that retry cannot double-send. Keyed callers get the stronger
 # per-period dedup inside the send loop instead. An unreadable send-log fails CLOSED.
-if ($ForceResend) {
+if ($ForceResend -and -not $ContractMode) {
     Write-Log "WARN" "FORCE-RESEND: dedup and quarantine bypassed by -ForceResend (human-directed re-run only; a scheduled spec must never pass it)$TagLog"
 }
 if (-not $ContractMode -and -not $ForceResend) {
@@ -786,6 +910,25 @@ if (-not $Simulating) { Ensure-OutlookReady }
 $attemptNo = 0
 while ($true) {
     $attemptNo++
+    if ($ContractMode) {
+        # A -ForceResend caller (human only) passes -Force: no check, but the lock, the FORCE-RESEND
+        # reset and the intent all still happen, so a crash stays visible and a concurrent fire is blocked.
+        $gate = if ($ForceResend) { Enter-DedupGate -Key $DedupKey -Force } else { Enter-DedupGate -Key $DedupKey }
+        if ($gate.State -eq 'SENT') {
+            Write-Log "OK" "DEDUP-SKIP: key=$DedupKey already sent at $($gate.At) -- not re-sending subject=`"$Subject`"$TagLog"
+            exit 0
+        }
+        if ($gate.State -eq 'UNKNOWN') {
+            Write-Log "ERROR" "DEDUP-BLOCK: key=$DedupKey prior send state UNKNOWN at $($gate.At) -- refusing (exit 6). Check Outlook Sent Items by hand; only if the message is absent may a human re-run with -ForceResend.$TagLog"
+            exit 6
+        }
+        if ($gate.State -ne 'PROCEED') {
+            # UNAVAILABLE: fail CLOSED. Always on the console, and in the log when it can be written.
+            [Console]::Error.WriteLine($gate.Reason)
+            Write-Log "ERROR" "$($gate.Reason) -- refusing (exit 6). Check Outlook Sent Items by hand; a human may re-run with -ForceResend once the message is confirmed absent.$TagLog"
+            exit 6
+        }
+    }
     $sim = $null
     if ($Simulating) { $sim = if ($SimPlan.Count -ge $attemptNo) { $SimPlan[$attemptNo - 1] } else { $SimPlan[-1] } }
     if ($WhatIf -and -not $sim) {
@@ -815,7 +958,10 @@ while ($true) {
         $hrText = if ($null -ne $o.HResult) { "0x{0:X8}" -f $o.HResult } else { "n/a" }
         $msg = "Outlook COM failed (HRESULT=$hrText): $($o.Message) -- Send() was not invoked (retry-safe)"
     }
-    $retryable = ($attemptNo -eq 1) -and (($o.Code -eq 2) -and ($o.HResult -eq $RPC_E_CALL_REJECTED))
+    # Contract mode: the script owns the one retry of 2/4 (Send() never ran, or the callee refused it),
+    # so the caller retries nothing. Legacy mode keeps only the pre-R-05 RPC_E_CALL_REJECTED retry.
+    # Exit 6 returned above and is never retried.
+    $retryable = ($attemptNo -eq 1) -and ($ContractMode -or (($o.Code -eq 2) -and ($o.HResult -eq $RPC_E_CALL_REJECTED)))
     if ($retryable) {
         Write-Log "WARN" "$msg -- retrying once in ${RetryDelaySec}s$TagLog"
         Start-Sleep -Seconds $RetryDelaySec
