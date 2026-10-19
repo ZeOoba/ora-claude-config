@@ -160,20 +160,7 @@ ACTION_ONLY = re.compile(r"^\s*(?:[-*+]\s+|\d{1,3}[.)]\s+)?[*_`]*"
 BLOCK_START = re.compile(r"^\s*(?:[-*+>]\s|\d{1,3}[.)]\s|#{1,6}\s|\|)")
 PSCONT = re.compile(r"(?:`|\^)\s*$")
 
-WAIVED_GENERIC_RETRY = frozenset({
-    "ora-am-brief", "ora-appsec-sweep", "ora-audit-log-sweep", "ora-broker-touch-cadence",
-    "ora-cc-snapshot-refresh", "ora-command-center-mirror-drift-check", "ora-county-sales-monitor",
-    "ora-deal-command-board", "ora-deal-sourcing-scan", "ora-doctrine-integrity-guard", "ora-entry-market-scan",
-    "ora-excess-usage-sweep", "ora-financial-code-integrity-sweep", "ora-forward-calendar-digest",
-    "ora-health-guard", "ora-hubspot-renewal-closeout-tasks", "ora-incentive-registry-refresh",
-    "ora-jackson-boe-prep-reminder", "ora-lease-snapshot-refresh", "ora-loan-balance-check",
-    "ora-loopnet-listings-sync", "ora-master-workbook-ingest", "ora-monthly-portfolio-briefing",
-    "ora-noi-opportunity-digest", "ora-open-sessions-board", "ora-passed-deal-tracker",
-    "ora-pm-monthly-billing", "ora-pr-land-watch", "ora-prepush-gate-sweep", "ora-recovery-billing-monthly",
-    "ora-recovery-structure-audit-annual", "ora-renewal-hubspot-reconcile", "ora-site-exposure-probe",
-    "ora-sourcing-construction-verify", "ora-task-integrity-guard", "ora-tenant-hubspot-reconciliation",
-    "ora-vacancy-aging-report", "ora-weekly-hygiene", "ora-wicomico-reassessment-reminder",
-})
+WAIVED_GENERIC_RETRY = frozenset()  # emptied by the R-05 spec batch (all 39 in-repo specs now per-code or contract mode)
 WAIVED_PENDING_LANDING = frozenset({
     "ora-agent-usage-report-monthly", "ora-doc-index-rebuild-monthly", "ora-edge-mfg-scout-weekly",
     "ora-edge-news-overlay-refresh", "ora-full-gate-weekly", "ora-quarterly-estimate-check",
