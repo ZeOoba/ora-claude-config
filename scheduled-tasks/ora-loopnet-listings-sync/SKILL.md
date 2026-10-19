@@ -41,7 +41,7 @@ node scripts/sync-listings.mjs <scraped.json> --write
 - Exit 20 or 1 → Step 3 alert. Leave nothing pushed; remove the worktree and branch.
 
 ## Step 3 — Email (only when there is something to say)
-Send via the SOLE send path: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`, TO `ggoldberg@oxfordra.net` ONLY — no cc, no other recipient. On a non-zero exit retry once, then state the send failure loudly in your final output; do not halt.
+Send via the SOLE send path: `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`, TO `ggoldberg@oxfordra.net` ONLY — no cc, no other recipient. On exit 2 or 4 retry once, then state the send failure loudly in your final output; do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 - PR opened: subject `LoopNet sync — PR ready (N changes)`; body = PR URL, change list, needsInput, warnings, and "Nothing is live until you merge."
 - needsInput with no changes: subject `LoopNet sync — input needed`; body = the needsInput lines (e.g. a new LoopNet property needs photo, lat/lng, market, category, description, rate type before it can be added by hand to data/listings.json).
 - Alert: subject `LoopNet sync — ALERT, no changes made`; body = the `reasons`, which page failed, and whether LoopNet blocked the read.
