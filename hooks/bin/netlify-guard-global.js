@@ -20,6 +20,8 @@
  * instead of the global install's own bin/run.js directly. Because npx prefers an existing
  * global install over a fresh download, this makes `npx netlify deploy --prod` (or a bare
  * `netlify`/`ntl` command, also resolved via PATH to the same global shims) go through
+ * authorization from ANY directory on the machine, not just from inside a project with its
+ * own local guard.
  * authorization from any directory that has NO project-local netlify install of its own.
  *
  * KNOWN RESIDUALS (not closed here; independent review 2026-10-18): (a) inside a project that
@@ -50,6 +52,25 @@
  * hardcoded path) -- never by re-invoking "netlify" on PATH or via npx, so there is no
  * risk of this wrapper recursing into itself.
  *
+ * Environment hardening (2026-10-18, two independent reviews of the 3ef48e0 fix):
+ *  - NODE_OPTIONS="--require evil.js" runs BEFORE this file and can replace
+ *    child_process.execFileSync to forge an ALLOW. Node 24 has no `--no-node-options`
+ *    flag (verified: "bad option"), so the node process cannot opt out; instead main()
+ *    refuses (exit 5) on any NODE_OPTIONS naming a known code/config-loading flag (quotes
+ *    stripped, as node does), NODE_PATH / NODE_REPL_EXTERNAL_MODULE / NODE_V8_COVERAGE /
+ *    OPENSSL_CONF, and any node execArgv; on the prod path it refuses ANY non-empty
+ *    NODE_OPTIONS. The flag list is a denylist of KNOWN vectors and is only a tripwire.
+ *    The real control is the shims (maintenance/patch-global-netlify-shim.js), which clear
+ *    NODE_OPTIONS and OPENSSL_CONF BEFORE node starts. Residual (unfixable in-process):
+ *    anything node does before this file's first line -- `--snapshot-blob` replaces this
+ *    file entirely, an OpenSSL provider DLL loads at init -- and a preload that deletes the
+ *    variable are invisible here, and `node guard.js` run by hand bypasses the shims. An
+ *    attacker who can do that can equally run netlify-cli's bin/run.js directly.
+ *  - The validator runs `python -I -S` with an environment ALLOWLIST (mirrors the
+ *    website-canonical repo-local guard, commit 492a928): the old single-key denylist
+ *    missed future test seams, and a planted .pth/sitecustomize in per-user
+ *    site-packages runs at startup even under -I unless -S is also given.
+ *
  * NETLIFY_GUARD_DRY_RUN=1 performs the full check but does not exec the real netlify-cli
  * -- logs "DRY RUN: would run <cmd>" and exits 0 instead. Same safety valve as the
  * per-repo guard; use it for ANY testing of this file, with no exceptions.
@@ -64,6 +85,63 @@ const CHECK_SCRIPT = "C:\\Users\\Owner\\.claude\\hooks\\lib\\check_website_deplo
 // update this constant, do not reintroduce an env/PATH lookup.
 const PYTHON_EXE = "C:\\Users\\Owner\\AppData\\Local\\Programs\\Python\\Python313\\python.exe";
 const DRY_RUN = process.env.NETLIFY_GUARD_DRY_RUN === "1";
+
+// Environment passed to the validator: an ALLOWLIST (case-insensitive; Windows env names
+// are), values verbatim, everything else dropped. The validator reads test seams such as
+// ORA_OVERRIDE_SESSIONS_DIR (override_tokens.py) that would let a caller point it at a
+// forged token directory; the sessions-dir default is an absolute path, so nothing else
+// is needed.
+const VALIDATOR_ENV_ALLOWLIST = [
+  "systemroot", "windir", "systemdrive", "path", "pathext", "comspec",
+  "userprofile", "homedrive", "homepath", "home", "appdata", "localappdata",
+  "temp", "tmp",
+];
+
+function validatorEnv() {
+  const env = {};
+  for (const key of Object.keys(process.env)) {
+    if (VALIDATOR_ENV_ALLOWLIST.indexOf(key.toLowerCase()) !== -1) env[key] = process.env[key];
+  }
+  return env;
+}
+
+// Node startup hooks that execute caller-controlled code before this file's first line.
+// OPENSSL_CONF can name a provider module that node loads natively at process init.
+const PRELOAD_ENV_VARS = ["node_path", "node_repl_external_module", "node_v8_coverage", "openssl_conf"];
+// Matched against NODE_OPTIONS with quotes stripped (node strips them itself, so
+// `"--require" m.js` is still a preload). --watch is included because it respawns the
+// child tree; the rest load code or config at startup.
+const CODE_LOADING_FLAG = new RegExp(
+  "(^|\\s)(-r|--require|--import|--loader|--experimental-loader|--inspect[\\w-]*|--env-file[\\w-]*" +
+  "|--openssl-config|--snapshot-blob|--watch[\\w-]*|--experimental-config-file" +
+  "|--experimental-default-config-file)(\\s|=|$)", "i");
+
+function envValue(name) {
+  for (const key of Object.keys(process.env)) {
+    if (key.toLowerCase() === name) return process.env[key];
+  }
+  return "";
+}
+
+// A reason string when the process started with a preload/loader vector, else null.
+// onProdPath additionally rejects any non-empty NODE_OPTIONS.
+function preloadProblem(onProdPath) {
+  for (const name of PRELOAD_ENV_VARS) {
+    if (envValue(name)) return name.toUpperCase() + " is set";
+  }
+  const nodeOptions = envValue("node_options");
+  // Normalise like node's parser: quotes and backslash escapes dropped, `_` == `-`.
+  if (CODE_LOADING_FLAG.test(nodeOptions.replace(/["'\\]/g, "").replace(/_/g, "-"))) {
+    return "NODE_OPTIONS loads code (" + nodeOptions + ")";
+  }
+  if (onProdPath && nodeOptions.trim()) return "NODE_OPTIONS is set (" + nodeOptions + ")";
+  // The shims (maintenance/patch-global-netlify-shim.js) pass node no flags, so ANY
+  // execArgv means someone invoked node directly with options.
+  if (process.execArgv.length > 0) {
+    return "node was started with flags (" + process.execArgv.join(" ") + ")";
+  }
+  return null;
+}
 
 function log(message) {
   process.stderr.write("[netlify-guard-global] " + message + "\n");
@@ -159,9 +237,23 @@ function isProdInvocation(args) {
 function main() {
   const args = process.argv.slice(2);
 
+  // A preload can rewrite argv or child_process before this point, so a code-loading
+  // vector is refused on EVERY invocation, not only the prod path.
+  let problem = preloadProblem(false);
+  if (problem) {
+    log("DENIED: " + problem + " -- a preload could forge the authorization check; unset it and retry");
+    process.exit(5);
+  }
+
   if (!isProdInvocation(args)) {
     runRealCli(args);
     return;
+  }
+
+  problem = preloadProblem(true);
+  if (problem) {
+    log("DENIED for prod deploy: " + problem + " -- unset it and retry");
+    process.exit(5);
   }
 
   const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
@@ -172,17 +264,11 @@ function main() {
   }
 
   try {
-    // -I (isolated): ignores PYTHON* env vars (PYTHONPATH/PYTHONSTARTUP/...) and the
-    // script directory / user site, so the validator cannot be redirected by environment.
-    // ORA_OVERRIDE_SESSIONS_DIR is a test seam in override_tokens.py: drop it so a caller
-    // cannot point the validator at a self-minted token directory.
-    // Windows env names are case-insensitive, so match the key case-insensitively.
-    const validatorEnv = {};
-    for (const k of Object.keys(process.env)) {
-      if (k.toUpperCase() !== "ORA_OVERRIDE_SESSIONS_DIR") validatorEnv[k] = process.env[k];
-    }
-    const output = execFileSync(PYTHON_EXE, ["-I", CHECK_SCRIPT, "--session", sessionId],
-      { encoding: "utf8", env: validatorEnv });
+    // -I (isolated): ignores PYTHON* env vars and the script directory / user site.
+    // -S: no site module, so a planted sitecustomize/.pth in user-writable site-packages
+    // cannot run inside the validator. Env is an ALLOWLIST (see validatorEnv).
+    const output = execFileSync(PYTHON_EXE, ["-I", "-S", CHECK_SCRIPT, "--session", sessionId],
+      { encoding: "utf8", env: validatorEnv() });
     log("authorized prod deploy for session " + sessionId + " -- " + output.trim());
   } catch (err) {
     const detail = (err.stderr && err.stderr.toString().trim()) || err.message;
@@ -196,5 +282,5 @@ function main() {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { isProdInvocation };
+  module.exports = { isProdInvocation, preloadProblem, validatorEnv };
 }

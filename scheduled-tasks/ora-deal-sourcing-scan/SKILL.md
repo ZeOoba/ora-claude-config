@@ -408,9 +408,11 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   short WALT, seller financing) is the most buy-box-shaped signal there, but it is
   behind a CBRE deal-room login and CANNOT be reached by any automated pass — it needs
   a broker call, not another scan.
-- MADISON WI — a nil result is NORMAL. Only ~4 industrial for-sale listings exist
-  citywide (confirmed 2026-07-14). An honest empty return is the correct output, not a
-  scan failure — do not stretch office or retail product into "flex" to fill the table.
+- MADISON WI — thin, but NOT near-empty. The old "~4 citywide" anchor (2026-07-14) is
+  SUPERSEDED: the 2026-10-05 scan counted ~15-18 distinct industrial-for-sale addresses
+  across all sources, ~5 of them in the buy box. A nil is possible but should be
+  surprising — a Madison nil means check that F1/F2/F3 were all actually read. Do not
+  stretch office or retail product into "flex" to fill the table.
 - Also capture RE-LISTS and PRICE CUTS on properties already in the Deal Sourcing
   Log or previously ranked — both are motivation signals; note prior price and delta.
 - Respect site terms: public pages and web-search results only. Never log in, never
@@ -598,8 +600,19 @@ ora-loopnet-listings-sync, so stay well inside the pace.
           public search DOES load and filters work. WORKING URL FORM:
             https://www.crexi.com/properties?types%5B%5D=Industrial&placeIds%5B%5D=<Google place id>
           (Columbus OH = ChIJcd6QucGJOIgRM7Wxz_hmMuQ, verified — the tab title resolved to
-          "Columbus, OH Industrial For Sale | Crexi"). For other metros get the place id by
-          typing the metro into Crexi's own location box once; record the id in run notes.
+          "Columbus, OH Industrial For Sale | Crexi"). For other metros do NOT build the URL by
+          hand: `address_value=<City>` alone (no placeIds) returns an EMPTY SHELL with the generic
+          title "Commercial Real Estate For Sale | Crexi" (measured 2026-10-05, Cincinnati and
+          Baltimore). Instead load https://www.crexi.com/properties?types%5B%5D=Industrial, click
+          the location box (~(160,54) at 1280x900), REMOVE any existing metro chip first (its x —
+          typing with a chip present adds a second blank entry and returns the old metro's cards),
+          type "<City>, <ST>", click the FIRST "Map search" suggestion (~(131,112)), wait ≥10 s,
+          then click empty page space to close the recents dropdown. Metro title appears BEFORE
+          the cards refresh (observed: Baltimore header/facets over Kansas City cards for >30 s
+          and across an F5): if card addresses don't name the metro, reload plain /properties
+          and redo the autocomplete — never read cards under a mismatched header. A location-
+          sharing prompt may leave the pane in map view; dismiss it. Verified this way
+          2026-10-05: Columbus 49, Cincinnati 49, Kansas City 63, Baltimore 36 industrial cards.
           The city-path form (/properties/OH/Columbus?...) HUNG on a spinner — do not use it.
           Results hydrate SLOWLY: wait ≥10 s and confirm the tab title names the metro
           before reading — an early read returns a 51-character shell that looks like
@@ -905,7 +918,14 @@ until has_more is false). Build the normalized-address set from the COMPLETE res
 match each candidate against it. Normalize by stripping the em-dash/comma city/ZIP suffix and
 lower-casing the street (e.g. "5545 Fair Ln" == "5545 Fair Lane — Fairfax (Cincinnati), OH
 45227"); match on street-number + street-name + (SF within 2%) as the dup key, since the
-same property is logged with varying submarket labels and dash/comma punctuation. If a
+same property is logged with varying submarket labels and dash/comma punctuation. DO NOT
+dedupe with LIKE '%<full suffix word>%' — the 2026-10-05 run created 3 duplicates because
+"South 6th Street" missed "S 6th St", "West 7th" missed "W 7th", and "Trafficway" was never
+searched against "Tfwy". Query on the street NUMBER plus the street-name stem only (e.g.
+LIKE '%1301 S%6th%', or just LIKE '1301 %'/'%7th St%'), checking BOTH directional and suffix
+abbreviations (S/South, W/West, St/Street, Rd/Road, Dr/Drive, Tfwy/Trafficway/Trfwy, Cir/Circle,
+Ln/Lane, Pkwy/Parkway). Already-flagged duplicates carry `Duplicate Of`; honor it, never
+re-create. If a
 candidate matches an existing row, UPDATE that row (per the rules below) — never create a
 second. A per-run sanity check: if >1 row shares a normalized street address, they are dups.
 
@@ -1149,18 +1169,17 @@ STEP 6 — EMAIL DIGEST
 Send TO ggoldberg@oxfordra.net ONLY — per the 2026-05-15 routing directive, re-ratified 2026-06-10: only the Daily Brief cc's egoldberg.
 Email send path (per ORA standing rule — COM is PRIMARY):
   PRIMARY — Outlook COM via the shared helper. Write the HTML body to a temp file, then:
-    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "<temp>.html" -BodyFormat html
+    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "<temp>.html" -BodyFormat html -DedupTaskId "ora-deal-sourcing-scan" -DedupPeriodKey "<run date yyyy-MM-dd>"
     Exit 0 = sent (appended to _shared\send-log.txt). The helper uses the signed-in
     desktop Outlook profile — no OAuth/token. (When run inside the Bash tool, read the
-    send-log "[OK] Sent" line to confirm; a trailing $LASTEXITCODE echo may report a
+    send-log "[OK] Sent" (or "[OK] DEDUP-SKIP") line to confirm; a trailing $LASTEXITCODE echo may report a
     shell error that is NOT the helper's exit code.)
-  NO send fallback (Composio removed 2026-06-11). On a non-zero COM exit: retry once; if it
-    still fails, prefix the Notion Deal Sourcing Log digest title with ⚠️ [EMAIL FAILED] and
+  NO send fallback (Composio removed 2026-06-11). Contract mode (R-05): the helper dedups on task id + period + subject before Send() and itself retries exit 2/4 once, so the caller NEVER retries any exit code. <run date yyyy-MM-dd> = the date part of the run date computed once at run start (the same value used in the subject). On exit 1, 3 or 5: do NOT retry; flag it loudly in the run summary. On exit 6 (send state unknown — the message MAY have gone out; includes DEDUP-BLOCK/QUARANTINE and the fail-closed DEDUP-* refusals): do NOT retry and never resend; flag it loudly in the run summary for a human to check Sent Items, per rules.md §2. On any failed send, prefix the Notion Deal Sourcing Log digest title with ⚠️ [EMAIL FAILED] and
     log the failure — do NOT halt. The automation-health-monitor producer-beacon check surfaces
     the silent send to Gabriel.
   Outlook only — never Gmail; never route to Composio (gone) or Rube (shut down).
-Subject: "ORA Deal-Sourcing Scan — [date] — [N] pursue / [P] pending price / [M] flagged". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
-Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the subject and everywhere else.
+Subject (FIXED per run day so the R-05 dedup key matches a same-day rerun; no counts or other run-dependent text): "ORA Deal-Sourcing Scan — [date]". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
+Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the body and everywhere else; the body opens with the counts line "[N] pursue / [P] pending price / [M] flagged" (counts never go in the subject).
 Body order:
   (1) PRICE CUT / RE-LIST flags first — the strongest motivation signals. Read them
       off the `Price Delta vs First Ask` formula; give prior ask, new ask, and %.
@@ -1195,8 +1214,9 @@ Body order:
          RE-LIST UNDETERMINABLE count, a submarket that returned nothing. Named, never
          omitted.
       7d FILTERED BY DESIGN — not gaps, listed so they are visibly deliberate: Madison nil
-         (normal — ~4 citywide — but ONLY when Madison's F1, F2 and F3 matrix cells are all
-         loaded; a Madison nil with any unread family is a §7c gap, not by-design), Montgomery County MD skipped (not first Tuesday — STEP 0d),
+         (possible but unlikely — ~15-18 industrial-for-sale addresses seen 2026-10-05 — and ONLY when
+         Madison's F1, F2 and F3 matrix cells are all loaded; a Madison nil with any unread family
+         is a §7c gap, not by-design), Montgomery County MD skipped (not first Tuesday — STEP 0d),
          sub-scale exclusions (<10K SF or <$1M: address + SF + ask, one line each — the
          buy-box floor is unchanged; this list lets Gabriel override by hand), and the
          own-assets-seen-on-market list.

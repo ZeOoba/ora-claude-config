@@ -1,5 +1,12 @@
 # Applying the hooks-audit settings proposal (branch feat/hooks-audit-0930)
 
+> **Status: APPLIED (R-02, Gabriel's decision 2026-10-18).** Step 4 ran on the
+> "state pending, sha256 DIFFERS" branch: the proposal was rendered onto the
+> then-current `settings.json` (blob c30368ef, origin/main c9242c2a), not copied
+> from this folder's stale `settings.json`. This folder was `_proposed/`; it is
+> kept here as the record. Its `settings.json` / `settings.diff` are the
+> 1370b41-based renderings and do NOT equal the applied file.
+
 `_proposed/settings.json` is the full proposed file. `_proposed/settings.diff` is the
 unified diff against live `settings.json` at 1370b41. Both are RENDERINGS of the
 proposal, which is defined as code in `hooks/tests/lib/settings_proposal.py`
