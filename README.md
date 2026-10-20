@@ -104,10 +104,9 @@ Verified against `git ls-files` at `origin/main` (2026-10-03; counts re-run 2026
 | `obsidian-fleet-mirror/` | Scripts that render live fleet state into the Obsidian vault (`write-fleet.ps1`, run every 60 s by the `ClaudeFleetMirror` Windows task via `run-hidden.vbs`); the rendered state files are untracked. |
 | `prompts/` | Standing prompt templates for recurring autonomous runs, their extract/verify helpers, and an `_archive/`. |
 | `docs/` | `system-inventory.md` (weekly overwrite snapshot), `MIGRATION_RUNBOOK.md` (cold-start/restore), `diagrams/` (six standalone Mermaid `.mmd` detail diagrams, §4), `authority-registry.md`, `review-lenses.md`, dated build reports/specs, `plans/`, `agent-references/`, and `superpowers/` (8 design specs + 19 implementation plans for the Engineering-OS and remediation work). |
-| `_proposed/` | A staged, not-yet-applied `settings.json` proposal from the hooks audit (`settings.json`, `settings.diff`, `APPLY.md`, `confguard-matcher.md`). Merging it changes nothing; it is applied as a separate, explicit step. |
 | `.github/workflows/` | 2 workflows: `fleet-deadman.yml` (scheduled off-box dead-man, §4b) and `claude-ci-fix.yml` (event-driven auto-fix responder on failed PR checks, change-requested reviews, or `@claude` / CodeRabbit comments; `@claude` fires only for the repo owner, actions are SHA-pinned, and the workflow token is `contents: read` — pushes use the Claude GitHub App token). |
 | `projects/…/memory/` | The ORA memory system — only `projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/` is tracked (421 files at 2026-10-06 and growing daily: `MEMORY.md` index, `event_log.md`, `open-items-tracker.md`, dated feedback/project/reference notes). Session transcripts (`.jsonl`) are **not** tracked. |
-| `_archive/` | Superseded config, a retired plugin bundle, and pre-trim snapshots — files are moved here rather than deleted. |
+| `_archive/` | Superseded config, a retired plugin bundle, pre-trim snapshots, and the applied hooks-audit `settings.json` proposal (`2026-10-18_settings-proposed-fold/`, formerly `_proposed/`) — files are moved here rather than deleted. |
 | `confidential-repos.json` | A small roster naming which *other* ORA repos require confidentiality gating on code-review tooling, plus the rule text — see §5; contents not enumerated here. |
 | `keybindings.json`, `.gitattributes`, `daily-setup-audit-prompt.md` | Small standalone config/reference files, individually opted in. |
 
@@ -195,11 +194,11 @@ verifies both chains.
 | `repo-freshness`, `active-work-broadcast`, `fleet-session-hook` | SessionStart | oxford-command-center freshness; broadcast live cross-session claims; activity mirror. (SessionStart also `cat`s the untracked `session-context.md`.) |
 | `fleet-session-hook`, `eos-telemetry` | Stop / SessionEnd | Activity mirror; reliability telemetry. |
 | `git-prepush-doctrine-gate`, `git-prepush-hook-tests-gate`, `git-prepush-confidential-scan` | Native git `pre-push` (not `settings.json`) | See below. |
-| `posttooluse-dispatcher` | **Not wired on `main`** | Staged consolidation of the Bash PostToolUse hooks; the matching `settings.json` change lives in `_proposed/`. |
+| `posttooluse-dispatcher` | PostToolUse (Bash, timeout 360) | Single Bash PostToolUse entry; runs `eos-gate-sentinel` and `ora-skills/tools/catch_up_main.py --hook` (the latter only on `gh pr merge`), each under its original matcher, with `chain: "post"` guard telemetry. |
 
-`settings.json` also carries two non-script PostToolUse Bash entries (an
-`ora-skills/tools/catch_up_main.py --hook` run and an inline oxfordra.net post-deploy HTTP
-check) and an inline Netlify-MCP post-call check.
+The former inline oxfordra.net post-deploy HTTP check and inline Netlify-MCP post-call
+check were removed when the hooks-audit proposal was applied (see
+`_archive/2026-10-18_settings-proposed-fold/APPLY.md`).
 
 **Pre-push chain.** A native `.git/hooks/pre-push` shim (untracked; clones do not carry
 `.git/hooks` — re-install per each gate's header and `docs/MIGRATION_RUNBOOK.md`) runs

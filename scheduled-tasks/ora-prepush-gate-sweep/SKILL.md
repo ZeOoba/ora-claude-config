@@ -1,6 +1,6 @@
 ---
 name: ora-prepush-gate-sweep
-description: Weekly Thursday 11:00 ET — runs the three pre-push gates against ~/.claude WITHOUT pushing, so a broken gate or a stale live-state test is found on a schedule instead of at someone's next push. Silent when clean; emails ggoldberg only on a failure. Read-only: never pushes, never commits, never mints an override token. [MODEL: claude-sonnet-5 | set 2026-09-17]
+description: Weekly Thursday 11:00 ET — runs the three pre-push gates against ~/.claude WITHOUT pushing, so a broken gate or a stale live-state test is found on a schedule instead of at someone's next push. Silent when clean; emails ggoldberg only on a failure. Read-only: never pushes, never commits, never mints an override token. [MODEL: claude-sonnet-5-5 | set 2026-10-06]
 ---
 
 ORA weekly pre-push gate sweep. Registered 2026-09-17 (Gabriel-directed) after three separate defects surfaced in one day ONLY because someone happened to push: a stale hardcoded baseline in test_check_open_items_duplicate_ids.py that blocked every session's pushes, and eos-review-gate silently failing OPEN because hooks/lib/git_probe_common.py was missing on the branch. Both had been broken for days with nothing watching. This task is the watcher.
@@ -51,7 +51,7 @@ powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\
 powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1"
 ```
     Subject: "[ACTION] pre-push gates FAILING - <today's date> -- <N> test(s)" (add " x<N> weeks" when STEP 3 shows a repeat, appended at the very end). The date must come immediately after "FAILING -", matching the probe's dated stem exactly -- do NOT put the test count or any other variable text between "FAILING" and the date. <today's date> is the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reused verbatim in every title, subject and body (probe stem included).
-    Body: the verbatim gate summary line, each failing test with its captured output, whether it is new or repeating, and this reminder: a failing gate blocks EVERY session's pushes, not just the author's, so it is shared infrastructure, not one person's bug. On a non-zero send exit, retry once, then stop.
+    Body: the verbatim gate summary line, each failing test with its captured output, whether it is new or repeating, and this reminder: a failing gate blocks EVERY session's pushes, not just the author's, so it is shared infrastructure, not one person's bug. On send exit 2 or 4, retry once, then stop. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 
     Close the STEP 0 claim now that the email has landed (or been skipped as an already-sent duplicate per the probe above):
 ```

@@ -50,7 +50,7 @@ This is a **guard** task, so the Phase-3 I6 rule applies: **EMIT proposals/repor
 ## SHARED MCP ROUTING (canonical — normalized 2026-06-03)
 
 The prior `8a611864` Composio wrapper is NOT connected; Rube (`d6315173`) is retired; the stale `outlook_icaco-sequel` alias is superseded — **never reference any of them. M365 Outlook only — no Gmail/Google Workspace.**
-- **Outlook email:** `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` — the SOLE automated send path (Composio removed 2026-06-11; no fallback connector exists; on a non-zero COM exit retry once, then fall to the B.4 last-resort local-log path — do not halt).
+- **Outlook email:** `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` — the SOLE automated send path (Composio removed 2026-06-11; no fallback connector exists; on COM exit 2 or 4 retry once, then fall to the B.4 last-resort local-log path — do not halt; on exit 5 or 6 do NOT retry and never resend (send state unknown — the message MAY have gone out), flag loudly in the run summary and the failure record named above).
 - **Notion:** native `mcp__c5f4869f-…__notion-*`.
 - **Recipients:** all Health-Guard emails go **to ggoldberg@oxfordra.net ONLY** (Eric removed per the 2026-05-15 directive; normalized here 2026-06-03 — the source preflight-guard and cc-verifier had cc'd egoldberg). The Daily Brief (in `ora-am-brief`) remains the only egoldberg-cc'd send.
 - **Python (for Block A engine + Block C probes):** use the full interpreter path `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe` (bare `python`/`powershell` are NOT on PATH in scheduled sessions). Maintenance scripts live under `C:/Users/Owner/.claude/maintenance/`; hooks under `C:/Users/Owner/.claude/hooks/`.
@@ -101,7 +101,7 @@ Guarantee every ACTIVE scheduled task's SKILL.md is present at the scheduler's c
     - Subject: `🌙 Overnight machine-offline detected — ora-health-guard woke {N}min late — YYYY-MM-DD`
     - Body: one line — actual start time (ET), minutes late vs 05:15 target, and a note that the AM task cluster (05:15–06:30 ET) is now catching up and `automation-health-monitor`'s 11:05 ET run will confirm full recovery.
   - If actual start time is within 45 minutes of 05:15 ET, skip this step silently — no email, proceed to A.1. A normal-cadence run needs no extra signal.
-  - This is a bounded, additive notification only — it never blocks or delays A.1–C.5, and never retries more than once on a COM failure (same one-retry-then-flag discipline as every other send in this file).
+  - This is a bounded, additive notification only — it never blocks or delays A.1–C.5, and never retries more than once, and only on exit 2 or 4 (same per-code discipline as every other send in this file).
 
 **A.0b — POWER-SLEEP REGRESSION CHECK (NEW 2026-08-12, Gabriel-directed).** Run this on **every** fire, on-time or late — it is one command and sub-second. A.0 above detects the *symptom* (a late wake, after the morning is already lost); this detects the *cause* while it is still cheap to fix.
 
@@ -417,7 +417,7 @@ Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no relia
 python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockB --run-id <run_id> --notion-page-id 3a56ecd8-9e59-8152-83b6-c61cec736f2b --email-sent-at <ISO8601 of the successful send>
 ```
 
-Omit `--email-sent-at` if the send failed both attempts and B.4's local-log path was used instead — the block still completed, it simply has no send timestamp to record. Call `fail --error "<what broke>"` only if the block aborted before B.3 (which releases the claim, correctly allowing a retry to capture a fresh mirror — see the B.0 tradeoff note).
+Omit `--email-sent-at` if the send failed (any exit code) and B.4's local-log path was used instead — the block still completed, it simply has no send timestamp to record. Call `fail --error "<what broke>"` only if the block aborted before B.3 (which releases the claim, correctly allowing a retry to capture a fresh mirror — see the B.0 tradeoff note).
 
 **B.4 — FAILURE PATHS.**
 - Notion FAILED but Outlook OK: still send the alert email (Outlook is independent). The `rate_snapshot` WILL have been reconstructed via the B.2 fallback ladder — include it and state its `confidence` prominently; only `portfolio_watch` is lost. If web_fetch also failed (primary tier down), say so and label rates SECONDARY (below decision-grade). Recommend a manual Notion check / re-auth before the next cycle.
@@ -486,7 +486,7 @@ If any probe script is missing/absent this run (folders may not have survived th
 
 > **WHY C.3 POINTS AT A.3 INSTEAD OF LISTING THE CONDITIONS (added 2026-08-09).** These two lists drifted apart the moment the engine was rewritten. A.3 was widened the same day to escalate `regressed[]`, `unreadable[]`, `errors[]`, `id_collisions[]` and `ledger_status` — the new engine's entire alarm surface — but C.3 still named only `missing_everywhere` and "integrity engine error." The result: Block A could detect that a live SKILL.md had been **reverted to an older version** (`regressed[]`), write it prominently into the body, and still ship it under an `ALL PASS` subject — the one line most likely to be skimmed and filed. A duplicated condition list is a standing drift hazard; there is now exactly one, in A.3, and adding a condition there is sufficient. Do not paste the list back into C.3.
 
-**C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On non-zero COM exit: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt.
+**C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On COM exit 2 or 4: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 
 **C.4.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the C.4 send):**
 
@@ -509,7 +509,7 @@ Block C publishes no Notion page, so `--notion-page-id` is omitted. Call `fail -
 `--email-sent-at` is conditional, exactly as in B.3.9 — this block has the same two-attempts-then-local-log path at C.4, so do not treat it as an unconditional part of the command:
 - send succeeded → the ISO8601 of that send;
 - **C.4.0 returned exit 10** (already in Sent Items) → pass the probe's matched `sentOn`, **not** now — the email went out on the earlier fire, and stamping the current time would misdate the artifact. Same rule applies to B.3.9 after a B.3.0 exit 10;
-- send failed both attempts and the B.4 local-log path was used → **omit the flag entirely**. The block still completed; it simply has no send timestamp to record.
+- send failed (any exit code) and the B.4 local-log path was used → **omit the flag entirely**. The block still completed; it simply has no send timestamp to record.
 
 **C.5 — HARD RULE (reiterated):** Block C never edits, creates, moves, or deletes any file or task, and never writes settings/hooks/CLAUDE/memory/registry. A FAILing probe is reported with its observed value; Gabriel decides remediation.
 
