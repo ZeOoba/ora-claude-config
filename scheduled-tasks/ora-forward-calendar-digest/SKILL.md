@@ -76,12 +76,12 @@ Exit 10 on EITHER probe → do NOT send; log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`,
 
   powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "C:\Users\Owner\.claude\artifacts\ora-forward-calendar\out\digest.html" -BodyFormat html -Attachment "C:\Users\Owner\.claude\artifacts\ora-forward-calendar\out\ora-forward-calendar.ics"
 Exit 1 here means the attachment was rejected (missing/empty/oversize file) and NOTHING was sent — fail-closed by design, since the body promises the file. That can only happen if STEP 3 did not actually write the .ics, so treat it as a STEP 3 failure: do not retry the send, and go to STEP 5 quoting the log line.
-On any other non-zero exit: retry ONCE. If it fails again, stop, report the failure loudly in the run log, and close the guard with `fail` (below) quoting the send error — do not halt silently, do not attempt any other send mechanism, and do not call `complete` for a digest that was never actually sent.
+On exit 2 or 4: retry ONCE. On exit 5 or 6 (or any code other than 1, 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2; flag it loudly in the run log. If a retried send fails again, stop, report the failure loudly in the run log, and close the guard with `fail` (below) quoting the send error — do not halt silently, do not attempt any other send mechanism, and do not call `complete` for a digest that was never actually sent.
 
-Close the entry guard once the send resolves (success, probe-skip, or exhausted retry — never leave STEP 0's claim open):
+Close the entry guard once the send resolves (success, probe-skip, or any failed send — never leave STEP 0's claim open):
   python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --email-sent-at <ISO8601>
-On the exhausted-retry send failure above, call this instead and stop:
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --error "<send error after retry>"
+On any failed send above (including exit 5 or 6, which are never repeated), call this instead and stop:
+  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --error "<send error>"
 
 STEP 5 — failure email (only on a STEP 2 or STEP 3 failure)
 Subject: "[ACTION] ORA Forward Calendar digest FAILED - YYYY-MM-DD"

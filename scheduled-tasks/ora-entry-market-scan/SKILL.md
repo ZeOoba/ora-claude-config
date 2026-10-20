@@ -52,7 +52,7 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --t
 ```
 
 - `complete` after Step 5's digest lands (or after the Layer 2 probe reports ALREADY_SENT — see Step 5).
-- **`fail`, never `complete`, on any abort or non-zero exit** — a crash, an unusable doctrine-version check (the Step 2 stop-and-flag path), or a send path that failed both attempts. `fail` releases the claim immediately so a legitimate same-month re-run is possible; a `complete` on a broken run would lock the month out.
+- **`fail`, never `complete`, on any abort or non-zero exit** — a crash, an unusable doctrine-version check (the Step 2 stop-and-flag path), or a send path that failed. `fail` releases the claim immediately so a legitimate same-month re-run is possible; a `complete` on a broken run would lock the month out.
 - **Every early-exit path that occurs AFTER the claim must still close it.** A zero-qualifier run (no listings clear the buy-box in any of the 5 markets) and a Notion-MCP-unavailable run are both NORMAL completions under this task's own Invariants, not aborts: write the outputs summary / JSON fallback, send the digest stating the result explicitly per market, post the Ops Hub row where the Invariants call for one, then call `complete`. Do not exit silently leaving the claim open — it would hold the month for the full 45-minute TTL and then expire as if the run had crashed.
 - **Always pass `--period month` on every call** for this task. Omitting it addresses the day-keyed bucket instead and defeats the guard silently — no error, the claim just never persists across days.
 - **A scheduled fire must never pass `--force`.** That is a human-directed, in-session override only.
@@ -117,23 +117,23 @@ For any previously-screened deal in these 5 markets logged as PASS/T2-WATCH with
 powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the dated stem>"
 ```
 
-- **Dated stem: `ORA Entry Market Scan - <YYYY-MM-DD>`** (this `<YYYY-MM-DD>`, the Subject's `[Month YYYY]` and the outputs filenames all come from the run date computed once at run start with `date '+%A %Y-%m-%d'` — date part only — reused verbatim) — written to a temp file under `C:\Users\Owner\AppData\Local\Temp\ora-entry-market-scan\`, never passed as a literal `-Subject` (non-ASCII is mangled in transit). Use the dated stem, NOT the full Step 5 subject line: that subject carries live counts (`[N] New Candidates, [N] Watched, [N] Passed`) which legitimately differ between two runs of the same cycle, so probing the full string would fail to match the earlier send and wave the duplicate through. Matching is substring and normalization-tolerant (dash family folded, casefolded), and the stem must sit at position 0 after any `[ORA]`/`[ACTION]` tag is stripped — so keep the date immediately after the stem and put variable text after it.
+- **Dated stem: `ORA Entry Market Scan - <YYYY-MM-DD>`** (this `<YYYY-MM-DD>`, the Subject's date and the outputs filenames all come from the run date computed once at run start with `date '+%A %Y-%m-%d'` — date part only — reused verbatim) — written to a temp file under `C:\Users\Owner\AppData\Local\Temp\ora-entry-market-scan\`, never passed as a literal `-Subject` (non-ASCII is mangled in transit). Use the dated stem: the Step 5 subject is now the stem (hyphen written as an em dash) and nothing run-dependent (live counts moved to the body), so it is stable across same-day reruns and the R-05 dedup key matches; the stem is still what the probe matches. Matching is substring and normalization-tolerant (dash family folded, casefolded), and the stem must sit at position 0 after any `[ORA]`/`[ACTION]` tag is stripped — so keep the date immediately after the stem and put variable text after it.
 - **Exit 10 (ALREADY_SENT)** → do NOT send. Log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip citing the earlier message, and still call Layer 1 `complete` (with `--period month`) so the sentinel re-converges with reality.
 - **Exit 0 (NOT_SENT)** → proceed with the send below.
 - **Exit 1 (PROBE_ERROR)** → fail open: send anyway, and note the probe gap in the digest's data-gaps section. Layer 1 already said PROCEED; suppressing a real report because a probe broke is worse than a duplicate.
 - A scheduled fire never passes `-Force`.
 
 Send summary email via Outlook COM:
-- Script: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1
+- Script: C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1 — pass `-DedupTaskId "ora-entry-market-scan" -DedupPeriodKey "<run date yyyy-MM-dd>"` (R-05 contract mode; <run date yyyy-MM-dd> = the date part of the run date computed once at run start)
 - To: ggoldberg@oxfordra.net ONLY (never cc egoldberg@, never ze@ addresses)
-- On COM failure: retry once, then log failure to Notion Ops Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062) — do NOT halt (that Ops Hub create follows the same look-for-it rule; never blind-retry a create — it produced a duplicate)
-- Subject: "ORA Entry Market Scan — [Month YYYY]: [N] New Candidates, [N] Watched, [N] Passed"
-- Body: RE-ENGAGE alerts first (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags) — for any GATE-FLAGGED Delmarva listing already carrying a `Gate Review` ratification, mark it "reviewed <date>" in the table instead of re-asking, then market summary, then data gaps / questions for Gabriel (genuinely new items only)
+- Exit handling (contract mode: the helper retries exit 2/4 once itself; the caller NEVER retries any exit code): on exit 1, 3 or 5 do NOT retry; on exit 6 (send state unknown — the message MAY have gone out) do NOT retry and never resend, flag it loudly in the run summary for a human to check Sent Items, per rules.md §2; on any failed send, log failure to Notion Ops Hub (32b6ecd8-9e59-81f2-b329-df3fd0e25062) — do NOT halt (that Ops Hub create follows the same look-for-it rule; never blind-retry a create — it produced a duplicate)
+- Subject (FIXED per run day, no counts or other run-dependent text): "ORA Entry Market Scan — <YYYY-MM-DD>" (the same run-date value as the dated stem)
+- Body: opens with the counts line `[N] New Candidates, [N] Watched, [N] Passed` (counts never go in the subject), then RE-ENGAGE alerts (if any), then T1/T2 ranked table (address, market, ask, SF, $/SF, Combined [est], P(exec)%, Expected Score, verdict, top seller signal, flags) — for any GATE-FLAGGED Delmarva listing already carrying a `Gate Review` ratification, mark it "reviewed <date>" in the table instead of re-asking, then market summary, then data gaps / questions for Gabriel (genuinely new items only)
 
 ### Step 6 — CLOSE THE CLAIM (v1.8, 2026-09-19 — mandatory whenever STEP 0-B returned exit 0)
 Last action of the run, after the outputs summary is archived (see Invariants):
 - Digest sent, or Layer 2 reported ALREADY_SENT, or the run completed normally with zero qualifiers / a Notion fallback → `block-sentinel.py complete … --period month --email-sent-at <ISO8601>`.
-- Run aborted, crashed, or exited non-zero (incl. the Step 2 doctrine-version stop-and-flag, and a COM send that failed both attempts) → `block-sentinel.py fail … --period month --error "<what broke>"`. Never `complete` on a broken run.
+- Run aborted, crashed, or exited non-zero (incl. the Step 2 doctrine-version stop-and-flag, and a COM send that failed) → `block-sentinel.py fail … --period month --error "<what broke>"`. Never `complete` on a broken run.
 - Stood down at STEP 0-B with exit 10 or 11 → this run owns nothing; call NEITHER.
 
 ## Invariants

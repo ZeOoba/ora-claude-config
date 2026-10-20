@@ -3,7 +3,7 @@
 **Added:** 2026-04-16
 **Applies to:** Every ORA scheduled task that references this file.
 **Destination:** ggoldberg@oxfordra.net (Gabriel's Outlook inbox).
-**Transport:** Desktop Outlook via COM automation (`send-via-outlook.ps1`) is the **SOLE send path** (the Composio fallback was removed 2026-06-11 — the connector no longer exists). On a non-zero COM exit: retry once, then flag the failure loudly (see Step 4) — do NOT route through Composio (gone), Rube (EOL 2026-05-15), Gmail, or Zapier. There is no second send mechanism by design; silent-send detection lives in the automation-health-monitor producer-beacon check.
+**Transport:** Desktop Outlook via COM automation (`send-via-outlook.ps1`) is the **SOLE send path** (the Composio fallback was removed 2026-06-11 — the connector no longer exists). On a non-zero COM exit: act on the exit code per Step 4 (only exit 2 or 4 is ever retried, once — R-05 send contract, 2026-10-18), then flag the failure loudly — do NOT route through Composio (gone), Rube (EOL 2026-05-15), Gmail, or Zapier. There is no second send mechanism by design; silent-send detection lives in the automation-health-monitor producer-beacon check.
 
 ---
 
@@ -53,11 +53,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:/Users/Owner/.claude/
 
 Replace `<Display Name>` with the task's human-readable name (see mapping in REFERENCE_BLOCK_SNIPPET).
 
+Preferred (R-05 contract mode — dedup before `Send()` plus the script's own single retry, so the caller then never retries): append `-DedupTaskId "<task-id>" -DedupPeriodKey "<ET date yyyy-MM-dd>"` to the same command. Compute the date with PowerShell `Get-Date -Format yyyy-MM-dd` or take block-sentinel.py's `etDate`; Git Bash ignores `TZ=America/New_York` and silently returns UTC on this host. For multi-fire tasks use `<etDate>-<block>` (for example `2026-10-18-slot-12`), never a bare block.
+
 ### 4. Verify exit code
 
 - **Exit 0 → success.** Add a line to your Notion completion log: `Email delivered to ggoldberg@oxfordra.net`.
-- **Exit 1 → usage error.** Check the Write step produced a file. Retry once.
-- **Exit 2 → Outlook COM failure.** Retry once. If it still fails, there is **NO send fallback** (Composio was removed 2026-06-11): append `⚠️ EMAIL DELIVERY FAILED (COM, no fallback)` to your Notion "Automation Health" completion row, include the last 20 lines of `C:/Users/Owner/.claude/scheduled-tasks/_shared/send-log.txt`, and ensure the task's primary output beacon (its Notion page / digest) is produced or visibly flagged — `ora-automation-health-monitor`'s producer-beacon check is what surfaces a silent send to Gabriel. Do NOT halt the task. Recipients stay `ggoldberg@oxfordra.net` only (2026-05-15 directive re-ratified 2026-06-10; only the Daily Brief cc's Eric). Never route through Composio (gone), Rube (EOL), or Gmail.
+- **Exit 1 → usage error.** Check the Write step produced a file, fix the invocation, and flag it. Do NOT retry the same command.
+- **Exit 2 → Outlook COM failure before `Send()`.** Retry once (legacy mode only; in contract mode the script already retried). If it still fails, there is **NO send fallback** (Composio was removed 2026-06-11): append `⚠️ EMAIL DELIVERY FAILED (COM, no fallback)` to your Notion "Automation Health" completion row, include the last 20 lines of `C:/Users/Owner/.claude/scheduled-tasks/_shared/send-log.txt`, and ensure the task's primary output beacon (its Notion page / digest) is produced or visibly flagged — `ora-automation-health-monitor`'s producer-beacon check is what surfaces a silent send to Gabriel. Do NOT halt the task. Recipients stay `ggoldberg@oxfordra.net` only (2026-05-15 directive re-ratified 2026-06-10; only the Daily Brief cc's Eric). Never route through Composio (gone), Rube (EOL), or Gmail.
+- **Exit 3 → Outlook stuck on a startup/profile wizard.** Do NOT retry; flag it — a human must dismiss the wizard.
+- **Exit 4 → timed out before `Send()` was invoked.** Same handling as exit 2 (legacy mode: retry once; contract mode: the script already retried).
+- **Exit 5 → refused (attachment + external, or external recipient not authorized).** Do NOT retry, never route around it; flag it.
+- **Exit 6 → send state unknown (the message MAY have gone out).** Do NOT retry. Flag it with the `SEND-STATE-UNKNOWN` / `DEDUP-BLOCK` / `QUARANTINE` line from `send-log.txt` (contract mode also exits 6 on a fail-closed `DEDUP-LOCK-UNAVAILABLE` / `DEDUP-LOCK-TIMEOUT` / `DEDUP-UNAVAILABLE` / `DEDUP-INTENT-UNWRITTEN` refusal, which may reach stderr only); a human checks Sent Items.
 
 ### 5. Error-case coverage
 
@@ -107,7 +113,7 @@ Follow the procedure in `C:/Users/Owner/.claude/scheduled-tasks/_shared/EMAIL_DE
    - `-Subject "[ORA] <DISPLAY_NAME> - YYYY-MM-DD"`
    - `-BodyFile` pointing at the temp file
    - `-BodyFormat html`
-4. On non-zero exit: retry once, then log `⚠️ EMAIL DELIVERY FAILED` in Automation Health and continue.
+4. On exit 2 or 4: retry once (legacy mode only); on any other non-zero exit (1, 3, 5, 6) do NOT retry. Either way, log `⚠️ EMAIL DELIVERY FAILED` in Automation Health and continue.
 5. On any task-level error you would have drafted to ggoldberg@oxfordra.net, also send via this helper with subject prefix `[ORA ERROR]` so failures don't stay silent.
 
 **This task's values:** `TASK_ID=<task-id>`, `DISPLAY_NAME=<Display Name>`
