@@ -65,6 +65,12 @@ So each matcher had ONLY Edit|Write|MultiEdit removed:
 IF YOU ADD A GUARD to the Edit/Write path, add it to GUARD_CHAIN here -- NOT as
 a new settings.json PreToolUse entry -- or it will run twice on Edit/Write.
 
+R-08: hooks/wiring/settings-wiring.toml mirrors CHAINS (its [[chain]] blocks) and
+declares every settings.json hook entry. Adding, removing or reordering a guard
+here means editing the table in the SAME commit; `python
+maintenance/render-settings-wiring.py --check` and hooks/tests/test-settings-wiring.py
+(pre-push gate) fail on any difference.
+
 =============================================================================
 SECOND CHAIN ADDED 2026-08-16 (OI-176) -- THE Bash PARTITION
 =============================================================================
