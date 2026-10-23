@@ -26,6 +26,8 @@ import json
 import os
 import sys
 
+sys.dont_write_bytecode = True  # check mode must write nothing, not even .pyc
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO, "hooks", "lib"))
@@ -106,8 +108,8 @@ def main(argv=None):
     except sw.TableError as exc:
         print("ERROR: %s" % exc, file=sys.stderr)
         return 2
-    except (OSError, ValueError) as exc:
-        print("ERROR: %s" % exc, file=sys.stderr)
+    except (OSError, ValueError, TypeError, AttributeError, KeyError) as exc:
+        print("ERROR: cannot evaluate (%s: %s)" % (type(exc).__name__, exc), file=sys.stderr)
         return 2
     expected = sorted(x for x in (a.expect_delta or "").split(",") if x)
     got = sorted(f["id"] for f in findings if f["kind"] == "UNWIRED")

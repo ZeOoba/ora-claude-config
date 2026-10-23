@@ -173,7 +173,7 @@ def render_hooks(table):
 
 def parse_settings_text(text):
     try:
-        return json.loads(text.lstrip("\ufeff"), object_pairs_hook=collections.OrderedDict)
+        return json.loads(_strip_bom(text), object_pairs_hook=collections.OrderedDict)
     except ValueError as exc:
         raise TableError("settings is not valid JSON: %s" % exc)
 
@@ -302,6 +302,11 @@ def check_capability(table, lowest_binary):
             if "min_binary" in r and _version_tuple(r["min_binary"]) > low]
 
 
+def _strip_bom(text):
+    """Strip exactly one leading BOM (a double BOM is not a valid settings file)."""
+    return text[1:] if text.startswith("\ufeff") else text
+
+
 def load_dispatcher_chains(hooks_dir):
     path = os.path.join(hooks_dir, "pretooluse-dispatcher.py")
     try:
@@ -309,7 +314,9 @@ def load_dispatcher_chains(hooks_dir):
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         return {k: list(v) for k, v in mod.CHAINS.items()}
-    except Exception as exc:  # noqa: BLE001
+    except BaseException as exc:  # noqa: BLE001  SystemExit at import must fail closed (exit 2)
+        if isinstance(exc, KeyboardInterrupt):
+            raise
         raise TableError("cannot load dispatcher chains from %s: %s" % (path, exc))
 
 
@@ -329,8 +336,8 @@ def run_check(table, settings_text, hooks_dir, lowest_binary=None, dispatcher_ch
     live = parse_settings_text(settings_text)
     findings = diff_hooks(table, live.get("hooks"))
     rendered = dump_settings(render_settings(table, live))
-    if not findings and lf(settings_text).lstrip("\ufeff") != rendered:
-        line, got, want = first_text_difference(lf(settings_text).lstrip("\ufeff"), rendered)
+    if not findings and _strip_bom(lf(settings_text)) != rendered:
+        line, got, want = first_text_difference(_strip_bom(lf(settings_text)), rendered)
         findings.append({"kind": "FORMAT", "detail": "hooks match structurally but the text "
                          "differs at line %d: file=%r rendered=%r" % (line, got[:80], want[:80])})
     if dispatcher_chains is None:
