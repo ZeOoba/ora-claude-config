@@ -1,0 +1,500 @@
+[
+ {
+  "id": "ora-ar-export-freshness-nudge",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-ar-export-freshness-nudge\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "58d1cac12245",
+  "sha_new": "84acf9b77f9c",
+  "enabled": false,
+  "cron": "30 11 1,15 * *",
+  "lastRunAt": "2026-09-15T15:44:05.548Z",
+  "edits": [
+   {
+    "old": "On non-zero exit, retry once; if still failing, post the full gap detail to the Notion Ops Hub as a fallback.",
+    "new": "On exit 2 or 4, retry once; if still failing, post the full gap detail to the Notion Ops Hub as a fallback. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion Ops Hub post, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 5875,
+  "bytes_new": 6077
+ },
+ {
+  "id": "ora-bearmode-refresh",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-bearmode-refresh\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "5256624182b2",
+  "sha_new": "fdddb0d6a3c8",
+  "enabled": false,
+  "cron": "25 6 9 3,6,9,12 *",
+  "lastRunAt": "2026-07-12T17:04:37.752Z",
+  "edits": [
+   {
+    "old": "on a non-zero COM exit retry once, then flag)",
+    "new": "on COM exit 2 or 4 retry once, then flag; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary)"
+   }
+  ],
+  "bytes_base": 3992,
+  "bytes_new": 4165
+ },
+ {
+  "id": "ora-capex-idea-stage-nudge",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-capex-idea-stage-nudge\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "71f3459d08ad",
+  "sha_new": "cf13da6884b6",
+  "enabled": false,
+  "cron": "15 12 1 * *",
+  "lastRunAt": "2026-09-02T09:38:06.904Z",
+  "edits": [
+   {
+    "old": "On a non-zero COM exit code: retry once, then flag the failure loudly in the Notion completion row — do not halt the task.",
+    "new": "On COM exit code 2 or 4: retry once, then flag the failure loudly in the Notion completion row — do not halt the task. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion completion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 3654,
+  "bytes_new": 3856
+ },
+ {
+  "id": "ora-consolidate-memory-monthly",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-consolidate-memory-monthly\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "3aba51734b19",
+  "sha_new": "328d4f120908",
+  "enabled": false,
+  "cron": "0 5 2 * *",
+  "lastRunAt": "2026-09-02T09:35:05.760Z",
+  "edits": [
+   {
+    "old": "On non-zero exit: retry once, then flag the failure (do not halt)",
+    "new": "On exit 2 or 4: retry once, then flag the failure (do not halt); on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary"
+   }
+  ],
+  "bytes_base": 4777,
+  "bytes_new": 4952
+ },
+ {
+  "id": "ora-counsel-review-standard-positions-2027",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-counsel-review-standard-positions-2027\\SKILL.md",
+  "flag": "mechanical",
+  "note": "One-time task (fireAt 2027-08), the only ENABLED LAMS row.",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "6848f19509d7",
+  "sha_new": "8e614f0a2fb9",
+  "enabled": true,
+  "cron": 1817211600000,
+  "lastRunAt": null,
+  "edits": [
+   {
+    "old": "(on non-zero exit: retry once, then flag loudly — do not halt)",
+    "new": "(on exit 2 or 4: retry once, then flag loudly — do not halt; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary)"
+   }
+  ],
+  "bytes_base": 6281,
+  "bytes_new": 6456
+ },
+ {
+  "id": "ora-dd-critical-tracker",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-dd-critical-tracker\\SKILL.md",
+  "flag": "mechanical",
+  "note": "ASCII-only spec (uses -- and no section sign); CRLF file.",
+  "crlf": true,
+  "bom": false,
+  "sha_base": "2ae77bf39339",
+  "sha_new": "14b9ae37cf92",
+  "enabled": false,
+  "cron": "35 9 * * 4",
+  "lastRunAt": "2026-09-05T19:06:55.886Z",
+  "edits": [
+   {
+    "old": "On send failure: retry once, then flag loudly in the Notion page -- do NOT halt.",
+    "new": "On send exit 2 or 4: retry once, then flag loudly in the Notion page -- do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion page, and never resend (exit 6 = send state unknown -- the message MAY have gone out), per rules.md section 2."
+   }
+  ],
+  "bytes_base": 6245,
+  "bytes_new": 6450
+ },
+ {
+  "id": "ora-exit-cap-spotcheck",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-exit-cap-spotcheck\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "ef872532ee13",
+  "sha_new": "87979602588f",
+  "enabled": false,
+  "cron": "45 6 9 3,6,9,12 *",
+  "lastRunAt": null,
+  "edits": [
+   {
+    "old": "On a non-zero exit code: retry once, then flag loudly in the Notion completion row; do not halt the task.",
+    "new": "On exit code 2 or 4: retry once, then flag loudly in the Notion completion row; do not halt the task. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion completion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 4966,
+  "bytes_new": 5168
+ },
+ {
+  "id": "ora-friday-closeout",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-friday-closeout\\SKILL.md",
+  "flag": "mechanical",
+  "note": "Variant B: 'missing bridge' is not an exit code and nothing was sent, so its one retry is kept.",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "b0ca5b8ec586",
+  "sha_new": "79b3a806b16d",
+  "enabled": false,
+  "cron": "30 16 * * 5",
+  "lastRunAt": "2026-09-05T17:32:00.068Z",
+  "edits": [
+   {
+    "old": "On failure or missing bridge: retry once, flag SEND FAILED loudly in the Notion row, continue — do NOT halt.",
+    "new": "On send exit 2 or 4, or a missing bridge (nothing was sent): retry once, flag SEND FAILED loudly in the Notion row, continue — do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 8345,
+  "bytes_new": 8571
+ },
+ {
+  "id": "ora-gis-endpoint-liveping",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-gis-endpoint-liveping\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "a2357007dccd",
+  "sha_new": "736b90ba728f",
+  "enabled": false,
+  "cron": "35 6 9 3,6,9,12 *",
+  "lastRunAt": null,
+  "edits": [
+   {
+    "old": "on non-zero exit, retry once then flag loudly in the Notion post rather than halting.",
+    "new": "on exit 2 or 4, retry once then flag loudly in the Notion post rather than halting; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the Notion post."
+   }
+  ],
+  "bytes_base": 4776,
+  "bytes_new": 4951
+ },
+ {
+  "id": "ora-health-guard-fail-aging-nudge",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-health-guard-fail-aging-nudge\\SKILL.md",
+  "flag": "mechanical-but-retired",
+  "note": "Registry row disabled; automation-health-monitor l.267 marks it RETIRED 2026-09-22 (retire-pending). Skip unless it is un-retired.",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "91f7695eed59",
+  "sha_new": "04a145b2fabc",
+  "enabled": false,
+  "cron": "0 9 * * 1-5",
+  "lastRunAt": "2026-09-15T14:44:04.610Z",
+  "edits": [
+   {
+    "old": "On send failure: retry once, then flag loudly in the Notion page -- do NOT halt.",
+    "new": "On send exit 2 or 4: retry once, then flag loudly in the Notion page -- do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion page, and never resend (exit 6 = send state unknown -- the message MAY have gone out), per rules.md section 2."
+   }
+  ],
+  "bytes_base": 4613,
+  "bytes_new": 4818
+ },
+ {
+  "id": "ora-ic-memo-pipeline-reconciliation",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-ic-memo-pipeline-reconciliation\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "8cc0cce94434",
+  "sha_new": "df17b29076b6",
+  "enabled": false,
+  "cron": "30 10 * * 2",
+  "lastRunAt": "2026-10-14T22:06:21.373Z",
+  "edits": [
+   {
+    "old": "On non-zero COM exit: retry once, then flag loudly in the Notion completion row — do not halt.",
+    "new": "On COM exit 2 or 4: retry once, then flag loudly in the Notion completion row — do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion completion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 6567,
+  "bytes_new": 6771
+ },
+ {
+  "id": "ora-insurance-renewal-monitor",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-insurance-renewal-monitor\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "f299c03d8cc2",
+  "sha_new": "439d3d0ba4f5",
+  "enabled": false,
+  "cron": "40 11 * * 1",
+  "lastRunAt": "2026-09-14T15:54:17.613Z",
+  "edits": [
+   {
+    "old": "On a non-zero COM exit code: retry once, then if it still fails, flag it loudly in the Notion completion row instead of halting",
+    "new": "On COM exit code 2 or 4: retry once, then if it still fails, flag it loudly in the Notion completion row instead of halting"
+   },
+   {
+    "old": "do not treat a failed send as a reason to stop the rest of this task.",
+    "new": "do not treat a failed send as a reason to stop the rest of this task. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion completion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 11766,
+  "bytes_new": 11968
+ },
+ {
+  "id": "ora-lams-fleet-resume-20260911",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-lams-fleet-resume-20260911\\SKILL.md",
+  "flag": "mechanical-but-spent",
+  "note": "One-time task, lastRunAt 2026-09-11, already auto-disabled. Editing is cosmetic; recommend SKIP (or retire).",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "c671b4a89193",
+  "sha_new": "806b271d94e4",
+  "enabled": false,
+  "cron": 1789156860000,
+  "lastRunAt": "2026-09-11T20:01:37.879Z",
+  "edits": [
+   {
+    "old": "on non-zero exit, retry once, then flag loudly and do not halt)",
+    "new": "on exit 2 or 4, retry once, then flag loudly and do not halt; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary)"
+   }
+  ],
+  "bytes_base": 3658,
+  "bytes_new": 3833
+ },
+ {
+  "id": "ora-lease-expiration-brief",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-lease-expiration-brief\\SKILL.md",
+  "flag": "mechanical",
+  "note": "Variant B (missing bridge); CRLF file.",
+  "crlf": true,
+  "bom": false,
+  "sha_base": "efcfec723143",
+  "sha_new": "e080ecb33b4d",
+  "enabled": false,
+  "cron": "45 10 * * 1",
+  "lastRunAt": "2026-09-14T14:50:32.180Z",
+  "edits": [
+   {
+    "old": "On failure or missing bridge: retry once, flag SEND FAILED loudly in the Notion row, continue — do NOT halt.",
+    "new": "On send exit 2 or 4, or a missing bridge (nothing was sent): retry once, flag SEND FAILED loudly in the Notion row, continue — do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 6597,
+  "bytes_new": 6823
+ },
+ {
+  "id": "ora-loan-terms-reconciliation",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-loan-terms-reconciliation\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "ab6acb4a1976",
+  "sha_new": "b0cf2c36ffe3",
+  "enabled": false,
+  "cron": "20 13 6 * *",
+  "lastRunAt": "2026-09-06T17:21:06.791Z",
+  "edits": [
+   {
+    "old": "On non-zero exit: retry once, then note the failure loudly in the Notion entry and continue. Do NOT halt.",
+    "new": "On exit 2 or 4: retry once, then note the failure loudly in the Notion entry and continue. Do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion entry, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 6963,
+  "bytes_new": 7158
+ },
+ {
+  "id": "ora-monday-sync",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-monday-sync\\SKILL.md",
+  "flag": "mechanical",
+  "note": "Variant B (missing bridge); CRLF; Layer-2 Sent-Items probe at step 6b is unchanged.",
+  "crlf": true,
+  "bom": false,
+  "sha_base": "58cf14f1611a",
+  "sha_new": "7ff2b79e2b13",
+  "enabled": false,
+  "cron": "35 10 * * 1",
+  "lastRunAt": "2026-09-14T14:44:27.377Z",
+  "edits": [
+   {
+    "old": "On failure or missing bridge: retry once, flag SEND FAILED loudly in the Notion row, continue — do NOT halt.",
+    "new": "On send exit 2 or 4, or a missing bridge (nothing was sent): retry once, flag SEND FAILED loudly in the Notion row, continue — do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 6330,
+  "bytes_new": 6556
+ },
+ {
+  "id": "ora-om-intake-ocr",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-om-intake-ocr\\SKILL.md",
+  "flag": "mechanical",
+  "note": "Two hunks: the send sentence (l.109) and the close-out 'fails after the one retry' (l.115). The folder-report fallback is NOT a resend, so it is kept for exit 5/6.",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "5064c9ea0a4e",
+  "sha_new": "7a3f2fb5700d",
+  "enabled": false,
+  "cron": "15 6 * * 3",
+  "lastRunAt": "2026-10-14T22:06:29.613Z",
+  "edits": [
+   {
+    "old": "on COM failure retry once then flag, do not halt)",
+    "new": "on COM exit 2 or 4 retry once then flag, do not halt; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out): take the folder-report path below and flag it loudly in the run-complete runLog entry)"
+   },
+   {
+    "old": "If the Outlook COM send is unavailable or fails after the one retry (e.g. Desktop Commander/PowerShell",
+    "new": "If the Outlook COM send is unavailable, fails after its one retry (exit 2 or 4), or ends in exit 5 or 6 with no retry (e.g. Desktop Commander/PowerShell"
+   }
+  ],
+  "bytes_base": 10421,
+  "bytes_new": 10704
+ },
+ {
+  "id": "ora-owner-outreach-queue-refresh",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-owner-outreach-queue-refresh\\SKILL.md",
+  "flag": "mechanical",
+  "note": "Other 'NON-ZERO exit' lines (l.54 driver, l.80 promotion) are not sends: untouched.",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "7dbdd7082b98",
+  "sha_new": "a1abb01ce15d",
+  "enabled": false,
+  "cron": "55 10 * * 1",
+  "lastRunAt": "2026-09-23T16:18:23.399Z",
+  "edits": [
+   {
+    "old": "On a NON-ZERO exit from the send script: retry once, then flag loudly in the Notion Operations Hub completion row (page 32b6ecd8) — do NOT halt.",
+    "new": "On exit 2 or 4 from the send script: retry once, then flag loudly in the Notion Operations Hub completion row (page 32b6ecd8) — do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion Operations Hub completion row, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 29331,
+  "bytes_new": 29548
+ },
+ {
+  "id": "ora-replacement-cost-refresh",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-replacement-cost-refresh\\SKILL.md",
+  "flag": "mechanical",
+  "note": "",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "a29c0fe04b9f",
+  "sha_new": "b49c186ce5bc",
+  "enabled": false,
+  "cron": "10 6 9 3,6,9,12 *",
+  "lastRunAt": "2026-07-12T17:05:08.454Z",
+  "edits": [
+   {
+    "old": "on COM failure retry once then flag)",
+    "new": "on COM exit 2 or 4 retry once then flag; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary)"
+   }
+  ],
+  "bytes_base": 4011,
+  "bytes_new": 4192
+ },
+ {
+  "id": "ora-underwrite-doctrine-staleness-check",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-underwrite-doctrine-staleness-check\\SKILL.md",
+  "flag": "mechanical",
+  "note": "ASCII-style dashes (--).",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "edc226b6a0d3",
+  "sha_new": "6abe8b273460",
+  "enabled": false,
+  "cron": "0 13 * * 3",
+  "lastRunAt": "2026-09-05T18:55:23.853Z",
+  "edits": [
+   {
+    "old": "On a non-zero COM exit: retry once, then note the failure loudly in the Notion completion post -- do not halt the task.",
+    "new": "On COM exit 2 or 4: retry once, then note the failure loudly in the Notion completion post -- do not halt the task. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion completion post, and never resend (exit 6 = send state unknown -- the message MAY have gone out), per rules.md section 2."
+   }
+  ],
+  "bytes_base": 7102,
+  "bytes_new": 7310
+ },
+ {
+  "id": "automation-health-monitor",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\automation-health-monitor\\SKILL.md",
+  "flag": "DESIGN-CALL",
+  "note": "Three send sentences (l.10 routing header, l.425 Step 2 alert, l.431 Step 3 meta-failure send which has NO retry sentence today). l.10 also carries the 2026-07-08 'OUTLOOK-COM-SEND-BROKEN ... exit 4' KNOWN ISSUE: historical, left as is (exit 4 stays retryable). Open: (a) this spec's job is to audit send-log for exit-6 / SEND-STATE-UNKNOWN, so the new text should say a stray exit 6 is itself a finding; (b) it is also a synced skill in github.com/ZeOoba/ora-skills (guide section 3C/E), so the same edit must land there or the next sync reverts it; (c) it carries a version changelog (v1.26 last), so decide whether to add a v1.27 line. Registry row is DISABLED (cron 5 11 * * 1-5).",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "779db55fc74f",
+  "sha_new": "4c696881f07a",
+  "enabled": false,
+  "cron": "5 11 * * 1-5",
+  "lastRunAt": "2026-09-15T15:14:55.180Z",
+  "edits": [
+   {
+    "old": "on a non-zero COM exit retry once, then flag — do not halt). **KNOWN ISSUE",
+    "new": "on COM exit 2 or 4 retry once, then flag — do not halt; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary and the chat summary). **KNOWN ISSUE"
+   },
+   {
+    "old": "On non-zero COM exit retry once, then flag in the Notion completion row.",
+    "new": "On COM exit 2 or 4 retry once, then flag in the Notion completion row. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the Notion completion row and the chat summary, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   },
+   {
+    "old": "If Step 1 fails after one retry, AUTO-SEND an Outlook email via the SOLE send path:",
+    "new": "If Step 1 fails after one retry, AUTO-SEND an Outlook email via the SOLE send path (on COM exit 2 or 4 retry once, then flag in the Notion completion row; on exit 5 or 6 do NOT retry and never resend — exit 6 = send state unknown, the message MAY have gone out — flag it loudly in the chat summary, per rules.md §2):"
+   }
+  ],
+  "bytes_base": 121252,
+  "bytes_new": 121909
+ },
+ {
+  "id": "ora-skill-text-audit",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-skill-text-audit\\SKILL.md",
+  "flag": "DESIGN-CALL",
+  "note": "l.8 routing header (mechanical on its own) and l.107 meta-failure auto-send. Open: the Step 5 'Publish:' enum has only [direct | retry | fallback-sent | total-blackout]; after an exit 6 the fallback alert's state is unknown, which fits none of them. Proposed text keeps the enum unchanged and says to log the value as ❌ fallback-sent plus the words 'state unknown' in the chat summary; alternative is a new enum value (changes the line other consumers may parse). Registry row DISABLED (cron 45 9 15 * *), lastRunAt 2026-10-14. CRLF file.",
+  "crlf": true,
+  "bom": false,
+  "sha_base": "14348255aaa2",
+  "sha_new": "4dd6f8b99122",
+  "enabled": false,
+  "cron": "45 9 15 * *",
+  "lastRunAt": "2026-10-14T22:05:58.338Z",
+  "edits": [
+   {
+    "old": "on a non-zero COM exit retry once, then flag — do not halt). HubSpot",
+    "new": "on COM exit 2 or 4 retry once, then flag — do not halt; on exit 5 or 6 (or any code other than 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), flag it loudly in the run summary). HubSpot"
+   },
+   {
+    "old": "On a non-zero COM exit retry once, then record the failure.",
+    "new": "On COM exit 2 or 4 retry once, then record the failure. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: record the failure, log `Publish: ❌ fallback-sent` with the words 'send state unknown' in the chat summary, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2."
+   }
+  ],
+  "bytes_base": 31396,
+  "bytes_new": 31836
+ },
+ {
+  "id": "ora-stale-pipeline-nudge",
+  "path": "C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Documents\\Claude\\Scheduled\\ora-stale-pipeline-nudge\\SKILL.md",
+  "flag": "REVIEW-ONLY-NO-EDIT",
+  "note": "Caller with no retry: l.100 says a non-zero exit 'is not this task's bug' (Notion is primary; the spec states LAMS has no COM reach). No retry sentence to change and no resend path. Optional later: contract-mode adoption. Registry row DISABLED.",
+  "crlf": false,
+  "bom": false,
+  "sha_base": "4a642510d982",
+  "sha_new": "4a642510d982",
+  "enabled": false,
+  "cron": "15 10 * * 4",
+  "lastRunAt": "2026-09-05T17:38:54.872Z",
+  "edits": [],
+  "bytes_base": 30733,
+  "bytes_new": 30733
+ }
+]
