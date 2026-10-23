@@ -110,10 +110,15 @@ Measured before wiring: over 10,333 real Edit/Write/DC-write calls in the last
 30 days of transcripts it would have blocked 5, all on adversarial-fixture
 test files or on ascii-only-guard.py itself; non-.py targets are never gated.
 
-R-06 (2026-10-19): sensitive-file-guard and override-mint-guard joined GUARD_CHAIN
-(before ascii-only-guard, which stays last), and override-mint-guard joined
-BASH_GUARD_CHAIN. Both fail open. The MCP delete gate (mcp-delete-guard.py) is NOT
-dispatched here: it is MCP-only and has its own settings.json entry.
+R-06 (2026-10-19): sensitive-file-guard joined GUARD_CHAIN (before ascii-only-guard,
+which stays last). It has no session_kind dependency (same regex as the inline
+blocker) and fails open. override-mint-guard was ALSO wired in by PR 338 but is now
+TEMPORARILY UNWIRED from both GUARD_CHAIN and BASH_GUARD_CHAIN: override-mint-guard.py
+stays in the repo, UNWIRED, pending the session_kind scan-budget fix (follow-up PR),
+because session_kind can misclassify a real interactive Desktop session as scheduled
+under load and would then block override-token writes. Re-add it to both chains and
+flip tests M11/M12 back once that fix lands. The MCP delete gate (mcp-delete-guard.py)
+is NOT dispatched here: it is MCP-only and has its own settings.json entry.
 """
 import io
 import importlib.util
@@ -153,8 +158,8 @@ GUARD_CHAIN = [
     # .env/credentials blocker. Live coverage today: Edit/Write/MultiEdit only (via this
     # dispatcher). NotebookEdit + DC write_file/edit_block/move_file/write_pdf need the
     # deferred Task 7 settings.json entry (R-06); audit M65 stays OPEN until it lands.
-    "override-mint-guard",  # R-06, 2026-10-19 -- no override-token writes from a
-    # scheduled/headless session. Stateless; fails open.
+    # override-mint-guard is deliberately NOT wired here (temporarily unwired, pending
+    # the session_kind scan-budget fix); see the module docstring.
     "ascii-only-guard",  # 2026-09-30 -- non-ASCII into a .py whose module
     # docstring declares ASCII-only. LAST on purpose (style rail, not security).
     # DC write_file/edit_block twins need their OWN settings.json entry.
@@ -192,7 +197,8 @@ BASH_GUARD_CHAIN = [
     # only when they would discard uncommitted work
     "memory-orphan-link-guard",
     "commit-hygiene-guard",
-    "override-mint-guard",  # R-06, 2026-10-19 -- dispatcher-only, stateless.
+    # override-mint-guard is deliberately NOT wired here (temporarily unwired, pending
+    # the session_kind scan-budget fix); see the module docstring.
 ]
 
 # --chain <name> selects which chain to run. Default stays the Edit/Write chain
