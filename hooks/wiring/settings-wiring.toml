@@ -1,0 +1,210 @@
+# R-08 single settings wiring table. SOURCE OF TRUTH for the `hooks` block of settings.json
+# and a checked mirror of the pretooluse-dispatcher chains. Row syntax: see
+# docs/superpowers/plans/2026-10-23-r08-settings-wiring-table.md (Row syntax section).
+# Rendered and diffed by maintenance/render-settings-wiring.py (check mode first).
+# One [[row]] = one settings.json hook entry (one handler). Order inside an event is
+# load-bearing and is the file order. @{name} expands [paths] and [matchers] values.
+version = 1
+event_order = ["UserPromptSubmit", "PostToolUse", "PreToolUse", "SessionStart", "Stop", "SessionEnd"]
+
+[paths]
+python = 'C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe'
+claude_dir = 'C:/Users/Owner/.claude'
+
+[matchers]
+dc_write = 'mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block'
+
+# Mirror of hooks/pretooluse-dispatcher.py CHAINS. The dispatcher stays the runtime
+# authority; check mode fails on any difference in membership or order.
+[[chain]]
+name = "editwrite"
+guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared-checkout-guard", "registry-write-guard", "config-write-guard", "eos-claude-md-guard", "memory-index-guard", "rules-md-guard", "lint-config-guard", "sensitive-file-guard", "override-mint-guard", "ascii-only-guard"]
+
+[[chain]]
+name = "bash"
+guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "override-mint-guard"]
+
+[[row]]
+id = 'ups.engineering-router'
+event = 'UserPromptSubmit'
+kind = "py"
+script = 'engineering-router.py'
+
+[[row]]
+id = 'post.dispatcher'
+event = 'PostToolUse'
+matcher = 'Bash'
+kind = "py"
+script = 'posttooluse-dispatcher.py'
+timeout = 360
+
+[[row]]
+id = 'post.fleet-session-hook'
+event = 'PostToolUse'
+matcher = 'Bash|Task|TaskCreate|TaskUpdate|Edit|Write|MultiEdit'
+kind = "py"
+script = 'fleet-session-hook.py'
+async = true
+
+[[row]]
+id = 'post.eos-plan-marker'
+event = 'PostToolUse'
+matcher = 'Write|Edit|Skill'
+kind = "py"
+script = 'eos-plan-marker.py'
+
+[[row]]
+id = 'post.commit-provenance-recorder'
+event = 'PostToolUse'
+matcher = 'Edit|Write|MultiEdit|@{dc_write}'
+kind = "py"
+script = 'commit-provenance-recorder.py'
+
+[[row]]
+id = 'post.memory-nag-correction'
+event = 'PostToolUse'
+matcher = 'Edit|Write|MultiEdit|@{dc_write}'
+kind = "py"
+script = 'memory-nag-correction.py'
+
+[[row]]
+id = 'post.scheduled-task-update-postguard'
+event = 'PostToolUse'
+matcher = 'mcp__scheduled-tasks__update_scheduled_task'
+kind = "py"
+script = 'scheduled-task-update-postguard.py'
+
+[[row]]
+id = 'pre.dispatcher-editwrite'
+event = 'PreToolUse'
+matcher = 'Edit|Write|MultiEdit'
+kind = "py"
+script = 'pretooluse-dispatcher.py'
+
+[[row]]
+id = 'pre.dispatcher-bash'
+event = 'PreToolUse'
+matcher = 'Bash'
+kind = "py"
+script = 'pretooluse-dispatcher.py'
+args = '--chain bash'
+
+[[row]]
+id = 'pre.ora-autonomy-gate'
+event = 'PreToolUse'
+matcher = 'NotebookEdit|mcp__.*netlify.*-updater|mcp__.*__(outlook_(send_mail|send_draft|update_draft|forward_mail|create_event|update_event|delete_event|respond_to_event|set_vacation|create_filter)|teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)|manage_(blog_post|landing_page|website_page))'
+kind = "py"
+script = 'ora-autonomy-gate.py'
+
+[[row]]
+id = 'pre.inline-sensitive-file-blocker'
+note = 'M65 soak: stays until the separate R-06 removal PR (>= 14 days after landing)'
+event = 'PreToolUse'
+matcher = 'Edit|Write'
+kind = "shell"
+command = "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | @{python} -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_input\\\",{}).get(\\\"file_path\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$FILE\" | grep -qiE \"(credentials|\\.env|password)\"; then echo \"BLOCKED: Cannot edit sensitive file: $FILE\" >&2; exit 2; fi'"
+
+[[row]]
+id = 'pre.confidentiality-guard'
+event = 'PreToolUse'
+matcher = 'NotebookEdit|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY).*|mcp__.*notion[-_]?(create|update|append|duplicate|move|comment).*|mcp__.*outlook_(send|create_draft|send_draft|forward|reply).*|mcp__.*outlook_(send_mail|send_draft|forward_mail|create_draft|create_reply_draft|create_reply_all_draft|update_draft|set_vacation).*|mcp__.*outlook_(create_event|update_event|respond_to_event|delete_event).*|mcp__.*teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat).*|mcp__.*sharepoint_(upload_file|update_file).*|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|aeo_prompts).*|mcp__.*notion-(send-message-to-session|spawn-session).*'
+kind = "py"
+script = 'confidentiality-guard.py'
+
+[[row]]
+id = 'pre.registry-write-guard'
+event = 'PreToolUse'
+matcher = '@{dc_write}'
+kind = "py"
+script = 'registry-write-guard.py'
+
+[[row]]
+id = 'pre.ascii-only-guard'
+event = 'PreToolUse'
+matcher = '@{dc_write}'
+kind = "py"
+script = 'ascii-only-guard.py'
+
+[[row]]
+id = 'pre.config-write-guard'
+event = 'PreToolUse'
+matcher = 'NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)'
+kind = "py"
+script = 'config-write-guard.py'
+
+[[row]]
+id = 'pre.lint-config-guard'
+event = 'PreToolUse'
+matcher = 'NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)'
+kind = "py"
+script = 'lint-config-guard.py'
+
+[[row]]
+id = 'pre.workbook-write-guard'
+event = 'PreToolUse'
+matcher = 'Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)'
+kind = "py"
+script = 'workbook-write-guard.py'
+
+[[row]]
+id = 'pre.memory-index-guard'
+event = 'PreToolUse'
+matcher = '@{dc_write}'
+kind = "py"
+script = 'memory-index-guard.py'
+
+[[row]]
+id = 'pre.scheduled-task-update-preguard'
+event = 'PreToolUse'
+matcher = 'mcp__scheduled-tasks__update_scheduled_task'
+kind = "py"
+script = 'scheduled-task-update-preguard.py'
+
+[[row]]
+id = 'start.session-context-cat'
+event = 'SessionStart'
+kind = "shell"
+command = 'cat "@{claude_dir}/session-context.md"'
+
+[[row]]
+id = 'start.repo-freshness'
+event = 'SessionStart'
+kind = "py"
+script = 'repo-freshness.py'
+timeout = 25
+status = 'Checking oxford-command-center freshness'
+
+[[row]]
+id = 'start.active-work-broadcast'
+event = 'SessionStart'
+kind = "py"
+script = 'active-work-broadcast.py'
+timeout = 10
+status = 'Checking for cross-session claims'
+
+[[row]]
+id = 'start.fleet-session-hook'
+event = 'SessionStart'
+kind = "py"
+script = 'fleet-session-hook.py'
+async = true
+
+[[row]]
+id = 'stop.fleet-session-hook'
+event = 'Stop'
+kind = "py"
+script = 'fleet-session-hook.py'
+async = true
+
+[[row]]
+id = 'end.fleet-session-hook'
+event = 'SessionEnd'
+kind = "py"
+script = 'fleet-session-hook.py'
+async = true
+
+[[row]]
+id = 'end.eos-telemetry'
+event = 'SessionEnd'
+kind = "py"
+script = 'eos-telemetry.py'
