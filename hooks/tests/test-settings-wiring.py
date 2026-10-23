@@ -224,14 +224,17 @@ try:
                       "notion-calendar-cancel-events|sharepoint_move_item|manage_segment|"
                       "manage_campaign_objects)")
     SENS_MATCHER = "NotebookEdit|mcp__.*__(write_file|edit_block|move_file|write_pdf)"
-    r06_rows = ("\n[[row]]\nid = 'pre.mcp-delete-guard'\nevent = 'PreToolUse'\n"
-                "matcher = '%s'\nkind = \"py\"\nscript = 'mcp-delete-guard.py'\ntimeout = 15\n"
-                "\n[[row]]\nid = 'pre.sensitive-file-guard-nb-dc'\nevent = 'PreToolUse'\n"
-                "matcher = '%s'\nkind = \"py\"\nscript = 'sensitive-file-guard.py'\ntimeout = 10\n"
-                % (DELETE_MATCHER, SENS_MATCHER))
-    ins = TABLE_TEXT.index("[[row]]\nid = 'start.session-context-cat'")
-    t06 = sw.validate_table(__import__("tomllib").loads(
-        TABLE_TEXT[:ins] + r06_rows.lstrip("\n") + "\n" + TABLE_TEXT[ins:]))
+    # The two rows and their settings entries are now ON main (R-06 Task 7 landed). Group G
+    # rebuilds the PRE-landing state from the real files, then replays the landing on it.
+    ins = TABLE_TEXT.index("[[row]]\nid = 'pre.mcp-delete-guard'")
+    end = TABLE_TEXT.index("[[row]]\nid = 'start.session-context-cat'")
+    check("G0 the real table carries both R-06 rows, contiguous, before start.session-context-cat",
+          TABLE_TEXT.count("id = 'pre.sensitive-file-guard-nb-dc'") == 1 and ins < end
+          and TABLE_TEXT.index("id = 'pre.sensitive-file-guard-nb-dc'") < end)
+    t06 = sw.validate_table(__import__("tomllib").loads(TABLE_TEXT))
+    PRE_OBJ = copy.deepcopy(OBJ)
+    del PRE_OBJ["hooks"]["PreToolUse"][-2:]
+    PRE_TEXT = sw.dump_settings(PRE_OBJ)
     r06_chains = copy.deepcopy(CHAINS)  # R-06 Task 6 already put its chain edits on main
     t06["chains"] = r06_chains
     fake = os.path.join(tmp, "hooks-r06")
@@ -239,24 +242,24 @@ try:
     for r in t06["rows"]:
         if r["kind"] == "py":
             open(os.path.join(fake, r["script"]), "w").close()
-    f, _ = sw.run_check(t06, SETTINGS_TEXT, fake, dispatcher_chains=r06_chains)
+    f, _ = sw.run_check(t06, PRE_TEXT, fake, dispatcher_chains=r06_chains)
     check("G1 table gains the 2 R-06 rows, settings not yet edited -> exactly 2 UNWIRED",
           kinds(f) == ["UNWIRED", "UNWIRED"] and
           sorted(x["id"] for x in f) == ["pre.mcp-delete-guard", "pre.sensitive-file-guard-nb-dc"],
           repr(f))
-    plan_edit = copy.deepcopy(OBJ)
+    plan_edit = copy.deepcopy(PRE_OBJ)
     p = plan_edit["hooks"]["PreToolUse"]
     p.append({"matcher": DELETE_MATCHER, "hooks": [{"type": "command", "command":
-              OBJ["hooks"]["PreToolUse"][-1]["hooks"][0]["command"].replace(
+              PRE_OBJ["hooks"]["PreToolUse"][-1]["hooks"][0]["command"].replace(
                   "scheduled-task-update-preguard.py", "mcp-delete-guard.py"), "timeout": 15}]})
     p.append({"matcher": SENS_MATCHER, "hooks": [{"type": "command", "command":
-              OBJ["hooks"]["PreToolUse"][-1]["hooks"][0]["command"].replace(
+              PRE_OBJ["hooks"]["PreToolUse"][-1]["hooks"][0]["command"].replace(
                   "scheduled-task-update-preguard.py", "sensitive-file-guard.py"), "timeout": 10}]})
     f, _ = sw.run_check(t06, sw.dump_settings(plan_edit), fake, dispatcher_chains=r06_chains)
     check("G2 R-06 plan's two entries appended at the PreToolUse tail -> CLEAN",
           not f, repr(f))
     check("G3 the rendered R-06 settings equal the plan's hand-edit byte for byte",
-          sw.dump_settings(sw.render_settings(t06, OBJ)) == sw.dump_settings(plan_edit))
+          sw.dump_settings(sw.render_settings(t06, PRE_OBJ)) == sw.dump_settings(plan_edit))
     import mcp_delete_tiers as tiers  # hooks/lib, on sys.path above
     check("G3b the delete-gate row matcher equals mcp_delete_tiers.SETTINGS_MATCHER",
           DELETE_MATCHER == tiers.SETTINGS_MATCHER)
@@ -271,10 +274,10 @@ try:
           repr({k: len(v) for k, v in CHAINS.items()}))
     mid = os.path.join(tmp, "g5.json")
     with open(mid, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(SETTINGS_TEXT)
+        fh.write(PRE_TEXT)
     tpath = os.path.join(tmp, "r06.toml")
     with open(tpath, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(TABLE_TEXT[:ins] + r06_rows.lstrip("\n") + "\n" + TABLE_TEXT[ins:])
+        fh.write(TABLE_TEXT)
     rc, out, err = cli("--check", "--table", tpath, "--settings", mid, "--hooks-dir", fake,
                        "--expect-delta", "pre.mcp-delete-guard,pre.sensitive-file-guard-nb-dc")
     # the CLI loads the real dispatcher from --hooks-dir; fake has none, so exit 2 is the
