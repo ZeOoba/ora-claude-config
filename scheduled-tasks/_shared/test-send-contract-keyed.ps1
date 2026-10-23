@@ -288,7 +288,7 @@ $lockedLog = New-TestLog -Seed @("$(Get-Stamp 90) [OK] Sent to=$To cc=none subje
 $before = [System.IO.File]::ReadAllText($lockedLog)
 $fs = New-Object System.IO.FileStream($lockedLog, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
 try { $r = Invoke-Send -Log $lockedLog -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t)) } finally { $fs.Dispose() }
-Check "E4 an unreadable send-log in contract mode fails closed (exit 6 DEDUP-UNAVAILABLE) before the preflight, log untouched" ($r.Code -eq 6 -and $r.Out -match 'DEDUP-UNAVAILABLE' -and $r.Out -notmatch 'stuck on startup wizard' -and [System.IO.File]::ReadAllText($lockedLog) -eq $before) $r
+Check "E4 an unreadable send-log in contract mode fails closed (exit 6 DEDUP-UNAVAILABLE) before the preflight (stuck diagnostic kept as a console WARN), log untouched" ($r.Code -eq 6 -and $r.Out -match 'DEDUP-UNAVAILABLE' -and $r.Out -match 'WARN: Outlook stuck on startup wizard' -and $r.Out -notmatch '\[ERROR\] Outlook stuck' -and [System.IO.File]::ReadAllText($lockedLog) -eq $before) $r
 
 $t = "E5 force stuck"
 $r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t, "-ForceResend"))
@@ -313,6 +313,17 @@ Check "E9 a NON-duplicate to an external recipient with Outlook not ready exits 
 $t = "E11 dup stuck external"
 $r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs (@("-To", "someone@example.com", "-Body", "x", "-Subject", $t) + $Keyed)
 Check "E11 a duplicate to an EXTERNAL recipient with Outlook not ready keeps exit 3 (no outbound check, no authorization consumed)" ($r.Code -eq 3 -and $r.Log -notmatch 'OUTBOUND-CHECK' -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 0) $r
+
+# E12: the early action block must decide on its own. The mutex gate in the send loop would return the same
+# verdict on a steady log, so hold the dedup lock for the whole run: only the early block can still answer.
+# (Mutant guard: with the early block disabled this run reaches the gate and exits 6 DEDUP-LOCK-TIMEOUT.)
+$t = "E12 dup stuck lock held"
+$e12Mutex = 'Global\ORA-send-via-outlook-dedup-' + $script:MutexSuffix
+$e12Held = New-Object System.Threading.Mutex($false, $e12Mutex)
+if (-not $e12Held.WaitOne(5000)) { throw "E12: could not take the dedup lock" }
+[Environment]::SetEnvironmentVariable("ORA_SEND_LOCK_WAIT_MS", "100")
+try { $r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t)) } finally { try { $e12Held.ReleaseMutex() } catch { }; $e12Held.Dispose() }
+Check "E12 a duplicate is suppressed by the early lookup alone: with the dedup lock held and Outlook not ready, exit 0 DEDUP-SKIP (no lock wait, no exit 6/3)" ($r.Code -eq 0 -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 1 -and $r.Log -notmatch 'DEDUP-LOCK-TIMEOUT' -and $r.Out -notmatch 'DEDUP-LOCK-TIMEOUT') $r
 
 $t = "E10 stuck in-flight intent"
 $r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 1) [INFO] SEND-INTENT: key=$(Get-TestKey $t) subject=`"$t`"$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t))
