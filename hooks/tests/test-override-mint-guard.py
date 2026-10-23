@@ -90,9 +90,13 @@ def test_dispatcher_membership():
         "_omg_disp", os.path.join(HOOKS_DIR, "pretooluse-dispatcher.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    check("M11 override-mint-guard is in GUARD_CHAIN", "override-mint-guard" in mod.GUARD_CHAIN)
-    check("M12 override-mint-guard is in BASH_GUARD_CHAIN",
-          "override-mint-guard" in mod.BASH_GUARD_CHAIN)
+    # TEMPORARY UNWIRING: override-mint-guard is deliberately OUT of both dispatcher
+    # chains pending the session_kind scan-budget fix (follow-up PR). Re-enable these
+    # to assert membership (is in) once that fix lands and the guard is re-wired.
+    check("M11 override-mint-guard is NOT in GUARD_CHAIN (temporarily unwired)",
+          "override-mint-guard" not in mod.GUARD_CHAIN)
+    check("M12 override-mint-guard is NOT in BASH_GUARD_CHAIN (temporarily unwired)",
+          "override-mint-guard" not in mod.BASH_GUARD_CHAIN)
     check("M13 ascii-only-guard is still last in GUARD_CHAIN",
           mod.GUARD_CHAIN[-1] == "ascii-only-guard")
 
