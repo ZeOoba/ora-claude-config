@@ -18,7 +18,7 @@ $To = "ggoldberg@oxfordra.net"
 $Keyed = @("-DedupTaskId", "ora-test-task", "-DedupPeriodKey", "2026-10-18")
 # Each suite run gets its own dedup lock name, so a suite never contends with a real fire's production lock.
 $script:MutexSuffix = [guid]::NewGuid().ToString("N").Substring(0, 12)
-$script:SeamVars = @("ORA_SEND_LOG_PATH", "ORA_SEND_SKIP_PREFLIGHT", "ORA_SEND_SIMULATE", "ORA_SEND_TIMEOUT_SEC", "ORA_SEND_RETRY_DELAY_SEC", "ORA_SEND_GATE_PAUSE_MS", "ORA_SEND_LOCK_WAIT_MS", "ORA_SEND_MUTEX_SUFFIX")
+$script:SeamVars = @("ORA_SEND_LOG_PATH", "ORA_SEND_SKIP_PREFLIGHT", "ORA_SEND_FORCE_PREFLIGHT_STUCK", "ORA_SEND_SIMULATE", "ORA_SEND_TIMEOUT_SEC", "ORA_SEND_RETRY_DELAY_SEC", "ORA_SEND_GATE_PAUSE_MS", "ORA_SEND_LOCK_WAIT_MS", "ORA_SEND_MUTEX_SUFFIX")
 
 function Get-TestSubjectHash {
     # Must stay byte-identical in behavior to Get-SubjectHash in send-via-outlook.ps1.
@@ -55,8 +55,10 @@ function Clear-Seams {
 }
 
 function Invoke-Send {
-    param([string]$Log, [string]$Sim, [string[]]$ScriptArgs)
+    param([string]$Log, [string]$Sim, [string[]]$ScriptArgs, [switch]$OutlookStuck)
     Set-Seams -Log $Log -Sim $Sim
+    # -OutlookStuck: the preflight behaves as if Outlook were busy/on a wizard (exit 3 unless the run is suppressed first).
+    if ($OutlookStuck) { [Environment]::SetEnvironmentVariable("ORA_SEND_FORCE_PREFLIGHT_STUCK", "1") }
     # EAP must drop to Continue: with "Stop", a child's stderr captured via 2>&1 becomes a
     # terminating error and kills the harness on the first ERROR-path case (the same trap
     # send-via-outlook.ps1 documents around its check_external_send.py call).

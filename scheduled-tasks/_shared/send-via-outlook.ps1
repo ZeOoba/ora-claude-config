@@ -134,6 +134,10 @@
       2 = Outlook COM failure BEFORE Send() was invoked, or Send() rejected by the callee with
           RPC_E_CALL_REJECTED (0x80010001, nothing was sent). Retry-safe.
       3 = Outlook stuck on a startup/profile wizard (preflight-detected, no COM attempted). Never retried.
+          In contract mode this applies only to a run that could still send: the read-only dedup
+          lookup runs first, so a duplicate (key already sent -> DEDUP-SKIP exit 0), a key whose
+          state is unknown (exit 6) and an unreadable send-log (exit 6) are decided without
+          Outlook ever being consulted.
       4 = COM call timed out BEFORE Send() was invoked (Outlook likely blocked). Retry-safe.
       5 = refused: attachment + external recipient, or external recipient(s) not authorized
           (see OUTBOUND-ACTION CHECK below). NEVER retried.
@@ -222,6 +226,9 @@ if ($WhatIf -and $env:ORA_SEND_LOG_PATH) { $LogPath = $env:ORA_SEND_LOG_PATH }
 # cases exited 3 because the live Outlook was momentarily not Responding). Honored ONLY under
 # -WhatIf, like ORA_SEND_LOG_PATH above.
 $SkipPreflight = [bool]($WhatIf -and $env:ORA_SEND_SKIP_PREFLIGHT -eq '1')
+# Test seam (WhatIf only): make the readiness preflight behave as if Outlook were busy or on a wizard, so the
+# ordering of the dedup lookup against the preflight can be tested without a real stuck Outlook.
+$ForcePreflightStuck = [bool]($WhatIf -and $env:ORA_SEND_FORCE_PREFLIGHT_STUCK -eq '1')
 # R-05 test seams for the send job, honored ONLY under -WhatIf (every line that reads one
 # names $WhatIf; maintenance/_tests/test_send_contract_suite.py S1 enforces that).
 # ORA_SEND_SIMULATE swaps the Outlook COM objects inside the send job for a scripted fake,
@@ -807,14 +814,34 @@ $AttachLog = if ($ResolvedAttachments.Count -gt 0) {
 # hung ~2min/call on the blocked COM job instead of fast-failing exit 3 all day -- added
 # "New Profile" plus a generic "Profile" catch-all so any future profile-wizard variant
 # fast-fails too, since Outlook's normal window title never contains that word.)
+# R-05 ordering (dedup before readiness): the dedup lookup is READ-ONLY (no lock, no SEND-INTENT) and happens
+# here, before the readiness verdict. A keyed run whose key is already SENT / UNKNOWN / unreadable is a duplicate
+# or a fail-closed case: a busy Outlook must not turn it into exit 3, so the stuck verdict is only fatal when the
+# lookup says PROCEED. Every other check keeps its original position; the duplicate is ACTED on (DEDUP-SKIP /
+# DEDUP-BLOCK / fail closed) right after the recipient and attachment checks, so a refusal (exit 1/5) is never
+# masked by a suppression and the single-use external-send authorization is consumed exactly as before for any
+# run that can still send. A plain -WhatIf dry run skips the lookup: its DRY RUN line already reports dedup=<state>.
+# -ForceResend skips it too (human-directed: it bypasses dedup, so the preflight stays fatal).
+$EarlyDedup = $null
+if ($ContractMode -and -not $ForceResend -and -not ($WhatIf -and -not $Simulating)) {
+    $EarlyDedup = Get-DedupState -Path $LogPath -Key $DedupKey
+}
+$EarlyResolved = [bool]($EarlyDedup -and $EarlyDedup.State -ne 'PROCEED')
 $existingOutlook = if ($SkipPreflight) { $null } else { Get-Process OUTLOOK -ErrorAction SilentlyContinue }
-if ($existingOutlook) {
+$stuckMsg = $null
+if ($ForcePreflightStuck) {
+    $stuckMsg = "Outlook stuck on startup wizard (PID=0, title='simulated by ORA_SEND_FORCE_PREFLIGHT_STUCK') - human must dismiss"
+} elseif ($existingOutlook) {
     foreach ($proc in $existingOutlook) {
         if ((-not $proc.Responding) -or ($proc.MainWindowTitle -match 'Welcome to Microsoft Outlook|Choose Profile|New Profile|Profile')) {
-            Write-Log "ERROR" "Outlook stuck on startup wizard (PID=$($proc.Id), title='$($proc.MainWindowTitle)') - human must dismiss"
-            exit 3
+            $stuckMsg = "Outlook stuck on startup wizard (PID=$($proc.Id), title='$($proc.MainWindowTitle)') - human must dismiss"
+            break
         }
     }
+}
+if ($stuckMsg -and -not $EarlyResolved) {
+    Write-Log "ERROR" $stuckMsg
+    exit 3
 }
 
 # --- Subject-date sanity (2026-07-09): WARN-only, never blocks a send ---
@@ -863,6 +890,14 @@ function Test-IsInternalRecipient {
 $allRecipients = @($To -split ';') + @($Cc -split ';') |
     ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
 $externalRecipients = @($allRecipients | Where-Object { -not (Test-IsInternalRecipient $_) })
+
+# R-05 ordering: the early dedup lookup may only skip the stuck verdict for an INTERNAL-only send. An external
+# recipient reaches the outbound check below, which consumes a single-use authorization; a run that is stuck and
+# already resolved (duplicate / unknown) must not spend one, so it keeps the original exit 3 with the token intact.
+if ($stuckMsg -and $EarlyResolved -and $externalRecipients.Count -gt 0) {
+    Write-Log "ERROR" $stuckMsg
+    exit 3
+}
 
 # --- ATTACHMENT x EXTERNAL RECIPIENT (2026-09-18) -- fail-closed, deliberately strict.
 # The outbound-action check below authorizes RECIPIENTS. It has no view of file
@@ -925,6 +960,27 @@ if ($externalRecipients.Count -gt 0) {
         exit 5
     }
     Write-Log "OK" "OUTBOUND-CHECK: authorized external recipient(s) [$($externalRecipients -join ', ')] -- $($checkOutput -join ' | ')"
+}
+
+# --- Act on the early dedup lookup (see the Preflight section above). Runs after every argument, attachment and
+# outbound-recipient check, and before the dry-run exit and any Outlook work. The authoritative check-then-intent
+# under the mutex (Enter-DedupGate) still runs in the send loop for every run that proceeds, so a race between the
+# lookup above and the later SEND-INTENT write is closed there. SENT -> exit 0; UNKNOWN -> exit 6; unreadable -> exit 6.
+if ($EarlyDedup) {
+    if ($EarlyDedup.State -eq 'SENT') {
+        Write-Log "OK" "DEDUP-SKIP: key=$DedupKey already sent at $($EarlyDedup.At) -- not re-sending subject=`"$Subject`"$TagLog"
+        exit 0
+    }
+    if ($EarlyDedup.State -eq 'UNKNOWN') {
+        Write-Log "ERROR" "DEDUP-BLOCK: key=$DedupKey prior send state UNKNOWN at $($EarlyDedup.At) -- refusing (exit 6). Check Outlook Sent Items by hand; only if the message is absent may a human re-run with -ForceResend.$TagLog"
+        exit 6
+    }
+    if ($EarlyDedup.State -eq 'UNREADABLE') {
+        $why = "DEDUP-UNAVAILABLE: the send-log could not be read, so a prior send for this key cannot be ruled out"
+        [Console]::Error.WriteLine($why)
+        Write-Log "ERROR" "$why -- refusing (exit 6). Check Outlook Sent Items by hand; a human may re-run with -ForceResend once the message is confirmed absent.$TagLog"
+        exit 6
+    }
 }
 
 if ($WhatIf -and -not $Simulating) {
