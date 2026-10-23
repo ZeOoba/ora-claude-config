@@ -100,6 +100,8 @@ def test_false_positive_and_read_pins():
         # routed name must never classify UNROUTED.
         ("mcp__x__delete__all", t.UNKNOWN),
         ("mcp__x__purge__everything", t.UNKNOWN),
+        # single-segment middle: last segment is a read verb, but the name routes via the matcher
+        ("mcp__x__clean_up_worktrees__list_all", t.UNKNOWN),
         # KNOWN LIMITATION (pinned, not endorsed): a read/restore prefix exempts the whole
         # name, so a compound verb that starts with one is EXEMPT even though it deletes.
         ("mcp__x__get_and_delete", t.EXEMPT),
@@ -171,6 +173,13 @@ def test_input_classifiers():
         (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"assetOperations": "REMOVE"}},
          t.IRREVERSIBLE),
         (camp, None, t.IRREVERSIBLE),
+        # mixed ADD+REMOVE is still a removal; empty ops list fails closed
+        (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"assetOperations": [
+            {"action": "ADD", "assetObjectType": "BLOG_POST"},
+            {"action": "REMOVE", "assetObjectType": "BLOG_POST"}]}}, t.RECOVERABLE),
+        (camp, {"operationType": "CAMPAIGN_ASSET", "assetRequest": {"campaignCrmObjectId": 1,
+                                                                    "assetOperations": []}},
+         t.IRREVERSIBLE),
     ]
     for name, ti, want in cases:
         try:
