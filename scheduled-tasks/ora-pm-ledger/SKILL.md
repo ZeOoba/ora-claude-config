@@ -1324,7 +1324,7 @@ missed run is itself surfaced by `automation-health-monitor`.
   - Exit codes: 0 = sent · 1 = usage error · 2 = COM failure (retry
     exhausted) · 3 = Outlook stuck on a startup/profile wizard (human must
     dismiss — do not attempt to work around this programmatically) · 4 = COM
-    call timed out BEFORE `Send()` (retry-safe, but this task still does not retry) · 5 = refused
+    call timed out (>15s) BEFORE `Send()` (retry-safe, but this task still does not retry) · 5 = refused
     (attachment + external recipient, or an unauthorized external recipient; never retry, never route
     around) · 6 = send state unknown, the message MAY have gone out (never retry, never resend; a human
     checks Outlook Sent Items).
