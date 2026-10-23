@@ -7,7 +7,7 @@ description: Quarterly Cowork Global Settings review reminder (cowork-settings s
 python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-cowork-settings-quarterly-review --block main --run-id <run_id> --period month --ttl-min 30
 - Exit 10 = this month already completed; Exit 11 = another fire is live. Stand down: no reads, no email, no Notion row; report a NORMAL skip.
 - Exit 0 = proceed. (Quarterly reminder; a weekend fire is acceptable.)
-After the email sends: `... block-sentinel.py complete --task ora-cowork-settings-quarterly-review --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that ends in failure (exit 5, or exit 2 or 4 once its single repeat is spent; exit 6 is the exception, see the send step): `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at`). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
+After the email sends: `... block-sentinel.py complete --task ora-cowork-settings-quarterly-review --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that ends in failure (exit 5, or exit 2 or 4 once its single repeat is spent; exit 6 is the exception, see the send step): `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at`, except exit 6: see the send step). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
 
 Run date: compute once with `date '+%A %Y-%m-%d'`, reuse everywhere.
 
