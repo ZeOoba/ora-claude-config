@@ -14,7 +14,7 @@ Compute once: `date '+%A %Y-%m-%d'`. Exit silently unless today is the first wee
 python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --ttl-min 30
 - Exit 10 = this month already completed; Exit 11 = another fire is live. Stand down: no Notion query or file write, no email; report a NORMAL skip.
 - Exit 0 = proceed.
-After the run finishes (after the email sends): `... block-sentinel.py complete --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that ends in failure (exit 5, or exit 2 or 4 once its single repeat is spent; exit 6 is the exception, see the send step): `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at` when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
+After the run finishes (after the email sends): `... block-sentinel.py complete --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that ends in failure (exit 5, or exit 2 or 4 once its single repeat is spent; exit 6 is the exception, see the send step): `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at`, except exit 6: see the send step when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
 
 ## Data source
 Notion database "REP Hour Log — Real Estate Professional Substantiation" under the Operations Hub.
