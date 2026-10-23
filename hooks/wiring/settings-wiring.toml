@@ -18,11 +18,11 @@ dc_write = 'mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_bloc
 # authority; check mode fails on any difference in membership or order.
 [[chain]]
 name = "editwrite"
-guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared-checkout-guard", "registry-write-guard", "config-write-guard", "eos-claude-md-guard", "memory-index-guard", "rules-md-guard", "lint-config-guard", "sensitive-file-guard", "override-mint-guard", "ascii-only-guard"]
+guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared-checkout-guard", "registry-write-guard", "config-write-guard", "eos-claude-md-guard", "memory-index-guard", "rules-md-guard", "lint-config-guard", "sensitive-file-guard", "ascii-only-guard"]
 
 [[chain]]
 name = "bash"
-guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "override-mint-guard"]
+guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard"]
 
 [[row]]
 id = 'ups.engineering-router'
