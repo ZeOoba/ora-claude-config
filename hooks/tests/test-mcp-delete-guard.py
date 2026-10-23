@@ -261,6 +261,15 @@ def test_fail_modes_and_log():
     check("G29b rows record tool, tier and decision",
           rows[0].get("decision") == "ask" and rows[1].get("decision") == "deny")
     check("G29c rows carry no input content (page id absent)", PAGE_ID not in text)
+    check("G29d every row has why (ASCII, <= 200 chars) and classify_ms (digits)",
+          all(isinstance(r.get("why"), str) and 0 < len(r["why"]) <= 200
+              and r.get("classify_ms", "").isdigit() for r in rows),
+          repr([(r.get("why"), r.get("classify_ms")) for r in rows]))
+    check("G29e deny row why names the session_kind evidence",
+          "scheduledTaskId" in rows[1].get("why", ""), repr(rows[1].get("why")))
+    check("G29f new fields carry no tool input (page id, task id, user_confirmed absent)",
+          all(PAGE_ID not in str(r.get("why")) and "r06-test-task" not in str(r.get("why"))
+              and "user_confirmed" not in json.dumps(r) for r in rows))
 
 
 def _tree(patch_name, patch_src):
