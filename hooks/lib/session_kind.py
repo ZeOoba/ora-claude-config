@@ -168,14 +168,14 @@ _SHARED = os.path.join(os.path.dirname(os.path.dirname(_HERE)), "maintenance", "
 
 
 class _Budget(object):
-    """Wall-clock budget shared by enumeration and the record scan. `hit` latches."""
+    """Monotonic-clock budget (immune to wall-clock steps) shared by enumeration and the record scan. `hit` latches."""
 
     def __init__(self, seconds):
-        self.deadline = time.time() + seconds
+        self.deadline = time.monotonic() + seconds
         self.hit = False
 
     def expired(self):
-        if not self.hit and time.time() > self.deadline:
+        if not self.hit and time.monotonic() > self.deadline:
             self.hit = True
         return self.hit
 
@@ -620,10 +620,10 @@ def _scan_with_retry(session_id, dirs):
     incomplete (budget, read error, internal error) and wall time remains. Only the last
     attempt's result is used (a retry never merges a partial scan into INTERACTIVE), except
     that fresh-undecodable-with-key evidence from any attempt is kept (fail closed)."""
-    deadline = time.time() + HARD_JOIN_SECONDS
+    deadline = time.monotonic() + HARD_JOIN_SECONDS
     res, attempts, undec = None, 0, False
     while attempts < MAX_ATTEMPTS:
-        remaining = deadline - time.time()
+        remaining = deadline - time.monotonic()
         if attempts and remaining <= 0:
             break
         attempts += 1

@@ -1061,6 +1061,164 @@ def test_unreadable_file():
         del sk.open
 
 
+class _Script(object):
+    """open() stand-in for session_kind driven by a per-path script: path -> list of
+    actions, one per open of that path (last action repeats). An action is "ok", "error"
+    (PermissionError), "gone" (FileNotFoundError), "block" (Event.wait, bounded by `cap`),
+    or ("sleep_error", seconds). `on_error` is called when an "error" action fires."""
+
+    def __init__(self, scripts, cap=8.0, on_error=None):
+        self.scripts = dict((os.path.normcase(k), v) for k, v in scripts.items())
+        self.counts = {}
+        self.cap = cap
+        self.on_error = on_error
+        self.release = threading.Event()
+
+    def __call__(self, path, *a, **kw):
+        key = os.path.normcase(path)
+        acts = self.scripts.get(key)
+        if acts:
+            n = self.counts.get(key, 0)
+            self.counts[key] = n + 1
+            act = acts[min(n, len(acts) - 1)]
+            if act == "error":
+                if self.on_error:
+                    self.on_error()
+                raise PermissionError("scripted")
+            if act == "gone":
+                raise FileNotFoundError("scripted")
+            if act == "block":
+                self.release.wait(self.cap)
+            if isinstance(act, tuple) and act[0] == "sleep_error":
+                time.sleep(act[1])
+                raise PermissionError("scripted")
+        return open(path, *a, **kw)
+
+
+def test_clock_step_back():
+    # A wall-clock step backwards (NTP/manual/VM resume) must not stretch the deadlines:
+    # they run on time.monotonic(). Attempt 1 ends with a read error and the wall clock
+    # then jumps back 30 s; attempt 2 blocks. With time.time() deadlines the join would wait
+    # ~HARD_JOIN + 30 s; with monotonic it ends at ~HARD_JOIN.
+    saved = (sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS)
+    real_time = time.time
+    off = [0.0]
+    d = store([{"cliSessionId": SID}, {"cliSessionId": OTHER}], ages=[5, 10])
+    mine = os.path.join(d, "local_00.json")
+    sc = _Script({mine: ["error", "block"]}, cap=8.0,
+                 on_error=lambda: off.__setitem__(0, -30.0))
+    try:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = 1.0, 2.0
+        sk.open = sc
+        sk.time.time = lambda: real_time() + off[0]
+        t0 = time.monotonic()
+        k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
+        dt = time.monotonic() - t0
+    finally:
+        sk.time.time = real_time
+        sc.release.set()
+        del sk.open
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = saved
+    check("CS1 wall clock steps back 30 s mid-call: Desktop -> SCHEDULED",
+          k == sk.SCHEDULED, "%s %s" % (k, ev))
+    check("CS2 wall clock steps back: classify returns within HARD_JOIN + 1 s (%.2fs)" % dt,
+          dt < 2.0 + 1.0)
+    check("CS3 both attempts ran (error, then block)", sc.counts.get(
+        os.path.normcase(mine)) == 2, repr(sc.counts))
+
+
+def test_total_wall():
+    # Both attempts share ONE HARD_JOIN wall. Attempt 1 ends incomplete just before the
+    # wall; attempt 2 blocks. A fresh wall per attempt would run to ~2 x HARD_JOIN.
+    saved = (sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS)
+    d = store([{"cliSessionId": SID}, {"cliSessionId": OTHER}], ages=[5, 10])
+    mine = os.path.join(d, "local_00.json")
+    sc = _Script({mine: [("sleep_error", 1.7), "block"]}, cap=8.0)
+    try:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = 5.0, 2.0
+        sk.open = sc
+        t0 = time.monotonic()
+        k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
+        dt = time.monotonic() - t0
+    finally:
+        sc.release.set()
+        del sk.open
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = saved
+    check("TW1 attempt 1 ends just before the wall, attempt 2 blocks: SCHEDULED",
+          k == sk.SCHEDULED, "%s %s" % (k, ev))
+    check("TW2 whole classify wall <= HARD_JOIN + 1 s (%.2fs)" % dt, dt <= 2.0 + 1.0)
+    check("TW3 a second attempt did start", sc.counts.get(os.path.normcase(mine)) == 2,
+          repr(sc.counts))
+
+
+def test_undecodable_or_across_attempts():
+    # Fresh undecodable evidence naming scheduledTaskId (owner unreadable) seen in attempt 1
+    # must be OR-ed into the final verdict even if attempt 2 (complete) no longer sees it.
+    d = _mkdtemp("sk-undec-")
+    bad = os.path.join(d, "local_00.json")
+    with open(bad, "wb") as fh:
+        fh.write(b'\xff\xfe\xfa{"scheduledTaskId": "ora-x"} \xff')
+    mine = os.path.join(d, "local_01.json")
+    with open(mine, "w") as fh:
+        json.dump({"cliSessionId": SID}, fh)
+    flaky = os.path.join(d, "local_02.json")
+    with open(flaky, "w") as fh:
+        json.dump({"cliSessionId": OTHER}, fh)
+    now = time.time()
+    for p, age in ((bad, 5), (mine, 10), (flaky, 15)):
+        os.utime(p, (now - age, now - age))
+    # Control: with a stable store the undecodable record alone already yields SCHEDULED.
+    check("UO0 control: undecodable-with-key fresh record, Desktop -> SCHEDULED",
+          sk.classify(SID, env=DESKTOP, dirs=[d])[0] == sk.SCHEDULED)
+    sc = _Script({bad: ["ok", "gone"], flaky: ["error", "ok"]})
+    sk.open = sc
+    try:
+        k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
+    finally:
+        del sk.open
+    check("UO1 attempt 1 sees undecodable evidence, attempt 2 (complete) does not: SCHEDULED",
+          k == sk.SCHEDULED and "undecodable" in ev, "%s %s" % (k, ev))
+    check("UO2 two attempts ran", sc.counts.get(os.path.normcase(flaky)) == 2, repr(sc.counts))
+
+
+_CHILD = r"""
+import sys, threading
+sys.path.insert(0, sys.argv[1])
+import session_kind as sk
+sk.HARD_JOIN_SECONDS = float(sys.argv[2])
+sk.BUDGET_SECONDS = 1.0
+never = threading.Event()
+def blocked_open(path, *a, **kw):
+    never.wait()
+sk.open = blocked_open
+k, tid, ev = sk.classify("%s", env={"CLAUDE_CODE_ENTRYPOINT": "claude-desktop"}, dirs=[sys.argv[3]])
+print(k)
+sys.stdout.flush()
+"""
+
+
+def test_process_exit_with_blocked_worker():
+    # The worker thread must be a daemon: with a read blocked forever, the process must still
+    # exit on its own right after classify returns. Run in a child with a hard subprocess
+    # timeout so this test cannot hang.
+    lib = os.path.dirname(os.path.abspath(sk.__file__))
+    d = store([{"cliSessionId": SID}], ages=[5])
+    hard = 2.0
+    t0 = time.monotonic()
+    timed_out, out = False, ""
+    try:
+        r = subprocess.run([sys.executable, "-I", "-c", _CHILD % SID, lib, str(hard), d],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=hard + 3.0)
+        out = r.stdout.decode("ascii", "replace").strip()
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    dt = time.monotonic() - t0
+    check("PX1 child exits on its own within HARD_JOIN + 3 s despite a forever-blocked read "
+          "(%.2fs)" % dt, not timed_out)
+    check("PX2 child classified the blocked store as SCHEDULED", out == sk.SCHEDULED, repr(out))
+
+
 def _run_all():
     test_record_join()
     test_entrypoint()
@@ -1085,6 +1243,10 @@ def _run_all():
     test_budget_inside_judge()
     test_prefix_byte_count()
     test_hard_join_and_retry()
+    test_clock_step_back()
+    test_total_wall()
+    test_undecodable_or_across_attempts()
+    test_process_exit_with_blocked_worker()
     test_c6_other_session_oversized()
 
 
