@@ -14,7 +14,7 @@ Compute once: `date '+%A %Y-%m-%d'`. Exit silently unless today is the first wee
 python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --ttl-min 30
 - Exit 10 = this month already completed; Exit 11 = another fire is live. Stand down: no Notion query or file write, no email; report a NORMAL skip.
 - Exit 0 = proceed.
-After the run finishes (after the email sends): `... block-sentinel.py complete --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that still fails after its one retry: `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at` when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
+After the run finishes (after the email sends): `... block-sentinel.py complete --task ora-rep-hours-monthly --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that ends in failure (exit 5, or exit 2 or 4 once its single repeat is spent; exit 6 is the exception, see the send step): `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at` when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
 
 ## Data source
 Notion database "REP Hour Log — Real Estate Professional Substantiation" under the Operations Hub.
@@ -32,7 +32,7 @@ Exclude every row whose Entry matches `^ZZ[\s._-]*TEST` (case-insensitive, leadi
 3. Flag per person: projected REP hours under 750; share at or under 50%; prior month with zero entries; any entry with an empty Evidence field.
 4. Email via Outlook COM `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1`, TO `ggoldberg@oxfordra.net` ONLY.
    Subject: `REP hours YTD <run date> — Eric <x> h · Gabriel <y> h · Rebecca <z> h (750 needed)`.
-   Body: one table per person (YTD hours, pace, share, flags), then "Months with no entries", then QUESTIONS FOR GABRIEL. Non-zero exit: retry once, then flag in the Notion completion row; do not halt.
+   Body: one table per person (YTD hours, pace, share, flags), then "Months with no entries", then QUESTIONS FOR GABRIEL. On exit 2 or 4: retry once, then flag in the Notion completion row; do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the Notion completion row and the guard close-out, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2. Close the guard `fail` on exit 5, but on exit 6 close it `complete` with no `--email-sent-at` (never `fail`: a same-day re-fire would send the message again).
 5. In the January run, also produce the prior full-year summary as `Taxes Estimated + Returns\outputs\<run date>_REPHours_TY<prior year>_Summary_v01.md` for the preparer.
 
 ## Never

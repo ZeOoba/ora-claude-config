@@ -160,11 +160,7 @@ ACTION_ONLY = re.compile(r"^\s*(?:[-*+]\s+|\d{1,3}[.)]\s+)?[*_`]*"
 BLOCK_START = re.compile(r"^\s*(?:[-*+>]\s|\d{1,3}[.)]\s|#{1,6}\s|\|)")
 PSCONT = re.compile(r"(?:`|\^)\s*$")
 
-WAIVED_GENERIC_RETRY = frozenset({
-    "ora-agent-usage-report-monthly", "ora-doc-index-rebuild-monthly", "ora-edge-mfg-scout-weekly",
-    "ora-edge-news-overlay-refresh", "ora-full-gate-weekly", "ora-quarterly-estimate-check",
-    "ora-rep-hours-monthly", "ora-site-market-snapshot-refresh", "ora-site-seo-crawl-weekly",
-})
+WAIVED_GENERIC_RETRY = frozenset()
 WAIVED_PENDING_LANDING = frozenset()
 # name -> (sha256[:16] of the ONE reviewed explicit-5/6 unit's normalized text, why it is not a send-exit
 # retry). Any edit to that unit (or a new retry joined into it) changes the hash and fails L1.
