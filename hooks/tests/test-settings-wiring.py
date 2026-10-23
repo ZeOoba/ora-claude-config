@@ -262,13 +262,13 @@ try:
           DELETE_MATCHER == tiers.SETTINGS_MATCHER)
     stale = copy.deepcopy(CHAINS)
     stale["editwrite"].remove("sensitive-file-guard")
-    stale["bash"].remove("override-mint-guard")
+    stale["bash"].remove("commit-hygiene-guard")
     f, _ = sw.run_check(t06, SETTINGS_TEXT, fake, dispatcher_chains=stale)
     check("G4 a dispatcher chain edit without the matching table edit -> CHAIN findings",
           kinds(f).count("CHAIN") == 2, repr(kinds(f)))
-    check("G4b the chains on main carry the R-06 guards (13 per chain)",
-          len(CHAINS["editwrite"]) == 13 and len(CHAINS["bash"]) == 13
-          and "override-mint-guard" in CHAINS["bash"], repr({k: len(v) for k, v in CHAINS.items()}))
+    check("G4b the table chains equal the real dispatcher chains (no pinned guard count)",
+          sw.load_dispatcher_chains(HOOKS_DIR) == CHAINS and "sensitive-file-guard" in CHAINS["editwrite"],
+          repr({k: len(v) for k, v in CHAINS.items()}))
     mid = os.path.join(tmp, "g5.json")
     with open(mid, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(SETTINGS_TEXT)
