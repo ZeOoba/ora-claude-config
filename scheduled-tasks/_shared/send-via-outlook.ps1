@@ -977,6 +977,12 @@ if ($EarlyDedup) {
     }
     if ($EarlyDedup.State -eq 'UNREADABLE') {
         $why = "DEDUP-UNAVAILABLE: the send-log could not be read, so a prior send for this key cannot be ruled out"
+        # The exit-3 diagnostic would otherwise be lost: this run was stuck AND unreadable, and exits 6.
+        # Console first (the log may be the unwritable thing), then the log when it can be written.
+        if ($stuckMsg) {
+            [Console]::Error.WriteLine("WARN: $stuckMsg (preflight verdict superseded by the unreadable send-log)")
+            Write-Log "WARN" "$stuckMsg (preflight verdict superseded by the unreadable send-log)$TagLog" | Out-Null
+        }
         [Console]::Error.WriteLine($why)
         Write-Log "ERROR" "$why -- refusing (exit 6). Check Outlook Sent Items by hand; a human may re-run with -ForceResend once the message is confirmed absent.$TagLog"
         exit 6
