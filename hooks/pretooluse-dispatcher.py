@@ -109,6 +109,11 @@ coverage is a SEPARATE settings.json entry, per that guard's own wiring plan.
 Measured before wiring: over 10,333 real Edit/Write/DC-write calls in the last
 30 days of transcripts it would have blocked 5, all on adversarial-fixture
 test files or on ascii-only-guard.py itself; non-.py targets are never gated.
+
+R-06 (2026-10-19): sensitive-file-guard and override-mint-guard joined GUARD_CHAIN
+(before ascii-only-guard, which stays last), and override-mint-guard joined
+BASH_GUARD_CHAIN. Both fail open. The MCP delete gate (mcp-delete-guard.py) is NOT
+dispatched here: it is MCP-only and has its own settings.json entry.
 """
 import io
 import importlib.util
@@ -144,6 +149,12 @@ GUARD_CHAIN = [
     "rules-md-guard",
     "lint-config-guard",  # OI-148, 2026-08-13 -- Edit/Write/MultiEdit into an
     # existing oxford-command-center lint/format/typecheck config
+    "sensitive-file-guard",  # R-06/M65, 2026-10-19 -- Python port of the inline
+    # .env/credentials blocker. Live coverage today: Edit/Write/MultiEdit only (via this
+    # dispatcher). NotebookEdit + DC write_file/edit_block/move_file/write_pdf need the
+    # deferred Task 7 settings.json entry (R-06); audit M65 stays OPEN until it lands.
+    "override-mint-guard",  # R-06, 2026-10-19 -- no override-token writes from a
+    # scheduled/headless session. Stateless; fails open.
     "ascii-only-guard",  # 2026-09-30 -- non-ASCII into a .py whose module
     # docstring declares ASCII-only. LAST on purpose (style rail, not security).
     # DC write_file/edit_block twins need their OWN settings.json entry.
@@ -181,6 +192,7 @@ BASH_GUARD_CHAIN = [
     # only when they would discard uncommitted work
     "memory-orphan-link-guard",
     "commit-hygiene-guard",
+    "override-mint-guard",  # R-06, 2026-10-19 -- dispatcher-only, stateless.
 ]
 
 # --chain <name> selects which chain to run. Default stays the Edit/Write chain
