@@ -75,7 +75,7 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
 
 - **No audit happened** -- STEP 1 exit 2 (after its could-not-start digest is sent or
   probe-skipped), or ANY abort at any step before an audit digest reaches STEP 8 (e.g. the
-  STEP 3 `ValueError` stop, which sends nothing) -- close with `fail`, so a later same-day
+  STEP 3 `ValueError` stop, which sends nothing; exception: a could-not-start digest whose send ended exit 6 closes `complete`, see STEP 8) -- close with `fail`, so a later same-day
   fire re-claims (`RECLAIMED_AFTER_FAILED`) and actually runs the audit:
 
 ```
@@ -402,8 +402,10 @@ immediately with the exact exit code and stderr.
 unknown -- the message MAY have gone out), or any code other than 2 or 4** -- do NOT retry and never
 resend (rules.md section 2): flag loudly in STEP 9 with the exact exit code and stderr (for exit 6 quote the
 `SEND-STATE-UNKNOWN` / `DEDUP-BLOCK` / `QUARANTINE` line from send-log.txt) and say a human must check
-Outlook Sent Items. The claim closes as STEP 0b specifies for that digest type, never with
-`--email-sent-at` (this run's send did not confirm).
+Outlook Sent Items. For exit 5 or any other code the claim closes as STEP 0b specifies for that digest type,
+never with `--email-sent-at`. For exit 6 the claim closes `complete` for BOTH digest types (a could-not-start
+digest included), still without `--email-sent-at`: a send that may have gone out counts as sent for the
+period, so no same-day fire resends.
 
 No Sent-Items re-probe before the exit-4 retry: exit 4 now means the timeout hit BEFORE `Send()`, so the
 message cannot have gone out and the retry is safe (R-05 send contract). A timeout AFTER `Send()` is
