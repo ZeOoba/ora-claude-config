@@ -141,7 +141,7 @@ def _log(decision, fields):
             pass
         rec = {"ts": round(time.time(), 3), "decision": decision}
         for key, value in fields.items():
-            rec[key] = _sanitize(value)
+            rec[key] = _sanitize(value, 200 if key == "why" else 160)
         with open(path, "a", encoding="ascii") as fh:
             fh.write(json.dumps(rec, sort_keys=True) + "\n")
     except Exception:
@@ -348,15 +348,21 @@ def main():
     if not SESSION_KIND_LOADED:
         _deny("hooks/lib/session_kind.py could not be imported, so the gate cannot tell "
               "whether a human is present; %s is refused until it is fixed." % short)
+    t_cls = time.perf_counter()
     kind, task_id, evidence = session_kind.classify(sid)
+    classify_ms = int(round((time.perf_counter() - t_cls) * 1000.0))
     if kind == session_kind.UNKNOWN and _desktop_entrypoint():
         # UNKNOWN is not proof of an interactive session: under Claude Desktop an
         # unreadable record means a scheduled firing may be running unattended.
         kind = session_kind.SCHEDULED
         evidence = "desktop entrypoint, session kind unknown: fail closed (%s)" % evidence
     target = tiers.target_label(short, tool_input)
+    # why / classify_ms are decision-log-only diagnostics (never shown to the model beyond
+    # the existing deny text). evidence comes from session_kind, never from tool input.
     fields = {"tool": _STATE["tool"], "tier": tier, "kind": kind,
-              "task": task_id or "", "target": target}
+              "task": task_id or "", "target": target,
+              "why": evidence if isinstance(evidence, str) else "",
+              "classify_ms": str(classify_ms)}
     if kind == session_kind.SCHEDULED:
         why = allowlisted(task_id, short, tier, tool_input)
         if why is not None:
