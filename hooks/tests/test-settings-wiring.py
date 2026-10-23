@@ -281,6 +281,26 @@ try:
     # correct fail-closed answer here -- G6 covers the lib path
     check("G5 --expect-delta with an unloadable dispatcher fails closed (exit 2)",
           rc == 2 and "cannot load dispatcher" in err, out + err)
+    # ---- H. review hardening (Opus REFUTE) ------------------------------------------------
+    stubdir = os.path.join(tmp, "hooks-exit")
+    os.makedirs(stubdir)
+    with open(os.path.join(stubdir, "pretooluse-dispatcher.py"), "w", encoding="utf-8") as fh:
+        fh.write("import sys\nsys.exit(0)\n")
+    rc, out, err = cli("--check", "--settings", drift_path, "--hooks-dir", stubdir)
+    check("H1 dispatcher that sys.exit(0)s at import -> exit 2, never 0", rc == 2 and "ERROR:" in err,
+          out + err)
+    for i, shape in enumerate(("[]", "null", '{"hooks": "x"}', '{"hooks": {"PreToolUse": "x"}}')):
+        sp = os.path.join(tmp, "shape%d.json" % i)
+        with open(sp, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(shape)
+        rc, out, err = cli("--check", "--settings", sp)
+        check("H2.%d malformed settings shape %s -> exit 2 (not a traceback exit 1)" % (i, shape),
+              rc == 2 and "ERROR:" in err and "Traceback" not in err, out + err)
+    try:
+        run("\ufeff\ufeff" + sw.lf(SETTINGS_TEXT))
+        check("H3 a double BOM is not stripped twice (TableError, exit 2)", False, "no error")
+    except sw.TableError:
+        check("H3 a double BOM is not stripped twice (TableError, exit 2)", True)
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
