@@ -267,4 +267,55 @@ $t16 = Get-Content -LiteralPath $log16 -Raw -Encoding UTF8
 $codes = @($p1.ExitCode, $p2.ExitCode)
 Check "K24 two concurrent keyed fires: exactly one [OK] Sent, one SEND-INTENT, each exit 0 or 6" ($done -and (Get-Count $t16 '\[OK\] Sent to=') -eq 1 -and (Get-Count $t16 'SEND-INTENT:') -eq 1 -and @($codes | Where-Object { $_ -ne 0 -and $_ -ne 6 }).Count -eq 0) @{ Code = ($codes -join ','); Log = $t16 }
 
+
+# E1-E8: the dedup lookup runs BEFORE the Outlook readiness preflight, so a duplicate is suppressed
+# without touching Outlook, while a non-duplicate send still exits 3 when Outlook is not ready.
+Write-Host "`nR-05 contract mode: dedup lookup precedes the Outlook readiness preflight"
+$t = "E1 dup stuck"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t))
+Check "E1 a duplicate with Outlook not ready is DEDUP-SKIP (exit 0), not exit 3" ($r.Code -eq 0 -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 1 -and $r.Log -notmatch 'stuck on startup wizard') $r
+
+$t = "E2 fresh stuck"
+$r = Invoke-Send -Log (New-TestLog) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t))
+Check "E2 a NON-duplicate with Outlook not ready still exits 3, no SEND-INTENT written" ($r.Code -eq 3 -and $r.Log -match 'stuck on startup wizard' -and (Get-Count $r.Log 'SEND-INTENT:') -eq 0) $r
+
+$t = "E3 quarantined stuck"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 5) [ERROR] SEND-STATE-UNKNOWN: Send() threw -- the message MAY have been sent. to=$To$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t))
+Check "E3 a key whose earlier state is unknown still blocks (exit 6 DEDUP-BLOCK) even with Outlook not ready" ($r.Code -eq 6 -and $r.Log -match 'DEDUP-BLOCK:' -and $r.Log -notmatch 'stuck on startup wizard') $r
+
+$t = "E4 locked stuck"
+$lockedLog = New-TestLog -Seed @("$(Get-Stamp 90) [OK] Sent to=$To cc=none subject=`"unrelated`" bytes=1 format=html shash=0123456789abcdef")
+$before = [System.IO.File]::ReadAllText($lockedLog)
+$fs = New-Object System.IO.FileStream($lockedLog, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+try { $r = Invoke-Send -Log $lockedLog -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t)) } finally { $fs.Dispose() }
+Check "E4 an unreadable send-log in contract mode fails closed (exit 6 DEDUP-UNAVAILABLE) before the preflight, log untouched" ($r.Code -eq 6 -and $r.Out -match 'DEDUP-UNAVAILABLE' -and $r.Out -notmatch 'stuck on startup wizard' -and [System.IO.File]::ReadAllText($lockedLog) -eq $before) $r
+
+$t = "E5 force stuck"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t, "-ForceResend"))
+Check "E5 -ForceResend bypasses the early dedup, so a stuck Outlook still exits 3" ($r.Code -eq 3 -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 0) $r
+
+$t = "E6 other period stuck"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t '2026-10-17')")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t))
+Check "E6 a sent record for another period is not a duplicate: exit 3" ($r.Code -eq 3 -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 0) $r
+
+$t = "E7 legacy stuck"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs @("-To", $To, "-Body", "x", "-Subject", $t)
+Check "E7 legacy mode (no key) with Outlook not ready still exits 3" ($r.Code -eq 3) $r
+
+$t = "E8 dup external"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -ScriptArgs (@("-To", "someone@example.com", "-Body", "x", "-Subject", $t) + $Keyed)
+Check "E8 a duplicate key sent to an unauthorized external recipient (Outlook ready) is still refused (exit 5), never suppressed as exit 0" ($r.Code -eq 5 -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 0) $r
+
+$t = "E9 fresh stuck external"
+$r = Invoke-Send -Log (New-TestLog) -Sim "ok" -OutlookStuck -ScriptArgs (@("-To", "someone@example.com", "-Body", "x", "-Subject", $t) + $Keyed)
+Check "E9 a NON-duplicate to an external recipient with Outlook not ready exits 3 BEFORE the outbound check runs (no authorization consumed)" ($r.Code -eq 3 -and $r.Log -notmatch 'OUTBOUND-CHECK' -and $r.Log -notmatch 'ATTACHMENT-CHECK') $r
+
+$t = "E11 dup stuck external"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 30) [OK] Sent to=$To cc=none subject=`"$t`" bytes=1 format=html$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs (@("-To", "someone@example.com", "-Body", "x", "-Subject", $t) + $Keyed)
+Check "E11 a duplicate to an EXTERNAL recipient with Outlook not ready keeps exit 3 (no outbound check, no authorization consumed)" ($r.Code -eq 3 -and $r.Log -notmatch 'OUTBOUND-CHECK' -and (Get-Count $r.Log 'DEDUP-SKIP:') -eq 0) $r
+
+$t = "E10 stuck in-flight intent"
+$r = Invoke-Send -Log (New-TestLog -Seed @("$(Get-Stamp 1) [INFO] SEND-INTENT: key=$(Get-TestKey $t) subject=`"$t`"$(Get-TestTag $t)")) -Sim "ok" -OutlookStuck -ScriptArgs ($K + @("-Subject", $t))
+Check "E10 an open SEND-INTENT (a fire in flight) with Outlook not ready blocks with exit 6, never exit 3" ($r.Code -eq 6 -and $r.Log -match 'DEDUP-BLOCK:') $r
+
 Complete-Suite
