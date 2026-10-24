@@ -10,11 +10,13 @@ every target lib/tool_call_paths.write_targets() returns (all candidate path fie
 decoy field cannot steer it), and prints the SAME message. The inline blocker stays wired
 through a 14-day soak and is removed by a separate PR.
 
-WIRING: live coverage today is Edit/Write/MultiEdit only, through pretooluse-dispatcher.py
-GUARD_CHAIN. NotebookEdit and Desktop Commander write_file/edit_block/move_file/write_pdf
-coverage requires the deferred Task 7 settings.json entry (R-06); audit finding M65 stays
-OPEN until that entry lands. Shell tools are out of scope; the inline blocker never
-covered them.
+WIRING: Edit/Write/MultiEdit reach this guard through pretooluse-dispatcher.py GUARD_CHAIN.
+NotebookEdit and Desktop Commander write_file/edit_block/move_file/write_pdf reach it through
+the standalone PreToolUse entry (table row pre.sensitive-file-guard-nb-dc in
+hooks/wiring/settings-wiring.toml, R-06 Task 7). The entry is live only after the live
+settings.json has the merge-forward; audit finding M65 closes once that is confirmed with
+render-settings-wiring.py --check --live. Shell tools are out of scope; the inline blocker
+never covered them.
 
 FAILS OPEN on internal error and on unparseable input, exactly like the inline blocker
 (its python one-liner prints "" on failure and the grep then passes).

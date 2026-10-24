@@ -226,12 +226,14 @@ try:
     SENS_MATCHER = "NotebookEdit|mcp__.*__(write_file|edit_block|move_file|write_pdf)"
     # The two rows and their settings entries are now ON main (R-06 Task 7 landed). Group G
     # rebuilds the PRE-landing state from the real files, then replays the landing on it.
-    ins = TABLE_TEXT.index("[[row]]\nid = 'pre.mcp-delete-guard'")
-    end = TABLE_TEXT.index("[[row]]\nid = 'start.session-context-cat'")
-    check("G0 the real table carries both R-06 rows, contiguous, before start.session-context-cat",
-          TABLE_TEXT.count("id = 'pre.sensitive-file-guard-nb-dc'") == 1 and ins < end
-          and TABLE_TEXT.index("id = 'pre.sensitive-file-guard-nb-dc'") < end)
     t06 = sw.validate_table(__import__("tomllib").loads(TABLE_TEXT))
+    row_ids = [r["id"] for r in t06["rows"]]
+    g0_want = ["pre.scheduled-task-update-preguard", "pre.mcp-delete-guard",
+               "pre.sensitive-file-guard-nb-dc", "start.session-context-cat"]
+    g0_at = row_ids.index(g0_want[0]) if g0_want[0] in row_ids else -1
+    check("G0 the real table carries both R-06 rows, in order, between the preguard row and "
+          "start.session-context-cat", g0_at >= 0 and row_ids[g0_at:g0_at + 4] == g0_want,
+          repr(row_ids))
     PRE_OBJ = copy.deepcopy(OBJ)
     del PRE_OBJ["hooks"]["PreToolUse"][-2:]
     PRE_TEXT = sw.dump_settings(PRE_OBJ)
@@ -281,7 +283,7 @@ try:
     rc, out, err = cli("--check", "--table", tpath, "--settings", mid, "--hooks-dir", fake,
                        "--expect-delta", "pre.mcp-delete-guard,pre.sensitive-file-guard-nb-dc")
     # the CLI loads the real dispatcher from --hooks-dir; fake has none, so exit 2 is the
-    # correct fail-closed answer here -- G6 covers the lib path
+    # correct fail-closed answer here -- G2 covers the lib path
     check("G5 --expect-delta with an unloadable dispatcher fails closed (exit 2)",
           rc == 2 and "cannot load dispatcher" in err, out + err)
     # ---- H. review hardening (Opus REFUTE) ------------------------------------------------
