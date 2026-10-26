@@ -114,6 +114,9 @@ TIERS = {
                              "owned by ora-autonomy-gate Gate 1d (token event:<eventId>)"),
     "image_remove_background": (EXEMPT, True,
                                 "Adobe image edit that returns a new image; deletes nothing"),
+    "outlook_untrash_thread": (EXEMPT, False,
+                               "restores a thread from Deleted Items; explicit row, not a read "
+                               "prefix, so untrash_then_delete stays gated"),
 }
 
 
