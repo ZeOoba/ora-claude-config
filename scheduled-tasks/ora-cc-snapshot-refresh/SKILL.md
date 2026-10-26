@@ -74,7 +74,7 @@ Every run of this task gets its own **private, ephemeral git worktree** — a fr
 
 **Stale-worktree sweep — run BEFORE creating this run's worktree**, from the live checkout:
 ```bash
-cd C:\Users\Owner\oxford-command-center
+cd C:/Users/Owner/oxford-command-center
 git fetch origin
 git worktree list --porcelain
 ```
@@ -88,7 +88,7 @@ git -C "<stale-path>" log origin/main..HEAD --oneline
 
 **Create this run's worktree**, from the live checkout, once the sweep above finds nothing to stop for:
 ```bash
-cd C:\Users\Owner\oxford-command-center
+cd C:/Users/Owner/oxford-command-center
 npm run worktree -- add "C:\Users\Owner\AppData\Local\Temp\ora-cc-worktrees\cc-snapshot-<runid>" origin/main "auto/cc-snapshot-<runid>"
 ```
 This wraps `scripts/safe-worktree.ts` (PR #29), which does a REAL `npm install` inside the new worktree — its own independent `node_modules`, never a directory junction back to the live checkout's. A junctioned worktree, later force-removed, is exactly what once deleted the live checkout's real `node_modules` and broke its tooling for every session (`reference_worktree_node_modules_junction_hazard.md`) — this procedure never does that. If `npm run worktree` is ever missing or broken, fall back by hand: `git worktree add "<path>" -b "auto/cc-snapshot-<runid>" origin/main`, then `npm install` inside `<path>` — but never junction `node_modules` for speed.
@@ -103,7 +103,7 @@ All of STEPS 2-6 above, and both Auto-commit and Auto-push below, now run with t
 
 **Cleanup — unconditional, every exit path, always the last action of the run.** Whether this run committed and pushed, restored a `MATERIAL: none` no-op, refused on a shrink/degradation guard, failed to land its PR, or crashed mid-guard: remove the worktree before finishing. **The local branch is different — delete it (`git branch -D`) ONLY when its tip is preserved elsewhere:** `git log origin/main..<branch> --oneline` is empty (no commit was made), OR the remote holds that commit — `git fetch origin <branch>` then `git merge-base --is-ancestor <local-sha> FETCH_HEAD` exits 0 (it equals or descends from it: `gh pr update-branch` moves the remote tip past the local one, so a bare sha compare misfires, and a sha mismatch alone is NOT a landing failure; a `git fetch` error such as exit 128 only means the branch is not on origin, so KEEP the local branch — that is not itself an alarm). If a commit exists ONLY on that local branch (push or PR creation failed, or this run was SUPERSEDED), KEEP the branch and report its name and sha — deleting it discards the run's only copy, which is how the 2026-09-14 commits came within one cleanup step of being lost.
 ```bash
-cd C:\Users\Owner\oxford-command-center
+cd C:/Users/Owner/oxford-command-center
 npm run worktree -- remove "<worktree-path>"
 git branch -D "auto/cc-snapshot-<runid>"   # ONLY when the rule above allows; otherwise skip this line and KEEP the branch
 git worktree prune

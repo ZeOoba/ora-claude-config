@@ -36,7 +36,7 @@ AUDITED run that STEPS 3-6 refer to, and must not be substituted for one.
 Claim before anything else:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --ttl-min 240
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --ttl-min 240
 ```
 
 - **Exit 10** -> today's audit already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`,
@@ -70,7 +70,7 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
   because re-running would repeat the whole verifier fan-out:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --email-sent-at <ISO8601>
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --email-sent-at <ISO8601>
 ```
 
 - **No audit happened** -- STEP 1 exit 2 (after its could-not-start digest is sent or
@@ -79,7 +79,7 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
   fire re-claims (`RECLAIMED_AFTER_FAILED`) and actually runs the audit:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --error "<what broke>"
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --error "<what broke>"
 ```
 
 ## STEP 1 -- build the run index (Stage 0, deterministic, no judgment)
@@ -376,7 +376,7 @@ Write the matching stem -- `Ground-Truth Audit -- <today's date>` or
 then:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the stem>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the stem>"
 ```
 
 - **Exit 10** (`ALREADY_SENT`) -> do NOT send. Log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`,

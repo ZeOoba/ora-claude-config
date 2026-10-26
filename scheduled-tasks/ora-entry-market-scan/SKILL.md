@@ -31,7 +31,7 @@ This task was unwired against the fleet's shared double-fire guard even though i
 Run this as the first action AFTER STEP 0-A passes, before Step 1 SOURCE:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-entry-market-scan --block main --run-id <run_id> --period month --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-entry-market-scan --block main --run-id <run_id> --period month --ttl-min 45
 ```
 
 - **Exit 10** → this month's cycle already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without sourcing, without writing to Notion and without emailing**, and report it as a **NORMAL skip** (not a miss), citing the earlier run's summary file in `outputs\`.
@@ -44,11 +44,11 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --
 **Closing the claim — only the claim holder may do it.** A run that got exit 10 or 11 owns nothing and calls NEITHER `complete` nor `fail`. A run that got exit 0 MUST close with exactly one of:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-entry-market-scan --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-entry-market-scan --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
 ```
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-entry-market-scan --block main --run-id <run_id> --period month --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-entry-market-scan --block main --run-id <run_id> --period month --error "<what broke>"
 ```
 
 - `complete` after Step 5's digest lands (or after the Layer 2 probe reports ALREADY_SENT — see Step 5).
@@ -114,7 +114,7 @@ For any previously-screened deal in these 5 markets logged as PASS/T2-WATCH with
 **LAYER 2 — PRE-SEND SENT-ITEMS PROBE (v1.8, 2026-09-19 — mandatory, run immediately BEFORE the COM send below):** Layer 1's claim state lives on OneDrive and can be lost or rolled back; this probe asks the mail store itself, so it is the backstop that actually stopped the duplicate digest on 2026-09-07.
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the dated stem>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the dated stem>"
 ```
 
 - **Dated stem: `ORA Entry Market Scan - <YYYY-MM-DD>`** (this `<YYYY-MM-DD>`, the Subject's date and the outputs filenames all come from the run date computed once at run start with `date '+%A %Y-%m-%d'` — date part only — reused verbatim) — written to a temp file under `C:\Users\Owner\AppData\Local\Temp\ora-entry-market-scan\`, never passed as a literal `-Subject` (non-ASCII is mangled in transit). Use the dated stem: the Step 5 subject is now the stem (hyphen written as an em dash) and nothing run-dependent (live counts moved to the body), so it is stable across same-day reruns and the R-05 dedup key matches; the stem is still what the probe matches. Matching is substring and normalization-tolerant (dash family folded, casefolded), and the stem must sit at position 0 after any `[ORA]`/`[ACTION]` tag is stripped — so keep the date immediately after the stem and put variable text after it.

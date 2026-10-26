@@ -20,7 +20,7 @@ missed, or an overlapping manual catch-up run. `--period month` keys the claim t
 for exactly this reason, and this task's blast radius is drafts in Gabriel's mailbox, so a double fire
 is not merely a duplicate report — it is duplicate counterparty correspondence.
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-broker-touch-cadence --block main --run-id <run_id> --period month --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-broker-touch-cadence --block main --run-id <run_id> --period month --ttl-min 45
 
 - Exit 10 → this month's run already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, create NO
   drafts, send NO email, touch neither Notion nor Outlook, and report it as a NORMAL skip (not a miss),
@@ -31,11 +31,11 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --
 Once the run's summary email lands — whether that is the Step 0.5 gated-run email or the Step 5
 completion summary — run:
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-broker-touch-cadence --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-broker-touch-cadence --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
 
 If the run aborts instead:
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-broker-touch-cadence --block main --run-id <run_id> --period month --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-broker-touch-cadence --block main --run-id <run_id> --period month --error "<what broke>"
 
 - ONLY the run holding the claim may call `complete` or `fail`. A run that stood down (exit 10 or 11)
   calls NEITHER.
@@ -93,7 +93,7 @@ If the Drafts folder cannot be read at all, treat that as a data gap: do NOT ass
 report the gap, create no drafts, and close the claim. An unreadable folder is not an empty one.
 
 0.5c — LAYER 2 PRE-SEND PROBE (fleet standard, mandatory before the gated run's ONE email):
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt>"
   - Always `-SubjectFile`, never a literal `-Subject` — non-ASCII subject characters are mangled in transit.
   - Use a DATED STEM, not the full subject, since the subject's tail carries live counts that
     legitimately differ between runs. Stem: `Broker Touch Cadence - <YYYY-MM-DD>` (<YYYY-MM-DD> = the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part only, reused verbatim in the subject, the Ops Hub row and the body). Keep the date in the
