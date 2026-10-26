@@ -10,12 +10,12 @@ PURPOSE. HubSpot's lease-renewal deals (pipeline `default`) went five months wit
 HARD LIMITS. Internal writes to HubSpot DEAL and NOTE objects only, plus exactly ONE Notion write per run — the Ops Hub completion row in STEP 7a. NEVER: write to the workbook, the Notion Tenant Database or any other Notion page, or any tenant-facing surface; delete or archive a deal; reopen a closed deal; change a deal's name, amount or owner; send anything to anyone but ggoldberg@oxfordra.net; change this task's own schedule or registration. Never fabricate a value — every date/rent you write comes from the workbook row you cite.
 
 STEP 0 — DOUBLE-FIRE GUARD. First action:
-`python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --ttl-min 45`
+`python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --ttl-min 45`
 Exit 10 or 11 → stand down silently (normal skip; call neither complete nor fail). Exit 0 → proceed. At the end call `complete` (same args + `--email-sent-at <ISO8601>` if an email went out) or, on abort, `fail --error "<what broke>"`. Contract: `_shared/README-DOUBLE-FIRE-GUARD.md`.
 
 **LAYER 2 (added 2026-09-18): before EVERY email send below (STEP 1d, STEP 5's two subjects, STEP 7, STEP 7a's fallback), run the pre-send probe first**, using that send's own dated stem (the stem must sit at position 0 of the subject after `outlook-sent-probe.ps1` strips a leading `[ACTION]` tag — put any variable count/name text AFTER the date, never between the stem and the date):
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly that send's dated stem>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly that send's dated stem>"
 ```
 Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, and still close the guard as if this send had happened (Layer 1 must re-converge). Exit 1 → fail open: send anyway, and note the probe gap in the email body.
 
@@ -29,7 +29,7 @@ PYTHONIOENCODING=utf-8 C:/Users/Owner/AppData/Local/Programs/Python/Python313/py
  c. Do NOT fall back to `oxford-command-center\data\snapshots\portfolio.json` — it carries no Notice-to-Vacate field and can be weeks stale during a fleet pause.
  d. FAIL-LOUD GATE: if the helper exits nonzero (neither path reads the tab, OR the row-2 "As of" date is unparseable, in the future, or more than 7 days before today, OR the parsed roster count is outside 100–200, OR the `PORTFOLIO TOTALS` end row is missing, OR the parsed count differs from row 2's "N tenants" by more than 2; its `gate_failures` field says which) → make NO HubSpot writes, run the Layer 2 probe (STEP 0) with dated stem `Renewal reconcile could not trust the workbook - <today's date>`, then email subject `[ACTION] Renewal reconcile could not trust the workbook - <today's date>` with exactly what failed, do STEP 7a (this is the "STEP 1d fail-loud abort" path STEP 7a names), then close the guard and stop:
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --error "workbook unreadable or stale — see email for detail"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --error "workbook unreadable or stale — see email for detail"
 ```
 A run that cannot read its source must never look like a clean run. Know what the freshness check proves: row 2 is the formula `"As of " & TEXT(TODAY(), …)`, so its cached value is the date Excel last recalculated and saved the file (verified 2026-09-21) — it shows the workbook was saved within 7 days, not that its rent data was reviewed within 7 days.
  Write temp files only under `C:\Users\Owner\AppData\Local\Temp\ora-renewal-recon\`. GATE-SAFETY: keep the strings `website-canonical` and `oxford-site` out of every shell command and path — a site-write guard blocks them.
@@ -65,11 +65,11 @@ STEP 7a — NOTION COMPLETION ROW (ALWAYS — added 2026-09-18). `automation-hea
 
 Then close the STEP 0 guard (this is the STEP 0 `complete` call, executed for every non-abort path — clean, changed, or held for review):
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --email-sent-at <ISO8601>
 ```
 Omit `--email-sent-at` on the silent-clean-run path (STEP 7's first sentence) — no email went out, and that is a legitimate completion. If the run aborts anywhere after STEP 0's claim and before reaching this point (other than the STEP 1d gate, which closes its own `fail` above), call:
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-renewal-hubspot-reconcile --block main --run-id <run_id> --error "<what broke>"
 ```
 
 QUESTIONS FOR GABRIEL: if a rule above does not cover a case, do not improvise — list the case under NEEDS GABRIEL with the two conflicting facts quoted.
