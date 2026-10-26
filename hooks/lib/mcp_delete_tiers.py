@@ -114,9 +114,9 @@ TIERS = {
                              "owned by ora-autonomy-gate Gate 1d (token event:<eventId>)"),
     "image_remove_background": (EXEMPT, True,
                                 "Adobe image edit that returns a new image; deletes nothing"),
-    "outlook_untrash_thread": (EXEMPT, False,
-                               "restores a thread from Deleted Items; explicit row, not a read "
-                               "prefix, so untrash_then_delete stays gated"),
+    "outlook_untrash_thread": (_BY_INPUT, False,
+                               "decided by restoreMap[].destinationFolderId; explicit row, not "
+                               "a read prefix, so untrash_then_delete stays gated"),
 }
 
 
@@ -182,7 +182,38 @@ def _manage_campaign_objects(ti):
     return EXEMPT, "asset additions only"
 
 
+# outlook_untrash_thread moves Deleted Items mail to a caller-named folder. Without a
+# restoreMap every message returns to Inbox. A restoreMap built from outlook_trash_thread's
+# result carries opaque Graph folder ids (well over 40 chars); the schema only pattern-checks
+# destinationFolderId, so a short well-known name (deleteditems, inbox, ...) is out of contract
+# and a recoverableitems* name would push trashed mail one stage toward purge.
+_OPAQUE_FOLDER_ID = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
+
+
+def _outlook_untrash_thread(ti):
+    if not isinstance(ti, dict):
+        return IRREVERSIBLE, "tool_input is not an object -- fails closed"
+    if "restoreMap" not in ti:
+        return EXEMPT, "no restoreMap: every in-trash message returns to Inbox"
+    rmap = ti["restoreMap"]
+    if not isinstance(rmap, list) or not rmap:
+        return IRREVERSIBLE, "restoreMap is not a non-empty list -- fails closed"
+    tier, reason = EXEMPT, "restores to the folder ids outlook_trash_thread recorded"
+    for entry in rmap:
+        dest = entry.get("destinationFolderId") if isinstance(entry, dict) else None
+        if not isinstance(dest, str) or not dest:
+            return IRREVERSIBLE, "restoreMap entry without a destinationFolderId -- fails closed"
+        if dest.casefold().startswith("recoverableitems"):
+            return IRREVERSIBLE, ("destination is a Recoverable Items folder: moves trashed "
+                                  "mail toward purge")
+        if _OPAQUE_FOLDER_ID.fullmatch(dest) is None:
+            tier, reason = RECOVERABLE, ("destination is not an opaque folder id "
+                                         "(well-known name or short id)")
+    return tier, reason
+
+
 _INPUT_CLASSIFIERS = {
+    "outlook_untrash_thread": _outlook_untrash_thread,
     "clean_up_worktrees": _clean_up_worktrees,
     "manage_segment": _manage_segment,
     "manage_campaign_objects": _manage_campaign_objects,
