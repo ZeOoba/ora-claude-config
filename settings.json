@@ -322,7 +322,7 @@
           {
             "type": "command",
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/mcp-delete-guard.py\"",
-            "timeout": 15
+            "timeout": 30
           }
         ]
       },

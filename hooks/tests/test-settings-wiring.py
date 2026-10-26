@@ -253,7 +253,7 @@ try:
     p = plan_edit["hooks"]["PreToolUse"]
     p.append({"matcher": DELETE_MATCHER, "hooks": [{"type": "command", "command":
               PRE_OBJ["hooks"]["PreToolUse"][-1]["hooks"][0]["command"].replace(
-                  "scheduled-task-update-preguard.py", "mcp-delete-guard.py"), "timeout": 15}]})
+                  "scheduled-task-update-preguard.py", "mcp-delete-guard.py"), "timeout": 30}]})
     p.append({"matcher": SENS_MATCHER, "hooks": [{"type": "command", "command":
               PRE_OBJ["hooks"]["PreToolUse"][-1]["hooks"][0]["command"].replace(
                   "scheduled-task-update-preguard.py", "sensitive-file-guard.py"), "timeout": 10}]})
@@ -265,6 +265,11 @@ try:
     import mcp_delete_tiers as tiers  # hooks/lib, on sys.path above
     check("G3b the delete-gate row matcher equals mcp_delete_tiers.SETTINGS_MATCHER",
           DELETE_MATCHER == tiers.SETTINGS_MATCHER)
+    import session_kind  # hooks/lib: classify() may run up to HARD_JOIN_SECONDS before it answers
+    g3c_timeout = next(r["timeout"] for r in t06["rows"] if r["id"] == "pre.mcp-delete-guard")
+    check("G3c the delete-gate hook timeout exceeds classify's hard wall (a hook timeout is "
+          "non-blocking: the delete would proceed unchecked)",
+          g3c_timeout > session_kind.HARD_JOIN_SECONDS, repr((g3c_timeout, session_kind.HARD_JOIN_SECONDS)))
     stale = copy.deepcopy(CHAINS)
     stale["editwrite"].remove("sensitive-file-guard")
     stale["bash"].remove("commit-hygiene-guard")
