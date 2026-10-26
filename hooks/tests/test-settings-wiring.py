@@ -51,7 +51,7 @@ def kinds(findings):
     return sorted(f["kind"] for f in findings)
 
 
-TABLE_TEXT = read(TABLE)
+TABLE_TEXT = sw.lf(read(TABLE))  # LF-normalize: a Windows autocrlf checkout stores CRLF
 TABLE_OBJ = sw.load_table(TABLE)
 SETTINGS_TEXT = read(SETTINGS)
 OBJ = sw.parse_settings_text(SETTINGS_TEXT)
