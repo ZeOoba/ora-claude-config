@@ -118,9 +118,9 @@ TIERS = {
                              "owned by ora-autonomy-gate Gate 1d (token event:<eventId>)"),
     "image_remove_background": (EXEMPT, True,
                                 "Adobe image edit that returns a new image; deletes nothing"),
-    "outlook_untrash_thread": (EXEMPT, False,
-                               "restores a thread from Deleted Items; explicit row, not a read "
-                               "prefix, so untrash_then_delete stays gated"),
+    "outlook_untrash_thread": (_BY_INPUT, False,
+                               "decided by restoreMap[].destinationFolderId; explicit row, not "
+                               "a read prefix, so untrash_then_delete stays gated"),
 }
 
 
@@ -186,7 +186,45 @@ def _manage_campaign_objects(ti):
     return EXEMPT, "asset additions only"
 
 
+# outlook_untrash_thread moves Deleted Items mail to a caller-named folder (schema, from the
+# live tool definition). Without a restoreMap every in-trash message returns to Inbox; with
+# one, ONLY mapped messages move and unmapped ones stay in Deleted Items. The schema only
+# pattern-checks destinationFolderId. A map built from outlook_trash_thread's result is
+# EXPECTED to carry opaque Graph folder ids; real ids have not been observed in this repo
+# (the test ids are synthetic), so the 40-character floor is a heuristic, not a measured
+# bound. A short well-known name (deleteditems, inbox, ...) is out of contract, and a
+# recoverableitems* name is assumed (unverified) to push trashed mail toward purge.
+# KNOWN LIMITS, accepted: the "opaque" test is effectively a length test (the pattern is the
+# schema's own alphabet), and the opaque id of a Recoverable Items folder, if a caller could
+# obtain one, would pass as EXEMPT. outlook_modify_labels.moveToFolderId is not delete-shaped
+# and never reaches this gate.
+_OPAQUE_FOLDER_ID = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
+
+
+def _outlook_untrash_thread(ti):
+    if not isinstance(ti, dict):
+        return IRREVERSIBLE, "tool_input is not an object -- fails closed"
+    if "restoreMap" not in ti:
+        return EXEMPT, "no restoreMap: every in-trash message returns to Inbox"
+    rmap = ti["restoreMap"]
+    if not isinstance(rmap, list) or not rmap:
+        return IRREVERSIBLE, "restoreMap is not a non-empty list -- fails closed"
+    tier, reason = EXEMPT, "restores to the folder ids outlook_trash_thread recorded"
+    for entry in rmap:
+        dest = entry.get("destinationFolderId") if isinstance(entry, dict) else None
+        if not isinstance(dest, str) or not dest:
+            return IRREVERSIBLE, "restoreMap entry without a destinationFolderId -- fails closed"
+        if dest.casefold().startswith("recoverableitems"):
+            return IRREVERSIBLE, ("destination is a Recoverable Items folder: moves trashed "
+                                  "mail toward purge")
+        if _OPAQUE_FOLDER_ID.fullmatch(dest) is None:
+            tier, reason = RECOVERABLE, ("destination is not an opaque folder id "
+                                         "(well-known name or short id)")
+    return tier, reason
+
+
 _INPUT_CLASSIFIERS = {
+    "outlook_untrash_thread": _outlook_untrash_thread,
     "clean_up_worktrees": _clean_up_worktrees,
     "manage_segment": _manage_segment,
     "manage_campaign_objects": _manage_campaign_objects,
