@@ -8,7 +8,7 @@ description: Quarterly estimated-tax check for Eric & Rebecca Goldberg (federal,
 Calculation and notification only. This task never pays, schedules or moves money (not money-moving under register-scheduled-task step 3b).
 
 ## — DOUBLE-FIRE ENTRY GUARD (run first)
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-quarterly-estimate-check --block main --run-id <run_id> --period month --ttl-min 30
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-quarterly-estimate-check --block main --run-id <run_id> --period month --ttl-min 30
 - Exit 10 = this month already completed; Exit 11 = another fire is live. Stand down: no calculation or file write, no email; report a NORMAL skip.
 - Exit 0 = proceed.
 After the run finishes (after the email sends): `... block-sentinel.py complete --task ora-quarterly-estimate-check --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort, and on a send that ends in failure (exit 5, or exit 2 or 4 once its single repeat is spent; exit 6 is the exception, see the send step): `... fail ... --error "<what broke>"` (never `complete` without a real `--email-sent-at`, except exit 6: see the send step when an email was owed). Only the claim holder calls complete/fail. ALWAYS pass `--period month`.
@@ -27,7 +27,7 @@ Compute once at start: `date '+%A %Y-%m-%d'`. Reuse that exact value in every ti
    `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe estimate_check.py --config estimates_config_<TAXYEAR>.json --ledger estimates_ledger.csv --asof <run date> --out "..\outputs\<run date>_EstimatedTax_Check_v01.md"`
    Exit 1 means the next installment needs a payment; that is the normal case, not a failure. Exit 2 = input problem: report it.
 3. If the config's prior-year figures are still marked DRAFT in its `source` field and the filed returns now exist in `Eric & Becca\`, add to QUESTIONS: "update prior_year_total_tax to the filed figures".
-4. Email via Outlook COM: `powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` TO `ggoldberg@oxfordra.net` ONLY.
+4. Email via Outlook COM: `powershell -File C:/Users/Owner/.claude/scheduled-tasks/_shared/send-via-outlook.ps1` TO `ggoldberg@oxfordra.net` ONLY.
    Subject: `Estimated tax — pay $<federal next-due amount> federal / $<MD amount> MD by <due date> (<run date>)`.
    Body: the report's "Next due" lines for each jurisdiction, then the full report attached, then QUESTIONS FOR GABRIEL. On exit 2 or 4: retry once, then record the failure loudly in the Notion completion row; do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the Notion completion row and the guard close-out, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2. Close the guard `fail` on exit 5, but on exit 6 close it `complete` with no `--email-sent-at` (never `fail`: a same-day re-fire would send the message again).
 5. Completion row: append a one-line status to the Operations Hub (`32b6ecd8…`) automation log per the fleet convention. Notion create without a page ID: look under the known parent before any retry (register-scheduled-task step 3, rule B).
