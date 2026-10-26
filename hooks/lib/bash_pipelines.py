@@ -198,12 +198,57 @@ def rewrite_shape(command):
     return last.stages
 
 
+_QUIT_ALWAYS = {"head", "read", "less", "more"}
+_GREPS = {"grep", "egrep", "fgrep", "rg", "ag"}
+# GNU grep accepts any unique abbreviation of a long option (`--max=1`, `--qui`).
+_GREP_LONG_EARLY = ("--qui", "--sil", "--max", "--files-with")
+_GREP_SHORT_EARLY = set("qlLm")
+_SED_QUIT = re.compile(r"(?:^|[;{}\s/\d$!IM])[qQ]\d*\s*(?:$|[;}])")
+_SED_E_ATTACHED = re.compile(r"^(?:-[a-zA-Z]*e|--expression=)(.+)$")
+
+
+def quits_early(stage):
+    """True when this stage can stop reading before EOF (head, grep -q/-m/-l/-L,
+    sed '...q', read, less, more, awk 'exit'). Upstream then dies of SIGPIPE, so
+    under pipefail a PASSING evidence command reports rc 120/141 and
+    `cmd | grep -q x` inverts to 1 when cmd fails. Conservative: a false True
+    only means no rewrite (status quo)."""
+    w = command_words(stage)
+    if not w:
+        return False
+    name, args = _base(w[0]), w[1:]
+    if name in _QUIT_ALWAYS:
+        return True
+    if name in _GREPS:
+        for a in args:
+            if a == "--":
+                break
+            if a.startswith("--"):
+                if a.startswith(_GREP_LONG_EARLY):
+                    return True
+            elif a.startswith("-") and len(a) > 1 and _GREP_SHORT_EARLY & set(a[1:]):
+                return True
+        return False
+    if name == "sed":
+        for a in args:
+            m = _SED_E_ATTACHED.match(a)  # `-e1q`, `--expression=1q`
+            if _SED_QUIT.search(m.group(1) if m else a) and (m or not a.startswith("-")):
+                return True
+        return False
+    if name in ("awk", "gawk", "mawk"):
+        return any(re.search(r"\bexit\b", a) for a in args)
+    return False
+
+
 def pipefail_targets(command):
     """Labels of the evidence commands a pipefail rewrite would protect, or []
-    when the command is not eligible: single-statement shape (rewrite_shape)
-    AND every non-last stage is an evidence command, `tee` or `cat`."""
+    when the command is not eligible: single-statement shape (rewrite_shape),
+    every non-last stage is an evidence command, `tee` or `cat`, AND the last
+    stage reads to EOF (quits_early)."""
     stages = rewrite_shape(command)
     if not stages or len(stages) < 2:
+        return []
+    if quits_early(stages[-1]):
         return []
     found = []
     for stage in stages[:-1]:

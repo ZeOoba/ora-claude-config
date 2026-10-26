@@ -184,6 +184,56 @@ def test_untouched():
        PREFIX in out, repr(out[:200]))
 
 
+def test_early_exit_last_stage():
+    """/insights review 2026-10-26 (C3): a LAST stage that quits before EOF
+    (`head -N`, `grep -q/-m/-l`, `sed 1q`, `read`, `less`, `more`) SIGPIPEs the
+    evidence command, so under pipefail a PASSING run reports rc 120/141, and
+    `cmd | grep -q x` inverts to 1 when cmd fails. Those commands are left as
+    written (status quo); consumers that read to EOF are still rewritten."""
+    for name, cmd in (
+            ("head -2", "python -m pytest -v tests/test_many.py | head -2"),
+            ("head -n 5", "npm run gate 2>&1 | head -n 5"),
+            ("head -c", "pytest -q | head -c 200"),
+            ("grep -q", "git push origin main 2>&1 | grep -q rejected"),
+            ("grep --quiet", "git push 2>&1 | grep --quiet rejected"),
+            ("grep -m1", "npm run gate 2>&1 | grep -m1 FAIL"),
+            ("grep -m 1", "npm run gate 2>&1 | grep -m 1 FAIL"),
+            ("grep --max-count", "npm run gate 2>&1 | grep --max-count=1 FAIL"),
+            ("grep -l", "npm test 2>&1 | grep -l FAIL"),
+            ("grep -ql combined", "npm test 2>&1 | grep -ql FAIL"),
+            ("egrep -q", "pytest | egrep -q 'passed'"),
+            ("rg -q", "pytest | rg -q passed"),
+            ("sed 1q", "pytest | sed 1q"),
+            ("sed -n 5q", "pytest | sed -n '5q'"),
+            ("sed /re/q", "pytest | sed '/passed/q'"),
+            ("read", "pytest | read first"),
+            ("less", "pytest | less"),
+            ("more", "pytest | more"),
+            ("full path head", "pytest | /usr/bin/head -3"),
+            ("cd hop head", "cd /c/x && npm run gate:ci 2>&1 | head -25"),
+            ("tee then head", "pytest | tee log.txt | head -3"),
+            ("env/wrapper head", "pytest | env LC_ALL=C head -2"),
+            ("sed -e1q attached", "pytest | sed -e1q"),
+            ("sed --expression=1q", "pytest | sed --expression=1q"),
+            ("sed /re/!q", "pytest | sed '/1/!q'"),
+            ("sed /re/Iq", "pytest | sed '/x/Iq'"),
+            ("grep --max=1 abbreviated", "pytest | grep --max=1 FAIL"),
+            ("grep --quie abbreviated", "pytest | grep --quie FAIL"),
+    ):
+        expect_untouched("early-exit last stage: " + name, cmd)
+    # Consumers that read to EOF keep the protection.
+    expect_rewrite("grep without -q", "npm run gate 2>&1 | grep FAIL")
+    expect_rewrite("grep -v", "npm run gate 2>&1 | grep -v hint")
+    expect_rewrite("grep -c counts to EOF", "pytest | grep -c passed")
+    expect_rewrite("sed s///", "pytest | sed 's/a/b/'")
+    expect_rewrite("sed -n 1p reads to EOF", "pytest | sed -n 1p")
+    expect_rewrite("sed -e with q inside the replacement text",
+                   "pytest | sed 's/quit/exit/'")
+    expect_rewrite("tail", "pytest | tail -5")
+    expect_rewrite("wc", "pytest | wc -l")
+    expect_rewrite("cat", "pytest | cat")
+
+
 def test_unreadable_settings_does_not_rewrite():
     """Rewriting changes the string permission rules are matched against. With
     the deny list unreadable we cannot prove the prefix does not dodge a deny
@@ -246,7 +296,8 @@ def test_chain_position():
 
 
 def main():
-    for t in (test_rewrites, test_untouched, test_unreadable_settings_does_not_rewrite,
+    for t in (test_rewrites, test_untouched, test_early_exit_last_stage,
+              test_unreadable_settings_does_not_rewrite,
               test_dispatcher_merge_carries_updated_input, test_chain_position):
         try:
             t()

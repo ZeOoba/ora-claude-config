@@ -43,8 +43,15 @@ rules.md s26 read the output, not the status). Every non-last stage must itself 
 look-only stage (grep, head, ...) in the middle disqualifies the rewrite.
 Look-only runs (`pytest --collect-only`, `--listTests`, `--help`, `--version`)
 are not evidence. Already-guarded commands (`set ... pipefail` / `PIPESTATUS`)
-are left alone. Known residual: a LAST stage that exits early (`| head -1`)
-can SIGPIPE a chatty evidence command under pipefail.
+are left alone. A LAST stage that can exit before EOF (`| head -N`,
+`grep -q/-m/-l`, `sed 1q`, `read`, `less`, `more`, awk `exit`) also disqualifies
+the rewrite (bash_pipelines.quits_early): it would SIGPIPE a passing evidence
+command to rc 120/141 (and make `| grep -q` report the evidence command's
+failure instead of grep's). Such commands keep the status quo. Known residual
+(still rewritten, can still show rc 141 on a passing run): interpreters that stop
+reading (`python -c`, `perl -ne ... last`), `sh -c`/`bash -c` wrappers, wrappers
+that take options (`env -u/-i`, `stdbuf`, `nice`), script files (`sed -f`,
+`awk -f`), `awk nextfile`, `dd count=`, and `head -n -N` is skipped needlessly.
 
 FAIL-OPEN. Any error -> no output, exit 0 -> the command runs as written
 (status quo). There is no per-call confirmation that the harness applied the
