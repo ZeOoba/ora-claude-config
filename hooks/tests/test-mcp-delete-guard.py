@@ -165,9 +165,34 @@ def test_exempt():
                  "mcp__7c55602a-d1ec-4c77-a92e-06ee3c786d3a__image_remove_background",
                  "mcp__ms365__outlook_untrash_thread",
                  "mcp__x__list_deleted_items"):
-        rc, out, err = run(env, tool, {"id": "1"})
-        check("G12 exempt %s passes silently" % tool.rsplit("__", 1)[-1],
-              rc == 0 and decision(out) is None, "rc=%d out=%s" % (rc, out[:120]))
+        # interactive AND scheduled: an EXEMPT call is never gated, and prints nothing
+        for sid in (SESSION_A, SESSION_S):
+            rc, out, err = run(env, tool, {"id": "1"}, sid=sid)
+            check("G12 exempt %s passes silently (%s)" % (tool.rsplit("__", 1)[-1], sid[:1]),
+                  rc == 0 and out == "", "rc=%d out=%s" % (rc, out[:120]))
+
+
+def test_untrash_by_input():
+    """outlook_untrash_thread is decided by restoreMap[].destinationFolderId."""
+    _, env = make_env()
+    ut = "mcp__ms365__outlook_untrash_thread"
+    fid = "AAMkAGI2" + "A" * 92
+    rm = lambda dest: {"conversationId": "c1", "restoreMap": [
+        {"messageId": "m1", "destinationFolderId": dest}]}
+    rc, out, _ = run(env, ut, rm(fid))
+    check("G12b untrash with an opaque-id restoreMap passes silently",
+          rc == 0 and out == "", "rc=%d out=%s" % (rc, out[:120]))
+    rc, out, _ = run(env, ut, rm("deleteditems"))
+    check("G12c untrash to a well-known name asks interactively",
+          rc == 0 and decision(out) == "ask", "rc=%d out=%s" % (rc, out[:160]))
+    rc, _, err = run(env, ut, rm("deleteditems"), sid=SESSION_S)
+    check("G12d untrash to a well-known name is blocked in a scheduled session",
+          rc == 2 and "scheduled" in err, "rc=%d %s" % (rc, err[-160:]))
+    rc, _, err = run(env, ut, rm("recoverableitemsdeletions"))
+    check("G12e untrash into Recoverable Items is irreversible: blocked without a token",
+          rc == 2, "rc=%d %s" % (rc, err[-160:]))
+    rc, out, _ = run(env, ut, {"conversationId": "c1", "restoreMap": "x"})
+    check("G12f untrash with a malformed restoreMap fails closed", rc == 2, "rc=%d out=%s" % (rc, out[:120]))
 
 
 def test_scheduled_sessions():
@@ -370,6 +395,7 @@ if __name__ == "__main__":
     test_irreversible()
     test_recoverable_and_unknown()
     test_exempt()
+    test_untrash_by_input()
     test_scheduled_sessions()
     test_plain_cli()
     test_fail_modes_and_log()

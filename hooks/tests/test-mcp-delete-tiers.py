@@ -106,9 +106,9 @@ def test_false_positive_and_read_pins():
         # name, so a compound verb that starts with one is EXEMPT even though it deletes.
         ("mcp__x__get_and_delete", t.EXEMPT),
         ("mcp__x__restore_then_purge", t.EXEMPT),
-        # untrash is an explicit TIERS row (EXEMPT), NOT a read prefix: the restore tool is
-        # exempt, its delete sibling stays gated, and a compound name starting with it is
-        # not laundered.
+        # untrash is an explicit by-input TIERS row, NOT a read prefix: with no restoreMap
+        # (the {} used here) the restore tool is EXEMPT, its delete sibling stays gated, and
+        # a compound name starting with it is not laundered. Map-dependent tiers: see T6.
         ("mcp__ms365__outlook_untrash_thread", t.EXEMPT),
         ("mcp__ms365__outlook_trash_thread", t.RECOVERABLE),
         ("mcp__x__untrash_then_delete", t.UNKNOWN),
@@ -125,7 +125,33 @@ def test_false_positive_and_read_pins():
 
 def test_input_classifiers():
     cu = "mcp__ccd_host__clean_up_worktrees"
+    ut = "mcp__ms365__outlook_untrash_thread"
+    fid = "AAMkAGI2" + "A" * 92  # opaque Graph-style folder id (100 chars)
+    rm = lambda *dests: {"conversationId": "c1", "restoreMap": [
+        {"messageId": "m%d" % i, "destinationFolderId": d} for i, d in enumerate(dests)]}
     cases = [
+        # outlook_untrash_thread: no map -> Inbox; opaque ids -> restore; anything else is
+        # out of contract; Recoverable Items fails to IRREVERSIBLE; malformed fails closed
+        (ut, {"conversationId": "c1"}, t.EXEMPT),
+        (ut, rm(fid, fid + "B"), t.EXEMPT),
+        (ut, rm("A" * 40), t.EXEMPT),
+        (ut, rm("A" * 39), t.RECOVERABLE),
+        (ut, rm("deleteditems"), t.RECOVERABLE),
+        (ut, rm("inbox"), t.RECOVERABLE),
+        (ut, rm(fid, "deleteditems"), t.RECOVERABLE),
+        (ut, rm("recoverableitemsdeletions"), t.IRREVERSIBLE),
+        (ut, rm("RecoverableItemsPurges"), t.IRREVERSIBLE),
+        (ut, rm(fid, "recoverableitemsroot"), t.IRREVERSIBLE),
+        (ut, rm("deleteditems", "recoverableitemsdeletions"), t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": None}, t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": []}, t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": "x"}, t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": [1]}, t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": [{}]}, t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": [{"destinationFolderId": 5}]}, t.IRREVERSIBLE),
+        (ut, {"conversationId": "c1", "restoreMap": [{"destinationFolderId": ""}]}, t.IRREVERSIBLE),
+        (ut, ["not", "a", "dict"], t.IRREVERSIBLE),
+        (ut, None, t.IRREVERSIBLE),
         (cu, {"older_than_days": 30}, t.RECOVERABLE),
         (cu, {"older_than_days": 30, "delete_sessions": False}, t.RECOVERABLE),
         (cu, {"older_than_days": 30, "delete_sessions": True}, t.IRREVERSIBLE),
@@ -199,7 +225,10 @@ def test_input_classifiers():
     weird = [None, 0, 1, "", "x", [], [1], {}, {"operation": object()}, 1.5, True,
              {"operation": {"type": {1, 2}}}, {"operationType": {1, 2}},
              {"delete_sessions": object()}, {"operation": {"type": b"x"}}]
-    for name in (cu, seg, camp):
+    weird = weird + [{"restoreMap": object()}, {"restoreMap": [object()]},
+                     {"restoreMap": [{"destinationFolderId": object()}]},
+                     {"restoreMap": [{"destinationFolderId": b"x"}]}]
+    for name in (cu, seg, camp, ut):
         raised = []
         for ti in weird:
             try:
