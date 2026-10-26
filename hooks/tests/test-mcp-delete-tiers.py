@@ -106,9 +106,9 @@ def test_false_positive_and_read_pins():
         # name, so a compound verb that starts with one is EXEMPT even though it deletes.
         ("mcp__x__get_and_delete", t.EXEMPT),
         ("mcp__x__restore_then_purge", t.EXEMPT),
-        # untrash is an explicit TIERS row (EXEMPT), NOT a read prefix: the restore tool is
-        # exempt, its delete sibling stays gated, and a compound name starting with it is
-        # not laundered.
+        # untrash is an explicit by-input TIERS row, NOT a read prefix: with no restoreMap
+        # (the {} used here) the restore tool is EXEMPT, its delete sibling stays gated, and
+        # a compound name starting with it is not laundered. Map-dependent tiers: see T6.
         ("mcp__ms365__outlook_untrash_thread", t.EXEMPT),
         ("mcp__ms365__outlook_trash_thread", t.RECOVERABLE),
         ("mcp__x__untrash_then_delete", t.UNKNOWN),

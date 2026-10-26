@@ -182,11 +182,18 @@ def _manage_campaign_objects(ti):
     return EXEMPT, "asset additions only"
 
 
-# outlook_untrash_thread moves Deleted Items mail to a caller-named folder. Without a
-# restoreMap every message returns to Inbox. A restoreMap built from outlook_trash_thread's
-# result carries opaque Graph folder ids (well over 40 chars); the schema only pattern-checks
-# destinationFolderId, so a short well-known name (deleteditems, inbox, ...) is out of contract
-# and a recoverableitems* name would push trashed mail one stage toward purge.
+# outlook_untrash_thread moves Deleted Items mail to a caller-named folder (schema, from the
+# live tool definition). Without a restoreMap every in-trash message returns to Inbox; with
+# one, ONLY mapped messages move and unmapped ones stay in Deleted Items. The schema only
+# pattern-checks destinationFolderId. A map built from outlook_trash_thread's result is
+# EXPECTED to carry opaque Graph folder ids; real ids have not been observed in this repo
+# (the test ids are synthetic), so the 40-character floor is a heuristic, not a measured
+# bound. A short well-known name (deleteditems, inbox, ...) is out of contract, and a
+# recoverableitems* name is assumed (unverified) to push trashed mail toward purge.
+# KNOWN LIMITS, accepted: the "opaque" test is effectively a length test (the pattern is the
+# schema's own alphabet), and the opaque id of a Recoverable Items folder, if a caller could
+# obtain one, would pass as EXEMPT. outlook_modify_labels.moveToFolderId is not delete-shaped
+# and never reaches this gate.
 _OPAQUE_FOLDER_ID = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
 
 
