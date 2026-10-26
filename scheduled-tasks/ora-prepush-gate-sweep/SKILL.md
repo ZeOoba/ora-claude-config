@@ -10,7 +10,7 @@ READ-ONLY BY CONSTRUCTION. Never push, never commit, never stage, never edit a f
 STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-18; run before STEP 1). Same overnight-offline catch-up-burst exposure documented fleet-wide (README-DOUBLE-FIRE-GUARD.md) -- a second fire in the same window would re-run the gates twice and, on a failure day, send a duplicate FAIL email. Run this first:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-prepush-gate-sweep --block main --run-id <run_id> --ttl-min 30
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-prepush-gate-sweep --block main --run-id <run_id> --ttl-min 30
 ```
 
 - **Exit 10** -> today's sweep already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, do not re-run the gates, and report it as a NORMAL skip citing the earlier run's result.
@@ -34,13 +34,13 @@ STEP 3 — Aging check. Read maintenance/_state/prepush-gate-sweep.json if it ex
 STEP 4 — Report.
   - CLEAN: write the state file, send NOTHING, and stop. Silence is the success signal. Close the STEP 0 claim with no `--email-sent-at` (a no-send completion is legitimate, same convention as `ora-open-sessions-board`'s 0-actionable-items path):
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-prepush-gate-sweep --block main --run-id <run_id>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-prepush-gate-sweep --block main --run-id <run_id>
 ```
   - ANY genuine FAIL, or either of the first two gates exiting non-zero:
 
     **PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the send below).** Layer 2 of the STEP 0 guard, dated stem:
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: pre-push gates FAILING - <today's date>>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: pre-push gates FAILING - <today's date>>"
 ```
     The stem must sit at position 0 of the subject after `outlook-sent-probe.ps1` strips the leading `[ACTION]` tag (README-DOUBLE-FIRE-GUARD.md, Layer 2) -- so the date has to immediately follow "FAILING -" in the composed subject below, with any variable count/repeat suffix AFTER the date, never between the stem and the date.
 
@@ -55,11 +55,11 @@ powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send
 
     Close the STEP 0 claim now that the email has landed (or been skipped as an already-sent duplicate per the probe above):
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-prepush-gate-sweep --block main --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-prepush-gate-sweep --block main --run-id <run_id> --email-sent-at <ISO8601>
 ```
 Never fabricate a count -- report exactly what the gates printed. If a gate script is missing, report it as MISSING (a deleted gate is itself a finding), never as a pass.
 
 If the run aborts before reaching either branch above, call `fail` instead so the claim does not strand at IN_PROGRESS for the full TTL:
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-prepush-gate-sweep --block main --run-id <run_id> --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-prepush-gate-sweep --block main --run-id <run_id> --error "<what broke>"
 ```

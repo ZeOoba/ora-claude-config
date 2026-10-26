@@ -10,7 +10,7 @@ HARD LIMITS: read-only against the workbook. No writes to HubSpot, Notion, the w
 STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-18; run before STEP 1). Same overnight-offline catch-up-burst exposure documented fleet-wide (README-DOUBLE-FIRE-GUARD.md) — this task emails on EVERY run (STEP 6), including the STEP 1c fail-loud gate path, so a second fire in the same window would send a duplicate report or a duplicate gate-failure alert. Run this first:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-vacancy-aging-report --block main --run-id <run_id> --ttl-min 30
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-vacancy-aging-report --block main --run-id <run_id> --ttl-min 30
 ```
 
 - **Exit 10** → today's report already sent. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, do not re-read the workbook or send again, and report it as a NORMAL skip citing the earlier run's email.
@@ -26,7 +26,7 @@ STEP 1 — READ THE SOURCE OF RECORD (live workbook, read-only). File: `C:\Users
 
     **PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before this send).** Layer 2 of the STEP 0 guard, dated stem:
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Vacancy report could not trust the workbook - <today's date>>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Vacancy report could not trust the workbook - <today's date>>"
 ```
     Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, and still call `block-sentinel.py complete` (no `--email-sent-at`) so Layer 1 re-converges. Exit 1 → fail open: send anyway, and note the probe gap in the email body.
  Temp files only under `C:\Users\Owner\AppData\Local\Temp\ora-vacancy-report\`. GATE-SAFETY: never put the strings `website-canonical` or `oxford-site` in a shell command or path — a site-write guard blocks them.
@@ -63,7 +63,7 @@ STEP 6 — SEND. Email every run (this is a standing accountability report, not 
 
 **PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before this send).** Layer 2 of the STEP 0 guard, dated stem `Vacancy Report <date>` (the subject's dynamic tail — unit/dollar counts — varies run to run, so the stem excludes it):
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Vacancy Report <date>>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Vacancy Report <date>>"
 ```
 Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, and still call `block-sentinel.py complete` below (with `--email-sent-at` from the earlier send) so Layer 1 re-converges. Exit 1 → fail open: send anyway, and note the probe gap in the email body.
 
@@ -71,7 +71,7 @@ TO `ggoldberg@oxfordra.net` ONLY, never cc — via the sole send path `C:\Users\
 
 Close the STEP 0 claim on whichever branch fired:
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-vacancy-aging-report --block main --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-vacancy-aging-report --block main --run-id <run_id> --email-sent-at <ISO8601>
 ```
 On the send-failed-after-retry branch (run-log appended, no email), omit `--email-sent-at` — the run-log entry is this run's durable evidence in place of an email, same convention as a legitimate no-send completion. If the run aborts before reaching either branch, call `fail --task ora-vacancy-aging-report --block main --run-id <run_id> --error "<what broke>"` instead so the claim does not strand at IN_PROGRESS for the full TTL.
 

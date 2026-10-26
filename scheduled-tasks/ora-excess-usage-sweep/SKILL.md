@@ -10,7 +10,7 @@ PURPOSE: Each Friday at 3:00 PM ET, check whether meaningful weekly Claude usage
 This task shares the same overnight-offline catch-up-burst exposure that hit `ora-am-brief`/`ora-deal-aging-sla` on 2026-08-09 (both fleets fire only while the Desktop app is open, so a stretch offline through a Friday 3pm slot re-arms this task at next open) — nothing stands a second fire down today, and a duplicate mid-window run would burn a second usage check, a second backlog pass, and could open duplicate PRs for the same Open Items. Run this first, before STEP 1:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-excess-usage-sweep --block main --run-id <run_id> --ttl-min 60
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-excess-usage-sweep --block main --run-id <run_id> --ttl-min 60
 ```
 
 TTL is 60, not the 30 default, because this run's own budget spans the full 3:00-4:00 PM ET window (STEP 1 hard-stops work ~10 minutes before the 4:00 PM reset) — longer than the default assumes.
@@ -22,7 +22,7 @@ TTL is 60, not the 30 default, because this run's own budget spans the full 3:00
 Close the claim on whichever exit the run actually takes:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-excess-usage-sweep --block main --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-excess-usage-sweep --block main --run-id <run_id> --email-sent-at <ISO8601>
 ```
 
 Omit `--email-sent-at` on the STEP 1 no-op path (no send happened — a legitimate complete with no send, same convention as `ora-open-sessions-board`'s 0-actionable-items path). If the run aborts instead, call `fail --error "<what broke>"` so the claim does not strand at IN_PROGRESS for the full TTL. **Only the run that holds the claim may call `complete` or `fail`** — a run that stood down at STEP 0 (exit 10 or 11) calls neither. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`. Do not "fix" a double-fire by retiming this task's cron — the burst is documented fleet-wide behavior; the guard belongs here.
@@ -54,7 +54,7 @@ Compose the summary subject with a **dated stem**, `Excess-Usage Sweep - {YYYY-M
 **PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the send).** Layer 2 of the STEP 0 guard:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Excess-Usage Sweep - {YYYY-MM-DD}>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Excess-Usage Sweep - {YYYY-MM-DD}>"
 ```
 
 Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `block-sentinel.py complete` below so Layer 1 re-converges with reality. Exit 1 → fail open: send anyway, and record the probe gap in the summary.
@@ -64,7 +64,7 @@ Send ONE summary email via the Outlook COM send-via-outlook.ps1 script (C:\Users
 Close the STEP 0 claim now that the durable output has landed:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-excess-usage-sweep --block main --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-excess-usage-sweep --block main --run-id <run_id> --email-sent-at <ISO8601>
 ```
 
 NEVER: merge a PR to main, deploy oxfordra.net, edit a financial model/governor constant, touch a Hard-Invariant blast-radius path outside its supervised procedure, or expose confidential deal data — regardless of remaining time budget or usage pressure to "use it all."

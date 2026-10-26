@@ -12,7 +12,7 @@ RESTORATION NOTE: Moved 2026-08-15 from the LAMS/Cowork fleet to CC/MCP (Gabriel
 **This task is registered and ENABLED on BOTH fleets at the identical cron `30 6 15 * *`.** The CC/MCP copy (this file) was registered 2026-08-15 21:00 ET — its `lastRunAt: null` is benign, the registration simply landed ~14.5h after that day's 06:30 ET slot. The LAMS/Cowork twin (`OneDrive — Oxford Capital Partners\Documents\Claude\Scheduled\ora-passed-deal-tracker\SKILL.md`) is still `enabled: true`, `lastRunAt 2026-08-15T18:28:04.621Z`, `lastScheduledFor 2026-08-15T10:30:00.000Z`. The LAMS→CC move (`event_log.md`, 2026-08-15, item T3-12) was never completed, so **2026-09-15 is the first date on which both fleets fire this sweep** — and the documented fleet-wide catch-up burst can fire this copy twice on its own besides. Run this guard as the first action of the run:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-passed-deal-tracker --block main --run-id <session run_id> --ttl-min 30
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-passed-deal-tracker --block main --run-id <session run_id> --ttl-min 30
 ```
 
 Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both shells this host offers. This is a single-block task: the block id is `main` throughout (which the helper renders as `BLOCK_MAIN_*` tokens), and its state file is its own — `Claude_Workspace\_state\ora-passed-deal-tracker-block-completion.json`, keyed per task, so it cannot collide with `ora-am-brief`'s.
@@ -375,7 +375,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **Close the entry guard on this path too.** This is the easy one to miss: the zero-trades branch sends nothing, so there is no send step to hang the terminal call off, and a run that ends here still holds the claim it took at Step 0. Once the Ops Hub note lands:
 
    ```
-   python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-passed-deal-tracker --block main --run-id <run_id> --notion-page-id <Ops Hub note page id>
+   python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-passed-deal-tracker --block main --run-id <run_id> --notion-page-id <Ops Hub note page id>
    ```
 
    No `--email-sent-at` on this path — no email was sent, and stamping one would misreport the artifact. A zero-trades sweep is a completed sweep, so `complete` is correct here, not `fail`.
@@ -449,7 +449,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **7a — Layer 2 pre-send probe. Run this immediately before the `send-via-outlook.ps1` call, not earlier.** It asks the mail store itself whether this month's summary is already sent, which is the backstop for Layer 1 — whose state file lives on OneDrive and can be rolled back or briefly unavailable to a sync conflict:
 
    ```
-   powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt>"
+   powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt>"
    ```
 
    Probe the **full dated subject** — `ORA Passed-Deal Tracker — Monthly Sweep — YYYY-MM-DD`, using the same run date the subject rule above fixes. The full string is correct here, and this is a deliberate departure from `ora-am-brief` Block C and `ora-deal-aging-sla`, which must probe a shortened dated stem: those subjects carry live counts or a run-composed headline in the tail that legitimately differ between two fires of the same day, so the full string would fail to match the earlier send and wave the duplicate through. **This** subject carries no counts and no run-composed text — it is fully determined by the send date — so it is stable across fires and safe to match on whole. Matching is substring and normalization-tolerant (dash family folded to `-`, non-ASCII dropped, casefolded), so the em-dash form written here still matches a plain-hyphen message in the store.
@@ -467,7 +467,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **7b — close the entry guard** once the Ops Hub block and the send have both resolved:
 
    ```
-   python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-passed-deal-tracker --block main --run-id <run_id> --notion-page-id <Ops Hub page id> --email-sent-at <ISO8601>
+   python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-passed-deal-tracker --block main --run-id <run_id> --notion-page-id <Ops Hub page id> --email-sent-at <ISO8601>
    ```
 
    Every field is required; a short form exits 2 and the run silently never records COMPLETE.
@@ -477,7 +477,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 9. **On abort, record it — never leave the claim `IN_PROGRESS`:**
 
    ```
-   python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-passed-deal-tracker --block main --run-id <run_id> --error "<what broke>"
+   python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-passed-deal-tracker --block main --run-id <run_id> --error "<what broke>"
    ```
 
    A dangling `IN_PROGRESS` is the state to avoid. It is invisible on the day it happens — the outputs may even have shipped — but the next fire past the 30-minute TTL reads the stale claim as a crashed run and regenerates everything. Before finishing, if this run claimed at Step 0, confirm it ended in `complete` or `fail`; `block-sentinel.py status --task ora-passed-deal-tracker --block main` is read-only and creates nothing.
