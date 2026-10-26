@@ -163,6 +163,7 @@ def test_exempt():
     _, env = make_env()
     for tool in ("mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_delete_event",
                  "mcp__7c55602a-d1ec-4c77-a92e-06ee3c786d3a__image_remove_background",
+                 "mcp__ms365__outlook_untrash_thread",
                  "mcp__x__list_deleted_items"):
         rc, out, err = run(env, tool, {"id": "1"})
         check("G12 exempt %s passes silently" % tool.rsplit("__", 1)[-1],
