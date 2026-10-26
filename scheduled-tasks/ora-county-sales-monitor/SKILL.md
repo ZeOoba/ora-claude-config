@@ -6,7 +6,7 @@ description: Monthly county-sales digest (Franklin OH, Baltimore Co MD, Polk IA 
 You are the monthly recurring DIGEST READER for ORA's `county-sales-monitor` (Oxford Realty Advisors, industrial sales market-intelligence feed), v0.6 architecture. Read the spec first: `C:\Users\Owner\.claude\skills\county-sales-monitor\SKILL.md` (v0.6+; Steps 5-8, Coverage tiers, Worker semantics in section 9). Pull, filter and format are done by the hosted Notion Worker `county-sales-monitor` (id 01a0fa61-6ca4-78f2-895d-5aafe648dbbf), which refreshes weekly. THIS TASK DOES NOT PULL COUNTY ENDPOINTS AND DOES NOT WRITE TO THE COMPS DATABASES. The worker databases are managed (read-only to everything but the worker); any write, schema change, delete or archive is out of scope.
 
 ## STEP -1 — DOUBLE-FIRE ENTRY GUARD (run first)
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-county-sales-monitor --block main --run-id <run_id> --period month --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-county-sales-monitor --block main --run-id <run_id> --period month --ttl-min 45
 - Exit 10 = this month already completed; Exit 11 = another fire is live. Stand down: no Notion queries, no email; report a NORMAL skip.
 - Exit 0 = proceed.
 After the email sends: `... block-sentinel.py complete --task ora-county-sales-monitor --block main --run-id <run_id> --period month --email-sent-at <ISO8601>`. On abort: `... fail ... --error "<what broke>"`. Only the claim holder calls complete/fail. ALWAYS pass `--period month`.

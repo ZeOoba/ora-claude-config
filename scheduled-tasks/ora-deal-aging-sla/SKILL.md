@@ -24,7 +24,7 @@ AUTOMATION-BUDGET JUSTIFICATION: Closes a real, already-realized gap. On 2026-07
 Run this as the first action of the run:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-deal-aging-sla --block main --run-id <run_id> --ttl-min 30
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-deal-aging-sla --block main --run-id <run_id> --ttl-min 30
 ```
 
 - **Exit 10** → today's run already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without drafting, posting, or emailing**, and report it as a NORMAL skip (not a miss) citing the earlier run's Notion page.
@@ -34,13 +34,13 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --
 Once STEP 7 lands, run the full command (a short form exits 2 and nothing is recorded):
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-deal-aging-sla --block main --run-id <run_id> --notion-page-id <STEP 7 page id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-deal-aging-sla --block main --run-id <run_id> --notion-page-id <STEP 7 page id> --email-sent-at <ISO8601>
 ```
 
 If the run aborts instead, record that rather than leaving the claim dangling:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-deal-aging-sla --block main --run-id <run_id> --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-deal-aging-sla --block main --run-id <run_id> --error "<what broke>"
 ```
 
 **Only the run that holds the claim may call `complete` or `fail`.** A run that stood down at STEP 0 (exit 10 or 11) calls NEITHER — it did not claim anything, and calling `fail` would release the live run's claim. A non-owner is refused with exit 12 and nothing is written. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`. **Do not "fix" a double-fire by retiming this task's cron** — the burst is documented fleet-wide behavior; the guard belongs here.
@@ -245,7 +245,7 @@ Post a NEW DATED CHILD PAGE under the Notion Ops Hub parent page (`32b6ecd8-9e59
 **PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before that send).** Layer 2 of the STEP 0 guard:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Deal Aging SLA - {YYYY-MM-DD}>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Deal Aging SLA - {YYYY-MM-DD}>"
 ```
 
 Probe the **dated stem** `Deal Aging SLA - {YYYY-MM-DD}` and nothing more. The headline this step composes is run-specific and the leading tag is inconsistent — on 2026-08-09 the two sends were `Deal Aging SLA - 2026-08-09: 0 breaches - Patterson returned…` and `[ORA] Deal Aging SLA - 2026-08-09 - 0 breaches, 1 posture mismatch…`. The stem matches both (matching is substring and normalization-tolerant); the full subject would match neither. Exit 10 → do NOT send, log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `block-sentinel.py complete` so the state file re-converges. Exit 1 → fail open: send, and record the probe gap on the Notion page. On a COM failure for either the drafts or the summary send: retry once, then flag loudly in the Notion Ops Hub page if the retry also fails — do not halt the run.

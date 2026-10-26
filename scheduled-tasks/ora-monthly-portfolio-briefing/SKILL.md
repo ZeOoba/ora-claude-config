@@ -14,7 +14,7 @@ This task shares the same catch-up-burst exposure `ora-am-brief`/`ora-deal-aging
 Run this as the first action of the run:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --ttl-min 45
 ```
 
 - **Exit 10** → this month's briefing already completed. Exit without pulling the workbook/Notion or emailing; report a NORMAL skip citing the earlier run's Notion page.
@@ -24,13 +24,13 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --
 Once the email + Notion archive land, run:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --notion-page-id <archived page id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --notion-page-id <archived page id> --email-sent-at <ISO8601>
 ```
 
 If the run aborts instead:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-monthly-portfolio-briefing --block main --run-id <run_id> --period month --error "<what broke>"
 ```
 
 **Only the run that holds the claim may call `complete` or `fail`.** **Always pass `--period month`** on every call — omitting it addresses the day-keyed bucket instead and silently defeats the guard. Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`.
