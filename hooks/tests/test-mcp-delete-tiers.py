@@ -106,6 +106,15 @@ def test_false_positive_and_read_pins():
         # name, so a compound verb that starts with one is EXEMPT even though it deletes.
         ("mcp__x__get_and_delete", t.EXEMPT),
         ("mcp__x__restore_then_purge", t.EXEMPT),
+        # delete_trigger (claude-code-remote) is an explicit IRREVERSIBLE row, matched on the
+        # exact short name only: its non-deleting siblings stay unrouted and a compound name
+        # is not covered by the row.
+        ("mcp__claude-code-remote__delete_trigger", t.IRREVERSIBLE),
+        ("mcp__claude-code-remote__update_trigger", t.UNROUTED),
+        ("mcp__claude-code-remote__fire_trigger", t.UNROUTED),
+        ("mcp__claude-code-remote__archive_session", t.UNROUTED),
+        ("mcp__x__delete_trigger_and_sessions", t.UNKNOWN),
+        ("mcp__x__delete_triggers", t.UNKNOWN),
         # untrash is an explicit TIERS row (EXEMPT), NOT a read prefix: the restore tool is
         # exempt, its delete sibling stays gated, and a compound name starting with it is
         # not laundered.
@@ -284,6 +293,9 @@ def test_routed_middle_segment_floor():
     check("T11b middle verb does not downgrade IRREVERSIBLE", got == t.IRREVERSIBLE, "got=%s" % got)
     got = t.classify("mcp__x__delete__notion-delete-pages", {})[0]
     check("T11c middle verb does not downgrade RECOVERABLE", got == t.RECOVERABLE, "got=%s" % got)
+    got = t.classify("mcp__x__delete__delete_trigger", {})[0]
+    check("T11f middle verb does not downgrade the delete_trigger IRREVERSIBLE row",
+          got == t.IRREVERSIBLE, "got=%s" % got)
     # server segment alone is not a middle segment; clean names unaffected
     check("T11d server name with verb is not a middle segment",
           t.classify("mcp__delete_srv__list_all", {})[0] == t.EXEMPT)
