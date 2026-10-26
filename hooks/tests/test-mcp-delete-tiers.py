@@ -106,6 +106,13 @@ def test_false_positive_and_read_pins():
         # name, so a compound verb that starts with one is EXEMPT even though it deletes.
         ("mcp__x__get_and_delete", t.EXEMPT),
         ("mcp__x__restore_then_purge", t.EXEMPT),
+        # untrash is an explicit TIERS row (EXEMPT), NOT a read prefix: the restore tool is
+        # exempt, its delete sibling stays gated, and a compound name starting with it is
+        # not laundered.
+        ("mcp__ms365__outlook_untrash_thread", t.EXEMPT),
+        ("mcp__ms365__outlook_trash_thread", t.RECOVERABLE),
+        ("mcp__x__untrash_then_delete", t.UNKNOWN),
+        ("mcp__x__untrash_everything", t.UNKNOWN),
         ("Bash", t.UNROUTED),
         (None, t.UNROUTED),
     ]
@@ -264,6 +271,7 @@ def test_routed_middle_segment_floor():
         ("mcp__x__DELETE__restore", {}),
         ("mcp__x__delete__image_remove_background", {}),
         ("mcp__x__delete__outlook_delete_event", {}),
+        ("mcp__x__delete__outlook_untrash_thread", {}),
         ("mcp__x__purge_all__list_x", {}),
         ("mcp__x__delete_all__manage_campaign_objects", camp_create),
         ("mcp__my_srv-1__delete__get_thing", {}),
