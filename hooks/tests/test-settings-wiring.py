@@ -266,10 +266,14 @@ try:
     check("G3b the delete-gate row matcher equals mcp_delete_tiers.SETTINGS_MATCHER",
           DELETE_MATCHER == tiers.SETTINGS_MATCHER)
     import session_kind  # hooks/lib: classify() may run up to HARD_JOIN_SECONDS before it answers
-    g3c_timeout = next(r["timeout"] for r in t06["rows"] if r["id"] == "pre.mcp-delete-guard")
-    check("G3c the delete-gate hook timeout exceeds classify's hard wall (a hook timeout is "
-          "non-blocking: the delete would proceed unchecked)",
-          g3c_timeout > session_kind.HARD_JOIN_SECONDS, repr((g3c_timeout, session_kind.HARD_JOIN_SECONDS)))
+    G3C_MARGIN = 5  # interpreter start plus the post-classify file reads (allowlist, token, log)
+    g3c_rows = [r for r in t06["rows"] if r["id"] == "pre.mcp-delete-guard"]
+    g3c_timeout = g3c_rows[0].get("timeout") if g3c_rows else None
+    g3c_wall = getattr(session_kind, "HARD_JOIN_SECONDS", None)
+    check("G3c the delete-gate hook timeout clears classify's hard wall by >= %ds (a hook timeout "
+          "is non-blocking: the delete would proceed unchecked)" % G3C_MARGIN,
+          isinstance(g3c_timeout, (int, float)) and isinstance(g3c_wall, (int, float))
+          and g3c_timeout >= g3c_wall + G3C_MARGIN, repr((g3c_timeout, g3c_wall)))
     stale = copy.deepcopy(CHAINS)
     stale["editwrite"].remove("sensitive-file-guard")
     stale["bash"].remove("commit-hygiene-guard")
