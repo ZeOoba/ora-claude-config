@@ -376,6 +376,41 @@ def test_target_digest():
                                           t.target_label("notion-delete-pages", a)) is not None)
 
 
+def test_row_lookup_is_exact_case():
+    """TIERS rows key on the exact short name. A case variant must get the tier of a name
+    WITHOUT that row (pinned, not endorsed: the lookup is case-sensitive, so an upper-case
+    variant of a delete tool is gated as UNKNOWN, never as the row's tier). The dangerous
+    direction is an EXEMPT or lenient row leaking onto a case variant, for example by
+    changing the lookup to TIERS.get(short.lower())."""
+    variants_seen = 0
+    for key in sorted(t.TIERS):
+        for variant in sorted({key.upper(), key.swapcase(), key.title(), key.capitalize()}):
+            if variant == key:
+                continue
+            name = "mcp__x__" + variant
+            with_row = t.classify(name, {})[0]
+            row = t.TIERS.pop(key)
+            try:
+                without_row = t.classify(name, {})[0]
+            finally:
+                t.TIERS[key] = row
+            variants_seen += 1
+            check("T13 row %s does not apply to case variant %s" % (key, variant),
+                  with_row == without_row, "with_row=%s without_row=%s" % (with_row, without_row))
+    check("T13a the case-variant sweep actually ran", variants_seen >= 2 * len(t.TIERS),
+          "variants=%d rows=%d" % (variants_seen, len(t.TIERS)))
+    # readable pins for the rows that matter most; each differs from its exact-name tier
+    for name, exact_tier, want in (
+            ("mcp__ms365__OUTLOOK_UNTRASH_THREAD", t.EXEMPT, t.UNKNOWN),
+            ("mcp__claude-code-remote__DELETE_TRIGGER", t.IRREVERSIBLE, t.UNKNOWN),
+            ("mcp__scheduled-tasks__DELETE_SCHEDULED_TASK", t.IRREVERSIBLE, t.UNKNOWN),
+            ("mcp__x__OUTLOOK_DELETE_EVENT", t.EXEMPT, t.UNKNOWN)):
+        got = t.classify(name, {})[0]
+        check("T13b %s is %s, not the exact-name tier %s" % (name.rsplit("__", 1)[-1], want,
+                                                           exact_tier),
+              got == want and got != exact_tier, "got=%s" % got)
+
+
 def test_tier_names_are_unique():
     """One override name == one tier (override_tokens.py). config-write-guard owns
     allow-destructive-delete; only mcp-delete-guard may define allow-mcp-delete."""
@@ -409,6 +444,7 @@ if __name__ == "__main__":
     test_oversized_name_is_bounded()
     test_target_digest()
     test_tier_names_are_unique()
+    test_row_lookup_is_exact_case()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures[:12])))
         sys.exit(1)
