@@ -43,11 +43,15 @@ rules.md s26 read the output, not the status). Every non-last stage must itself 
 look-only stage (grep, head, ...) in the middle disqualifies the rewrite.
 Look-only runs (`pytest --collect-only`, `--listTests`, `--help`, `--version`)
 are not evidence. Already-guarded commands (`set ... pipefail` / `PIPESTATUS`)
-are left alone. A LAST stage that can exit before EOF (`| head -N`,
-`grep -q/-m/-l`, `sed 1q`, `read`, `less`, `more`, awk `exit`) also disqualifies
-the rewrite (bash_pipelines.quits_early): it would SIGPIPE a passing evidence
-command to rc 120/141 (and make `| grep -q` report the evidence command's
-failure instead of grep's). Such commands keep the status quo. Known residual
+are left alone. A LAST stage that can exit before EOF also changes the call
+(bash_pipelines.early_exit_kind). A PREDICATE (`grep -q/-l/-L`) always
+disqualifies the rewrite: pipefail would make it report the evidence command's
+failure instead of grep's. A LIMITER (`| head -N`, `grep -m`, `sed 1q`, `read`,
+`less`, `more`, awk `exit`) disqualifies it only for CHATTY evidence (test
+runners, gates), which it would SIGPIPE to rc 120/141 on a passing run; after
+short-output evidence (`git push/commit/merge`, `gh pr merge`) the rewrite
+stays, because those finish before the limiter quits and a bare `| head` is
+exactly how a rejected push gets reported as landed. Known residual
 (still rewritten, can still show rc 141 on a passing run): interpreters that stop
 reading (`python -c`, `perl -ne ... last`), `sh -c`/`bash -c` wrappers, wrappers
 that take options (`env -u/-i`, `stdbuf`, `nice`), script files (`sed -f`,
