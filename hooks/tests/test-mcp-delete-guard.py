@@ -146,6 +146,23 @@ def test_irreversible():
     ti = {"older_than_days": 30, "delete_sessions": True}
     check("G8 clean_up_worktrees with delete_sessions is irreversible",
           run(env, "mcp__ccd_host__clean_up_worktrees", ti)[0] == 2)
+    trig, ti = "mcp__claude-code-remote__delete_trigger", {"trigger_id": "trig_r06test"}
+    rc, _, err = run(env, trig, ti)
+    check("G8b delete_trigger without a token is blocked, even interactive",
+          rc == 2 and "allow-mcp-delete" in err, "rc=%d %s" % (rc, err[-200:]))
+    tok = mint(env, SESSION_A, [label(trig, {"trigger_id": "trig_other"})])
+    check("G8c a token for a different trigger_id is refused",
+          run(env, trig, ti)[0] == 2 and os.path.exists(tok))
+    os.remove(tok)
+    tok = mint(env, SESSION_A, [label(trig, ti)])
+    check("G8d a token bound to the exact trigger_id allows it once",
+          run(env, trig, ti)[0] == 0 and not os.path.exists(tok))
+    check("G8e and the next identical call is blocked again", run(env, trig, ti)[0] == 2)
+    check("G8f delete_trigger is blocked in a scheduled session even with a token",
+          (mint(env, SESSION_S, [label(trig, ti)]), run(env, trig, ti, sid=SESSION_S)[0])[1] == 2)
+    check("G8g update_trigger (the pause alternative) passes silently",
+          run(env, "mcp__claude-code-remote__update_trigger",
+              {"trigger_id": "trig_r06test", "enabled": False}) [:2] == (0, ""))
 
 
 def test_recoverable_and_unknown():
