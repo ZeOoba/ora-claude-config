@@ -184,6 +184,104 @@ def test_untouched():
        PREFIX in out, repr(out[:200]))
 
 
+def test_early_exit_last_stage():
+    """/insights review 2026-10-26 (C3): a LAST stage that quits before EOF
+    (`head -N`, `grep -q/-m/-l`, `sed 1q`, `read`, `less`, `more`) SIGPIPEs the
+    evidence command, so under pipefail a PASSING run reports rc 120/141, and
+    `cmd | grep -q x` inverts to 1 when cmd fails. Those commands are left as
+    written (status quo); consumers that read to EOF are still rewritten.
+    These cases all use CHATTY evidence (test runners, gates) except the
+    grep -q/-l predicates; short-output evidence behind a limiter is covered by
+    test_short_output_evidence_keeps_protection."""
+    for name, cmd in (
+            ("head -2", "python -m pytest -v tests/test_many.py | head -2"),
+            ("head -n 5", "npm run gate 2>&1 | head -n 5"),
+            ("head -c", "pytest -q | head -c 200"),
+            ("grep -q", "git push origin main 2>&1 | grep -q rejected"),
+            ("grep --quiet", "git push 2>&1 | grep --quiet rejected"),
+            ("grep -m1", "npm run gate 2>&1 | grep -m1 FAIL"),
+            ("grep -m 1", "npm run gate 2>&1 | grep -m 1 FAIL"),
+            ("grep --max-count", "npm run gate 2>&1 | grep --max-count=1 FAIL"),
+            ("grep -l", "npm test 2>&1 | grep -l FAIL"),
+            ("grep -ql combined", "npm test 2>&1 | grep -ql FAIL"),
+            ("egrep -q", "pytest | egrep -q 'passed'"),
+            ("rg -q", "pytest | rg -q passed"),
+            ("sed 1q", "pytest | sed 1q"),
+            ("sed -n 5q", "pytest | sed -n '5q'"),
+            ("sed /re/q", "pytest | sed '/passed/q'"),
+            ("read", "pytest | read first"),
+            ("less", "pytest | less"),
+            ("more", "pytest | more"),
+            ("full path head", "pytest | /usr/bin/head -3"),
+            ("cd hop head", "cd /c/x && npm run gate:ci 2>&1 | head -25"),
+            ("tee then head", "pytest | tee log.txt | head -3"),
+            ("env/wrapper head", "pytest | env LC_ALL=C head -2"),
+            ("sed -e1q attached", "pytest | sed -e1q"),
+            ("sed --expression=1q", "pytest | sed --expression=1q"),
+            ("sed /re/!q", "pytest | sed '/1/!q'"),
+            ("sed /re/Iq", "pytest | sed '/x/Iq'"),
+            ("grep --max=1 abbreviated", "pytest | grep --max=1 FAIL"),
+            ("grep --quie abbreviated", "pytest | grep --quie FAIL"),
+    ):
+        expect_untouched("early-exit last stage: " + name, cmd)
+    # Consumers that read to EOF keep the protection.
+    expect_rewrite("grep without -q", "npm run gate 2>&1 | grep FAIL")
+    expect_rewrite("grep -v", "npm run gate 2>&1 | grep -v hint")
+    expect_rewrite("grep -c counts to EOF", "pytest | grep -c passed")
+    expect_rewrite("sed s///", "pytest | sed 's/a/b/'")
+    expect_rewrite("sed -n 1p reads to EOF", "pytest | sed -n 1p")
+    expect_rewrite("sed -e with q inside the replacement text",
+                   "pytest | sed 's/quit/exit/'")
+    expect_rewrite("tail", "pytest | tail -5")
+    expect_rewrite("wc", "pytest | wc -l")
+    expect_rewrite("cat", "pytest | cat")
+
+
+def test_short_output_evidence_keeps_protection():
+    """/adversarial-merge-gate review of PR 353 (C1): the early-exit exemption is
+    only right for CHATTY evidence (test runners, gates), whose long output
+    SIGPIPEs under a limiter. `git push`/`commit`/`merge` and `gh pr merge` print
+    a few lines, finish before `head -N` quits, and are exactly the commands
+    whose FAILURE a bare pipe masks (a rejected push reported as landed). A
+    limiter after them keeps the pipefail rewrite. Only a PREDICATE consumer
+    (`grep -q/-l/-L`) is exempt for every kind, because pipefail inverts it."""
+    for name, cmd in (
+            ("push|head", "git push origin main 2>&1 | head -5"),
+            ("push|head -n", "git push origin main 2>&1 | head -n 5"),
+            ("pr merge|head", "gh pr merge 353 --squash 2>&1 | head -3"),
+            ("gh -R pr merge|head", "gh -R o/r pr merge 12 | head -3"),
+            ("commit|head", "git commit -F msg.txt 2>&1 | head -2"),
+            ("merge|sed 1q", "git merge origin/main 2>&1 | sed 1q"),
+            ("pull|head", "git pull --ff-only 2>&1 | head -4"),
+            ("rebase|head", "git rebase origin/main 2>&1 | head -4"),
+            ("cherry-pick|head", "git cherry-pick abc123 2>&1 | head -2"),
+            ("push|grep -m1", "git push 2>&1 | grep -m1 rejected"),
+            ("push|grep --max-count", "git push 2>&1 | grep --max-count=1 rejected"),
+            ("push|read", "git push 2>&1 | read first"),
+            ("push|tee|head", "git push 2>&1 | tee push.log | head -3"),
+            ("cd hop push|head", "cd /c/x && git push origin main 2>&1 | head -3"),
+            ("env push|head", "GIT_TRACE=0 git push | head -3"),
+            ("git -C push|head", "git -C C:/x push 2>&1 | head -3"),
+            ("push|head full path", "git push | /usr/bin/head -3"),
+            ("mixed short+chatty|head", "git push 2>&1 | pytest | head -3"),
+    ):
+        expect_rewrite("short-output evidence + limiter: " + name, cmd)
+    # A predicate consumer stays exempt for short-output kinds too.
+    for name, cmd in (
+            ("push|grep -q", "git push origin main 2>&1 | grep -q rejected"),
+            ("push|grep -l", "git push 2>&1 | grep -l rejected"),
+            ("push|grep -L", "git push 2>&1 | grep -L ok"),
+            ("commit|grep -ql", "git commit -F m 2>&1 | grep -ql hook"),
+            ("pr merge|grep --quiet", "gh pr merge 3 --squash 2>&1 | grep --quiet Merged"),
+            ("merge|grep --files-with-matches",
+             "git merge x 2>&1 | grep --files-with-matches CONFLICT"),
+    ):
+        expect_untouched("predicate consumer after short-output: " + name, cmd)
+    # Chatty evidence behind a limiter is still left alone.
+    expect_untouched("chatty gate|head", "npm run gate:ci 2>&1 | head -25")
+    expect_untouched("chatty pytest|sed 1q", "pytest -v | sed 1q")
+
+
 def test_unreadable_settings_does_not_rewrite():
     """Rewriting changes the string permission rules are matched against. With
     the deny list unreadable we cannot prove the prefix does not dodge a deny
@@ -246,7 +344,9 @@ def test_chain_position():
 
 
 def main():
-    for t in (test_rewrites, test_untouched, test_unreadable_settings_does_not_rewrite,
+    for t in (test_rewrites, test_untouched, test_early_exit_last_stage,
+              test_short_output_evidence_keeps_protection,
+              test_unreadable_settings_does_not_rewrite,
               test_dispatcher_merge_carries_updated_input, test_chain_position):
         try:
             t()
