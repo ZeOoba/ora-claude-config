@@ -202,53 +202,83 @@ _QUIT_ALWAYS = {"head", "read", "less", "more"}
 _GREPS = {"grep", "egrep", "fgrep", "rg", "ag"}
 # GNU grep accepts any unique abbreviation of a long option (`--max=1`, `--qui`).
 _GREP_LONG_EARLY = ("--qui", "--sil", "--max", "--files-with")
-_GREP_SHORT_EARLY = set("qlLm")
+_GREP_LONG_PREDICATE = ("--qui", "--sil", "--files-with")
+_GREP_SHORT_PREDICATE = set("qlL")
 _SED_QUIT = re.compile(r"(?:^|[;{}\s/\d$!IM])[qQ]\d*\s*(?:$|[;}])")
 _SED_E_ATTACHED = re.compile(r"^(?:-[a-zA-Z]*e|--expression=)(.+)$")
 
 
-def quits_early(stage):
-    """True when this stage can stop reading before EOF (head, grep -q/-m/-l/-L,
-    sed '...q', read, less, more, awk 'exit'). Upstream then dies of SIGPIPE, so
-    under pipefail a PASSING evidence command reports rc 120/141 and
-    `cmd | grep -q x` inverts to 1 when cmd fails. Conservative: a false True
-    only means no rewrite (status quo)."""
+PREDICATE = "predicate"   # grep -q/-l/-L: answers a yes/no, pipefail INVERTS it
+LIMIT = "limit"           # head -N, sed q, grep -m, read ...: cuts the output short
+
+
+def early_exit_kind(stage):
+    """How this stage can stop reading before EOF, or None when it reads to EOF.
+    PREDICATE (grep -q/-l/-L): `cmd | grep -q x` inverts to 1 under pipefail
+    when cmd fails, whatever cmd is. LIMIT (head, grep -m, sed '...q', read,
+    less, more, awk 'exit'): upstream dies of SIGPIPE only if it is still
+    writing, so a CHATTY command reports rc 120/141 when it passed, while a
+    short-output command finishes first and keeps its real status. Conservative:
+    a false positive only means no rewrite (status quo)."""
     w = command_words(stage)
     if not w:
-        return False
+        return None
     name, args = _base(w[0]), w[1:]
     if name in _QUIT_ALWAYS:
-        return True
+        return LIMIT
     if name in _GREPS:
+        kind = None
         for a in args:
             if a == "--":
                 break
             if a.startswith("--"):
                 if a.startswith(_GREP_LONG_EARLY):
-                    return True
-            elif a.startswith("-") and len(a) > 1 and _GREP_SHORT_EARLY & set(a[1:]):
-                return True
-        return False
+                    if a.startswith(_GREP_LONG_PREDICATE):
+                        return PREDICATE
+                    kind = LIMIT
+            elif a.startswith("-") and len(a) > 1:
+                letters = set(a[1:])
+                if _GREP_SHORT_PREDICATE & letters:
+                    return PREDICATE
+                if "m" in letters:
+                    kind = LIMIT
+        return kind
     if name == "sed":
         for a in args:
             m = _SED_E_ATTACHED.match(a)  # `-e1q`, `--expression=1q`
             if _SED_QUIT.search(m.group(1) if m else a) and (m or not a.startswith("-")):
-                return True
-        return False
+                return LIMIT
+        return None
     if name in ("awk", "gawk", "mawk"):
-        return any(re.search(r"\bexit\b", a) for a in args)
-    return False
+        return LIMIT if any(re.search(r"\bexit\b", a) for a in args) else None
+    return None
+
+
+def quits_early(stage):
+    """True when this stage can stop reading before EOF (see early_exit_kind)."""
+    return early_exit_kind(stage) is not None
+
+
+def short_output(label):
+    """True for evidence kinds that print a few lines and finish before a
+    limiter quits: git push/commit/merge/..., `gh pr merge`. Their failure is the
+    one a bare pipe masks (a rejected push reported as landed), so a limiter
+    after them must not switch the pipefail rewrite off."""
+    return label.startswith("git ") or label == "gh pr merge"
 
 
 def pipefail_targets(command):
     """Labels of the evidence commands a pipefail rewrite would protect, or []
     when the command is not eligible: single-statement shape (rewrite_shape),
     every non-last stage is an evidence command, `tee` or `cat`, AND the last
-    stage reads to EOF (quits_early)."""
+    stage does not defeat the rewrite: a PREDICATE consumer (grep -q/-l/-L)
+    always does; a LIMIT consumer (head, sed q, grep -m ...) does only when no
+    evidence stage is short-output (git push/commit/merge, gh pr merge)."""
     stages = rewrite_shape(command)
     if not stages or len(stages) < 2:
         return []
-    if quits_early(stages[-1]):
+    kind = early_exit_kind(stages[-1])
+    if kind == PREDICATE:
         return []
     found = []
     for stage in stages[:-1]:
@@ -259,6 +289,8 @@ def pipefail_targets(command):
         w = command_words(stage)
         if not w or _base(w[0]) not in _REWRITE_MIDDLE:
             return []
+    if kind == LIMIT and not any(short_output(k) for k in found):
+        return []
     return found
 
 
