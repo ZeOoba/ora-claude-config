@@ -2954,6 +2954,184 @@ def test_floor_result_round4_distant_keyword_declarations_still_flag_unit():
     print("  PASS test_floor_result_round4_distant_keyword_declarations_still_flag_unit")
 
 
+# Interim-checklist threshold wording (ora-skills PR #165, debt-management/references/
+# ltv-interim-netting-checklist.md). The checklist's OPERATIVE 40% lives on two lines that carry no
+# governor keyword and no "<=" comparator, so no pre-existing pass read them: a hand edit of the
+# threshold to 55% was silent (reviewer finding, PR #165). Lines quoted from the PR branch.
+_INTERIM_RESULT_LINE = ("- Result: strictly above %s (unrounded; never round down) is "
+                        "**LTV-FLAGGED (portfolio)**: Gabriel signs off or the transaction is not accepted.")
+_INTERIM_WORKSHEET_ROW = ("| 7 | Result = (1 + 3 + 5 loan − 6) / (2 − 4 + own value − "
+                          "own value sold), vs %s |")
+
+
+def test_interim_checklist_canonical_threshold_wording_stays_clean_unit():
+    m = _load_probe_module()
+    for line in (_INTERIM_RESULT_LINE % "40.00%", _INTERIM_RESULT_LINE % "40%",
+                 _INTERIM_WORKSHEET_ROW % "40%", _INTERIM_WORKSHEET_ROW % "40.0%"):
+        assert m.scan_line(line) == [], (
+            "canonical interim-checklist threshold must not flag; line=%r got=%r"
+            % (line, m.scan_line(line)))
+    print("  PASS test_interim_checklist_canonical_threshold_wording_stays_clean_unit")
+
+
+def test_interim_checklist_drifted_threshold_wording_flags_unit():
+    m = _load_probe_module()
+    for tpl in (_INTERIM_RESULT_LINE, _INTERIM_WORKSHEET_ROW):
+        for bad in ("55.00%", "45%", "40.5%", "65%", "0.40%"):
+            line = tpl % bad
+            out = m.scan_line(line)
+            assert len(out) == 1 and "canonical 40%" in out[0], (
+                "drifted interim-checklist threshold %s must flag exactly once; line=%r got=%r"
+                % (bad, line, out))
+    # reverse word order and the other comparator verbs of the same construct
+    for line in ("Flag: LTV-FLAGGED (portfolio) when the figure exceeds 50.00%.",
+                 "Result: greater than 45% is LTV flagged for Gabriel.",
+                 "Anything over 55% (unrounded) is **LTV-FLAGGED**."):
+        assert m.scan_line(line), "drifted LTV-FLAGGED threshold must flag; line=%r" % line
+    print("  PASS test_interim_checklist_drifted_threshold_wording_flags_unit")
+
+
+def test_interim_checklist_extractor_does_not_flag_unrelated_prose_unit():
+    m = _load_probe_module()
+    for line in (
+            "Vacancy above 10% over 12 months triggers a leasing review.",
+            "Flag any tenant with arrears above 5% of rent as watch.",
+            "| 2 | Result = NOI / debt service, vs 1.25x |",
+            "| 3 | Occupancy = leased SF / total SF, vs 95% |",
+            "The refi test is LTV-FLAGGED only for the portfolio; see the checklist.",
+            "- Result: strictly above 40.00% is LTV-FLAGGED; per-property refi ceiling stays 65%.",
+    ):
+        assert m.scan_line(line) == [], (
+            "unrelated prose / canonical dual statement must not flag; line=%r got=%r"
+            % (line, m.scan_line(line)))
+    print("  PASS test_interim_checklist_extractor_does_not_flag_unrelated_prose_unit")
+
+
+def test_interim_checklist_refute_round1_false_negatives_closed_unit():
+    """REFUTE round 1 (2026-10-27), C1-C3: each shape below hid a real drift."""
+    m = _load_probe_module()
+    must_flag = (
+        # C1: 40 -> 65 on a PORTFOLIO flag line that also mentions per-property elsewhere on the line
+        "Above 65% → **LTV-FLAGGED (portfolio)**: flag, never kill; the per-property refi ceiling is 65% per-property.",
+        "Above 65% is an **LTV-FLAGGED (portfolio)** item requiring sign-off (per-property stays 65%).",
+        # C2: a canonical 40% earlier on the line must not hide the drifted value after it
+        "- Result: above 40% gross or above 55% netted is LTV-FLAGGED",
+        "| 7 | Result = (1 + 3 + 5 loan − 6) / (2 − 4 + own value − own value sold), vs 40% / 55% |",
+        # C3: markup, dash and wording variants of the same construct
+        "- Result: strictly above **55%** is **LTV-FLAGGED (portfolio)**",
+        "- Result: strictly above **55**% is LTV-FLAGGED",
+        "- Result: strictly above 55% is LTV–FLAGGED",
+        "- Result: strictly above 55% is LTV‑FLAGGED",
+        "- Result: strictly above 55% is LTV_FLAGGED",
+        "- Result: &gt; 55% is LTV-FLAGGED",
+        "- Result: ≥ 55% is LTV-FLAGGED",
+        "- Result: more than 55% is LTV-FLAGGED",
+        "- Result: exceeding 55% is LTV-FLAGGED",
+        "| 7 | Result = (1 + 3 + 5 loan − 6) / (2 − 4 + own value − own value sold), vs **55%** |",
+        "| 7 | Result = (1 + 3 + 5 loan − 6) / (2 − 4 + own value − own value sold), versus 55% |",
+        "| 7 | Result = (1 + 3 + 5 loans − 6) / (2 − 4 + own value − own value sold), vs 55% |",
+    )
+    for line in must_flag:
+        assert m.scan_line(line), "drifted interim-checklist threshold must flag; line=%r" % line
+    print("  PASS test_interim_checklist_refute_round1_false_negatives_closed_unit")
+
+
+def test_interim_checklist_refute_round1_false_positive_guards_unit():
+    """REFUTE round 1, C4/C6: each guard must be pinned by a line that would flag without it."""
+    m = _load_probe_module()
+    must_stay_clean = (
+        # loan-token guard: a debt-yield / LTC / lender-max row shares the word 'loan'
+        "| Debt yield | Result = NOI / loan, vs 10% |",
+        "| 9 | Result = new loan / total value, vs 75% lender max |",
+        "| 5 | Result = (loan + mezz) / cost, vs 80% LTC |",
+        # flag STATISTIC, not the threshold
+        "LTV flag rate over 30% of pipeline deals last year.",
+        # the ratified per-property 65 stated as a comparator on a per-property flag line
+        "A single asset above 65% per-property is LTV-flagged at the property level.",
+        # canonical dual statement, canonical decoy on both sides
+        "- Result: above 40% gross or above 40.00% netted is LTV-FLAGGED",
+        # correction note: the corrected-away 55 is skipped, the live 40 is canonical
+        "Corrected from 55% to 40%: above 40% is LTV-FLAGGED.",
+    )
+    for line in must_stay_clean:
+        assert m.scan_line(line) == [], (
+            "must not flag; line=%r got=%r" % (line, m.scan_line(line)))
+    print("  PASS test_interim_checklist_refute_round1_false_positive_guards_unit")
+
+
+_ROW_FORMULA = "Result = (1 + 3 + 5 loan − 6) / (2 − 4 + own value − own value sold)"
+
+
+def test_interim_checklist_refute_round2_unit():
+    """REFUTE round 2 (2026-10-27): every repro, both directions, plus a pin for each guard that
+    survived mutation, the accepted loud-flag case, and a time bound (C11 was cubic)."""
+    import time
+    m = _load_probe_module()
+    must_flag = (
+        # C6: worksheet-row edits that dropped the row
+        "| 7 | " + _ROW_FORMULA + ", vs 40% (gross) / 55% (netted, noi-neutral) |",
+        "| 7 | " + _ROW_FORMULA.replace("value", "values") + ", vs 55% |",
+        "| 7 | **Result** = (1 + 3 + 5 loan) / (2 own value), vs 55% |",
+        "| 7 | Result: (1 + 3 + 5 loan) / (2 own value), vs 55% |",
+        "| 7 | " + _ROW_FORMULA + " | vs 55% |",
+        "| 7 | " + _ROW_FORMULA + " vs 55% |",
+        "| 7 | " + _ROW_FORMULA + ", vs 40% | 55% |",
+        # C5: 40 -> 65 with a per-property parenthetical right next to the value
+        "Above 65% (per-property refi ceiling unchanged) → **LTV-FLAGGED (portfolio)**",
+        # C3/C4: remaining variants
+        "- Result: strictly above `55%` is LTV-FLAGGED",
+        "- Result: in excess of 55% is LTV-FLAGGED",
+        "- Result: beyond 55% is LTV-FLAGGED",
+        ("- Result: strictly above 55% (unrounded; never round down, measured on the Oxford-share booked "
+         "debt plus signed loans and the loan under test) is **LTV-FLAGGED (portfolio)**"),
+        "LTV-FLAGGED when the result net of lender holdbacks exceeds 55%",
+        # round-2 review N1-N3: the checklist's own wording and clause-bounded guards
+        "- Result: strictly above 55% (Oxford-share, unrounded) is **LTV-FLAGGED (portfolio)**",
+        "- Result: strictly above 55% (unrounded, i.e. never round down) is **LTV-FLAGGED (portfolio)**",
+        "Hold DSCR at 1.25x; above 55% → **LTV-FLAGGED (portfolio)**",
+        "LTV-FLAGGED (portfolio) when the yield-adjusted result exceeds 55%",
+        # per-property marker FAR from the value does not veto a 65 on a flag line (pins veto distance)
+        ("Above 65% is LTV-FLAGGED here; many words later in an unrelated clause the note mentions the "
+         "per-property refi ceiling"),
+    )
+    for line in must_flag:
+        assert m.scan_line(line), "drifted threshold must flag; line=%r" % line
+    must_stay_clean = (
+        # C7: dual-ceiling doctrine statements and ratios of other metrics
+        "Per-property: above 65% → LTV-FLAGGED (property); portfolio: above 40% → LTV-FLAGGED (portfolio)",
+        "A per-property LTV above 65% is LTV-FLAGGED; the portfolio aggregate test stays 40%.",
+        "| Loan | LTC above 80% | LTV-FLAGGED if the lender also caps |",
+        "Occupancy above 90% and LTV-FLAGGED deals are reviewed weekly.",
+        "LTV-FLAGGED share over 25% of pipeline.",
+        "Above 25% of pipeline deals are LTV-FLAGGED.",
+        "Debt yield above 10% is an LTV-FLAGGED signal for the lender.",   # another ratio named in-clause
+        # pins: the 'loan' token and the numeric range guard
+        "| 4 | Result = equity / value, vs 55% |",
+        "| 4 | Result = new loan / total value, vs 75% lender max |",
+        # each formula guard alone (the whole-line 'loan' pre-gate is satisfied by the trailing note)
+        "| 4 | Result = equity / value, vs 55% | note: no loan involved |",   # formula lacks 'loan'
+        "| 4 | Result = loan / equity, vs 55% |",                            # formula lacks 'value'
+        "| 4 | Result = loan x value, vs 55% |",                              # formula lacks '/'
+        "| 4 | Result = noi / (loan value), vs 55% |",                        # other-ratio word in formula
+        # sentence boundary: a flag term in the NEXT sentence is not this threshold
+        "Above 55% of gross revenue is the target. LTV-FLAGGED deals are reviewed weekly.",
+        "- Result: above 0% is LTV-FLAGGED",
+        "- Result: above 150% is LTV-FLAGGED",
+    )
+    for line in must_stay_clean:
+        assert m.scan_line(line) == [], "must not flag; line=%r got=%r" % (line, m.scan_line(line))
+    # C8: accepted LOUD flag -- a changelog line narrating an old comparator value is reworded, not skipped
+    assert m.scan_line("v1.7: corrected the LTV-FLAGGED trigger from over 45% to over 40% (typo)."), (
+        "narrated old comparator value flags loudly by design")
+    # C11: linear time on adversarial long lines
+    t0 = time.time()
+    m.scan_line("| result = " + "loan / " * 3500 + "value")
+    m.scan_line("above 40% " * 4000 + "ltv-flagged")
+    m.scan_line("*" * 50000 + "55%")
+    assert time.time() - t0 < 3.0, "interim-checklist passes must be linear-time on long lines"
+    print("  PASS test_interim_checklist_refute_round2_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -3052,6 +3230,12 @@ def main():
     test_floor_result_round2_binder_declarations_still_flag_unit()
     test_floor_result_round3_verbphrase_binders_still_flag_unit()
     test_floor_result_round4_distant_keyword_declarations_still_flag_unit()
+    test_interim_checklist_canonical_threshold_wording_stays_clean_unit()
+    test_interim_checklist_drifted_threshold_wording_flags_unit()
+    test_interim_checklist_extractor_does_not_flag_unrelated_prose_unit()
+    test_interim_checklist_refute_round1_false_negatives_closed_unit()
+    test_interim_checklist_refute_round1_false_positive_guards_unit()
+    test_interim_checklist_refute_round2_unit()
     test_event_log_excluded_e2e()
     test_active_work_claims_pruned_unit()
     test_active_work_claims_excluded_e2e()
