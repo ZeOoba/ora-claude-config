@@ -315,6 +315,26 @@
             "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-preguard.py\""
           }
         ]
+      },
+      {
+        "matcher": "mcp__.*__.*([Dd]elete|DELETE|[Tt]rash|TRASH|[Rr]emove|REMOVE|[Pp]urge|PURGE|[Dd]iscard|DISCARD).*|mcp__.*__(clean_up_worktrees|notion-calendar-cancel-events|sharepoint_move_item|manage_segment|manage_campaign_objects)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/mcp-delete-guard.py\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit|mcp__.*__(write_file|edit_block|move_file|write_pdf)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/sensitive-file-guard.py\"",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "SessionStart": [

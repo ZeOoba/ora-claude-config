@@ -66,7 +66,7 @@ The prior `8a611864` Composio wrapper is NOT connected; Rube (`d6315173`) is ret
 **Claim at the head of each block** (`--block blockA` / `blockB` / `blockC`), before any of that block's work:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45
 ```
 
 - **Exit 0** → claimed; run the block normally.
@@ -95,7 +95,7 @@ Guarantee every ACTIVE scheduled task's SKILL.md is present at the scheduler's c
 **A.00 — CLAIM BLOCK A** (first action in this block, before A.0's lateness computation): `block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45`, per STEP 0. Exit 10/11 → skip to Block B, recording a NORMAL skip. This guards A.1's self-heal as well as A.0's alert: `guard.ps1` **restores files and writes mirrors**, so it is the one genuinely mutating step in this task.
 
 **A.0 — WAKE-LATENESS IMMEDIATE ALERT (NEW 2026-07-22).** This task's cron target is 05:15 ET. On every fire, compute how late the session actually started vs that target. Motivating pattern: repeated "machine/Cowork-app closed overnight" catch-up bursts (2026-07-14, 2026-07-20, 2026-07-21, 2026-07-22) sat undetected until `automation-health-monitor`'s ~11:05 ET run — a 3-6 hour silent gap. No on-machine scheduled task (this one included) can fire before the machine itself wakes, so this cannot be a true pre-9am external ping (that would require extending the existing GitHub Actions/Power Automate dead-man's-switch pattern already used for `ora-cowork-heartbeat` — out of reach from a Cowork/Code session, no such connector available; flagged as a follow-up requiring a session with GitHub/Power Automate access). What this step CAN do: convert "silently discovered ~5h later" into "alerted the instant the system notices."
-  - If actual start time is **> 45 minutes past 05:15 ET**, this is a late/catch-up wake. **Probe Sent Items first** (Layer 2, mandatory before this send): `powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Overnight machine-offline detected>"`. Exit 10 → do NOT send; log `BLOCK_A_WAKE_ALERT_ALREADY_IN_SENT_ITEMS` and record a NORMAL skip. Exit 1 → fail open: send, and record the probe gap.
+  - If actual start time is **> 45 minutes past 05:15 ET**, this is a late/catch-up wake. **Probe Sent Items first** (Layer 2, mandatory before this send): `powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Overnight machine-offline detected>"`. Exit 10 → do NOT send; log `BLOCK_A_WAKE_ALERT_ALREADY_IN_SENT_ITEMS` and record a NORMAL skip. Exit 1 → fail open: send, and record the probe gap.
     **This stem is deliberately UNDATED — the only one in this file.** The minutes-late figure sits *between* the stem and the date (`…woke 320min late — 2026-07-24`) and legitimately differs between two fires, so no dated prefix can cover both. Date scoping comes from the probe's `SentOn` filter (default: today, host clock = ET), not from the subject. The stem stays safe only because it is anchored at position 0 — pinned by self-test cases proving it does **not** match this task's other two emails.
     Then send a SEPARATE, lightweight standalone email (do NOT wait for the Block C consolidated send) via the SOLE send path `send-via-outlook.ps1`, to `ggoldberg@oxfordra.net` only:
     - Subject: `🌙 Overnight machine-offline detected — ora-health-guard woke {N}min late — YYYY-MM-DD`
@@ -213,7 +213,7 @@ Five verdicts. **`STALE-LOCATION` is checked FIRST and outranks `FROZEN`, becaus
 
 **A.1 — Execute the deterministic engine** via Bash/Desktop Commander (bare `powershell` is NOT on PATH; use the full interpreter):
 ```
-C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\ora-task-integrity-guard\guard.ps1"
+C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\ora-task-integrity-guard\guard.ps1"
 ```
 **(Repointed 2026-07-09 — the original `scheduled-task-integrity-guard\guard.ps1` was retired 2026-06-11; see RESTORATION NOTE above.)** This is the SAME authoritative engine `ora-task-integrity-guard` runs daily at 12:54 PM ET — invoking it again here at 05:15 ET is safe and intentional: the engine is idempotent (canonical-is-authoritative, add-only, never deletes — NOT newest-wins; see the 2026-08-09 rewrite note), and this earlier run exists specifically to protect the 06:00 morning batch, independent of `ora-task-integrity-guard`'s own later alarm-email run. Per `ora-task-integrity-guard`'s own spec, this engine restores any MISSING SKILL.md at each task's registry `filePath` from a surviving copy (canonical + 2 mirrors, never deletes) across BOTH registries. **It no longer restores a "stale" canonical (rewritten 2026-08-09):** a present canonical is authoritative and is never overwritten, because "stale" was decided by mtime and a mirror can hold OLDER CONTENT with a NEWER MTIME — which reverted three live SKILL.mds on 2026-08-09. Content that has moved backwards is now REPORTED via `regressed[]`, not silently rewritten (`claude-code-sessions` AND `local-agent-mode-sessions`). **Do NOT reimplement this logic — treat both tasks' invocations as calling the same authoritative script, not two independent ones.** *(This is the I6-permitted bounded mutation. The engine restores SKILL.md task-instruction files only — it does NOT touch settings/hooks/CLAUDE/memory or the registry.)*
 
@@ -232,7 +232,7 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 **A.5 — CLOSE THE BLOCK A CLAIM.** Run this once A.1–A.4 have resolved **or Block A was skipped for an absent engine (A.1)**. Both are *recorded outcomes*, not aborted blocks — an INTEGRITY ENGINE ERROR and an INTEGRITY ENGINE ABSENT each produce a reportable result, so both close with `complete`:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockA --run-id <run_id>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-health-guard --block blockA --run-id <run_id>
 ```
 
 Block A publishes no Notion page, so `--notion-page-id` is omitted; add `--email-sent-at <ISO8601>` **only if A.0 actually sent the late-wake alert**. Call `fail --error "<what broke>"` instead only if the block genuinely aborted before A.2 captured anything — that releases the claim so an operator retry need not wait out the TTL.
@@ -359,7 +359,7 @@ Block A publishes no Notion page, so `--notion-page-id` is omitted; add `--email
 **B.3.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the B.3 send).** Layer 2 of the double-fire guard, and the step that would have stopped the 2026-07-24 duplicate:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: ORA Connector Pre-Flight - {YYYY-MM-DD}>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: ORA Connector Pre-Flight - {YYYY-MM-DD}>"
 ```
 
 Probe the **dated stem** `ORA Connector Pre-Flight - {YYYY-MM-DD}` and nothing more — write it with a plain ASCII hyphen and **no leading emoji**. The status prefix (`✅` / `⚠️`) and the trailing connector list are both run-specific: on 2026-07-24 the two sends were `ORA Connector Pre-Flight - 2026-07-24 - Notion OK` and `✅ ORA Connector Pre-Flight — 2026-07-24 — Notion OK`. The stem matches both after normalization; either full subject would have matched only itself, which is precisely how that duplicate got through. Exit 10 → do **NOT** send; log `BLOCK_B_MIRROR_ALREADY_IN_SENT_ITEMS` with the probe's matched `sentOn`, record a NORMAL skip, and still call `complete` at B.3.9 so the state file re-converges. Exit 1 → fail open: send, and record the probe gap.
@@ -414,7 +414,7 @@ Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no relia
 **B.3.9 — CLOSE THE BLOCK B CLAIM.** After the B.3 send resolves and B.3.5b's beacon write has been attempted (success *or* documented skip — a skipped beacon on a known Notion outage is a completed block, not a failed one):
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockB --run-id <run_id> --notion-page-id 3a56ecd8-9e59-8152-83b6-c61cec736f2b --email-sent-at <ISO8601 of the successful send>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-health-guard --block blockB --run-id <run_id> --notion-page-id 3a56ecd8-9e59-8152-83b6-c61cec736f2b --email-sent-at <ISO8601 of the successful send>
 ```
 
 Omit `--email-sent-at` if the send failed (any exit code) and B.4's local-log path was used instead — the block still completed, it simply has no send timestamp to record. Call `fail --error "<what broke>"` only if the block aborted before B.3 (which releases the claim, correctly allowing a retry to capture a fresh mirror — see the B.0 tradeoff note).
@@ -491,7 +491,7 @@ If any probe script is missing/absent this run (folders may not have survived th
 **C.4.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the C.4 send):**
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Health Guard - {YYYY-MM-DD}>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Health Guard - {YYYY-MM-DD}>"
 ```
 
 Probe the **dated stem** `Health Guard - {YYYY-MM-DD}` — **without** the `[ORA]` / `[ACTION]` tag (the probe strips leading bracket tags, so including one would over-narrow the match and let a verdict flip through) and without the trailing verdict. Exit 10 → do **NOT** send; log `BLOCK_C_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `complete` at C.4.9. Exit 1 → fail open: send, and record the probe gap.
@@ -501,7 +501,7 @@ Probe the **dated stem** `Health Guard - {YYYY-MM-DD}` — **without** the `[ORA
 **C.4.9 — CLOSE THE BLOCK C CLAIM.** Once the send resolves:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockC --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-health-guard --block blockC --run-id <run_id> --email-sent-at <ISO8601>
 ```
 
 Block C publishes no Notion page, so `--notion-page-id` is omitted. Call `fail --error "<what broke>"` if the probe suite aborted before C.2 composed anything.

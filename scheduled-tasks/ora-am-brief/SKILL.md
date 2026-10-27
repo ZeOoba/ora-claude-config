@@ -40,7 +40,7 @@ Two independent layers. Neither is sufficient alone — keep both.
 **Layer 1 — per-block, per-ET-date sentinel.** State file:
 
 ```
-C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\ora-am-brief-block-completion.json
+C:/Users/Owner/OneDrive - Oxford Capital Partners/Claude_Workspace/_state/ora-am-brief-block-completion.json
 ```
 
 Shape: `{ "<YYYY-MM-DD>": { "blockA|blockB|blockC|blockD": { status, runId, claimedAt, notionPageId, emailSentAt } } }`.
@@ -56,7 +56,7 @@ Helper: `C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py` (shar
 Run this as the block's first action, substituting the block id (`blockA`/`blockB`/`blockC`/`blockD`). Use ONE `run_id` for the whole session:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-am-brief --block blockB --run-id <session run_id> --ttl-min 30
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-am-brief --block blockB --run-id <session run_id> --ttl-min 30
 ```
 
 Act on the exit code — it is the whole contract:
@@ -73,7 +73,7 @@ An `IN_PROGRESS` record **older** than the TTL is treated as a crashed run: the 
 ### Step N — complete (immediately after the block's outputs land)
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockB --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601 of the successful send>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-am-brief --block blockB --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601 of the successful send>
 ```
 
 Call `complete` only **after** the block's durable outputs exist. If the block genuinely failed, call `fail` instead (`--error "<what broke>"`) — that releases the claim immediately so a legitimate operator retry does not have to wait out the TTL. Leaving a block silently `IN_PROGRESS` is the one state to avoid.
@@ -115,7 +115,7 @@ BLOCK A — RATE/TREASURY PREFETCH (run FIRST, weekdays only; SKIP Sat/Sun & US 
 A.0 ENTRY GUARD — `block-sentinel.py claim --task ora-am-brief --block blockA --run-id <run_id> --ttl-min 30`, per DOUBLE-FIRE ENTRY GUARD above. Exit 10 → log `BLOCK_A_ALREADY_COMPLETE_TODAY`, skip Block A, record a NORMAL skip, and carry the EXISTING snapshot's `prefetch_status`/`fetched_at` forward for Block B Section 3 and Block C.0.5 by reading the "Rate Snapshot — Current" page rather than re-fetching. Exit 11 → stand down the block. A.3 overwrites a fixed page via `replace_content`, so an unguarded second fire silently destroys the first fire's snapshot and appends a duplicate Rate History row. After A.3 succeeds, run the full command (every field is required; a short form exits 2 and Block A silently never records COMPLETE):
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockA --run-id <run_id> --notion-page-id 35e6ecd8-9e59-814f-ae22-fe99464084d1
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-am-brief --block blockA --run-id <run_id> --notion-page-id 35e6ecd8-9e59-814f-ae22-fe99464084d1
 ```
 
 A.1 FETCH (best-effort, record every gap; never retry a source more than twice): (a) UST constant-maturity yields, prior trading day's close, 2Y/5Y/10Y/30Y minimum (more tenors where available; interpolate unconfirmed intermediates and tag [DERIVED]) — try U.S. Treasury daily par-yield XML (…/pages/xml?data=daily_treasury_yield_curve&field_tdr_date_value_month=YYYYMM) first, then web_search (dshort/Forbes/CNBC/StreetStats). (b) SOFR — overnight print plus 30/90/180-day averages and SOFR Index via NY Fed JSON API (markets.newyorkfed.org/api/rates/secured/sofr/last/5.json and /sofrai/last/3.json); CME Term SOFR is license-gated — mark LICENSE-GATED/n/a. This CC/MCP surface reaches the NY Fed API directly for a **curl-based fetch** (no 403 — that gap was specific to the Cowork hosted-fetch tooling) — but that does NOT hold for the WebFetch tool specifically. The 2026-08-04 06:00 backfill run confirmed the NY Fed API returns **HTTP 403 via WebFetch** (and the Treasury XML endpoint in (a) above **times out via WebFetch** too) while both return cleanly via curl. Fetch both sources with a local curl/`Invoke-RestMethod` call (e.g. Desktop Commander `start_process`), not the WebFetch tool. So this run should obtain these fields itself rather than relying on `ora-sofr-direct-prefetch`'s later patch — but do NOT characterize that task's later run as a no-op. **PUBLICATION WINDOW (verified 2026-07-24 — this drives everything below).** The NY Fed publishes overnight SOFR at **approximately 8:00 a.m. ET**, and the SOFR Averages and Index "shortly after" it (Federal Reserve Bank of New York, *Additional Information About Reference Rates*). This task fires at **06:00 ET — two hours BEFORE publication.** So on an on-schedule run the newest data that EXISTS is overnight SOFR only through **D−2** (D−1's print lands ~08:00 on D) and SOFR Averages/Index only through **D−1**. Confirmed against the Rate History log: the 2026-07-16 run, fetched at exactly 06:00 ET, carried the 07-15 SOFRAI print and the 07-14 overnight rate (3.63 — 07-15's actual print was 3.64), whereas the 07-24 run at 10:40 ET, after publication, carried the same-day 07-24 print. Consequently `ora-sofr-direct-prefetch` (weekdays ~10:10 AM ET, i.e. after the publication window) typically advances the 30/90/180-day average and Index rows to a genuinely newer effective date — a substantive refresh, not a confirmation (and not a required dependency in either direction). It is a confirmation ONLY on catch-up-burst days when THIS run fires after ~10:10 ET and has actually compared the values. **Never write a forward-looking claim about that task into the page** — the 2026-07-21 run published "`ora-sofr-direct-prefetch` … is a no-op confirmation this run — all SOFR fields already obtained here" while itself carrying 07-20 averages, which the 10:10 task then correctly advanced to the 07-21 print. State a match only retrospectively, and only when this run actually observed it. **SOFR ROW LABELING (hard rule).** Every SOFR strip row must carry the `effectiveDate` the API returned for THAT row — never a date inferred from `prior_trading_day`, never one carried across rows. The header's `prior_trading_day` anchors the **UST close only**; UST and SOFR publish on different latencies, so on an on-schedule 06:00 run the SOFR strip legitimately sits one business day behind that header. That lag is EXPECTED: state it plainly in the row notes, do NOT let it alone set SOURCE_DEGRADED, and do NOT paper over it — it is exactly what the 10:10 task closes. The 2026-07-16 06:00 run printed `prior_trading_day: 2026-07-15` while its SOFR Spot row held the 07-14 rate; a figure printed under a header date it does not belong to is a labeling fabrication, not a rounding detail. (c) Spreads & credit — compute 10Y−2Y bp; BBB OAS (BAMLC0A4CBBB) via fred MCP if loaded, else web_search (FRED HTTP is usually blocked here — do not rely on it); 30Y FRM via web_search "Freddie Mac PMMS 30-year fixed". (d) CME FedWatch — next FOMC date + hold/cut/hike probabilities (best-effort, cite as-of date); Fed funds target range.
@@ -146,7 +146,7 @@ Run the daily-brief skill (installed skill; do not pin a version number here, it
 **B.SEND.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the COM send).** Layer 2 of the double-fire guard. Write the exact subject you are about to send to a UTF-8 temp file and probe:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt with the full dated subject>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt with the full dated subject>"
 ```
 
 - **Exit 10** (`ALREADY_SENT`) → **do NOT send.** Log `BLOCK_B_EMAIL_ALREADY_IN_SENT_ITEMS` with the matched `sentOn` from the probe's JSON, and record a NORMAL skip. Still record COMPLETE so the state file re-converges with reality — this is precisely the state-file-lost path, and if this run never held a claim you must say so explicitly by adding `--adopt`: `... complete --task ora-am-brief --block blockB --run-id <run_id> --adopt --email-sent-at <the probe's matched sentOn>`. Use the **probe's** `sentOn`, not now — the email went out on the earlier fire, and recording the current time would misdate the artifact.
@@ -286,7 +286,7 @@ Surface unresolved Claude sessions on BOTH desktops (Code + Cowork) waiting on G
 
 Run (read-only, ~2 min):
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\maintenance\open_sessions_probe.py --days 14
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/maintenance/open_sessions_probe.py --days 14
 ```
 If this script path no longer exists (verify with a file check before assuming it does), skip this sub-step, log `OPEN_SESSIONS_PROBE_SCRIPT_MISSING`, and continue — do not halt Block C on it.
 
@@ -345,7 +345,7 @@ Send via Outlook COM — `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-vi
 **First, close the entry guard claimed at C.00** — Block C's outputs (C.7 Notion page, C.8 email) have landed, so record it before writing the summary:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockC --run-id <run_id> --notion-page-id <C.7 page id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-am-brief --block blockC --run-id <run_id> --notion-page-id <C.7 page id> --email-sent-at <ISO8601>
 ```
 
 If Block C aborted, call `fail --task ora-am-brief --block blockC --run-id <run_id> --error "<what broke>"` instead. Leaving blockC `IN_PROGRESS` after its outputs shipped is the failure mode to avoid: the next fire past the TTL would re-sweep and re-send.
@@ -386,7 +386,7 @@ Output:
 **D.9 — CLOSE THE ENTRY GUARD.** Once the Notion page and the email both resolve, close the claim taken at D.0:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-am-brief --block blockD --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-am-brief --block blockD --run-id <run_id> --notion-page-id <page id> --email-sent-at <ISO8601>
 ```
 
 If Block D aborted, call `fail --task ora-am-brief --block blockD --run-id <run_id> --error "<what broke>"` instead.

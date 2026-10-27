@@ -9,14 +9,14 @@ GUARD 0 — SCAN MUST BE DONE (added 2026-09-23 with scan v2.8). Read C:\Users\O
 
 GUARD 1 — DOUBLE-FIRE RUN GUARD (added 2026-09-23; contract: _shared\README-DOUBLE-FIRE-GUARD.md). After GUARD 0 passes and BEFORE any Notion write or email:
 
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-sourcing-construction-verify --block main --run-id <run_id> --period week --ttl-min 180
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-sourcing-construction-verify --block main --run-id <run_id> --period week --ttl-min 180
 
 - Exit 10 → this week's run already completed. Write nothing, send nothing; end with the one-line summary "construction-verify already completed this week — normal skip".
 - Exit 11 → another fire is live this week. Stand down identically.
 - Exit 0 → proceed. When the run ends, close the claim: after the summary email (or, when the target set is empty and no email is sent, right after the 'no eligible rows' summary):
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-sourcing-construction-verify --block main --run-id <run_id> --period week --email-sent-at <ISO8601>
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-sourcing-construction-verify --block main --run-id <run_id> --period week --email-sent-at <ISO8601>
   (omit --email-sent-at when nothing was emailed — including when the summary send still fails after its one retry: the Notion work is done, so call complete without --email-sent-at and flag the send failure loudly in the run summary). On a genuine abort instead:
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-sourcing-construction-verify --block main --run-id <run_id> --period week --error "<what broke>"
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-sourcing-construction-verify --block main --run-id <run_id> --period week --error "<what broke>"
 - ALWAYS pass `--period week` on EVERY call — omitting it keys the claim to the day and silently defeats the guard. Only the run holding the claim calls complete/fail; a run that stood down (10/11) calls neither. A GUARD 0 skip happens before the claim and calls neither.
 
 WHY THIS EXISTS: the scan's construction-type photo step is MANDATORY but was skipped on 2026-09-05 and 2026-09-23 (a long scan run runs out of budget for it), leaving every new row 'Unknown — CONFIRM' and scored 2/5 on Construction. The score impact is small (up to +3) but the by-products are real: photos expose special-purpose build-outs, in-place tenants, separate parcels, rail/site problems that listing text never states. This task does that step on its own budget. It never creates rows, never changes Verdict/Status/Floor Result, never contacts anyone.
