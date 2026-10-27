@@ -1,7 +1,8 @@
-"""settings.json wiring check for hooks/mcp-delete-guard.py (R-06, C14 stub for Task 7).
+"""settings.json wiring check for hooks/mcp-delete-guard.py (R-06, C14 / Task 7).
 
-Task 7 (adding the PreToolUse entry to settings.json) is deferred. Until it lands this
-file prints SKIP for the live settings.json and exits 0. Once an entry exists it asserts:
+Task 7 (the PreToolUse entry in settings.json, rendered from the wiring table) has landed.
+The SKIP path below remains only for a settings file that lacks the entry. With an entry
+present this file asserts:
   * exactly ONE PreToolUse entry references mcp-delete-guard.py;
   * that entry's matcher equals mcp_delete_tiers.SETTINGS_MATCHER byte for byte;
   * the guard is not duplicated (one command hook in that entry, no repeated
@@ -136,7 +137,7 @@ def main():
     selftest()
     live = problems(load(os.path.join(REPO, "settings.json")))
     if live is None:
-        print("SKIP: mcp-delete-guard is not wired in settings.json yet (R-06 Task 7 deferred)")
+        print("SKIP: mcp-delete-guard is not wired in settings.json (expected after R-06 Task 7)")
     else:
         check("W1 settings.json wiring of %s" % GUARD, live == [], "; ".join(live))
     if _failures:

@@ -15,7 +15,7 @@ HARD RULES
 - This task is READ-ONLY against the artifact store, HubSpot, Notion and the Master Workbook. It writes only under C:\Users\Owner\.claude\artifacts\ora-forward-calendar\, a neutral staging temp folder (STEP 2), and the fleet's shared double-fire guard state file (STEP 0/4/5, the same Claude_Workspace\_state\ location every other CC/MCP task's guard already writes to).
 
 STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-18, before this task's first commit — test_scheduled_task_run_guard.py fails any tracked side-effecting task with no entry guard, and this one sends email). Same shared helper as ora-am-brief/ora-open-sessions-board/ora-deal-aging-sla; full contract in `_shared/README-DOUBLE-FIRE-GUARD.md`. Run this first, before STEP 1:
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --ttl-min 30
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --ttl-min 30
 Cadence is weekly, so this claims by ISO week (`--period week`), not by day — matching ora-county-sales-monitor's monthly cadence using `--period month`; a same-week re-fire (not just a same-day one) is the duplicate this guard exists to catch.
 - **Exit 10** → this week's digest already sent. Log `BLOCK_MAIN_ALREADY_COMPLETE_THIS_WEEK`, do not re-read the store, re-build, or re-send, and report a NORMAL skip citing the earlier run. **Exit 11** → another fire is live; stand down identically. **Exit 0** → proceed to STEP 1. **Any other exit** (2 = malformed command, 9009/127 = interpreter missing) is a tooling failure, not a decision: fail open, run normally, and surface the code in the run summary.
 - Only the run holding the claim may close it (STEP 4 `complete`/`fail`, or STEP 5 `fail`). A run that stood down here calls neither.
@@ -48,7 +48,7 @@ the live store the builder actually reads:
 If the ArtifactData call errors, is refused, or yields zero files, go to STEP 5 with the reason.
 
 STEP 3 — build the digest and the .ics
-  cd C:\Users\Owner\.claude\artifacts\ora-forward-calendar
+  cd C:/Users/Owner/.claude/artifacts/ora-forward-calendar
   node build-digest.js live/dates out
 The script prints one line of JSON: {ok, docs, open, overdue, next14, next90, beyond90, soonest, ics, digest, alarms}.
 It writes out\digest.html (email body) and out\ora-forward-calendar.ics.
@@ -65,10 +65,10 @@ remains — it is prefix-anchored, not a substring search. (Corrected 2026-09-22
 "week of YYYY-MM-DD" could never match, because the stripped subject starts "Forward Calendar - ".)
 Run TWO probes, both scoped to today's Sent Items by the probe's default -OnDate:
   (a) ORA branch — dated stem:
-  powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Forward Calendar - week of YYYY-MM-DD>"
+  powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Forward Calendar - week of YYYY-MM-DD>"
   (b) [ACTION] branch — its "N overdue" segment sits BEFORE "week of" and N can differ between
   two fires, so no dated stem is contiguous with it; probe the undated prefix instead:
-  powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Forward Calendar - >"
+  powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Forward Calendar - >"
   Stem (b) cannot swallow the FAILED alert ("[ACTION] ORA Forward Calendar digest FAILED ..." strips
   to "ORA Forward Calendar digest ...", which does not start "Forward Calendar -"). Do not widen
   either stem further.
@@ -79,14 +79,14 @@ Exit 1 here means the attachment was rejected (missing/empty/oversize file) and 
 On exit 2 or 4: retry ONCE. On exit 5 or 6 (or any code other than 1, 2 or 4) do NOT retry and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2; flag it loudly in the run log. If a retried send fails again, stop, report the failure loudly in the run log, and close the guard with `fail` (below) quoting the send error — do not halt silently, do not attempt any other send mechanism, and do not call `complete` for a digest that was never actually sent.
 
 Close the entry guard once the send resolves (success, probe-skip, or any failed send — never leave STEP 0's claim open):
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --email-sent-at <ISO8601>
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --email-sent-at <ISO8601>
 On any failed send above (including exit 5 or 6, which are never repeated), call this instead and stop:
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --error "<send error>"
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --error "<send error>"
 
 STEP 5 — failure email (only on a STEP 2 or STEP 3 failure)
 Subject: "[ACTION] ORA Forward Calendar digest FAILED - YYYY-MM-DD"
 Body: name the step that failed, the exact error or reason string, and state plainly that no digest was produced this week. Same send path and routing as STEP 4 (no Sent-Items probe needed — this failure path has never sent a Forward Calendar email this run). Close the entry guard STEP 0 claimed:
-  python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --error "<step that failed>: <reason>"
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-forward-calendar-digest --block main --run-id <run_id> --period week --error "<step that failed>: <reason>"
 Then stop.
 
 NOTES FOR WHOEVER MAINTAINS THIS

@@ -205,6 +205,11 @@ BASH_GUARD_CHAIN = [
     "commit-hygiene-guard",
     # override-mint-guard is deliberately NOT wired here (temporarily unwired, pending
     # the session_kind scan-budget fix); see the module docstring.
+    "winpath-guard",  # 2026-10-23 -- blocks unquoted X:\ paths and "\$" in
+    # double-quoted Windows paths (bash silently corrupts both)
+    "pipe-mask-guard",  # 2026-10-23 -- MUST STAY LAST: it emits a command
+    # rewrite (updatedInput), and only a chain that reached the end without a
+    # block may emit one. test-pipe-mask-guard.py asserts the position.
 ]
 
 # --chain <name> selects which chain to run. Default stays the Edit/Write chain
@@ -422,9 +427,16 @@ def emit_stdout(chunks):
     established it).
 
     Naively concatenating two guards' JSON objects yields `{...}{...}`, which
-    parses as NOTHING -- silently losing BOTH messages. Today only one guard in
-    the chain emits, so this never fires; it exists so that adding a second
-    emitter to GUARD_CHAIN does not silently break delivery."""
+    parses as NOTHING -- silently losing BOTH messages. Several guards in
+    the chain emit (memory-orphan-link-guard, commit-hygiene-guard and
+    pipe-mask-guard among them), so two can fire on one call; this merge keeps
+    a second emitter from silently breaking delivery.
+
+    updatedInput (2026-10-23, pipe-mask-guard): carried through like every other
+    hookSpecificOutput key, first emitter wins. It REPLACES the whole tool input,
+    and every guard computed its own from the ORIGINAL payload, so two rewrites
+    cannot be composed -- a second, different one is dropped and named on
+    stderr rather than silently lost."""
     if not chunks:
         return
     if len(chunks) == 1:
@@ -449,6 +461,12 @@ def emit_stdout(chunks):
                         if hv:
                             ctxs.append(str(hv))
                     else:
+                        if (hk == "updatedInput" and hk in hso
+                                and hso[hk] != hv):
+                            sys.stderr.write(
+                                "dispatcher: conflicting updatedInput from two "
+                                "guards -- keeping the first, dropping the "
+                                "second\n")
                         hso.setdefault(hk, hv)
             else:
                 merged.setdefault(k, v)

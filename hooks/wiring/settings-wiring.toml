@@ -22,7 +22,7 @@ guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared
 
 [[chain]]
 name = "bash"
-guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard"]
+guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "winpath-guard", "pipe-mask-guard"]
 
 [[row]]
 id = 'ups.engineering-router'
@@ -159,6 +159,24 @@ event = 'PreToolUse'
 matcher = 'mcp__scheduled-tasks__update_scheduled_task'
 kind = "py"
 script = 'scheduled-task-update-preguard.py'
+
+[[row]]
+id = 'pre.mcp-delete-guard'
+event = 'PreToolUse'
+matcher = 'mcp__.*__.*([Dd]elete|DELETE|[Tt]rash|TRASH|[Rr]emove|REMOVE|[Pp]urge|PURGE|[Dd]iscard|DISCARD).*|mcp__.*__(clean_up_worktrees|notion-calendar-cancel-events|sharepoint_move_item|manage_segment|manage_campaign_objects)'
+kind = "py"
+script = 'mcp-delete-guard.py'
+timeout = 30
+note = 'R-06: MCP-only, NOT in any dispatcher chain; matcher == mcp_delete_tiers.SETTINGS_MATCHER; timeout must exceed session_kind.HARD_JOIN_SECONDS (a hook timeout is non-blocking, so the delete would proceed unchecked)'
+
+[[row]]
+id = 'pre.sensitive-file-guard-nb-dc'
+event = 'PreToolUse'
+matcher = 'NotebookEdit|mcp__.*__(write_file|edit_block|move_file|write_pdf)'
+kind = "py"
+script = 'sensitive-file-guard.py'
+timeout = 10
+note = 'R-06/M65: NotebookEdit + Desktop Commander writes; Edit/Write/MultiEdit reach the guard via the editwrite chain'
 
 [[row]]
 id = 'start.session-context-cat'

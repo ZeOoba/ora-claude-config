@@ -307,7 +307,7 @@ Identify accumulated Cowork sessions older than 14 days that originated from sch
 
 Complements E's automation-session sweep with the OTHER archive class: substantive sessions that finished cleanly but were never archived, plus sessions Gabriel already decided on an answer board. This runs on the CC host (this fleet), so python IS available here — the "Python is NOT installed" note above describes the legacy Cowork sandbox, not this runtime.
 
-1. Run: `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\maintenance\open_sessions_probe.py --days 30 --all --json` (read-only scan of BOTH stores — claude-code-sessions + local-agent-mode-sessions).
+1. Run: `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/maintenance/open_sessions_probe.py --days 30 --all --json` (read-only scan of BOTH stores — claude-code-sessions + local-agent-mode-sessions).
 2. Archive candidates = rows where `fleet` is false AND either: `status` is `NO-ACTION` with `ageHours` > 168 (closed cleanly, idle a week+), OR the session appears in the answered board (Gabriel already dispositioned it) with no activity newer than its `decidedAt`. Exclude anything with `ageHours` < 1 (may be live).
 
    **answered.json shape — pin this, do not infer it (fixed 2026-07-26).** `C:\Users\Owner\.claude\scheduled-tasks\ora-open-sessions-board\answered.json` is a **JSON object keyed by `sessionId`**, NOT a list of records: `{"local_<id>": {"title": ..., "decidedAt": <ISO>, "decision": <str>}, ...}`. Look a session up with `answered.get(sessionId)` — iterating it as a list yields bare key *strings*, every field access misses, and the arm contributes **zero candidates while reporting success**. That is exactly what happened on the 2026-07-26 run: the file held **61 decided entries current through 2026-07-24** and the run reported "parsed to 0 decided entries." Read it with `encoding='utf-8-sig'` (it carries a BOM).
@@ -450,7 +450,7 @@ Read §7 of `C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\
 
 **EXECUTION (one command, deterministic):**
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\maintenance\session-env-retention.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/maintenance/session-env-retention.ps1
 ```
 The script enforces every safety check itself (live-sessionId exclusion read fresh from `~/.claude\sessions\*.json`, 90-day LastWriteTime gate, `_archive\` never a candidate, non-empty candidates logged as ANOMALY but still archived — a move preserves content, fail-open exit 0) and logs to `maintenance\session-env-retention.log`.
 
@@ -466,7 +466,7 @@ The script enforces every safety check itself (live-sessionId exclusion read fre
 
 **EXECUTION (one command, deterministic):**
 ```
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\maintenance\sweep-override-tokens.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/maintenance/sweep-override-tokens.ps1
 ```
 The script enforces every safety check itself (live-sessionId exclusion read fresh from `~/.claude\sessions\*.json` — same source as Block K, per-token-type age window, `_archive_override_tokens\` never a candidate, MOVE not delete — ORA archive invariant, fail-open exit 0) and logs to `maintenance\override-token-sweep.log`. Supports `-DryRun` for ad hoc verification without moving anything.
 
