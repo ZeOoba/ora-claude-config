@@ -5,7 +5,7 @@ description: AAOS contracts-mirror publisher (CC/MCP fleet, filesystem/git tool)
 
 Pre-flight — assert the checkout is on `main` (added 2026-09-10, open-items-tracker.md#OI-259):
 
-    cd C:\Users\Owner\AAOS
+    cd C:/Users/Owner/AAOS
     git rev-parse --abbrev-ref HEAD
 
 `publish-contracts.py` stamps `PUBLISHED.json` with whatever `git rev-parse HEAD` returns for the CURRENT branch — it has no concept of `main`. If a session has left this checkout on a feature branch, this task will publish that branch's contracts to the seam and stamp them as canonical, with no warning. Proven live 2026-09-10: with the checkout on a feature branch, `check-contract-drift.py` reported `COMMIT DRIFT: mirror stamped source_commit='0dd90dc…', current tree is 'd8845e7…'`.

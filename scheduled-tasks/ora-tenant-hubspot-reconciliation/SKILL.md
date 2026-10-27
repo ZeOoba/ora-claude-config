@@ -12,7 +12,7 @@ This task was unwired against the fleet's double-fire guard even though it share
 Run this as the first action of the run:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --ttl-min 45
 ```
 
 - **Exit 10** → this month's run already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`, **exit without pulling HubSpot/Notion or emailing**, and report it as a NORMAL skip (not a miss) citing the earlier run's tracker entries.
@@ -22,13 +22,13 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --
 Once Step 6's email send lands, run:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --email-sent-at <ISO8601>
 ```
 
 If the run aborts instead (Step 7's data-gap case still completes the report — only a genuine crash/abort skips straight to `fail`):
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --error "<what broke>"
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-tenant-hubspot-reconciliation --block main --run-id <run_id> --period month --error "<what broke>"
 ```
 
 **Only the run that holds the claim may call `complete` or `fail`.** A run that stood down (exit 10 or 11) calls NEITHER. **Always pass `--period month`** on every call for this task — omitting it addresses the day-keyed bucket instead and defeats the guard silently (no error; the claim just never persists across days). Full contract: `_shared/README-DOUBLE-FIRE-GUARD.md`.
