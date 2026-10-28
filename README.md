@@ -44,7 +44,7 @@ expected to happen in an isolated `git worktree`, gated by
 flowchart TB
     subgraph SESSION["A Claude Code session on this machine"]
         CFG["settings.json<br/>hook wiring, permissions,<br/>model / plugin config"]
-        HOOKS["hooks/<br/>36 hook scripts: 2 PreToolUse dispatcher chains,<br/>direct PreToolUse / PostToolUse / Session* / Stop /<br/>UserPromptSubmit entries, 3 native git pre-push gates"]
+        HOOKS["hooks/<br/>41 top-level hook scripts: 2 PreToolUse dispatcher chains,<br/>direct PreToolUse / PostToolUse / Session* / Stop /<br/>UserPromptSubmit entries, 3 native git pre-push gates"]
         SKILLS["skills/ + agents/ + commands/ + workflows/<br/>procedures the session can invoke"]
         SCHED["scheduled-tasks/&lt;id&gt;/SKILL.md<br/>CC/MCP fleet task specs"]
         MAINT["maintenance/<br/>fleet, health and integrity probes"]
@@ -67,7 +67,7 @@ flowchart TB
     LOCALDIR -.->|"git commit / push<br/>opt-in files only, through the pre-push gates"| REPO[("This repo:<br/>GitHub ZeOoba/ora-claude-config<br/>PRIVATE backup mirror, not a deploy target")]
     REPO -.->|"git clone<br/>disaster recovery"| LOCALDIR
 ```
-<!-- diagram-verified: 2026-10-03 -->
+<!-- diagram-verified: 2026-10-28 -->
 
 **Reading the diagram:** everything in the top box happens inside one live Claude Code
 session. `settings.json` wires the hooks and exposes the skills/agents/commands/workflows
@@ -92,12 +92,12 @@ Verified against `git ls-files` at `origin/main` (2026-10-03; counts re-run 2026
 |---|---|
 | `CLAUDE.md` | The global operating prompt (identity, hard invariants, routing canon, Engineering OS) loaded into every session. |
 | `settings.json` | Hook wiring, permissions (`defaultMode: bypassPermissions`, with `allow`/`deny` lists), `env`, `model`, `statusLine`, `worktree`, `enabledPlugins` (`superpowers`, `pr-review-toolkit`), `extraKnownMarketplaces`, `skillOverrides`, and UI preferences. |
-| `hooks/` | 36 top-level hook scripts (§4a), plus `lib/` (19 shared modules: commit/provenance parsing, override tokens, secret patterns, guard telemetry, session liveness, site/deploy tiers, …), `bin/netlify-guard-global.js` (machine-wide netlify CLI shim for Hard Invariant 2), `tests/` (61 `test-*.py` suites plus `tests/lib/`), and `archive/` (retired hook artifacts). `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked**. |
+| `hooks/` | 41 top-level hook scripts (§4a), plus `lib/` (19 shared modules: commit/provenance parsing, override tokens, secret patterns, guard telemetry, session liveness, site/deploy tiers, …), `bin/netlify-guard-global.js` (machine-wide netlify CLI shim for Hard Invariant 2), `tests/` (61 `test-*.py` suites plus `tests/lib/`), and `archive/` (retired hook artifacts). `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked**. |
 | `commands/` | 13 slash-command definitions — the Engineering-OS lanes (`build`, `debug`, `refactor`, `research`, `ship`, `plan`) and session utilities (`heavy`, `ram`, `solo`, `handoff`, `open-sessions`, `cleardisk`, `cleardisk-sessions`). |
 | `agents/` | 17 custom sub-agent definitions (`adversarial-reviewer`, `comms-qc-reviewer`, `dd-package-sweep`, `deal-flow-triage`, `deal-recon`, `estoppel-reconciler`, `insurance-declaration-checker`, `lease-abstract-verifier`, `noi-opportunity-scout`, `open-items-triage`, `portfolio-anomaly-scout`, `psa-redline-checker`, `repro-isolator`, `security-auditor`, `site-qc-reviewer`, `tax-appeal-scout`, `underwriting-checker`). |
 | `skills/` | 8 ORA-authored skills (`adversarial-merge-gate`, `branch-catchup`, `county-parcel-screen`, `county-sales-monitor`, `evidence-dossier-drafting`, `external-artifact-intake`, `ora-setup-audit`, `security-and-hardening`), some with `references/`, `scripts/` or `workflows/` subfolders, plus two `_archive_*` folders of retired skills. **Not** the full skill catalog — most `anthropic-skills:*` skills are Cowork-synced runtime content; ORA-built skill source lives in `ZeOoba/ora-skills`. |
 | `maintenance/` | 91 top-level scripts/configs (Python probes, PowerShell engines, three onboarding `.cmd` launchers) and 96 `test-*`/`test_*` files across `maintenance/`, `_tests/`, `tests/` and `headless/`. Subfolders: `_shared/` (store discovery, fleet-pause helpers, acknowledgement allowlists, `scheduler-stores.json`), `_state/` (tracked probe state), `_applied/`, `_archive/`, `headless/` (Windows-Task-Scheduler twins of selected fleet checks, in parallel burn-in per `headless/CUTOVER.md`), `windows-task-xml/` (exported definitions of the 8 off-fleet Windows tasks). |
-| `scheduled-tasks/` | One folder per CC/MCP task spec: 55 task folders, 27 dated `_archive_*` folders of retired/completed specs, one `_draft-*` folder, and `_shared/` (the Outlook COM send helper `send-via-outlook.ps1`, `outlook-sent-probe.ps1`, the double-fire `block-sentinel.py`, and their docs/tests). **Mostly** only `SKILL.md` is tracked; a short allow-list of task engines and references is also tracked (`ora-task-integrity-guard/guard.ps1` + `membership-guard.ps1`, `ora-pm-ledger/*_snapshot_diff.py` etc., `ora-appsec-sweep/suppressions.md`, `ora-renewal-hubspot-reconcile/read_rent_roll.py`). Runtime state, logs and `.bak` files are not. |
+| `scheduled-tasks/` | One folder per CC/MCP task spec: 65 task folders, 28 dated `_archive_*` folders of retired/completed specs, one `_draft-*` folder, and `_shared/` (the Outlook COM send helper `send-via-outlook.ps1`, `outlook-sent-probe.ps1`, the double-fire `block-sentinel.py`, and their docs/tests). **Mostly** only `SKILL.md` is tracked; a short allow-list of task engines and references is also tracked (`ora-task-integrity-guard/guard.ps1` + `membership-guard.ps1`, `ora-pm-ledger/*_snapshot_diff.py` etc., `ora-appsec-sweep/suppressions.md`, `ora-renewal-hubspot-reconcile/read_rent_roll.py`). Runtime state, logs and `.bak` files are not. |
 | `_scheduled_tasks_backup/` | A derived mirror of task `SKILL.md` specs (139 task folders + one archive folder), written by `scheduled-tasks/ora-task-integrity-guard/guard.ps1` (§4b). Canonical specs are authoritative; this mirror is used only to restore a canonical spec that has gone **absent**. |
 | `workflows/` | 3 multi-agent `Workflow` scripts (`cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`), `README-cc-self-audit.md`, and a `_tests/` prompt-snapshot rig. |
 | `mcp-servers/` | 2 self-authored, single-file, read-only MCP servers: `fred/` (St. Louis Fed FRED API) and `census/` (U.S. Census Bureau Data API). |
@@ -144,17 +144,17 @@ flowchart LR
     CALL["Tool call"] --> M{"settings.json<br/>PreToolUse matcher"}
     M -->|"Edit / Write / MultiEdit"| DEW["pretooluse-dispatcher.py<br/>(default chain)"]
     M -->|"Bash"| DB["pretooluse-dispatcher.py<br/>--chain bash"]
-    M -->|"NotebookEdit, MCP write tools"| DIRECT["Direct entries:<br/>ora-autonomy-gate, confidentiality-guard,<br/>config-write-guard, lint-config-guard,<br/>workbook-write-guard, registry-write-guard,<br/>memory-index-guard, scheduled-task-update-preguard"]
+    M -->|"NotebookEdit, MCP write tools"| DIRECT["Direct entries:<br/>ora-autonomy-gate, confidentiality-guard,<br/>config-write-guard, lint-config-guard,<br/>workbook-write-guard, registry-write-guard,<br/>memory-index-guard, ascii-only-guard,<br/>mcp-delete-guard, sensitive-file-guard,<br/>scheduled-task-update-preguard"]
     M -->|"Edit / Write"| INLINE["Inline sensitive-file blocker<br/>(credentials / .env / password paths)"]
 
     subgraph EW["Edit/Write chain (in order)"]
         direction TB
-        E1["ora-autonomy-gate"] --> E2["confidentiality-guard"] --> E3["eos-plan-gate"] --> E4["shared-checkout-guard"] --> E5["registry-write-guard"] --> E6["config-write-guard"] --> E7["eos-claude-md-guard"] --> E8["memory-index-guard"] --> E9["rules-md-guard"] --> E10["lint-config-guard"] --> E11["ascii-only-guard"]
+        E1["ora-autonomy-gate"] --> E2["confidentiality-guard"] --> E3["eos-plan-gate"] --> E4["shared-checkout-guard"] --> E5["registry-write-guard"] --> E6["config-write-guard"] --> E7["eos-claude-md-guard"] --> E8["memory-index-guard"] --> E9["rules-md-guard"] --> E10["lint-config-guard"] --> E11["sensitive-file-guard"] --> E12["ascii-only-guard"]
     end
 
     subgraph BC["Bash chain (in order)"]
         direction TB
-        B1["ora-autonomy-gate"] --> B2["confidentiality-guard"] --> B3["config-write-guard"] --> B4["lint-config-guard"] --> B5["workbook-write-guard"] --> B6["eos-evidence-gate"] --> B7["eos-review-gate"] --> B8["commit-provenance-guard"] --> B9["worktree-isolation-guard"] --> B10["destructive-git-guard"] --> B11["memory-orphan-link-guard"] --> B12["commit-hygiene-guard"]
+        B1["ora-autonomy-gate"] --> B2["confidentiality-guard"] --> B3["config-write-guard"] --> B4["lint-config-guard"] --> B5["workbook-write-guard"] --> B6["eos-evidence-gate"] --> B7["eos-review-gate"] --> B8["commit-provenance-guard"] --> B9["worktree-isolation-guard"] --> B10["destructive-git-guard"] --> B11["memory-orphan-link-guard"] --> B12["commit-hygiene-guard"] --> B13["winpath-guard"] --> B14["pipe-mask-guard"]
     end
 
     DEW --> E1
@@ -166,7 +166,7 @@ flowchart LR
     RES -->|"yes: first block wins,<br/>chain short-circuits"| BLOCK["Tool call refused"]
     RES -->|"no"| RUN["Tool runs, then PostToolUse hooks"]
 ```
-<!-- diagram-verified: 2026-10-03 -->
+<!-- diagram-verified: 2026-10-28 -->
 
 Dispatcher semantics (from its own header): guard order is load-bearing and mirrors
 `settings.json`; each guard runs in-process and, if it cannot load or raises, is re-run as
