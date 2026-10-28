@@ -15,7 +15,14 @@
     multiple (commas are normalized to semicolons before the COM call).
 
 .PARAMETER Subject
-    Email subject line.
+    Email subject line. Mutually exclusive with -SubjectFile; one of the two is required.
+
+.PARAMETER SubjectFile
+    Path to a UTF-8 text file whose content is the subject (one line; trailing CR/LF trimmed,
+    an interior CR/LF is refused). Same flag, same meaning as outlook-sent-probe.ps1, so one
+    temp file can feed both the probe and the send. Also the safe way to carry a non-ASCII
+    subject (see the emoji example below) because no non-ASCII byte crosses a shell boundary.
+    A missing, empty or multi-line file exits 1 and nothing is sent.
 
 .PARAMETER Body
     Email body as a string. Mutually exclusive with -BodyFile.
@@ -200,7 +207,12 @@
 [CmdletBinding(PositionalBinding=$false)]
 param(
     [Parameter(Mandatory=$true)][string]$To,
-    [Parameter(Mandatory=$true)][string]$Subject,
+    # Exactly one of -Subject / -SubjectFile (checked below, exit 1). Not Mandatory so that
+    # -SubjectFile is accepted: the other shared helper (outlook-sent-probe.ps1) takes
+    # -SubjectFile and callers pass the same flag to both; before 2026-10-28 this script
+    # rejected it as an unknown parameter and the fire died before the send.
+    [string]$Subject,
+    [string]$SubjectFile,
     [string]$Body,
     [string]$BodyFile,
     [ValidateSet("html","text")][string]$BodyFormat = "html",
@@ -665,6 +677,29 @@ function Enter-DedupGate {
     }
 }
 # --- end R-05 helpers ---
+
+# --- Resolve subject source (-Subject xor -SubjectFile) ---
+if ($PSBoundParameters.ContainsKey('Subject') -and $SubjectFile) {
+    Write-Log "ERROR" "-Subject and -SubjectFile are mutually exclusive"
+    exit 1
+}
+if ($SubjectFile) {
+    if (-not (Test-Path -LiteralPath $SubjectFile -PathType Leaf)) {
+        Write-Log "ERROR" "SubjectFile not found: $SubjectFile"
+        exit 1
+    }
+    $Subject = (Get-Content -LiteralPath $SubjectFile -Raw -Encoding UTF8)
+    if ($null -eq $Subject) { $Subject = "" }
+    $Subject = $Subject.TrimEnd("`r", "`n")
+    if ($Subject -match "[`r`n]") {
+        Write-Log "ERROR" "SubjectFile must hold a single line: $SubjectFile"
+        exit 1
+    }
+}
+if ([string]::IsNullOrWhiteSpace($Subject)) {
+    Write-Log "ERROR" "Must provide -Subject or -SubjectFile (non-empty)"
+    exit 1
+}
 
 # --- Validate body source ---
 if (-not $Body -and -not $BodyFile) {

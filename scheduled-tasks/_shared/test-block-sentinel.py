@@ -687,6 +687,148 @@ def test_claim_slot_times_then_finalize_with_emitted_block():
     os.remove(st)
 
 
+# ---------------------------------------------------------------- renew / late-start / path (2026-10-28)
+
+def _load_sentinel():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("block_sentinel_mod", SCRIPT)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _claim_aged(st, minutes, run_id="g1", task="ora-full-gate-weekly", block="main"):
+    """Claim, then back-date claimedAt so the claim looks `minutes` old."""
+    rc, _ = run(["claim", "--task", task, "--block", block, "--run-id", run_id, "--ttl-min", "30"], st)
+    data = read_state(st)
+    data[et_today()][block]["claimedAt"] = iso_ago(minutes)
+    write_state(st, data)
+    return rc
+
+
+def test_renew_extends_a_long_run_past_the_ttl():
+    print("\ntest_renew_extends_a_long_run_past_the_ttl")
+    st = tmp_state()
+    _claim_aged(st, 28)
+    rc, out = run(["renew", "--task", "ora-full-gate-weekly", "--block", "main", "--run-id", "g1",
+                   "--min-age-min", "25"], st)
+    check("exit 0 RENEWED", rc == 0 and out.get("decision") == "RENEWED", "%s %s" % (rc, out))
+    rec = read_state(st)[et_today()]["main"]
+    check("claimedAt moved forward (age < 1 min)",
+          datetime.strptime(rec["claimedAt"], "%Y-%m-%dT%H:%M:%SZ") > datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=1), str(rec))
+    check("firstClaimedAt keeps the original claim",
+          rec.get("firstClaimedAt") and rec["firstClaimedAt"] < rec["claimedAt"], str(rec))
+    check("renewals counted", rec.get("renewals") == 1, str(rec))
+    # the point of the exercise: a second fire 35 min after the ORIGINAL claim must still stand down
+    rc2, out2 = run(["claim", "--task", "ora-full-gate-weekly", "--block", "main", "--run-id", "g2",
+                     "--ttl-min", "30"], st)
+    check("second fire stands down (exit 11) after renewal", rc2 == 11, "%s %s" % (rc2, out2))
+
+
+def test_unrenewed_long_run_is_reclaimed_control():
+    print("\ntest_unrenewed_long_run_is_reclaimed_control")
+    st = tmp_state()
+    _claim_aged(st, 35)
+    rc, out = run(["claim", "--task", "ora-full-gate-weekly", "--block", "main", "--run-id", "g2",
+                   "--ttl-min", "30"], st)
+    check("without renewal the 35-min-old claim is reclaimed (the defect renew fixes)",
+          rc == 0 and "STALE" in out.get("logToken", ""), "%s %s" % (rc, out))
+
+
+def test_renew_is_noop_below_min_age():
+    print("\ntest_renew_is_noop_below_min_age")
+    st = tmp_state()
+    _claim_aged(st, 5)
+    before = read_state(st)
+    rc, out = run(["renew", "--task", "ora-full-gate-weekly", "--block", "main", "--run-id", "g1",
+                   "--min-age-min", "25"], st)
+    check("exit 0 RENEW_NOT_NEEDED", rc == 0 and out.get("decision") == "RENEW_NOT_NEEDED", "%s %s" % (rc, out))
+    check("state untouched", read_state(st) == before)
+
+
+def test_renew_refuses_non_owner_and_nonlive():
+    print("\ntest_renew_refuses_non_owner_and_nonlive")
+    st = tmp_state()
+    rc, out = run(["renew", "--task", "t", "--block", "main", "--run-id", "g1"], st)
+    check("never claimed -> exit 12 REFUSED_NO_CLAIM",
+          rc == 12 and out.get("decision") == "REFUSED_NO_CLAIM", "%s %s" % (rc, out))
+    check("never claimed -> no state file created", not os.path.exists(st))
+    _claim_aged(st, 28, task="t")
+    before = read_state(st)
+    rc, out = run(["renew", "--task", "t", "--block", "main", "--run-id", "intruder"], st)
+    check("other run -> exit 12 REFUSED_NOT_OWNER",
+          rc == 12 and out.get("decision") == "REFUSED_NOT_OWNER", "%s %s" % (rc, out))
+    check("non-owner renew wrote nothing", read_state(st) == before)
+    run(["complete", "--task", "t", "--block", "main", "--run-id", "g1"], st)
+    rc, out = run(["renew", "--task", "t", "--block", "main", "--run-id", "g1"], st)
+    check("COMPLETE block -> exit 12 REFUSED_NOT_IN_PROGRESS",
+          rc == 12 and out.get("decision") == "REFUSED_NOT_IN_PROGRESS", "%s %s" % (rc, out))
+
+
+def test_renew_honors_period_bucket():
+    print("\ntest_renew_honors_period_bucket")
+    st = tmp_state()
+    run(["claim", "--task", "w", "--block", "main", "--run-id", "w1", "--period", "week"], st)
+    rc, out = run(["renew", "--task", "w", "--block", "main", "--run-id", "w1", "--period", "week"], st)
+    check("weekly claim renews with --period week", rc == 0 and out.get("decision") == "RENEWED", "%s %s" % (rc, out))
+    rc, out = run(["renew", "--task", "w", "--block", "main", "--run-id", "w1"], st)
+    check("wrong bucket (day) is REFUSED, not silently created", rc == 12, "%s %s" % (rc, out))
+
+
+def test_late_start_math():
+    print("\ntest_late_start_math")
+    m = _load_sentinel()
+    et = timezone(timedelta(hours=-4))
+
+    def at(h, mi):
+        return datetime(2026, 10, 28, h, mi, tzinfo=et)
+
+    check("10:06 vs 06:00 -> 246", m.late_start_min("06:00", at(10, 6)) == 246.0)
+    check("11:33 vs 11:30 -> 3", m.late_start_min("11:30", at(11, 33)) == 3.0)
+    check("14:40 vs 14:10 -> 30", m.late_start_min("14:10", at(14, 40)) == 30.0)
+    check("2 min early (skew) clamps to 0", m.late_start_min("11:30", at(11, 28)) == 0.0)
+    check("00:20 vs 23:30 -> 50 (previous-day catch-up across midnight)",
+          m.late_start_min("23:30", at(0, 20)) == 50.0)
+    check("garbage -> None", m.late_start_min("noon", at(1, 0)) is None and m.late_start_min("25:00", at(1, 0)) is None)
+
+
+def test_claim_records_and_logs_late_start():
+    print("\ntest_claim_records_and_logs_late_start")
+    st = tmp_state()
+    rc, out = run(["claim", "--task", "ora-full-gate-weekly", "--block", "main", "--run-id", "g1",
+                   "--scheduled-et", "00:00"], st)
+    check("exit 0 PROCEED (observational only)", rc == 0 and out.get("decision") == "PROCEED", "%s %s" % (rc, out))
+    rec = read_state(st)[et_today()]["main"]
+    check("record carries scheduledEt + lateStartMin",
+          rec.get("scheduledEt") == "00:00" and isinstance(rec.get("lateStartMin"), float), str(rec))
+    check("JSON echoes lateStartMin", out.get("lateStartMin") == rec["lateStartMin"], str(out))
+    log = os.path.join(os.path.dirname(st), "late-start-log.jsonl")
+    try:
+        lines = [json.loads(l) for l in open(log, encoding="utf-8") if l.strip()]
+        check("late-start-log.jsonl got a line for this run",
+              any(l.get("runId") == "g1" and l.get("task") == "ora-full-gate-weekly" for l in lines), str(lines[-1:]))
+    finally:
+        if os.path.exists(log):
+            os.remove(log)
+    st2 = tmp_state()
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "g1", "--scheduled-et", "bogus"], st2)
+    check("unparseable --scheduled-et is ignored with a note, claim still PROCEEDs",
+          rc == 0 and out.get("decision") == "PROCEED" and "scheduled-et" in (out.get("stateFileError") or ""),
+          "%s %s" % (rc, out))
+    rc, out = run(["claim", "--task", "t2", "--block", "main", "--run-id", "g1"], tmp_state())
+    check("no --scheduled-et -> lateStartMin null", out.get("lateStartMin") is None, str(out))
+
+
+def test_emitted_state_path_is_forward_slash():
+    print("\ntest_emitted_state_path_is_forward_slash")
+    st = tmp_state()
+    rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "g1"], st)
+    check("claim statePath has no backslash (Git Bash would eat it)",
+          "\\" not in out.get("statePath", "\\"), str(out.get("statePath")))
+    rc, out = run(["status", "--task", "t", "--block", "main"], st)
+    check("status statePath has no backslash", "\\" not in out.get("statePath", "\\"), str(out.get("statePath")))
+
+
 if __name__ == "__main__":
     print("block-sentinel.py -- entry-guard contract tests")
     test_virgin_claim_proceeds()
@@ -727,6 +869,14 @@ if __name__ == "__main__":
     test_claim_slot_times_single_instant_near_midnight()
     test_claim_without_block_or_slot_times_writes_nothing()
     test_claim_slot_times_then_finalize_with_emitted_block()
+    test_renew_extends_a_long_run_past_the_ttl()
+    test_unrenewed_long_run_is_reclaimed_control()
+    test_renew_is_noop_below_min_age()
+    test_renew_refuses_non_owner_and_nonlive()
+    test_renew_honors_period_bucket()
+    test_late_start_math()
+    test_claim_records_and_logs_late_start()
+    test_emitted_state_path_is_forward_slash()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
