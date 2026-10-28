@@ -1,7 +1,7 @@
 %% Updated hook lifecycle. Verified 2026-10-06 against settings.json hooks block (command list
 %% printed via python json load), hooks/pretooluse-dispatcher.py:135-192 (GUARD_CHAIN, BASH_GUARD_CHAIN)
 %% and :343-385 (_dispatch).
-%% diagram-verified: 2026-10-06
+%% diagram-verified: 2026-10-28
 flowchart TB
   subgraph EVENTS["settings.json events (6)"]
     UPS["UserPromptSubmit<br/>engineering-router.py (non-blocking)"]
@@ -13,14 +13,16 @@ flowchart TB
   end
 
   PRE --> MATCH{"matcher"}
-  MATCH -->|"Edit|Write|MultiEdit"| DEW["pretooluse-dispatcher.py<br/>GUARD_CHAIN (11 guards)"]
-  MATCH -->|"Bash"| DB["pretooluse-dispatcher.py --chain bash<br/>BASH_GUARD_CHAIN (12 guards)"]
+  MATCH -->|"Edit|Write|MultiEdit"| DEW["pretooluse-dispatcher.py<br/>GUARD_CHAIN (12 guards)"]
+  MATCH -->|"Bash"| DB["pretooluse-dispatcher.py --chain bash<br/>BASH_GUARD_CHAIN (14 guards)"]
   MATCH -->|"Edit|Write"| INLINE["inline bash: sensitive-file blocker<br/>(.env / credentials / password paths)"]
   MATCH -->|"outbound MCP + NotebookEdit +<br/>Netlify updaters + manage_*"| D1["direct: ora-autonomy-gate"]
   MATCH -->|"Notion/Outlook/Teams/SharePoint/<br/>HubSpot write tools"| D2["direct: confidentiality-guard<br/>(FAIL-CLOSED)"]
-  MATCH -->|"Desktop Commander write/edit"| D3["direct: registry-write-guard,<br/>memory-index-guard"]
+  MATCH -->|"Desktop Commander write/edit"| D3["direct: registry-write-guard,<br/>memory-index-guard, ascii-only-guard"]
   MATCH -->|"excel + DC + NotebookEdit"| D4["direct: config-write-guard,<br/>lint-config-guard"]
   MATCH -->|"Write|Edit|MultiEdit + excel + DC"| D5["direct: workbook-write-guard<br/>(also fires on Edit/Write, not only Bash;<br/>not in GUARD_CHAIN)"]
+  MATCH -->|"MCP delete/trash/purge tools"| D7["direct: mcp-delete-guard (30s)"]
+  MATCH -->|"NotebookEdit + DC write/edit/move/pdf"| D8["direct: sensitive-file-guard (10s)"]
   MATCH -->|"update_scheduled_task"| D6["direct: scheduled-task-update-preguard (warn)"]
 
   subgraph DISP["dispatcher internals"]
@@ -38,6 +40,8 @@ flowchart TB
   D2 --> RUN
   D3 --> RUN
   D4 --> RUN
+  D7 --> RUN
+  D8 --> RUN
   D5 --> RUN
   D6 --> RUN
   INLINE --> RUN
