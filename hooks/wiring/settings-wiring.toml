@@ -22,7 +22,7 @@ guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared
 
 [[chain]]
 name = "bash"
-guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "winpath-guard", "pipe-mask-guard"]
+guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "winpath-guard", "rewrite-advisory-guard", "pipe-mask-guard"]
 
 [[row]]
 id = 'ups.engineering-router'
