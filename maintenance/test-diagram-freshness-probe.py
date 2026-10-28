@@ -66,11 +66,55 @@ def test_genuinely_fresh_valid_stamp_unaffected_unit():
     print("  PASS test_genuinely_fresh_valid_stamp_unaffected_unit")
 
 
+def test_mmd_file_with_percent_stamp_is_in_scope_unit():
+    """A standalone .mmd has no ```mermaid fence and uses a `%%` stamp; it must be checked, not NO_DIAGRAM."""
+    today = date.today().isoformat()
+    dfp.read_local = _fake_read(f"%% diagram-verified: {today}\nflowchart TB\n  a --> b\n")
+    result = dfp.check_one("fake.mmd", "docs/diagrams/x.mmd", None, max_age_days=90)
+    assert result["status"] == "FRESH", f"expected FRESH for a stamped .mmd, got: {result}"
+    dfp.read_local = _fake_read("flowchart TB\n  a --> b\n")
+    result = dfp.check_one("fake.mmd", "docs/diagrams/x.mmd", None, max_age_days=90)
+    assert result["status"] == "MISSING_STAMP", f"expected MISSING_STAMP for an unstamped .mmd, got: {result}"
+    print("  PASS test_mmd_file_with_percent_stamp_is_in_scope_unit")
+
+
+def test_oldest_of_several_stamps_decides_unit():
+    """A README with 3 diagrams must not read FRESH because only the FIRST diagram was re-stamped."""
+    today = date.today().isoformat()
+    content = (MERMAID_CONTENT + f"<!-- diagram-verified: {today} -->\n"
+               + MERMAID_CONTENT + "<!-- diagram-verified: 2020-01-01 -->\n")
+    dfp.read_local = _fake_read(content)
+    result = dfp.check_one("fake-repo", "README.md", None, max_age_days=90)
+    assert result["status"] == "STALE", f"stale later stamp was hidden by a fresh first stamp: {result}"
+    assert "2020-01-01" in result["detail"]
+    print("  PASS test_oldest_of_several_stamps_decides_unit")
+
+
+def test_invalid_stamp_anywhere_in_file_is_reported_unit():
+    today = date.today().isoformat()
+    content = (MERMAID_CONTENT + f"<!-- diagram-verified: {today} -->\n"
+               + MERMAID_CONTENT + "<!-- diagram-verified: 2026-02-31 -->\n")
+    dfp.read_local = _fake_read(content)
+    result = dfp.check_one("fake-repo", "README.md", None, max_age_days=90)
+    assert result["status"] == "INVALID_STAMP", f"expected INVALID_STAMP, got: {result}"
+    print("  PASS test_invalid_stamp_anywhere_in_file_is_reported_unit")
+
+
+def test_repo_own_mmd_files_are_targets_unit():
+    labels = [t[0] for t in dfp.TARGETS]
+    assert any("docs/diagrams/01_hook_lifecycle.mmd" in l for l in labels), f"missing .mmd targets: {labels}"
+    print("  PASS test_repo_own_mmd_files_are_targets_unit")
+
+
 def main():
     test_calendar_invalid_stamp_reports_problem_not_crash_unit()
     test_invalid_stamp_does_not_abort_the_whole_audit_unit()
     test_valid_stamp_still_flags_as_a_problem_unit()
     test_genuinely_fresh_valid_stamp_unaffected_unit()
+    test_mmd_file_with_percent_stamp_is_in_scope_unit()
+    test_oldest_of_several_stamps_decides_unit()
+    test_invalid_stamp_anywhere_in_file_is_reported_unit()
+    test_repo_own_mmd_files_are_targets_unit()
     print("ALL DIAGRAM-FRESHNESS-PROBE TESTS PASS")
 
 
