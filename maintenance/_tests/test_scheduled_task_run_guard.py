@@ -183,6 +183,12 @@ UNGUARDED_BACKLOG = {
     # each EMAILS ggoldberg with no run guard; adopt the guard per task and remove the entry.
     "ora-agent-usage-report-monthly",            # emails the monthly agent-usage summary
     "ora-site-market-snapshot-refresh",          # emails the quarterly stale-figures digest
+    # Added 2026-10-27. One-time 2026-10-23 16:01 resume, UNTRACKED, so this suite failed
+    # only in the live working tree. NOT read-only: step 2 sends a peer session
+    # (local_1e678d9a...) a resume instruction via mcp__ccd_session_mgmt__send_message,
+    # which no SIDE_EFFECTS pattern matches; a second fire would re-send it. Its fire time
+    # has passed, so it is inert once its folder is archived -- remove this entry then.
+    "ora-ltv-register-unpause-2026-10-23-1601",  # messages the LTV design session
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
@@ -191,6 +197,12 @@ NO_SIDE_EFFECT_REVIEWED = {
     # "Never pushes, never switches branches ... purely additive local commits";
     # "Do not send any email or Outlook message ... Do not touch Notion." (SKILL.md:18,23)
     "ora-memory-commit-sweep",
+    # One-time 2026-10-23 17:00 status brief, read-only (read 2026-10-27): "Do NOT edit,
+    # commit, push, create, delete, send email, or change anything in Notion, the
+    # workbook, or any repo. Report only." (SKILL.md:6); "do not email anyone." (:18).
+    # Its only commands are git status/log and session reads. UNTRACKED, so this suite
+    # failed only in the live working tree.
+    "ora-ltv-register-resume-2026-10-23",
 }
 
 # Guarded tasks whose ordering regex cannot settle, checked by hand instead.
