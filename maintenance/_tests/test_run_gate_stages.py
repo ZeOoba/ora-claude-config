@@ -51,6 +51,8 @@ elif stage == "hang":
 elif stage == "sleepy":
     time.sleep(2.2)
     print("done sleeping")
+elif stage == "swallowed":
+    print("      Tests  2 failed | 5 passed (7)")
 elif stage == "tscfail":
     print("src/a.ts(1,1): error TS2322")
     print("Found 3 errors in 2 files.")
@@ -128,6 +130,20 @@ with tempfile.TemporaryDirectory() as tmp:
     check("body excerpt is bounded (head 25 + tail 10), not the whole 600-line log", body.count("at frame") < 60, body.count("at frame"))
     check("every reported path is forward-slash", "\\" not in json.dumps({k: s[k] for k in ("logDir", "subjectFile", "bodyFile", "summaryFile")}) and all("\\" not in (r["logPath"] or "") for r in s["stages"]))
 
+    # ---------------------------------------------------------------- exit 0 but reports failures
+    p, s, logd = run_runner(tmp, ["swallowed"])
+    check("exit 0 with 'failed' counts in the output is FAIL, never a silent CLEAN",
+          s["stages"][0]["status"] == "FAIL" and s["verdict"] == "FAILING" and p.returncode == 1, p.stdout)
+    check("body explains the exit-0 override", "Exit code was 0 but the output reports failures" in read(s["bodyFile"]))
+
+    # ---------------------------------------------------------------- probe subject
+    p, s, logd = run_runner(tmp, ["noisy_fail"])
+    check("probe-subject.txt holds the stem the probe can match",
+          read(s["probeSubjectFile"]) == "full gate FAILING - Monday 2026-10-26", s.get("probeSubjectFile"))
+    check("probe subject is NOT the [ACTION] email subject", read(s["probeSubjectFile"]) != read(s["subjectFile"]))
+    p, s, logd = run_runner(tmp, ["ok"])
+    check("clean run writes no probe subject", s["probeSubjectFile"] is None)
+
     # ---------------------------------------------------------------- MISSING stage
     pj = os.path.join(tmp, "package.json")
     with open(pj, "w", encoding="ascii") as fh:
@@ -178,6 +194,23 @@ with tempfile.TemporaryDirectory() as tmp:
           (s["heartbeat"] or {}).get("claimLost") == "REFUSED_NOT_OWNER" and s["stages"][0]["status"] == "PASS", s.get("heartbeat"))
     check("lost claim is flagged in the email body", "CLAIM LOST" in read(s["bodyFile"]))
 
+    # unreadable state file is an ERROR, not a lost claim
+    with open(state, "w", encoding="utf-8") as fh:
+        fh.write("{bad")
+    p, s, logd = run_runner(tmp, ["sleepy"], extra=hb_args)
+    hbs = s["heartbeat"] or {}
+    check("unreadable state -> not reported as claimLost", not hbs.get("claimLost"), hbs)
+    check("unreadable state -> recorded in heartbeat.errors", len(hbs.get("errors", [])) >= 1, hbs)
+    check("heartbeat errors are printed in the email body", "CLAIM HEARTBEAT ERRORS" in read(s["bodyFile"]), read(s["bodyFile"])[:400])
+
+    # heartbeat that cannot run at all (bad sentinel path) must be visible
+    p, s, logd = run_runner(tmp, ["ok"], extra=["--sentinel-task", "t", "--sentinel-block", "main",
+                                                "--sentinel-run-id", "g1", "--sentinel-script",
+                                                os.path.join(tmp, "no-such-sentinel.py")])
+    check("nonexistent sentinel script -> heartbeat errors surfaced in body",
+          "CLAIM HEARTBEAT ERRORS" in read(s["bodyFile"]) or s["verdict"] == "CLEAN" and (s["heartbeat"] or {}).get("errors"),
+          s.get("heartbeat"))
+
     # no sentinel args -> no heartbeat object
     p, s, logd = run_runner(tmp, ["ok"])
     check("no sentinel args -> heartbeat null", s["heartbeat"] is None)
@@ -196,6 +229,8 @@ check("spec: forbids piping the gate through tail/head", "tail" in spec_text and
 check("spec: the alert email is sent with -SubjectFile/-BodyFile from the runner",
       "-SubjectFile <log-dir>/email-subject.txt" in spec_text and "-BodyFile <log-dir>/email-body.txt" in spec_text)
 check("spec: claim line records the scheduled time", "claim --task ora-full-gate-weekly" in spec_text and "--scheduled-et 11:30" in spec_text)
+check("spec: probe is fed probe-subject.txt, never the email subject",
+      "-SubjectFile <log-dir>/probe-subject.txt" in spec_text and "ONE subject file feeds both" not in spec_text)
 check("spec: recipients unchanged (ggoldberg only, no cc)", "ggoldberg@oxfordra.net ONLY (no cc, never ze@)" in spec_text)
 
 n_fail = results.count(False)

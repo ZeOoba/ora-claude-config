@@ -89,6 +89,7 @@ owns the IN_PROGRESS claim (firstClaimedAt keeps the original, renewals counts t
 old, so a caller can invoke it freely at every stage boundary: pass 25 against a 30-minute TTL.
 A non-owner, a never-claimed block, or a block no longer IN_PROGRESS is REFUSED (exit 12) and
 nothing is written -- the caller must treat that as "my claim was lost" and say so loudly.
+--run-id is REQUIRED for renew (REFUSED_NO_RUN_ID, exit 12 without it).
 
 LATE START (added 2026-10-28): `claim --scheduled-et HH:MM` (the task's cron time, US/Eastern)
 records scheduledEt + lateStartMin on the claim record, echoes lateStartMin in the JSON, and
@@ -468,14 +469,24 @@ def late_start_min(scheduled_hhmm, now_et):
 
     Anchored to today's ET date. A reading more than 12 h EARLY is a catch-up for the
     previous day's fire (fired just after midnight), so it is measured against yesterday's
-    time; any other early reading (a few minutes of clock skew) clamps to 0."""
+    time; any other early reading (a few minutes of clock skew) clamps to 0.
+
+    KNOWN LIMITS: on a host WITHOUT tzdata, _eastern_now() returns a fixed-offset zone, so the
+    result is wall-clock-based and can be off by 60 min on a DST-change day. And it is anchored
+    to TODAY's clock time, so a weekly/daily task that catches up on a
+    LATER calendar day than its cron day reads as early and clamps to 0 (e.g. a Wednesday task
+    firing Thursday 09:00). The jsonl line carries claimedAt, so the true lateness can be
+    recomputed offline against the cron."""
     hm = parse_hhmm(scheduled_hhmm)
     if hm is None:
         return None
-    sched = now_et.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
-    delta = (now_et - sched).total_seconds() / 60.0
+    sched = now_et.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0, fold=0)
+    # Subtract in UTC: same-tzinfo subtraction is wall-clock and is wrong across a DST change.
+    delta = (now_et.astimezone(timezone.utc) - sched.astimezone(timezone.utc)).total_seconds() / 60.0
     if delta < -12 * 60:
-        delta += 24 * 60
+        # previous calendar day's instant, built in the zone (not +1440 wall minutes: wrong on DST days)
+        sched = sched - timedelta(days=1)
+        delta = (now_et.astimezone(timezone.utc) - sched.astimezone(timezone.utc)).total_seconds() / 60.0
     return round(max(delta, 0.0), 1)
 
 
@@ -567,11 +578,12 @@ def cmd_claim(args):
         if rec:
             new_rec["supersededRunId"] = rec.get("runId")
         late = None
+        late_note = None
         sched = getattr(args, "scheduled_et", None)
         if sched:
             late = late_start_min(sched, _eastern_now())
             if late is None:
-                note = "; ".join(n for n in (note, "ignored unparseable --scheduled-et %r" % sched) if n)
+                late_note = "ignored unparseable --scheduled-et %r" % sched
             else:
                 new_rec["scheduledEt"] = sched
                 new_rec["lateStartMin"] = late
@@ -588,6 +600,7 @@ def cmd_claim(args):
             "record": new_rec,
             "persisted": write_err is None,
             "lateStartMin": late,
+            "lateStartNote": late_note,
             "stateFileError": "; ".join(notes) if notes else None,
             "message": "%s claimed for %s by runId=%s (%s)." % (args.block, today, run_id, reason),
         })
@@ -706,13 +719,19 @@ def cmd_renew(args):
                          "message": why})
             return emit(base, EXIT_REFUSED)
 
+        if not args.run_id:
+            return refuse("REFUSED_NO_RUN_ID",
+                          "renew needs --run-id: without an identity it could extend a crashed run's claim "
+                          "and make the legitimate re-fire stand down.")
         if rec is None:
             return refuse("REFUSED_NO_CLAIM", "Nothing to renew: %s was never claimed for %s." % (args.block, today))
         if str(rec.get("status", "")).upper() != "IN_PROGRESS":
             return refuse("REFUSED_NOT_IN_PROGRESS",
                           "%s is %s, not IN_PROGRESS: the claim was already released or reclaimed."
                           % (args.block, rec.get("status")))
-        if args.run_id and rec.get("runId") not in (None, args.run_id):
+        # Strict: a record with NO runId is ownerless, not "anyone's". Renewing it would revive a
+        # dead claim and make the legitimate re-fire stand down.
+        if rec.get("runId") != args.run_id:
             return refuse("REFUSED_NOT_OWNER",
                           "The live claim belongs to runId=%s, not %s: this run lost its claim."
                           % (rec.get("runId"), args.run_id))

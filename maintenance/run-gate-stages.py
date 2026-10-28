@@ -175,9 +175,16 @@ def run_stage(stage, cmd_template, cwd, log_path, timeout_s):
     with open(log_path, "rb") as fh:
         text = fh.read().decode("utf-8", "replace")
     lines = text.splitlines()
+    counts = parse_counts(text)
+    status = "TIMEOUT" if timed_out else ("PASS" if rc == 0 else "FAIL")
+    # Exit 0 while the output itself reports failed tests / errors is not a pass: never
+    # let a swallowed exit code produce a silent CLEAN.
+    reports_failures = bool(counts.get("failed") or counts.get("errors"))
+    if status == "PASS" and reports_failures:
+        status = "FAIL"
     return {"stage": stage, "command": cmd, "exit": rc, "timedOut": timed_out, "durationSec": dur,
-            "status": "TIMEOUT" if timed_out else ("PASS" if rc == 0 else "FAIL"),
-            "counts": parse_counts(text), "logPath": fwd(log_path), "logLines": len(lines),
+            "status": status, "exitZeroButReportsFailures": status == "FAIL" and rc == 0,
+            "counts": counts, "logPath": fwd(log_path), "logLines": len(lines),
             "logBytes": len(text.encode("utf-8")),
             "head": lines[:HEAD_LINES], "tail": lines[-TAIL_LINES:] if len(lines) > HEAD_LINES else []}
 
@@ -206,15 +213,22 @@ class Heartbeat(threading.Thread):
             self.errors.append("renew call failed: %s" % exc)
             return
         try:
-            decision = json.loads(p.stdout).get("decision")
+            payload = json.loads(p.stdout)
         except Exception:
-            decision = None
+            payload = {}
+        decision = payload.get("decision")
         if decision == "RENEWED":
             self.renewals += 1
-        elif p.returncode == 12:
-            self.claim_lost = decision or "REFUSED"
-        elif decision != "RENEW_NOT_NEEDED":
-            self.errors.append("renew exit %s decision %s" % (p.returncode, decision))
+        elif decision == "RENEW_NOT_NEEDED":
+            pass
+        elif decision in ("REFUSED_NOT_OWNER", "REFUSED_NOT_IN_PROGRESS") and not payload.get("stateFileError"):
+            # A readable state file that says the claim is not ours. An unreadable one
+            # (OneDrive hiccup) also answers REFUSED_NO_CLAIM; that is an error, not a lost claim.
+            self.claim_lost = decision
+        else:
+            self.errors.append("renew exit %s decision %s%s" % (
+                p.returncode, decision,
+                " (%s)" % payload["stateFileError"] if payload.get("stateFileError") else ""))
 
     def run(self):
         while not self.stop_evt.wait(self.every_s):
@@ -231,6 +245,13 @@ class Heartbeat(threading.Thread):
 def verdict_of(results):
     bad = [r for r in results if r["status"] != "PASS"]
     return ("CLEAN" if not bad else "FAILING"), (bad[0]["stage"] if bad else None)
+
+
+def build_probe_subject(run_date, first_bad):
+    """The text outlook-sent-probe.ps1 must be given. The probe matches the SENT subject against
+    the probe text and only strips [tags] from the sent side, so the "[ACTION] ... -- <stage>"
+    subject cannot be fed to it; the stem "full gate FAILING - <date>" can."""
+    return None if first_bad is None else "full gate FAILING - %s" % run_date
 
 
 def build_subject(run_date, first_bad):
@@ -256,6 +277,10 @@ def build_body(summary):
                  "concurrently; treat this report as possibly duplicated." % hb["claimLost"])
     elif hb.get("renewals"):
         L.append("Claim renewed %d time(s) (run outlived the claim TTL)." % hb["renewals"])
+    if hb.get("errors"):
+        L.append("!! CLAIM HEARTBEAT ERRORS (%d): the claim was NOT being kept alive reliably; if the run "
+                 "exceeded the claim TTL a second fire may have run concurrently. First: %s"
+                 % (len(hb["errors"]), hb["errors"][0]))
     L += ["", "STAGE RESULTS", "-------------"]
     for r in res:
         ex = "n/a" if r["exit"] is None else str(r["exit"])
@@ -267,6 +292,8 @@ def build_body(summary):
         if r["status"] == "MISSING":
             L.append("No npm script named %r in package.json -- itself a finding." % r["stage"])
             continue
+        if r.get("exitZeroButReportsFailures"):
+            L.append("Exit code was 0 but the output reports failures: treated as FAIL.")
         L.append("Parsed: %s" % fmt_counts(r["counts"]))
         L.append("Full log: %s (%d lines)" % (r["logPath"], r["logLines"]))
         L.append("--- first %d lines ---" % len(r["head"]))
@@ -346,6 +373,11 @@ def main(argv=None):
     subject = build_subject(a.run_date, first_bad)
     body = build_body(summary)
     summary["subject"] = subject
+    probe = build_probe_subject(a.run_date, first_bad)
+    summary["probeSubjectFile"] = fwd(os.path.join(a.log_dir, "probe-subject.txt")) if probe else None
+    if probe:
+        with open(os.path.join(a.log_dir, "probe-subject.txt"), "w", encoding="utf-8", newline="") as fh:
+            fh.write(probe)
     summary["subjectFile"] = fwd(os.path.join(a.log_dir, "email-subject.txt"))
     summary["bodyFile"] = fwd(os.path.join(a.log_dir, "email-body.txt"))
     summary["summaryFile"] = fwd(os.path.join(a.log_dir, "summary.json"))
@@ -355,7 +387,8 @@ def main(argv=None):
         fh.write(body)
     with open(os.path.join(a.log_dir, "summary.json"), "w", encoding="utf-8", newline="") as fh:
         json.dump(summary, fh, indent=2, sort_keys=True)
-    keys = ("verdict", "firstFailingStage", "totals", "subject", "subjectFile", "bodyFile", "summaryFile",
+    keys = ("verdict", "firstFailingStage", "totals", "subject", "subjectFile", "probeSubjectFile", "bodyFile",
+            "summaryFile",
             "logDir", "heartbeat")
     sys.stdout.write(json.dumps({k: summary[k] for k in keys}, indent=2, sort_keys=True) + "\n")
     return 0 if verdict == "CLEAN" else 1
