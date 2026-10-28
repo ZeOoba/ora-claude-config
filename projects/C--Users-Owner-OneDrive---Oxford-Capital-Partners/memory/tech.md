@@ -122,6 +122,23 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - ORA PM Crons | state=retired | crit=no | exit1-ok=no | since=2026-08-16 | superseded-by=ora-pm-daily-crons | note=OI-162; its SKILL.md says do not re-enable; last result 0x8007042B is the 08-16 kill, not a live failure
 <!--END-WINDOWS-TASK-ROSTER-->
 
+## 3i. Self-hosted GitHub Actions runners (documented 2026-10-28; /insights: runners went offline after sleep)
+
+Four runners on LAPTOP-CSHSCBE6, all label `ora-ci`; none is a Windows service (`Get-Service actions.runner.*` is empty). Each listener runs `run.cmd` under Task Scheduler as user Owner. Not in the 3h roster on purpose (that block is machine-read; these are not ORA* automation).
+
+| Runner (gh name) | Repo | Dir | Task |
+|---|---|---|---|
+| LAPTOP-CSHSCBE6 (id 21) | oxford-command-center | `C:\actions-runner` | ORA-Runner-OCC |
+| LAPTOP-CSHSCBE6-occ (id 22) | oxford-command-center | `C:\Users\Owner\actions-runner-occ` | ORA-Runner-OCC2 |
+| LAPTOP-CSHSCBE6 (id 21) | Website | `C:\Users\Owner\actions-runner` | ORA-Runner-Website |
+| LAPTOP-CSHSCBE6-skills (id 21) | ora-skills | `C:\actions-runner-skills` | ORA-Runner-Skills |
+
+- Tasks: logon trigger + repeating time trigger (relaunch if the listener died), MultipleInstances IgnoreNew, RestartCount 999, no battery stop. Check: `gh api repos/ZeOoba/<repo>/actions/runners` (no other ZeOoba repo has runners).
+- Hardened 2026-10-28 (elevated `Set-ScheduledTask`): principal Owner/S4U (runs logged on or not) plus an AtStartup trigger added to the logon + repeating triggers. Before this the LogonType was Interactive, so the listener died at logoff and did not start at boot before login. Sleep drops the broker session; the repeating trigger is the recovery path. Re-applying needs an elevated shell (non-elevated returns Access is denied). Reboot-verified 2026-10-28: all four runners Online after restart (Owner was logged in; pre-login start not separately tested).
+- Stale duplicates `ORA-CI-Runner-ora-skills` and `ORA-CI-Runner-oxford-command-center` (same dirs, last result 0xC000013A) were deleted 2026-10-28; do not recreate.
+- True service alternative: re-run `config.cmd --runasservice` per dir (registration + removal token and logon password supplied by Gabriel; a runner package has no `svc.cmd` on Windows). Then `sc.exe failure <svc> reset= 86400 actions= restart/60000/restart/60000/restart/60000`. Modern Standby (S0) pauses services on lid close regardless.
+- Restarting a listener kills a running job: check `busy` first. Never handle runner tokens in-session.
+
 ## 4. MCP connectors
 
 <!--BEGIN-CONNECTOR-ROSTER-->
