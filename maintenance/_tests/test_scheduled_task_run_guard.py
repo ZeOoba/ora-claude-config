@@ -123,7 +123,7 @@ STEP_LINE = re.compile(r"^\s{0,3}(?:\*\*)?(?:\d+[.)]|[A-Z]\.\d+|Step\s+\d+)", re
 # parsed argv is reused to close the claim (a stray --ttl-min exits 2).
 # --slot-times (2026-09-24): claim resolves the block itself; the spec then closes
 # with the `block` claim emitted, which finalize_argv appends via `resolved_block`.
-CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0, "--slot-times": 1}
+CLAIM_ONLY_FLAGS = {"--ttl-min": 1, "--force": 0, "--slot-times": 1, "--scheduled-et": 1}
 
 # Frozen 2026-09-10. Side effects, no run guard. The documented per-task adoption
 # backlog (README-DOUBLE-FIRE-GUARD.md: "adoption is proven per-task, not
