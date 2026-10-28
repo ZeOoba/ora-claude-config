@@ -64,6 +64,11 @@ _EXCEL = "excel MCP rewrites the workbook in place; no undo"
 _ABSENT = "named by the ratified design; absent from the current M365 connector"
 
 TIERS = {
+    "delete_trigger": (IRREVERSIBLE, False,
+                       "claude-code-remote scheduled-task delete: removes the task and every "
+                       "session it started (stated in its definition); losing run history and "
+                       "having no restore are inferred, no undelete tool is described (pause "
+                       "with update_trigger enabled:false)"),
     "delete_scheduled_task": (IRREVERSIBLE, True,
                               "removes the registry entry, cron and run history (pause with "
                               "update_scheduled_task enabled:false; retire via the "

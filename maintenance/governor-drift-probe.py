@@ -272,6 +272,57 @@ RE_LTV_ANCHOR = re.compile(r"ltv\s*(?:ceiling|maximum|max)"
 # "maximum" (spelled in full) is a rare enough non-LTV collocation to accept. "ceiling"/"maximum"
 # abutting a percent read unambiguously as an LTV ceiling on a governor line.
 RE_LTV_CEIL_REV = re.compile(_LTV_VAL + r"\s*%\s*(?:ceiling|maximum)\b", re.I)
+# INTERIM-CHECKLIST threshold wording (ora-skills PR #165, debt-management/references/
+# ltv-interim-netting-checklist.md). The checklist states its OPERATIVE 40% in two shapes that carry no
+# governor keyword and no "<=" comparator, so no earlier pass read them and a hand edit of the threshold
+# was silent (reviewer finding on PR #165). Both extractors are comparator-bound to a DISTINCTIVE
+# anchor, not to a bare percent, so unrelated prose ("vacancy above 10%") cannot match:
+#   * RE_LTV_INTERIM_CMP + RE_LTV_FLAG_TERM: "<above|over|exceeds|...> N%" bound to the flag term
+#     'ltv-flag(ged)' in the same sentence, either order (see block 4 in scan_line for the windows).
+#   * RE_LTV_ROW_*: the worksheet row "| N | Result = (...loan...) / (...value...), vs N% |"; the 'loan'
+#     and 'value' tokens in the FORMULA are the metric guard (an unrelated "Result = NOI / debt, vs 8%"
+#     row has neither).
+# REFUTE round 1 (2026-10-27) reshaped these: (1) each comparator+value is matched ON ITS OWN (a
+# lookahead/lookbehind check for the flag term replaces the consuming ".{0,80}?ltv-flag" tail, which
+# let a canonical 40% earlier on the line swallow a drifted value after it); (2) markdown bold around
+# the number, dash/underscore variants of 'ltv-flag', the extra comparator spellings and 'versus' /
+# 'loans' are accepted; (3) the per-property veto is scoped to the VALUE, not the whole line.
+_BOLD = r"[*_`]*"
+RE_LTV_INTERIM_CMP = re.compile(
+    r"(?:above|over|exceeds?|exceeding|greater\s+than|more\s+than|in\s+excess\s+of|beyond|&gt;=?|[>≥]=?)\s*" + _BOLD
+    + _LTV_VAL + _BOLD + r"\s*%", re.I)
+RE_LTV_FLAG_TERM = re.compile(r"ltv[\s\-‐-―−_*]*flag", re.I)
+# words that make an 'LTV flag ... over N%' sentence a STATISTIC about flags, not the threshold
+# (hyphen-aware: "Oxford-share" is the checklist's own wording and is NOT a flag statistic -- REFUTE
+# round 2 N1)
+LTV_FLAG_STAT_WORDS = re.compile(
+    r"(?<![\w-])(?:rate|rates|count|counts|share|shares|pipeline)(?![\w-])", re.I)
+# a DIFFERENT ratio named just before the comparator ("LTC above 80%", "occupancy above 90%");
+# hyphen-aware so "yield-adjusted result exceeds 55%" is not "yield" (N3)
+LTV_OTHER_RATIO_BEFORE = re.compile(
+    r"(?<![\w-])(?:ltc|dscr|occupancy|vacancy|yield|noi)(?![\w-])", re.I)
+# sentence end: '. ' that is not an abbreviation ("i.e. ", "e.g. ", "vs. ", "etc. ") -- N2. A flag term
+# in the NEXT sentence is deliberately not bound ("... target. LTV-FLAGGED deals ..."); the one accepted
+# residual is a split like "above 40% gross; above 55% netted. Either is LTV-FLAGGED".
+RE_LTV_SENT_END = re.compile(r"(?<!i\.e)(?<!e\.g)(?<!\bvs)(?<!\betc)\.\s")
+# the flag term this value binds to carries a portfolio/aggregate qualifier: "LTV-FLAGGED (portfolio)"
+RE_LTV_FLAG_PORTFOLIO_QUAL = re.compile(r"\w*[\s*_`]*\(\s*(?:portfolio|aggregate)", re.I)
+# Worksheet result row. Linear-time by construction (REFUTE round 2, C11: the earlier single regex with
+# nested lazy quantifiers was cubic on a long line): locate the row head, then the first 'vs'/'versus',
+# then check the FORMULA between them in code.
+RE_LTV_ROW_HEAD = re.compile(r"\|\s*[*_`]*result[*_`]*\s*[=:]", re.I)
+RE_LTV_ROW_VS = re.compile(r"\b(?:vs\.?|versus)\b", re.I)
+RE_LTV_ROW_LOAN = re.compile(r"\bloans?\b", re.I)
+RE_LTV_ROW_VALUE = re.compile(r"\bvalues?\b", re.I)
+RE_LTV_ROW_PCT = re.compile(_BOLD + _LTV_VAL + _BOLD + r"\s*%", re.I)
+RE_LTV_ROW_PCT_ONLY = re.compile(r"\s*" + _BOLD + _LTV_VAL + _BOLD + r"\s*%\s*", re.I)
+# a result row that is about another ratio (debt yield, LTC, DSCR, lender max): FORMULA part only
+RE_LTV_ROW_NEG = re.compile(r"\b(?:lender|ltc|dscr|noi|yield)\b", re.I)
+# ...and the owner named right AFTER a threshold percentage in the 'vs' cell ("vs 75% lender max")
+RE_LTV_ROW_PCT_OWNER = re.compile(r"\b(?:lender|ltc)\b", re.I)
+INTERIM_FLAG_WINDOW_AFTER = 200   # bounded by the end of the sentence ('. ') inside this window
+INTERIM_FLAG_WINDOW_BEFORE = 120
+INTERIM_PERPROP_NEAR = 30
 # LTV audit-note suppressor (I-4): a PAST correction landing on canonical 40%. Kept TIGHT --
 # requires the explicit "corrected ... from <N>% to/→ 40%" structure. Its MATCH SPAN is used to
 # SPAN-SCOPE the suppression (branch 3): only a percent sitting INSIDE the span (the corrected-away
@@ -1895,6 +1946,93 @@ def scan_line(raw):
                 if _nonltv_subject_owns(low, vs):
                     continue
                 _flag_ltv(m.group(1), vs=vs, ve=m.end(1))
+    # 4) INTERIM-CHECKLIST threshold wording -- independent of is_gov (these lines carry no governor
+    #    keyword; that is exactly why the passes above missed them). Equality-checked numerically like
+    #    every other LTV pass; the ratified per-property 65 is not read as an aggregate drift when a
+    #    per-property marker sits next to the value (see _interim_flag).
+    interim_seen = set()
+
+    def _interim_flag(val, vs, ve, portfolio_bound=False):
+        """Numeric equality vs the canonical aggregate 40. The ratified per-property 65 is vetoed only
+        when a per-property marker sits NEXT TO THE VALUE (within INTERIM_PERPROP_NEAR chars) AND the
+        flag term the value binds to is not itself qualified '(portfolio)'/'(aggregate)': a 40->65
+        drift on a portfolio flag line must flag even when 'per-property' appears elsewhere on the line
+        (REFUTE round 1 C1 / round 2 C5). No correction-note skip: a real note ('corrected ... from 55%
+        to 40%') carries none of these comparator forms; a changelog line that narrates an OLD value in
+        comparator form ('corrected the LTV-FLAGGED trigger from over 45% to over 40%') flags LOUDLY and
+        is reworded, the probe's established practice (REFUTE round 2 C8, pinned by a test)."""
+        if not val or val in interim_seen:
+            return
+        try:
+            num = float(val)
+        except ValueError:
+            return
+        if num == float(CANON_LTV_PERPROPERTY) and not portfolio_bound:
+            near = low[max(0, vs - INTERIM_PERPROP_NEAR):ve + INTERIM_PERPROP_NEAR]
+            if any(mk in near for mk in PERDEAL_MARKERS):
+                return
+        if num != float(CANON_LTV) and 0 < num <= 100:
+            interim_seen.add(val)
+            out.append("LTV interim-checklist threshold %s%% != canonical %s%%" % (val, CANON_LTV))
+
+    # (a) '<above|over|exceeds|...> N%' bound to an LTV-FLAG term in the same sentence: the first flag
+    #     term AFTER the value (<=200 chars, to the end of the sentence '. '), else the last one BEFORE it
+    #     (<=120 chars from the start of its sentence) with no flag-STATISTIC wording in between. A
+    #     different ratio named just before the comparator ("LTC above 80%"), or a statistic right
+    #     after the value ("over 25% of pipeline"), is not the threshold.
+    for m in RE_LTV_INTERIM_CMP.finditer(low):
+        a_end = m.end()
+        after = low[a_end:a_end + INTERIM_FLAG_WINDOW_AFTER]
+        se = RE_LTV_SENT_END.search(after)
+        if se:
+            after = after[:se.start()]
+        b_start = max(0, m.start() - INTERIM_FLAG_WINDOW_BEFORE)
+        before = low[b_start:m.start()]
+        last_end = None
+        for se in RE_LTV_SENT_END.finditer(before):
+            last_end = se.end()
+        if last_end is not None:
+            b_start += last_end
+            before = before[last_end:]
+        # the lead guard looks only inside the current CLAUSE (N3): "Hold DSCR at 1.25x; above 55% ..."
+        lead = re.split(r"[;:,]", low[max(0, m.start() - 30):m.start()])[-1]
+        if (LTV_OTHER_RATIO_BEFORE.search(lead)
+                or LTV_FLAG_STAT_WORDS.search(low[a_end:a_end + 30])):
+            continue
+        bound_end = None
+        fm = RE_LTV_FLAG_TERM.search(after)
+        if fm:
+            bound_end = a_end + fm.end()
+        else:
+            for h in RE_LTV_FLAG_TERM.finditer(before):
+                if not LTV_FLAG_STAT_WORDS.search(before[h.end():]):
+                    bound_end = b_start + h.end()
+        if bound_end is None:
+            continue
+        _interim_flag(m.group(1), m.start(1), m.end(1),
+                      portfolio_bound=RE_LTV_FLAG_PORTFOLIO_QUAL.match(low, bound_end) is not None)
+    # (b) the worksheet result row '| N | Result = (...loan...) / (...value...), vs N% |'. Linear-time:
+    #     head, first 'vs', then the FORMULA is checked in code; the threshold is the cell after 'vs'
+    #     plus (for 'vs 40% | 55% |') a following cell that is nothing but a percentage.
+    if "result" in low and "loan" in low:
+        rm = RE_LTV_ROW_HEAD.search(low)
+        vsm = RE_LTV_ROW_VS.search(low, rm.end()) if rm else None
+        if vsm:
+            formula = low[rm.end():vsm.start()]
+            if (RE_LTV_ROW_LOAN.search(formula) and "/" in formula
+                    and RE_LTV_ROW_VALUE.search(formula) and not RE_LTV_ROW_NEG.search(formula)):
+                base = vsm.end()
+                cells = low[base:].split("|")
+                offs = base
+                for ci, cell in enumerate(cells[:2]):
+                    if ci == 1 and not RE_LTV_ROW_PCT_ONLY.fullmatch(cell):
+                        break
+                    for pm in RE_LTV_ROW_PCT.finditer(cell):
+                        # 'vs 75% lender max' / 'vs 80% LTC': the threshold of ANOTHER ratio
+                        if RE_LTV_ROW_PCT_OWNER.search(cell[pm.end():pm.end() + 15]):
+                            continue
+                        _interim_flag(pm.group(1), offs + pm.start(1), offs + pm.end(1))
+                    offs += len(cell) + 1
     return out
 
 # DATED AUDIT/PROJECT memory files (2026-07-16): the same append-only NARRATIVE class as
