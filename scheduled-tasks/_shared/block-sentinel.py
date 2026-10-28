@@ -62,6 +62,9 @@ USAGE
   python block-sentinel.py fail     --task ora-am-brief --block blockB --run-id <id>
                                     [--error "..."] [--period day|week|month]
   python block-sentinel.py status   --task ora-am-brief --block blockB   (read-only) [--period day|week|month]
+  python block-sentinel.py renew    --task ora-full-gate-weekly --block main --run-id <id>
+                                    [--min-age-min 25] [--period day|week|month]
+                                    heartbeat for a long run (see RENEW below)
   python block-sentinel.py slot     --times 09:35,12:35,15:35            (read-only) -> {"block": "slot-12", ...}
                                     For multi-fire-per-day tasks: resolves the current ET cron slot so
                                     no caller does timezone math in a shell (Git Bash ignores TZ here).
@@ -77,6 +80,20 @@ week (`YYYY-Www`, US/Eastern); --period month keys to the calendar month
 whichever bucket is selected; only the key format and retention window change
 (see `prune()`). The caller must pass the SAME --period on claim/complete/fail
 that it used to claim, or it addresses a different bucket than intended.
+
+RENEW (added 2026-10-28): a claim is only protected for --ttl-min. A run that outlives it
+(the weekly full gate: 8-24 min typical, longer when a stage hangs) looks crashed to a second
+fire, which would reclaim and run concurrently. `renew` re-stamps claimedAt for the run that
+owns the IN_PROGRESS claim (firstClaimedAt keeps the original, renewals counts them). With
+--min-age-min N it is a no-op (decision RENEW_NOT_NEEDED, exit 0) until the claim is N minutes
+old, so a caller can invoke it freely at every stage boundary: pass 25 against a 30-minute TTL.
+A non-owner, a never-claimed block, or a block no longer IN_PROGRESS is REFUSED (exit 12) and
+nothing is written -- the caller must treat that as "my claim was lost" and say so loudly.
+
+LATE START (added 2026-10-28): `claim --scheduled-et HH:MM` (the task's cron time, US/Eastern)
+records scheduledEt + lateStartMin on the claim record, echoes lateStartMin in the JSON, and
+appends one line to <state dir>/late-start-log.jsonl. Observational only: it never changes
+the claim decision, and an unparseable value is ignored with a note.
 
 Exit codes:  0 PROCEED/ok  |  10 SKIP_ALREADY_COMPLETE  |  11 STAND_DOWN_IN_PROGRESS
              12 REFUSED (finalize without ownership; nothing written)
@@ -422,9 +439,55 @@ def prune(data, today, period="day"):
     return data
 
 
+def _fwd(value):
+    """Forward-slash form of a path for the JSON a Bash-driven caller will paste back into a
+    command. An unquoted backslash path in Git Bash loses its separators (C:UsersOwner...), and
+    the agent running the spec then hand-corrects it, which hides the defect."""
+    return value.replace("\\", "/") if isinstance(value, str) else value
+
+
 def emit(payload, code):
+    if isinstance(payload, dict) and "statePath" in payload:
+        payload = dict(payload, statePath=_fwd(payload["statePath"]))
     sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return code
+
+
+def parse_hhmm(value):
+    """'HH:MM' -> (h, m), or None when it is not a valid 24h time."""
+    try:
+        h, m = str(value).strip().split(":")
+        h, m = int(h), int(m)
+    except (ValueError, AttributeError):
+        return None
+    return (h, m) if 0 <= h <= 23 and 0 <= m <= 59 else None
+
+
+def late_start_min(scheduled_hhmm, now_et):
+    """Minutes between the task's scheduled ET time and `now_et`, or None if unparseable.
+
+    Anchored to today's ET date. A reading more than 12 h EARLY is a catch-up for the
+    previous day's fire (fired just after midnight), so it is measured against yesterday's
+    time; any other early reading (a few minutes of clock skew) clamps to 0."""
+    hm = parse_hhmm(scheduled_hhmm)
+    if hm is None:
+        return None
+    sched = now_et.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+    delta = (now_et - sched).total_seconds() / 60.0
+    if delta < -12 * 60:
+        delta += 24 * 60
+    return round(max(delta, 0.0), 1)
+
+
+def _append_late_log(state_path, entry):
+    """Best-effort jsonl next to the state file. Never raises: observability must not be a
+    new way for the guard to fail."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(state_path)), "late-start-log.jsonl"),
+                  "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, sort_keys=True) + "\n")
+    except Exception:
+        pass
 
 
 # ------------------------------------------------------------------ commands
@@ -503,6 +566,18 @@ def cmd_claim(args):
                    "notionPageId": None, "emailSentAt": None}
         if rec:
             new_rec["supersededRunId"] = rec.get("runId")
+        late = None
+        sched = getattr(args, "scheduled_et", None)
+        if sched:
+            late = late_start_min(sched, _eastern_now())
+            if late is None:
+                note = "; ".join(n for n in (note, "ignored unparseable --scheduled-et %r" % sched) if n)
+            else:
+                new_rec["scheduledEt"] = sched
+                new_rec["lateStartMin"] = late
+                _append_late_log(path, {"task": args.task, "block": args.block, "periodKey": today,
+                                        "runId": run_id, "scheduledEt": sched, "lateStartMin": late,
+                                        "claimedAt": new_rec["claimedAt"]})
         data.setdefault(today, {})[canon_block(args.block)] = new_rec
         write_err = save_state(path, prune(data, today, period))
 
@@ -512,6 +587,7 @@ def cmd_claim(args):
             "logToken": block_token(args.block, reason),
             "record": new_rec,
             "persisted": write_err is None,
+            "lateStartMin": late,
             "stateFileError": "; ".join(notes) if notes else None,
             "message": "%s claimed for %s by runId=%s (%s)." % (args.block, today, run_id, reason),
         })
@@ -610,6 +686,54 @@ def cmd_fail(args):
     return _finalize(args, "FAILED", {"error": args.error or "unspecified"})
 
 
+def cmd_renew(args):
+    """Heartbeat: re-stamp claimedAt on the IN_PROGRESS claim THIS run owns, so a run longer
+    than --ttl-min is not mistaken for a crash and reclaimed by a second fire."""
+    path = args.state or default_state_path(args.task)
+    period = getattr(args, "period", None) or "day"
+    today = period_key(period)
+    key = canon_block(args.block)
+    min_age = args.min_age_min or 0
+    with _Lock(path) as lock:
+        data, err = load_state(path)
+        rec = (data.get(today) or {}).get(key)
+        base = {"task": args.task, "block": args.block, "etDate": today, "period": period,
+                "periodKey": today, "statePath": path, "stateFileError": err or lock.note}
+
+        def refuse(decision, why):
+            base.update({"decision": decision, "persisted": False, "record": rec,
+                         "logToken": block_token(args.block, "RENEW_" + decision),
+                         "message": why})
+            return emit(base, EXIT_REFUSED)
+
+        if rec is None:
+            return refuse("REFUSED_NO_CLAIM", "Nothing to renew: %s was never claimed for %s." % (args.block, today))
+        if str(rec.get("status", "")).upper() != "IN_PROGRESS":
+            return refuse("REFUSED_NOT_IN_PROGRESS",
+                          "%s is %s, not IN_PROGRESS: the claim was already released or reclaimed."
+                          % (args.block, rec.get("status")))
+        if args.run_id and rec.get("runId") not in (None, args.run_id):
+            return refuse("REFUSED_NOT_OWNER",
+                          "The live claim belongs to runId=%s, not %s: this run lost its claim."
+                          % (rec.get("runId"), args.run_id))
+        age = age_minutes(rec.get("claimedAt"))
+        if min_age and age is not None and age < min_age:
+            base.update({"decision": "RENEW_NOT_NEEDED", "persisted": False, "record": rec,
+                         "ageMin": round(age, 1),
+                         "message": "claim is %.1f min old (< %d): no renewal needed." % (age, min_age)})
+            return emit(base, EXIT_OK)
+        rec.setdefault("firstClaimedAt", rec.get("claimedAt"))
+        rec["claimedAt"] = utc_iso()
+        rec["renewals"] = int(rec.get("renewals") or 0) + 1
+        data.setdefault(today, {})[key] = rec
+        write_err = save_state(path, prune(data, today, period))
+        base.update({"decision": "RENEWED", "persisted": write_err is None, "record": rec,
+                     "ageMin": round(age, 1) if age is not None else None,
+                     "stateFileError": "; ".join(n for n in (err, lock.note, write_err) if n) or None,
+                     "message": "%s claim renewed (renewal #%d)." % (args.block, rec["renewals"])})
+        return emit(base, EXIT_OK)
+
+
 def cmd_status(args):
     """Read-only. Must not create the state file -- callers use it to inspect."""
     path = args.state or default_state_path(args.task)
@@ -675,7 +799,7 @@ def cmd_slot(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for name in ("claim", "complete", "fail", "status"):
+    for name in ("claim", "complete", "fail", "status", "renew"):
         sp = sub.add_parser(name)
         sp.add_argument("--task", required=True)
         # claim may resolve its block from --slot-times instead (checked in cmd_claim)
@@ -688,12 +812,19 @@ def main(argv=None):
                              "(default day); must match across claim/complete/fail for one run")
         if name == "claim":
             sp.add_argument("--ttl-min", type=int, default=None)
+            sp.add_argument("--scheduled-et", default=None,
+                            help="the task's scheduled ET fire time HH:MM; records lateStartMin on the "
+                                 "claim and in late-start-log.jsonl (observational only)")
             sp.add_argument("--force", action="store_true",
                             help="override a COMPLETE record (documented manual-rerun escape hatch)")
             sp.add_argument("--slot-times", default=None,
                             help="ET fire times HH:MM,... -- resolve the block (slot-HH) inside the "
                                  "claim from the same clock reading as the date; overrides --block. "
                                  "Reuse the emitted `block` verbatim for complete/fail")
+        if name == "renew":
+            sp.add_argument("--min-age-min", type=int, default=0,
+                            help="no-op until the claim is at least this many minutes old "
+                                 "(use 25 against the default 30-minute TTL)")
         if name == "complete":
             sp.add_argument("--notion-page-id", default=None)
             sp.add_argument("--email-sent-at", default=None)
@@ -711,7 +842,7 @@ def main(argv=None):
         return cmd_slot(args)
     try:
         return {"claim": cmd_claim, "complete": cmd_complete,
-                "fail": cmd_fail, "status": cmd_status}[args.cmd](args)
+                "fail": cmd_fail, "status": cmd_status, "renew": cmd_renew}[args.cmd](args)
     except Exception as exc:  # fail open, loudly
         return emit({"task": getattr(args, "task", None), "block": getattr(args, "block", None),
                      "decision": "PROCEED", "logToken": "BLOCK_SENTINEL_INTERNAL_ERROR",
