@@ -207,6 +207,8 @@ BASH_GUARD_CHAIN = [
     # the session_kind scan-budget fix); see the module docstring.
     "winpath-guard",  # 2026-10-23 -- blocks unquoted X:\ paths and "\$" in
     # double-quoted Windows paths (bash silently corrupts both)
+    "rewrite-advisory-guard",  # 2026-10-28 -- ADVISORY ONLY (additionalContext, never
+    # blocks, never rewrites): nudges sed -i / perl -i / python -c file writes to Edit
     "pipe-mask-guard",  # 2026-10-23 -- MUST STAY LAST: it emits a command
     # rewrite (updatedInput), and only a chain that reached the end without a
     # block may emit one. test-pipe-mask-guard.py asserts the position.
