@@ -25,7 +25,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-STAMP_RE = re.compile(r"<!--\s*diagram-verified:\s*(\d{4}-\d{2}-\d{2})\s*-->")
+# `<!-- diagram-verified: D -->` in Markdown, `%% diagram-verified: D` in a standalone .mmd file.
+STAMP_RE = re.compile(r"(?:<!--|%%)\s*diagram-verified:\s*(\d{4}-\d{2}-\d{2})")
 MERMAID_RE = re.compile(r"```mermaid")
 
 # (label, local path or None, remote "owner/repo" or None) -- exactly one of
@@ -41,6 +42,17 @@ TARGETS = [
     # website-canonical deliberately excluded -- Hard Invariant 2, needs a
     # separate per-write confirmation pass, not swept into an automated probe.
 ]
+
+# This repo's own standalone diagrams (docs/diagrams/*.mmd) and the system-of-record diagram were
+# outside the probe: the README stamp could read FRESH while these drifted (2026-10-28 audit: hook
+# guard counts, task counts and file counts were all wrong after 3 weeks). Resolved relative to this
+# script so the entries work on any checkout; a missing stamp is reported, not skipped.
+_ROOT = Path(__file__).resolve().parent.parent
+for _mmd in sorted((_ROOT / "docs" / "diagrams").glob("*.mmd")):
+    TARGETS.append((f"ora-claude-config docs/diagrams/{_mmd.name}", str(_mmd), None))
+_SOR = next((_ROOT / "projects").glob("*/memory/00_system_of_record.md"), None) if (_ROOT / "projects").is_dir() else None
+if _SOR is not None:
+    TARGETS.append(("ora-claude-config 00_system_of_record.md", str(_SOR), None))
 
 
 def read_local(path):
@@ -73,29 +85,36 @@ def check_one(label, local_path, remote_repo, max_age_days):
     if err:
         return {"repo": label, "status": "UNREADABLE", "detail": err}
 
-    if not MERMAID_RE.search(content):
+    # A standalone .mmd file IS the diagram; Markdown files need a fence to be in scope.
+    if not (str(local_path or "").endswith(".mmd") or MERMAID_RE.search(content)):
         return {"repo": label, "status": "NO_DIAGRAM", "detail": "no ```mermaid fence found -- not in scope for a stamp"}
 
-    m = STAMP_RE.search(content)
-    if not m:
+    raw_stamps = STAMP_RE.findall(content)
+    if not raw_stamps:
         return {"repo": label, "status": "MISSING_STAMP", "detail": "has a mermaid diagram but no diagram-verified stamp"}
 
-    try:
-        stamp_date = date.fromisoformat(m.group(1))
-    except ValueError as e:
-        # STAMP_RE only validates DIGIT SHAPE (\d{4}-\d{2}-\d{2}), not calendar validity --
-        # a syntactically-matching but impossible date ("2026-02-31") makes fromisoformat
-        # raise. This must become a per-target result, not an uncaught exception: check_one
-        # is invoked from a single list comprehension in main(), so letting this propagate
-        # would abort the ENTIRE cross-repo audit and silently drop every other target.
-        return {"repo": label, "status": "INVALID_STAMP",
-                "detail": f"stamp {m.group(1)!r} is not a valid calendar date: {e}"}
+    # A file can hold several diagrams, each with its own stamp. The OLDEST one decides, so a freshly
+    # re-stamped first diagram cannot hide a stale later one.
+    parsed = []
+    for raw in raw_stamps:
+        try:
+            parsed.append(date.fromisoformat(raw))
+        except ValueError as e:
+            # STAMP_RE only validates DIGIT SHAPE (\d{4}-\d{2}-\d{2}), not calendar validity --
+            # a syntactically-matching but impossible date ("2026-02-31") makes fromisoformat
+            # raise. This must become a per-target result, not an uncaught exception: check_one
+            # is invoked from a single list comprehension in main(), so letting this propagate
+            # would abort the ENTIRE cross-repo audit and silently drop every other target.
+            return {"repo": label, "status": "INVALID_STAMP",
+                    "detail": f"stamp {raw!r} is not a valid calendar date: {e}"}
+    stamp_date = min(parsed)
     age_days = (date.today() - stamp_date).days
     if age_days < 0:
         return {"repo": label, "status": "FUTURE_STAMP", "detail": f"stamp dated {stamp_date} is in the future -- check for a typo"}
     if age_days > max_age_days:
         return {"repo": label, "status": "STALE", "detail": f"stamped {stamp_date}, {age_days}d ago (threshold {max_age_days}d)"}
-    return {"repo": label, "status": "FRESH", "detail": f"stamped {stamp_date}, {age_days}d ago"}
+    return {"repo": label, "status": "FRESH", "detail": f"stamped {stamp_date}, {age_days}d ago"
+            + (f" (oldest of {len(parsed)} stamps)" if len(parsed) > 1 else "")}
 
 
 def main():
