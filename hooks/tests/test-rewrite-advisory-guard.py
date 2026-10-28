@@ -170,7 +170,7 @@ def test_review_round1():
     check("xargs grep pattern", "git ls-files | xargs grep -l sed -i", False)
     check("xargs -I sed", "ls | xargs -I{} sed -i 's/a/b/' {}", True)
     # D1 -- no quadratic scan; bounded wall time on a 126KB hostile body
-    big = "python -c \"" + "open('" * 21000
+    big = "python -c \"" + "open('" * 21000 + "\""  # closed quote: tokeniser must accept it
     t0 = time.time()
     rc, out, err = run(payload(big), "script")
     el = time.time() - t0
@@ -180,7 +180,7 @@ def test_review_round1():
         FAILS.append("126KB open( payload took %.1fs rc=%s (budget 4s)" % (el, rc))
     big2 = "open(" * 26000
     t0 = time.time()
-    rc, out, err = run(payload("python -c \"" + big2), "script")
+    rc, out, err = run(payload("python -c \"" + big2 + "\""), "script")
     el = time.time() - t0
     if rc == 0 and el < 4.0:
         PASSES[0] += 1
