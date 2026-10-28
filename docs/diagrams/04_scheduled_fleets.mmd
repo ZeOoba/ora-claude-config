@@ -1,12 +1,12 @@
 %% Verified against README 4b + maintenance/push-fleet-heartbeat.ps1 header + docs/system-inventory.md
 %% (manually refreshed 2026-10-06; previous Block H stamp was 2026-09-14)
-%% diagram-verified: 2026-10-06
+%% diagram-verified: 2026-10-28
 flowchart TB
   subgraph DESKTOP["Claude Desktop (fires only while open)"]
     CC["CC/MCP registry (claude-code-sessions/.../scheduled-tasks.json)"]
     LM["LAMS/Cowork registry (local-agent-mode-sessions/.../scheduled-tasks.json)"]
   end
-  CCSPEC["~/.claude/scheduled-tasks/id/SKILL.md (tracked: 55 live + 27 archive dirs)"]
+  CCSPEC["~/.claude/scheduled-tasks/id/SKILL.md (tracked: 65 live + 28 archive dirs)"]
   LMSPEC["OneDrive Claude/Scheduled/id (NOT tracked)"]
   CC --> CCSPEC
   LM --> LMSPEC
