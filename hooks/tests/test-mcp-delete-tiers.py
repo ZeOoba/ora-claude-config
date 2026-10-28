@@ -106,6 +106,15 @@ def test_false_positive_and_read_pins():
         # name, so a compound verb that starts with one is EXEMPT even though it deletes.
         ("mcp__x__get_and_delete", t.EXEMPT),
         ("mcp__x__restore_then_purge", t.EXEMPT),
+        # delete_trigger (claude-code-remote) is an explicit IRREVERSIBLE row, matched on the
+        # exact short name only: its non-deleting siblings stay unrouted and a compound name
+        # is not covered by the row.
+        ("mcp__claude-code-remote__delete_trigger", t.IRREVERSIBLE),
+        ("mcp__claude-code-remote__update_trigger", t.UNROUTED),
+        ("mcp__claude-code-remote__fire_trigger", t.UNROUTED),
+        ("mcp__claude-code-remote__archive_session", t.UNROUTED),
+        ("mcp__x__delete_trigger_and_sessions", t.UNKNOWN),
+        ("mcp__x__delete_triggers", t.UNKNOWN),
         # untrash is an explicit by-input TIERS row, NOT a read prefix: with no restoreMap
         # (the {} used here) the restore tool is EXEMPT, its delete sibling stays gated, and
         # a compound name starting with it is not laundered. Map-dependent tiers: see T6.
@@ -313,6 +322,9 @@ def test_routed_middle_segment_floor():
     check("T11b middle verb does not downgrade IRREVERSIBLE", got == t.IRREVERSIBLE, "got=%s" % got)
     got = t.classify("mcp__x__delete__notion-delete-pages", {})[0]
     check("T11c middle verb does not downgrade RECOVERABLE", got == t.RECOVERABLE, "got=%s" % got)
+    got = t.classify("mcp__x__delete__delete_trigger", {})[0]
+    check("T11f middle verb does not downgrade the delete_trigger IRREVERSIBLE row",
+          got == t.IRREVERSIBLE, "got=%s" % got)
     # server segment alone is not a middle segment; clean names unaffected
     check("T11d server name with verb is not a middle segment",
           t.classify("mcp__delete_srv__list_all", {})[0] == t.EXEMPT)
@@ -364,6 +376,76 @@ def test_target_digest():
                                           t.target_label("notion-delete-pages", a)) is not None)
 
 
+def _fullwidth(text):
+    """ASCII lowercase letters -> fullwidth forms (U+FF41..), built with chr() to keep this
+    file ASCII-only. NFKC folds them back to ASCII, which a lenient lookup might do."""
+    return "".join(chr(ord(c) + 0xFEE0) if "a" <= c <= "z" else c for c in text)
+
+
+def _name_variants(key):
+    """Names that are NOT the exact short name but that a lenient lookup could fold onto it."""
+    out = {key.upper(), key.swapcase(), key.title(), key.capitalize(),  # case
+           " " + key, key + " ",                                        # padding
+           key.replace("_", "-"), key.replace("-", "_"),                # separator swap
+           _fullwidth(key)}                                             # NFKC-foldable
+    out.discard(key)
+    return sorted(out)
+
+
+def test_row_lookup_is_exact_name():
+    """T14. TIERS rows key on the EXACT short name. A variant that merely looks like a row
+    key (other case, padded with a space, hyphen/underscore swapped, fullwidth letters) must
+    get the tier of a name WITHOUT that row, so a row never leaks onto a lookalike. The
+    dangerous direction is an EXEMPT or lenient row leaking, for example via
+    TIERS.get(short.lower()), TIERS.get(short.strip()) or a separator/NFKC fallback.
+
+    PINNED, NOT ENDORSED. This pins today's behavior, including its weak spots:
+      * The five EXTRA_NAMES rows (clean_up_worktrees, sharepoint_move_item,
+        notion-calendar-cancel-events, manage_segment, manage_campaign_objects) are matched
+        case-sensitively by the matcher too, so their upper-case variants are UNROUTED and
+        the guard never sees them (T14c pins that).
+      * For IRREVERSIBLE rows, exact-name keying is the LENIENT direction: DELETE_TRIGGER
+        only asks interactively while delete_trigger blocks. A future change that raises
+        severity for case variants must rewrite T14/T14b on purpose.
+    The read-prefix check (short.lower().startswith(READ_PREFIXES)) is a different path and
+    is not pinned here."""
+    variants_seen = 0
+    for key in sorted(t.TIERS):
+        for variant in _name_variants(key):
+            name = "mcp__x__" + variant
+            with_row = t.classify(name, {})[0]
+            row = t.TIERS.pop(key)
+            try:
+                without_row = t.classify(name, {})[0]
+            finally:
+                t.TIERS[key] = row
+            variants_seen += 1
+            check("T14 row %s does not apply to variant %r" % (key, variant),
+                  with_row == without_row, "with_row=%s without_row=%s" % (with_row, without_row))
+    # every key yields >= 2 case variants, 2 padded, 1 fullwidth
+    check("T14a the variant sweep actually ran", variants_seen >= 5 * len(t.TIERS),
+          "variants=%d rows=%d" % (variants_seen, len(t.TIERS)))
+    # readable pins; each differs from its exact-name tier
+    for name, exact_tier, want in (
+            ("mcp__ms365__OUTLOOK_UNTRASH_THREAD", t.EXEMPT, t.UNKNOWN),
+            ("mcp__claude-code-remote__DELETE_TRIGGER", t.IRREVERSIBLE, t.UNKNOWN),
+            ("mcp__scheduled-tasks__DELETE_SCHEDULED_TASK", t.IRREVERSIBLE, t.UNKNOWN),
+            ("mcp__x__OUTLOOK_DELETE_EVENT", t.EXEMPT, t.UNKNOWN),
+            ("mcp__x__ outlook_delete_event", t.EXEMPT, t.UNKNOWN),
+            ("mcp__x__outlook_delete_event ", t.EXEMPT, t.UNKNOWN),
+            ("mcp__x__outlook-delete-event", t.EXEMPT, t.UNKNOWN)):
+        got = t.classify(name, {})[0]
+        check("T14b %s is %s, not the exact-name tier %s" % (name.rsplit("__", 1)[-1], want,
+                                                           exact_tier),
+              got == want and got != exact_tier, "got=%s" % got)
+    # documented gap, pinned: EXTRA_NAMES rows are not routed at all when the case differs
+    for key in sorted(t.EXTRA_NAMES):
+        name = "mcp__x__" + key.upper()
+        check("T14c %s is UNROUTED and not routed by the matcher (known gap, pinned)"
+              % key.upper(), t.classify(name, {})[0] == t.UNROUTED and not t.is_routed(name),
+              "tier=%s routed=%s" % (t.classify(name, {})[0], t.is_routed(name)))
+
+
 def test_tier_names_are_unique():
     """One override name == one tier (override_tokens.py). config-write-guard owns
     allow-destructive-delete; only mcp-delete-guard may define allow-mcp-delete."""
@@ -397,6 +479,7 @@ if __name__ == "__main__":
     test_oversized_name_is_bounded()
     test_target_digest()
     test_tier_names_are_unique()
+    test_row_lookup_is_exact_name()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures[:12])))
         sys.exit(1)
