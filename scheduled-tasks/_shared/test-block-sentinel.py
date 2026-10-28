@@ -761,8 +761,35 @@ def test_renew_refuses_non_owner_and_nonlive():
     check("non-owner renew wrote nothing", read_state(st) == before)
     run(["complete", "--task", "t", "--block", "main", "--run-id", "g1"], st)
     rc, out = run(["renew", "--task", "t", "--block", "main", "--run-id", "g1"], st)
+    # ownerless record (no runId) is nobody's: renew must not revive it
+    data = read_state(st)
+    data[et_today()]["main"] = {"status": "IN_PROGRESS", "claimedAt": "2020-01-01T00:00:00Z"}
+    write_state(st, data)
+    before_own = read_state(st)
+    rc, out = run(["renew", "--task", "t", "--block", "main", "--run-id", "intruder"], st)
+    check("ownerless IN_PROGRESS record -> REFUSED_NOT_OWNER, nothing written",
+          rc == 12 and out.get("decision") == "REFUSED_NOT_OWNER" and read_state(st) == before_own, "%s %s" % (rc, out))
+    data = read_state(st)
+    data[et_today()]["main"] = {"status": "COMPLETE", "runId": "g1", "claimedAt": iso_ago(1)}
+    write_state(st, data)
+    rc, out = run(["renew", "--task", "t", "--block", "main", "--run-id", "g1"], st)
     check("COMPLETE block -> exit 12 REFUSED_NOT_IN_PROGRESS",
           rc == 12 and out.get("decision") == "REFUSED_NOT_IN_PROGRESS", "%s %s" % (rc, out))
+
+
+def test_renew_requires_run_id_and_cannot_revive_a_crashed_claim():
+    print("\ntest_renew_requires_run_id_and_cannot_revive_a_crashed_claim")
+    st = tmp_state()
+    _claim_aged(st, 400)           # owner crashed long ago
+    before = read_state(st)
+    rc, out = run(["renew", "--task", "ora-full-gate-weekly", "--block", "main"], st)
+    check("renew without --run-id -> exit 12 REFUSED_NO_RUN_ID",
+          rc == 12 and out.get("decision") == "REFUSED_NO_RUN_ID", "%s %s" % (rc, out))
+    check("anonymous renew wrote nothing", read_state(st) == before)
+    rc, out = run(["claim", "--task", "ora-full-gate-weekly", "--block", "main", "--run-id", "g2",
+                   "--ttl-min", "30"], st)
+    check("the legitimate re-fire still reclaims the stale claim", rc == 0 and out.get("decision") == "PROCEED",
+          "%s %s" % (rc, out))
 
 
 def test_renew_honors_period_bucket():
@@ -789,6 +816,26 @@ def test_late_start_math():
     check("2 min early (skew) clamps to 0", m.late_start_min("11:30", at(11, 28)) == 0.0)
     check("00:20 vs 23:30 -> 50 (previous-day catch-up across midnight)",
           m.late_start_min("23:30", at(0, 20)) == 50.0)
+    # DST fall-back 2026-11-01: 01:30 EDT scheduled, now 01:45 EST (the second 01:45) is 75 real minutes
+    try:
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        sched_first = datetime(2026, 11, 1, 1, 45, tzinfo=ny, fold=1)
+        check("DST fall-back counts elapsed time, not wall-clock (01:30 sched, 01:45 EST -> 75)",
+              m.late_start_min("01:30", sched_first) == 75.0, m.late_start_min("01:30", sched_first))
+    except Exception as exc:  # tzdata missing on this host: nothing to assert against
+        print("  SKIP  DST fall-back (no zoneinfo: %s)" % exc)
+    try:
+        from zoneinfo import ZoneInfo
+        ny2 = ZoneInfo("America/New_York")
+        check("previous-day catch-up on a DST day uses real elapsed time (spring: 23:30 -> 11:00 EDT = 630)",
+              m.late_start_min("23:30", datetime(2026, 3, 8, 11, 0, tzinfo=ny2)) == 630.0,
+              m.late_start_min("23:30", datetime(2026, 3, 8, 11, 0, tzinfo=ny2)))
+        check("previous-day catch-up on a DST day (fall: 23:30 -> 11:00 EST = 750)",
+              m.late_start_min("23:30", datetime(2026, 11, 1, 11, 0, tzinfo=ny2)) == 750.0,
+              m.late_start_min("23:30", datetime(2026, 11, 1, 11, 0, tzinfo=ny2)))
+    except Exception as exc:
+        print("  SKIP  DST previous-day (no zoneinfo: %s)" % exc)
     check("garbage -> None", m.late_start_min("noon", at(1, 0)) is None and m.late_start_min("25:00", at(1, 0)) is None)
 
 
@@ -812,9 +859,9 @@ def test_claim_records_and_logs_late_start():
             os.remove(log)
     st2 = tmp_state()
     rc, out = run(["claim", "--task", "t", "--block", "main", "--run-id", "g1", "--scheduled-et", "bogus"], st2)
-    check("unparseable --scheduled-et is ignored with a note, claim still PROCEEDs",
-          rc == 0 and out.get("decision") == "PROCEED" and "scheduled-et" in (out.get("stateFileError") or ""),
-          "%s %s" % (rc, out))
+    check("unparseable --scheduled-et is ignored, claim still PROCEEDs, note is NOT a stateFileError",
+          rc == 0 and out.get("decision") == "PROCEED" and "scheduled-et" in (out.get("lateStartNote") or "")
+          and not out.get("stateFileError"), "%s %s" % (rc, out))
     rc, out = run(["claim", "--task", "t2", "--block", "main", "--run-id", "g1"], tmp_state())
     check("no --scheduled-et -> lateStartMin null", out.get("lateStartMin") is None, str(out))
 
@@ -873,6 +920,7 @@ if __name__ == "__main__":
     test_unrenewed_long_run_is_reclaimed_control()
     test_renew_is_noop_below_min_age()
     test_renew_refuses_non_owner_and_nonlive()
+    test_renew_requires_run_id_and_cannot_revive_a_crashed_claim()
     test_renew_honors_period_bucket()
     test_late_start_math()
     test_claim_records_and_logs_late_start()
