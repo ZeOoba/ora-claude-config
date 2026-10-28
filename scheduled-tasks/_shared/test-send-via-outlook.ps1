@@ -259,6 +259,48 @@ Assert-Case -Name "internal send with attachment is NOT blocked by that rule" `
     -ExpectCode 0 -LogMustContain @("DRY RUN: would send", "attachments=1")
 
 Write-Host "`nAudit-log integrity"
+Write-Host "`nSubject source: -SubjectFile (added 2026-10-28; was rejected as an unknown parameter)"
+$SubjOk = Join-Path $Work "subj.txt"
+[System.IO.File]::WriteAllText($SubjOk, "Full gate FAILING - 2026-10-28`r`n", (New-Object System.Text.UTF8Encoding($false)))
+$SubjBom = Join-Path $Work "subj-bom.txt"
+[System.IO.File]::WriteAllText($SubjBom, "Bom subject", (New-Object System.Text.UTF8Encoding($true)))
+$SubjMulti = Join-Path $Work "subj-multi.txt"
+[System.IO.File]::WriteAllText($SubjMulti, "line one`nline two", (New-Object System.Text.UTF8Encoding($false)))
+$SubjEmpty = Join-Path $Work "subj-empty.txt"
+[System.IO.File]::WriteAllText($SubjEmpty, "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+
+Assert-Case -Name "-SubjectFile is accepted and its text becomes the subject (CRLF trimmed)" `
+    -ScriptArgs @("-To", $To, "-SubjectFile", $SubjOk, "-Body", "hello") `
+    -ExpectCode 0 -LogMustContain @("DRY RUN: would send", 'subject="Full gate FAILING - 2026-10-28" ')
+
+Assert-Case -Name "-SubjectFile with a UTF-8 BOM does not leak the BOM into the subject" `
+    -ScriptArgs @("-To", $To, "-SubjectFile", $SubjBom, "-Body", "hello") `
+    -ExpectCode 0 -LogMustContain @('subject="Bom subject"')
+
+Assert-Case -Name "-Subject and -SubjectFile together exit 1" `
+    -ScriptArgs @("-To", $To, "-Subject", "x", "-SubjectFile", $SubjOk, "-Body", "hello") `
+    -ExpectCode 1 -LogMustContain @("mutually exclusive") -LogMustNotContain @("DRY RUN")
+
+Assert-Case -Name "neither -Subject nor -SubjectFile exits 1" `
+    -ScriptArgs @("-To", $To, "-Body", "hello") `
+    -ExpectCode 1 -LogMustContain @("Must provide -Subject or -SubjectFile") -LogMustNotContain @("DRY RUN")
+
+Assert-Case -Name "missing -SubjectFile path exits 1" `
+    -ScriptArgs @("-To", $To, "-SubjectFile", (Join-Path $Work "nope.txt"), "-Body", "hello") `
+    -ExpectCode 1 -LogMustContain @("SubjectFile not found") -LogMustNotContain @("DRY RUN")
+
+Assert-Case -Name "multi-line -SubjectFile exits 1" `
+    -ScriptArgs @("-To", $To, "-SubjectFile", $SubjMulti, "-Body", "hello") `
+    -ExpectCode 1 -LogMustContain @("single line") -LogMustNotContain @("DRY RUN")
+
+Assert-Case -Name "blank -SubjectFile exits 1" `
+    -ScriptArgs @("-To", $To, "-SubjectFile", $SubjEmpty, "-Body", "hello") `
+    -ExpectCode 1 -LogMustContain @("non-empty") -LogMustNotContain @("DRY RUN")
+
+Assert-Case -Name "-SubjectFile works with the R-05 dedup contract (key built from the file's subject)" `
+    -ScriptArgs @("-To", $To, "-SubjectFile", $SubjOk, "-Body", "hello", "-DedupTaskId", "ora-test-subjfile", "-DedupPeriodKey", "2026-10-28") `
+    -ExpectCode 0 -LogMustContain @("key=ora-test-subjfile/2026-10-28/")
+
 $env:ORA_SEND_LOG_PATH = $LogFile
 $env:ORA_SEND_SKIP_PREFLIGHT = "1"
 $canonicalBefore = "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt"
