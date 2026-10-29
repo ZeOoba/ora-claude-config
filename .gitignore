@@ -320,3 +320,9 @@ maintenance/_state/ground-truth/run-index-*.json
 # claim touched one; must never be one `git add -A` away from landing in a
 # git-tracked, off-machine-pushed repo. Never tracked.
 maintenance/_state/ground-truth-pending-approval/
+
+# Spreadsheets (master-workbook backups hold loan, cash, rent-roll and insurance
+# data) must never land in this git-tracked, off-machine-pushed repo.
+*.xlsx
+*.xlsm
+*.xlsb
