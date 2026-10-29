@@ -200,7 +200,7 @@ def main():
             env["PROBE_VAL"] = val
             return subprocess.run(["node", probe], env=env, capture_output=True, text=True)
 
-        for label, val in [("backslash escape", '"--requ\ire" m.js'), ("underscore", "--experimental_loader=m.js"),
+        for label, val in [("backslash escape", r'"--requ\ire" m.js'), ("underscore", "--experimental_loader=m.js"),
                            ("underscore openssl", "--openssl_config=m.cnf"), ("snapshot-blob", "--snapshot-blob m.blob"),
                            ("quoted snapshot-blob", '"--snapshot-blob" "m.blob"')]:
             p = probe_run(val)
