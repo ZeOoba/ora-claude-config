@@ -35,26 +35,26 @@ flowchart TB
     subgraph GUARD["CONFIDENTIALITY EGRESS GUARD — fail-CLOSED, wraps every external write/send/deploy"]
     end
     subgraph SRC["SOURCES (read)"]
-        XL["Master Excel workbook<br/>(34 sheets) — SOURCE OF TRUTH"]
-        NO["Notion (6 DBs)"]
+        XL["Master Excel workbook<br/>SOURCE OF TRUTH"]
+        NO["Notion databases"]
         HS["HubSpot (CRM/pipeline)"]
         M365["M365 / SharePoint"]
         QB["QuickBooks Desktop<br/>via CData ODBC"]
-        PM["PM platforms (4)"]
+        PM["PM platforms"]
     end
     subgraph INGEST["INGEST + VALIDATE"]
         PARSE["parse.ts (Excel COM .Value2)<br/>adapters/ → normalize → Zod<br/>quarantine bad rows"]
     end
     subgraph CORE["CANONICAL CORE"]
-        SNAP["Typed Snapshot (Zod)<br/>+ reconciliation gate ($0 tol)<br/>+ versioned history.json"]
+        SNAP["Typed Snapshot (Zod)<br/>+ reconciliation gate ($0 tol)<br/>+ persisted snapshot<br/>(data/snapshots/portfolio.json)"]
         SRV["Brain Server (Hono, :8911, local)<br/>watch→SSE, holds secrets"]
     end
     subgraph OUT["CONSUMERS"]
         UI["React UI modules"]
-        JARVIS["JARVIS AI panel (⌘J)"]
+        JARVIS["AI assistant panel (⌘J)"]
         AGENTS["Sub-agents (read-only)"]
-        FLEET["Scheduled fleet (~18 target)"]
-        BRIEF["Daily JARVIS brief (email)"]
+        FLEET["Scheduled fleet<br/>(CC/MCP + LAMS; see docs/diagrams/04_scheduled_fleets.mmd)"]
+        BRIEF["Daily brief (email)"]
         MIRROR["Redacted Cloudflare mirror<br/>(read-only, behind Access)"]
     end
     XL & NO & HS & M365 & QB & PM --> PARSE --> SNAP --> SRV
@@ -62,6 +62,7 @@ flowchart TB
     GUARD -.wraps.- OUT
     XCUT["CROSS-CUTTING: Observability/Health · Knowledge base (memory) · Event log · Secrets vault · Backup/rollback"]
 ```
+<!-- diagram-verified: 2026-10-29 -- scope: topology and named components re-checked against ora-claude-config and oxford-command-center at origin/main (Hono Brain Server on :8911 with chokidar watch, Zod snapshot contracts, reconcile gate, persisted data/snapshots/portfolio.json, Cloudflare mirror behind Access, fail-closed confidentiality-guard hook, the (cmd)J assistant). Hard-coded counts were removed because they drift (workbook sheets, Notion DBs, PM platforms, fleet size). NOT re-verified from a repo: the external sources themselves, and the "Sub-agents (read-only)" claim. -->
 
 ---
 
