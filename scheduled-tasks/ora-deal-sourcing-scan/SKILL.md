@@ -24,6 +24,12 @@ clears (Floor PASS rows average 1957 vintage vs 1979 for FAIL-BASIS). Changes:
   D. [PROXY] metros cannot reach T1 without a cited comp-band PASS.
   E. Per-building SF >=50,000 caps at T2 — a CAP, not a kill (ratified by Gabriel
      2026-10-30; aligns to acquisition-underwriting Stage 0 Gate 2 and the firm buy-box).
+  F. T1-PENDING-PRICE rows (unpriced, Floor N/A) are WRITTEN to Notion as Verdict 'T2 WATCH'
+     + literal `T1-PENDING-PRICE` tag in Next Action and Notes / Flags — never 'T1 PURSUE' —
+     so they neither inflate T1 counts nor trigger verified-deal-recon (ratified 2026-10-30).
+  G. MIXED CLEAR: the clear gate tests the minimum bay, but minimum <12 ft with any bay
+     >=16 ft caps at T2 (not PASS); gate-flagged PASS only when no bay reaches 16 ft
+     (ratified 2026-10-30).
   New STEP 3D captures use code, clear, coverage and comps for T1-bound rows in-run.
 Evidence: RE-SCAN-2.9-1 (asset class: 13500 E 40, 2401-2501 International Ln — 2 incidents);
 RE-SCAN-2.9-2 (functional/comp: 2810 Saratoga, 67&76 Washington — 2); RE-SCAN-2.9-3
@@ -837,12 +843,16 @@ WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
 - PHYSICAL FLOORS (v2.9 — numeric): >=200A power, >=2 stalls/1,000 SF parking, and:
     clear height  <12 ft ............ GATE-FLAGGED (AU Stage 0 Gate 4) → Verdict PASS, listed in
                                       §7d for hand override; never T1/T2 on its own
+                                      (mixed clear with any bay >=16 ft: T2 — see below)
     clear height 12 to <16 ft ....... FAILED physical floor → max tier T2 WATCH
                                       (14 ft suffices only where every unit is <3,500 SF)
     site coverage >60% (building footprint ÷ land area) ... FAILED → max T2 WATCH
     truck court <60 ft AND no usable yard ................. FAILED → max T2 WATCH
-  Mixed clear (e.g. "10'-28'") is tested at the MINIMUM unless functional SF is normalized to
-  the >=16 ft bays per STEP 2.5. Eave height is not clear height.
+  Mixed clear (e.g. "10'-28'") is tested at the MINIMUM bay unless functional SF is normalized
+  to the >=16 ft bays per STEP 2.5. MIXED-CLEAR RULE (Gabriel-ratified 2026-10-30): if the
+  minimum bay is <12 ft AND any bay is >=16 ft, the row is a FAILED physical floor capped at
+  T2 WATCH — NOT gate-flagged PASS. The <12 ft gate-flagged PASS applies only when NO bay
+  reaches 16 ft. Eave height is not clear height.
   UNKNOWN is still not FAILED — but an unknown clear height, coverage or truck court cannot
   reach T1 PURSUE: it routes to T1-PENDING-VERIFY (TIER ASSIGNMENT). Origin: 67 & 76
   Washington (13'4", 86% coverage, no court) and 2810 Saratoga (~11.5 ft) both logged T1.
@@ -933,14 +943,18 @@ TIER ASSIGNMENT (gate first, score second):
                    Verdict 'T2 WATCH' + token `T1-PENDING-VERIFY: <missing facts>` (fail-safe:
                    verified-deal-recon fires only on T1 PURSUE). Report and count SEPARATELY.
 - T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60. REQUEST PRICE only.
-                     Report and count SEPARATELY from T1 PURSUE.
+                     Report and count SEPARATELY from T1 PURSUE. (v2.9, Gabriel-ratified
+                     2026-10-30) Written to Notion as Verdict 'T2 WATCH' + the literal tag
+                     `T1-PENDING-PRICE` in Next Action AND Notes / Flags — NEVER as Verdict
+                     'T1 PURSUE', so unpriced rows neither inflate T1 counts nor trigger
+                     verified-deal-recon (same pattern as T1-PENDING-VERIFY).
 - T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59, OR COMP-TEST FAIL, OR a
                    FAILED physical floor, OR >=50,000 SF per building, OR USE-CODE
                    mixed/conflicting, OR [PROXY] without a COMP-TEST PASS. Log,
                    monitor for price cuts, no outreach.
 - PASS / DECLINE = priced at or above replacement, OR 2+ failed physical floors, OR
                    an instant disqualifier, OR USE-CODE retail/office/Other (re-route), OR
-                   clear <12 ft (gate-flagged), OR score <50. Log with the reason.
+                   clear <12 ft with no bay >=16 ft (gate-flagged), OR score <50. Log with the reason.
 A score >=60 NEVER promotes a FAIL-BASIS deal into T1. If you find yourself writing
 "scores 78 but fails basis — worth a look," STOP: that is the exact failure this
 redesign exists to prevent. It is a T2.
@@ -1106,7 +1120,8 @@ update); Asking Price;
 `First Sighted` = creation date as usual, but `Ask at First Sighting` stays BLANK until the
 run that verifies the ask; see STEP 1B-B)**; Total SF; Price / SF
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
-T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
+T2 WATCH / PASS / KILLED — v2.9: T1-PENDING-PRICE and T1-PENDING-VERIFY rows are written
+'T2 WATCH' with their literal tag, never 'T1 PURSUE'; only a full T1 PURSUE gets that value); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
 FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type;
 **`Construction Type`** (v2.8 — select; EXACT options: 'Masonry / Brick' · 'Block / CMU' ·
 'Tilt-Up / Precast Concrete' · 'Hybrid (masonry + metal)' · 'Pre-Engineered Metal (PEMB)' ·
