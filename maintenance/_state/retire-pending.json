@@ -26,7 +26,14 @@
       "fleet": "lams",
       "id": "ora-owner-outreach-queue-refresh",
       "ratified": "2026-10-30",
-      "reason": "Migrated to CC/MCP 2026-10-30 (Deal Sourcing Expansion Plan Phase 0; Gabriel 'Start Phase 0' in-turn). CC copy at ~/.claude/scheduled-tasks/ora-owner-outreach-queue-refresh/ is canonical, enabled, cron '55 10 * * 1'. The LAMS twin (enabled:false) must NEVER be re-enabled -- including by the 2026-09-28 LAMS-fleet-resume brief, whose 25-id list contains it -- or the pipeline double-fires and builds two packs. Same-id collision: use the list_scheduled_tasks path field to target the LAMS row only. Handoff: maintenance/_state/handoffs/2026-10-30_LAMS-outreach-twin-retire_brief.md.",
+      "reason": "Migrated to CC/MCP 2026-10-30 (Deal Sourcing Expansion Plan Phase 0; Gabriel 'Start Phase 0' in-turn). CC copy at ~/.claude/scheduled-tasks/ora-owner-outreach-queue-refresh/ is canonical, enabled, cron '55 10 * * 1'. The LAMS twin (enabled:false) must NEVER be re-enabled -- including by the 2026-09-28 LAMS-fleet-resume brief, whose 25-id list contains it -- or the pipeline double-fires and builds two packs. Same-id collision: use the list_scheduled_tasks path field to target the LAMS row only. Handoff: maintenance/_state/handoffs/2026-10-30_LAMS-twins-retire_brief.md (supersedes the outreach-only brief).",
+      "executeFrom": "native on-device Cowork session"
+    },
+    {
+      "fleet": "lams",
+      "id": "ora-cowork-heartbeat",
+      "ratified": "2026-10-30",
+      "reason": "Migrated to CC/MCP 2026-10-30 (Gabriel in-turn: 'Migrate to CC fleet'). CC copy at ~/.claude/scheduled-tasks/ora-cowork-heartbeat/ is canonical, enabled, cron '50 5 * * *', same Notion page 35c6ecd8. The LAMS twin (enabled:false since 2026-09-15) must NEVER be re-enabled -- including by the 2026-09-28 LAMS-fleet-resume brief -- or both fleets stamp the page and a dark CC fleet could be masked by a live LAMS one. Same-id collision: target the LAMS row by its list_scheduled_tasks path field. Never test a delete against this id. Handoff: maintenance/_state/handoffs/2026-10-30_LAMS-twins-retire_brief.md.",
       "executeFrom": "native on-device Cowork session"
     }
   ],
