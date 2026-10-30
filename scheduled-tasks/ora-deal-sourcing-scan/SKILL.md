@@ -3,7 +3,18 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.10, 2026-10-30).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.11, 2026-10-30).
+
+v2.11 — AMENDMENT H PORTFOLIO PATH IN THE STEP 2 ELIGIBILITY GATE (2026-10-30, Gabriel in-turn:
+"update the upstream filters" once acquisition-underwriting v4.40/v4.41 merged, ora-skills
+#187/#189). STEP 2 (c) dropped every deal over $10M, so a $10–15M portfolio never reached
+scoring. Portfolios sold together now pass up to $15M total, with no per-building price band.
+A portfolio of more than 5 buildings, one over $15M, or one containing a failing building is
+KEPT as a gate flag, never dropped (Amendment H (i); Ruling 5). NO score, weight, floor or
+governor changed. OPEN QUESTION FOR GABRIEL: the Capital sleeve score component (STEP 3,
+"outside 0") is left UNCHANGED, so a $10–15M portfolio scores 0/10 there, a 10-point handicap
+against this scan's T1 PURSUE >= 60 test. Changing a score component needs his ratification;
+until then such portfolios can still reach T2 and the acquisition-underwriting SCREEN.
 
 v2.10 — SOURCE MAPPING (2026-10-30, Gabriel-approved "Build it now", Deal Sourcing Expansion
 Plan Phase 1). NO SCORE, WEIGHT, GATE, FLOOR OR GOVERNOR CHANGED — STEP 5 now states how the
@@ -246,7 +257,8 @@ ORA BUY-BOX (screening filter — apply unchanged)
 - Product: Class B/C industrial, shallow-bay, flex, office-warehouse ONLY.
 - Size: ~10,000-80,000 SF building to LOG; <50,000 SF PER BUILDING to reach T1
   (acquisition-underwriting Stage 0 Gate 2 — v2.9; >=50,000 SF caps at T2, not a kill).
-  Deal size $1M-$10M (sweet spot $1.5-6M).
+  Deal size $1M-$10M (sweet spot $1.5-6M); a portfolio sold together up to $15M total
+  (Amendment H — see STEP 2 (c)).
 - Capital sleeve: $0.75-5.0M equity at 65% LTV; all-cash close + post-close refi.
 - Hard floors (independent): >=25% discount to replacement cost (basis-buyer
   doctrine — basis beats cap rate) AND >8% stabilized yield-on-cost.
@@ -711,7 +723,13 @@ ora-loopnet-listings-sync, so stay well inside the pace.
 
 STEP 2 — ELIGIBILITY GATE
 Keep a candidate only if: (a) industrial/flex/office-warehouse product, per STEP 2.0; (b) in a
-target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no instant
+target cluster; (c) within or plausibly within 10-80K SF and $1-10M — PORTFOLIO PATH (v2.11,
+Amendment H): buildings sold together as one deal pass (c) up to $15M total, with no
+per-building price band; a portfolio >5 buildings, >$15M, or containing a building outside
+the size/product rules is KEPT as a GATE FLAG naming the cause (Notes / Flags), never dropped
+here. For a portfolio, (a), (d) and STEP 2.0 are applied PER BUILDING: one failing building
+(e.g. a RETAIL/OFFICE use under STEP 2.0) makes the whole portfolio a gate flag, NOT a fail of
+(a)/(d) and NOT the STEP 2.0 PASS/RE-ROUTE — only Gabriel carves a building out; (d) no instant
 disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before a-d).
 Log filtered items with one-line reasons in the run notes; do not
 write them to Notion.
