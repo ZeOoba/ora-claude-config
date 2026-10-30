@@ -30,3 +30,6 @@ This clause is deliberately unmirrored elsewhere (was CLAUDE.md-only; now lives 
 Evidence behind "keep, don't merge" (2026-10-01): the Workflow has 56 persisted runs (2026-08-17..09-29), all completed, 0 tooling failures, 86% found a real defect (11 high, 36 medium, 9 low), median ≈ 570K tokens / 5.5 min, every run against `oxford-command-center`. `/verify` (a third copy of the Workflow's lens text, "keep in sync") had 1 recorded use and was retired 2026-10-01 on Gabriel's instruction (local copy: `~/.claude/archive/commands/verify.md`; git history is the durable copy); the forked `-opus` script is replaced by `args.model` (oxford-command-center PR #420, merged 2026-10-01; `model: 'opus'` only when Fable is unavailable, result carries `modelFloorMet`). If a future change adds a test-validity or race lens to the Workflow, trial it on 2-3 historical change sets first — the 86% find rate is an asset, don't perturb the prompt blind.
 
 Related: [[reference_agent_skills_repo_intake_2026-08-13]] (the intake that surfaced this gap) · [[reference_claude_md_word_budget_is_a_floor]] · [[reference_refute_cross_model_escalation]].
+
+## Non-trivial technical recommendations (moved from CLAUDE.md 2026-10-30)
+Structure: current state → evidence → root cause → alternatives → ROI/confidence → risk → rollback — evidence over preference.
