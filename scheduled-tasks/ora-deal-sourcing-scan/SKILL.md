@@ -3,7 +3,34 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.8, 2026-09-23).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.9, 2026-10-30).
+
+v2.9 — T1 GATE NO LONGER PROMOTES ON REPLACEMENT-NEW DISCOUNT ALONE (2026-10-30,
+Gabriel-ratified). NO GOVERNOR, RCT v03 ROW, VINTAGE RAMP OR SCORE WEIGHT CHANGED. Origin:
+2026-10-30 verified-deal-recon of the four priced 2026-10-27 T1 PURSUE rows returned 3 PASS +
+1 NEEDS-MORE (13500 E 40 Hwy = dark Gordmans RETAIL anchor, 76,520 SF; 2810 W Saratoga =
+1940 ~11.5 ft flip priced at its $80/SF like-kind comp; 67 & 76 Washington = 13'4" clear, 86%
+coverage, no truck court, circular PROXY discount; 3752 Kentucky = market-priced Class C).
+Back-test of all 44 ever-T1 Floor-PASS rows: 0 of 8 decided rows held T1 on doctrine.
+Root cause: the only price test was RCT v03 replacement-NEW, which obsolete stock always
+clears (Floor PASS rows average 1957 vintage vs 1979 for FAIL-BASIS). Changes:
+  A. STEP 2.0 ASSET-CLASS / USE-CODE CHECK before scoring (retail/office/Other → PASS +
+     ALT-ASSET-TRACK; unknown/conflict caps at T2; Product pts require VERIFIED use).
+  B. STEP 3A-2 COMP-BAND TEST — ask must ALSO be <=85% of the like-kind comp median, with
+     >=2 like-kind comps (both ratified by Gabriel 2026-10-30). No comp band →
+     T1-PENDING-VERIFY (new bucket), never T1 PURSUE.
+  C. Numeric physical floors (clear <12 ft gate-flagged; 12-<16 ft, coverage >60%, truck
+     court <60 ft / no yard each cap at T2; unknown → T1-PENDING-VERIFY).
+  D. [PROXY] metros cannot reach T1 without a cited comp-band PASS.
+  E. Per-building SF >=50,000 caps at T2 — a CAP, not a kill (ratified by Gabriel
+     2026-10-30; aligns to acquisition-underwriting Stage 0 Gate 2 and the firm buy-box).
+  New STEP 3D captures use code, clear, coverage and comps for T1-bound rows in-run.
+Evidence: RE-SCAN-2.9-1 (asset class: 13500 E 40, 2401-2501 International Ln — 2 incidents);
+RE-SCAN-2.9-2 (functional/comp: 2810 Saratoga, 67&76 Washington — 2); RE-SCAN-2.9-3
+(PROXY: 67&76 Washington — EVIDENCE: SINGLE-INCIDENT, sunset at the December back-test);
+RE-SCAN-2.9-4 (size: 13500 E 40, International Ln — 2). Testable: share of T1 PURSUE rows
+that survive verified-deal-recon, Dec 2026 back-test. Rows already logged are NOT re-tiered
+by this version (score snapshots are immutable); any re-tier is a separate supervised pass.
 
 v2.8 — COVERAGE-GAP CLOSURE (2026-09-23, Gabriel-directed). NO SCORE, WEIGHT, GATE,
 THRESHOLD, FLOOR OR GOVERNOR CHANGED — this version changes run ORDER, SOURCE COVERAGE and
@@ -204,13 +231,17 @@ CANONICAL INPUTS
 
 ORA BUY-BOX (screening filter — apply unchanged)
 - Product: Class B/C industrial, shallow-bay, flex, office-warehouse ONLY.
-- Size: ~10,000-80,000 SF building; deal size $1M-$10M (sweet spot $1.5-6M).
+- Size: ~10,000-80,000 SF building to LOG; <50,000 SF PER BUILDING to reach T1
+  (acquisition-underwriting Stage 0 Gate 2 — v2.9; >=50,000 SF caps at T2, not a kill).
+  Deal size $1M-$10M (sweet spot $1.5-6M).
 - Capital sleeve: $0.75-5.0M equity at 65% LTV; all-cash close + post-close refi.
 - Hard floors (independent): >=25% discount to replacement cost (basis-buyer
   doctrine — basis beats cap rate) AND >8% stabilized yield-on-cost.
 - Value-add preferred over stabilized "almost always" (below-market rents, vacancy,
   short WALT, mismanagement are POSITIVES, not negatives).
-- Physical floors: >=200A power, >=2 stalls/1,000 SF parking, functional clear height.
+- Physical floors: >=200A power, >=2 stalls/1,000 SF parking, clear height >=16 ft (>=14 ft
+  where every unit is <3,500 SF), site coverage <=60%, truck court >=60 ft or a usable yard
+  (v2.9 — numeric per the acquisition-underwriting clear/loading matrix; see STEP 3A).
 - Mezzanine/2nd-floor SF on slab = 0% credit unless independently functional.
 - Instant disqualifiers: retail-only; office-only; multifamily; auto-use tenancy;
   ground lease <30 yr; environmental remediation >20% of price; outside the ten
@@ -227,14 +258,14 @@ ORA BUY-BOX (screening filter — apply unchanged)
 
 RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
   STEP 0 pre-flight → STEP 1 text scouts (parallel) → STEP 1B browser pass (orchestrator,
-  sequential) → STEP 2 / 2.5 / 3A / 3B gate + score → STEP 3C construction photos for
-  T1-bound rows → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
+  sequential) → STEP 2 / 2.0 / 2.5 / 3A / 3A-2 / 3B gate + score → STEP 3C construction
+  photos for T1-bound rows → STEP 3D T1 verify pass (v2.9) → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
   ora-sourcing-construction-verify → STEP 6 digest → DONE-MARKER (last action).
   BUDGET — HARD CAPS, NOT JUDGMENT (the 2026-09-23 run died on "if running long"):
     STEP 1B-A discovery: ≤ 30 page loads TOTAL across all ten markets (≈1 Crexi + ≤2
       broker-direct per market; LoopNet only for markets where Crexi was blocked or
       returned 0). STEP 1B-B provisional resolution: ≤ 12 loads. STEP 3C: ≤ 4 loads per
-      T1 row. Count loads; stop the sub-step at its cap and name what was not loaded.
+      T1 row. STEP 3D (v2.9): ≤ 4 loads + 2 GIS queries per T1-PENDING-VERIFY row. Count loads; stop the sub-step at its cap and name what was not loaded.
     EXTRACTION DISCIPLINE: read pages with `javascript_tool` returning COMPACT JSON (address,
       price, SF, DOM/listed date, href — nothing else), or `get_page_text` with
       max_chars ≤ 6000. Never pull a full accessibility tree or full page text into
@@ -666,7 +697,7 @@ ora-loopnet-listings-sync, so stay well inside the pace.
   they run later as STEP 3C, after TIER ASSIGNMENT. Do not attempt them here.)
 
 STEP 2 — ELIGIBILITY GATE
-Keep a candidate only if: (a) industrial/flex/office-warehouse product; (b) in a
+Keep a candidate only if: (a) industrial/flex/office-warehouse product, per STEP 2.0; (b) in a
 target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no instant
 disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before a-d).
 Log filtered items with one-line reasons in the run notes; do not
@@ -701,6 +732,23 @@ For EVERY candidate, before any scoring or Notion read/write:
   OH candidates on streets that appear in the roster, and say so in the digest.
 Unpriced listings in-cluster and on-product PASS the gate (a)-(d) (price discovery is a
 next action, not a disqualifier) — but never (e): an unpriced own asset is still ours.
+
+STEP 2.0 — ASSET-CLASS / USE-CODE CHECK (v2.9; runs BEFORE any score; DECIDES PRODUCT)
+Product is a FACT to source, not a reading of listing prose. For every candidate record
+`USE-CODE: <value> | <source>` in Notes / Flags from, strongest first: (1) the county
+assessor/auditor land-use or property-class code (listing-enrichment-gate step 5 sources);
+(2) the listing platform's structured "Property Type" field; (3) listing text — tagged
+[UNVERIFIED]. Outcomes:
+  - INDUSTRIAL/FLEX verified (1) or (2) → proceed; Product scores normally.
+  - RETAIL, OFFICE, or Notion Asset Type 'Other' → Verdict PASS, Next Action
+    "RE-ROUTE: ALT-ASSET-TRACK (acquisition-underwriting Stage 0 Gate 6 / 2.9)". Never T1/T2.
+    Origin: 13500 E 40 Hwy (Gordmans anchor, scored Product 15 with Asset Type 'Other');
+    2401-2501 International Ln (office, logged T1 as Multi-Tenant Industrial).
+  - MIXED, CONFLICTING (listing says industrial, code says retail/office/commercial) or
+    [UNVERIFIED] only → Product scores 8 (not 15) and the verdict is capped at T2 WATCH /
+    T1-PENDING-VERIFY until resolved.
+Never write Asset Type 'Other' on a row whose Verdict is T1 PURSUE — that combination is
+self-contradictory and is a bug.
 
 STEP 2.5 — FUNCTIONAL SF NORMALIZATION (do this BEFORE any $/SF is computed)
 Compute $/SF on FUNCTIONAL SF, not marketed SF. Marketed SF routinely includes
@@ -782,12 +830,24 @@ WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
   We do NOT yet have a sourced PEMB $/SF, so no numeric adjustment is applied —
   flag it, do not fabricate a multiplier. Sourcing a PEMB shell cost is on the
   same GC/lender email that would settle soft costs and the small-bay premium.
-- PHYSICAL FLOORS: >=200A power, >=2 stalls/1,000 SF parking, functional clear
-  height. UNKNOWN is not FAILED — treat unknowns as open questions, not failures.
+- PHYSICAL FLOORS (v2.9 — numeric): >=200A power, >=2 stalls/1,000 SF parking, and:
+    clear height  <12 ft ............ GATE-FLAGGED (AU Stage 0 Gate 4) → Verdict PASS, listed in
+                                      §7d for hand override; never T1/T2 on its own
+    clear height 12 to <16 ft ....... FAILED physical floor → max tier T2 WATCH
+                                      (14 ft suffices only where every unit is <3,500 SF)
+    site coverage >60% (building footprint ÷ land area) ... FAILED → max T2 WATCH
+    truck court <60 ft AND no usable yard ................. FAILED → max T2 WATCH
+  Mixed clear (e.g. "10'-28'") is tested at the MINIMUM unless functional SF is normalized to
+  the >=16 ft bays per STEP 2.5. Eave height is not clear height.
+  UNKNOWN is still not FAILED — but an unknown clear height, coverage or truck court cannot
+  reach T1 PURSUE: it routes to T1-PENDING-VERIFY (TIER ASSIGNMENT). Origin: 67 & 76
+  Washington (13'4", 86% coverage, no court) and 2810 Saratoga (~11.5 ft) both logged T1.
 - INSTANT DISQUALIFIERS: per the buy-box list above.
 
 Gate outcomes (write the outcome to Notion `Floor Result`):
-- PASS — clears basis, no failed physical floor, no disqualifier. ELIGIBLE FOR T1.
+- PASS — clears basis, no failed physical floor, no disqualifier. ELIGIBLE FOR T1 — but
+  (v2.9) clearing the RCT floor alone never makes T1 PURSUE: STEP 2.0, STEP 3A-2 and the
+  TIER ASSIGNMENT conditions must ALSO hold.
 - FAIL-BASIS — priced above 75% of replacement. CANNOT BE T1 AT ANY SCORE.
   Maximum tier is T2 WATCH. Log it, state the price at which it WOULD clear, and
   monitor for a cut. Pursuing one requires an explicit Gabriel exception plus a
@@ -800,11 +860,33 @@ Gate outcomes (write the outcome to Notion `Floor Result`):
   headline badly. For each, state the ask ABOVE WHICH IT DIES on basis, so the broker
   call has a decision rule attached before it is made.
 
+STEP 3A-2 — COMP-BAND TEST (v2.9; SECOND basis test; must ALSO pass for T1)
+The RCT v03 floor measures the discount to building NEW. It cannot see functional
+obsolescence, so worn-out stock always clears it. acquisition-underwriting v3.4 already rules
+"A large RCT discount does NOT establish mispricing if the comp band is near or above the ask";
+this step applies that rule at scan time.
+  COMP BAND = >=2 like-kind Class B/C industrial comps in the same submarket: closed sales
+  <=24 months (county-sales-monitor comps database / recorded deed first) or, failing that,
+  active asks; like-kind = year built within ±15 years, clear height in the same band as STEP
+  3A, and either side of 50,000 SF matched. Record
+  `COMP-TEST: <PASS|FAIL|UNKNOWN> | median $X/SF | n=<k> | <address, $/SF, date, source>; ...`.
+  PASS if  ask $/SF (FUNCTIONAL SF)  <=  0.85 x comp-band median $/SF.
+           [0.85 and n>=2 = RATIFIED-JUDGMENT, Gabriel 2026-10-30; calibrate at the Dec 2026
+           back-test. Unsourced — never cite 0.85 as a market statistic.]
+  FAIL → max tier T2 WATCH; Next Action states the ask at which it WOULD pass (0.85 x median x
+         functional SF).
+  UNKNOWN (fewer than 2 like-kind comps found in-run) → T1-PENDING-VERIFY, never T1 PURSUE.
+  [PROXY] METROS (Madison, Grand Rapids, Richmond, Des Moines): the RCT floor there is not
+  independent evidence, so a PROXY row reaches T1 ONLY on a COMP-TEST PASS with cited comps.
+  Origin: 2810 Saratoga (renovated like-kind 2441 W Baltimore St closed $80/SF, ask $69-74 →
+  ~86-92% of comp → FAIL); 67 & 76 Washington ("49% discount" was a circular PROXY RCT).
+  Never use RCT as a comp; never use one comp; never net the two tests.
+
 STEP 3B — SCORE (Fit Score 0-100 — RANKS WITHIN A GATE OUTCOME, never overrides it)
 - Market — primary cluster (20): established cluster 20; entry-phase 14; edge of
   cluster 8; outside 0 (should have been filtered).
-- Product — B/C industrial/flex (15): on-doctrine 15; mixed w/ heavy office 8;
-  marginal 4.
+- Product — B/C industrial/flex (15): on-doctrine with USE-CODE VERIFIED (STEP 2.0) 15;
+  mixed w/ heavy office, or use [UNVERIFIED] 8; marginal 4. (v2.9)
 - Basis vs replacement (15): >=25% below replacement 15; 10-25% below 9; near
   replacement 4; above 0. Unpriced = 7 provisional. RETAINED as a ranking signal
   (depth of discount legitimately separates two deals that both clear the floor) —
@@ -828,19 +910,28 @@ STEP 3B — SCORE (Fit Score 0-100 — RANKS WITHIN A GATE OUTCOME, never overri
   unknown 5 provisional.
 - Capital sleeve (10): $1.5-6M 10; $1-1.5M or $6-10M 6; outside 0.
 - Value-add bias (5): vacancy/below-market rents/short WALT present 5; stabilized 2.
-- Physical floors (10): meets power+parking+clear 10; one unknown 6; one failed 3;
-  two+ failed 0.
+- Physical floors (10): meets power+parking+clear+coverage+court 10; one unknown 6; one
+  failed 3; two+ failed 0. Thresholds per STEP 3A (v2.9).
 - Mezz SF credit (5): no mezz dependency 5; mezz-inflated SF 0.
 - Lease quality (5): PG or 3%+ escalations evident 5; unknown 3; weak 0.
 
 TIER ASSIGNMENT (gate first, score second):
-- T1 PURSUE      = Floor Result PASS **AND** score >=60. Request OM immediately.
+- T1 PURSUE      = Floor Result PASS **AND** COMP-TEST PASS **AND** USE-CODE industrial/flex
+                   VERIFIED **AND** every physical floor MET (none unknown) **AND** <50,000 SF
+                   per building **AND** score >=60. Request OM immediately. (v2.9)
+- T1-PENDING-VERIFY = would be T1 PURSUE but one or more of COMP-TEST / USE-CODE / clear /
+                   coverage / truck court is UNKNOWN after STEP 3D. Written to Notion as
+                   Verdict 'T2 WATCH' + token `T1-PENDING-VERIFY: <missing facts>` (fail-safe:
+                   verified-deal-recon fires only on T1 PURSUE). Report and count SEPARATELY.
 - T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60. REQUEST PRICE only.
                      Report and count SEPARATELY from T1 PURSUE.
-- T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59. Log, monitor
-                   for price cuts, no outreach.
+- T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59, OR COMP-TEST FAIL, OR a
+                   FAILED physical floor, OR >=50,000 SF per building, OR USE-CODE
+                   mixed/conflicting/unverified, OR [PROXY] without a COMP-TEST PASS. Log,
+                   monitor for price cuts, no outreach.
 - PASS / DECLINE = priced at or above replacement, OR 2+ failed physical floors, OR
-                   an instant disqualifier, OR score <50. Log with the reason.
+                   an instant disqualifier, OR USE-CODE retail/office/Other (re-route), OR
+                   clear <12 ft (gate-flagged), OR score <50. Log with the reason.
 A score >=60 NEVER promotes a FAIL-BASIS deal into T1. If you find yourself writing
 "scores 78 but fails basis — worth a look," STOP: that is the exact failure this
 redesign exists to prevent. It is a T2.
@@ -862,6 +953,15 @@ Write the result, the CONSTRUCTION-CHECKED token and any by-products into the ro
 STEP 5. If a confirmed construction type moves the score across the 60 line, re-apply
 TIER ASSIGNMENT (the gate is unchanged; only the 5-pt component moved).
 
+STEP 3D — T1 VERIFY PASS (v2.9; runs after TIER ASSIGNMENT, same budget class as 3C)
+For every row that would be T1 PURSUE but is T1-PENDING-VERIFY for an UNKNOWN in STEP 2.0,
+3A (clear/coverage/court) or 3A-2 (comps): run listing-enrichment-gate steps 1, 5 and 7 (use
+class, footprint ÷ parcel coverage, listing clear height) and one comp pull, <= 4 page loads +
+2 GIS queries per row. Resolved and passing → T1 PURSUE (and, if its construction is still
+UNKNOWN, it then gets the STEP 3C photo check like any T1 row). Resolved and failing → the cap that
+rule names. Still unknown → stays T1-PENDING-VERIFY with Next Action naming the missing
+fact(s) and the decision rule. A skipped row is a §7c coverage gap, named by address.
+
 BENCHMARK HONESTY (mandatory in every digest): the denominator is RCT v03 — SOURCED
 from the C&W 2025 guide and ratified by Gabriel 2026-07-14. State in the digest which
 metro floor was applied, and state the discount as a share of TRUE replacement ("this
@@ -874,7 +974,8 @@ Live caveats that must still be surfaced:
   which doctrine includes. True basis is always worse than the scan's figure.
 - FOUR METROS USE PROXIES — Madison (Milwaukee), Grand Rapids (Detroit), Richmond
   (Baltimore), Des Moines (Minneapolis) are NOT in the C&W guide. Mark any basis
-  verdict in those four [PROXY]. GRAND RAPIDS IS THE WEAKEST: Detroit is a high-cost
+  verdict in those four [PROXY]; a [PROXY] row reaches T1 only on a STEP 3A-2 COMP-TEST
+  PASS (v2.9). GRAND RAPIDS IS THE WEAKEST: Detroit is a high-cost
   union market while RSMeans shows Grand Rapids well below the national average, so
   its floor ($107.73) is probably TOO GENEROUS — flag Grand Rapids passes accordingly.
 - NAME ANY DEAL WITHIN ~3% OF ITS FLOOR. The benchmark is March-2025 vintage and
@@ -1008,6 +1109,8 @@ load those domains; name it in §7c instead)); Broker / Contact; Date Seen; Note
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
+v2.9: Notes / Flags carries the `USE-CODE:`, `COMP-TEST:` and (where applicable)
+`T1-PENDING-VERIFY:` tokens immediately after the gate outcome. No new Notion property.
 
 *** STEP 5A — BROKER FIELD + BROKER RELATION (v2.7, 2026-09-19, Gabriel-directed) ***
 Two writes per listing, both in the Deal Sourcing Log row you just created/updated:
@@ -1179,7 +1282,7 @@ Email send path (per ORA standing rule — COM is PRIMARY):
     the silent send to Gabriel.
   Outlook only — never Gmail; never route to Composio (gone) or Rube (shut down).
 Subject (FIXED per run day so the R-05 dedup key matches a same-day rerun; no counts or other run-dependent text): "ORA Deal-Sourcing Scan — [date]". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
-Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the body and everywhere else; the body opens with the counts line "[N] pursue / [P] pending price / [M] flagged" (counts never go in the subject).
+Count T1 PURSUE, T1-PENDING-VERIFY and T1-PENDING-PRICE SEPARATELY in the body and everywhere else; the body opens with the counts line "[N] pursue / [V] pending verify / [P] pending price / [M] flagged" (counts never go in the subject).
 Body order:
   (1) PRICE CUT / RE-LIST flags first — the strongest motivation signals. Read them
       off the `Price Delta vs First Ask` formula; give prior ask, new ask, and %.
@@ -1188,6 +1291,9 @@ Body order:
   (2) T1 PURSUE — gate-cleared AND priced. These are the only deals that earn an OM
       request. Address, metro, functional SF, ask, functional $/SF, the basis
       discount vs the [EST] benchmark, score, pre-mortem, URL.
+  (2b) T1-PENDING-VERIFY — clears the RCT floor but a v2.9 fact is unknown. For each: the
+      missing fact(s), the comp band if partial, and the decision rule ("decline if clear
+      <16 ft or ask > 0.85 x comp median = $X").
   (3) T1-PENDING-PRICE — on-doctrine but unpriced; the basis test could not be run.
       Action is REQUEST PRICE, nothing more. For each, give the ask ABOVE WHICH IT
       DIES, so the broker call carries its own decision rule. Group the calls by
@@ -1218,8 +1324,9 @@ Body order:
          Madison's F1, F2 and F3 matrix cells are all loaded; a Madison nil with any unread family
          is a §7c gap, not by-design), Montgomery County MD skipped (not first Tuesday — STEP 0d),
          sub-scale exclusions (<10K SF or <$1M: address + SF + ask, one line each — the
-         buy-box floor is unchanged; this list lets Gabriel override by hand), and the
-         own-assets-seen-on-market list.
+         buy-box floor is unchanged; this list lets Gabriel override by hand), clear <12 ft
+         GATE-FLAGGED rows (v2.9 STEP 3A: address + clear + ask, one line each, for hand
+         override), and the own-assets-seen-on-market list.
   (8) BROKER CAPTURE (added v2.7, 2026-09-19) — four counts, one short section:
         - listings scanned this run;
         - listings with a NAMED listing agent;
