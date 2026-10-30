@@ -5,12 +5,26 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-16T16:04:04.643Z
+  modified: 2026-10-30T17:31:59.384Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-10-30 — Deal Sourcing Plan Phase 0: weekly funnel scorecard built and wired into owner-outreach STEP 4c
+- **Built:** `Investment Candidates -- 2026\sourcing_funnel_scorecard.py` + `test_sourcing_funnel_scorecard.py` (38 checks; folder suite `run_tests.py` 91 passed). Read-only. Deal source order: Notion REST (404 today: Deal Sourcing Log not shared with the outreach integration) → `--deals` grouped SQL export (validated against live select options; unknown value = exit 2) → NOT SUPPLIED. SCREEN = `Scorecard Done` only; scan verdicts reported separately.
+- **Wired:** CC `ora-owner-outreach-queue-refresh` v1.9 STEP 4c — one SQL query/run, verbatim JSON, WARN-only, runs on halted weeks too.
+- **First live read (90d):** 227 letters / 0 responses captured / 16 call-sheet owners, 0 outcomes / 190 scan-triaged / 16 full SCREENs / 2 T1 PURSUE / 0 LOI Sent Dates. Source="Other" on 131 of 206 scored rows.
+- **Not mirrored** to `Claude outputs\` (sibling copy folder); Notion plan page `4096ecd8` §9 updated.
+
+## 2026-10-30 — Deal Sourcing Plan Phase 0: sourcing engine moved onto CC fleet
+- **Ratified:** Gabriel in-turn ("Start Phase 0"; plan = Notion `4096ecd8-9e59-8150-8417-c1d9a30130e4`).
+- **Re-enabled (CC, UPDATE + re-tag `[MODEL: UNVERIFIABLE | checked 2026-10-30]`):** `ora-deal-sourcing-scan` (`45 10 * * 2`, next 11-03), `ora-entry-market-scan` (`45 11 * * 2`, in-task 1st-Tue guard, next 11-03 = real monthly run), `ora-broker-touch-cadence` (`40 13 2 * *`, next 11-02). Only description lines changed; no custom frontmatter lost.
+- **Created (CC):** `ora-owner-outreach-queue-refresh` (`55 10 * * 1`, next 11-02). Body verbatim from LAMS v1.7 except Desktop Commander → direct local execution; `output_contract` frontmatter re-applied by hand (dropped by create; any future update_scheduled_task drops it again).
+- **LAMS twin:** `ora-owner-outreach-queue-refresh` stays enabled:false, added to `retire-pending.json`; retire via native on-device Cowork session, brief `handoffs/2026-10-30_LAMS-outreach-twin-retire_brief.md`. The 09-28 LAMS-resume brief's 25-id list includes this id — carve it out.
+- **Found already closed:** OI-180 (suppression pull moved to REST `pull_suppression.py` 2026-08-24, not on SQL quota); scan/roster doctrine conflict (closed 2026-09-22, local canonical). Master vintage 2026-10-27 ratified.
+- **Open for Gabriel:** 10-27 pack unreleased (next Monday run will exit 3 until `--released`); `outreach-responses.csv` absent (0 responses logged); 16 call-sheet owners with no outcomes.
 
 ## 2026-10-18 -- CLAUDE.md Release-bullet change (bbb20b21): Gabriel approval recorded
 - Gabriel approved the CLAUDE.md Release-bullet change in commit bbb20b21 in-turn on 2026-10-17 ("Proceed with recommendation") after reviewing the CLAUDE.md diff. Recorded here at the dirty-tree-triage parent session's request. No governor constants touched; CLAUDE.md word count 1849 (limit 1850).
