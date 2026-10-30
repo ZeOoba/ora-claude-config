@@ -1,0 +1,200 @@
+{
+ "when": "2026-10-28T16:54:16.233485",
+ "removed": [
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\confguard-coverage-0930",
+   "branch": "refs/heads/feat/confguard-coverage-0930",
+   "head": "7d3a3150e08b637e4aff44974e50e072a08a6d7a",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\fix-wwg-gt",
+   "branch": "refs/heads/fix/workbook-guard-comparison-operator",
+   "head": "f680fc6e0dcf821ade894139b69f0f39eba952f7",
+   "last": "2026-10-06"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\gdp-positivity-guard",
+   "branch": "refs/heads/fix/governor-drift-probe-positivity-guard",
+   "head": "963dcd391240971aa858bd8da116aa0e4894a7b5",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\heartbeat-publish",
+   "branch": "refs/heads/feat/deadman-heartbeat-publish",
+   "head": "5374ddaf8d7309abd1535fa88f52ba3cbe2fa54c",
+   "last": "2026-09-20"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\heartbeat-stale-state-selfheal",
+   "branch": "refs/heads/fix/heartbeat-selfheal-stale-staged-state",
+   "head": "e298e614483f54cdc085dbb36633b2e58864edda",
+   "last": "2026-10-13"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\hooks-audit-0930",
+   "branch": "refs/heads/feat/hooks-audit-0930",
+   "head": "d66fae0cbff822d0b4f22e6744bd507f4e819e75",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\interesting-hofstadter-ab708f",
+   "branch": "(detached)",
+   "head": "089ea3c0bf442a32381a3516164293551e4d5b3b",
+   "last": "2026-09-21"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\mcp-send-gate",
+   "branch": "refs/heads/feat/mcp-send-gate",
+   "head": "840f19701fd64d5ebbf293a7a2b82296ac5c7275",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\merge-forward-precheck",
+   "branch": "refs/heads/fix/merge-forward-precheck-overlap",
+   "head": "ec5caa1d27ea023bb48a997464058d3e0e187082",
+   "last": "2026-09-21"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\oi331-backup-push-signal",
+   "branch": "refs/heads/oi330-oi331-backup-signal",
+   "head": "da362d4126e9730f25eb5aedf7bbff7e72dc6ede",
+   "last": "2026-09-23"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\ops-hub-full-uuid-task-specs",
+   "branch": "refs/heads/fix/ops-hub-full-uuid-task-specs",
+   "head": "c51bbf8dbf70558c3dea828246aa68acec3dd4bf",
+   "last": "2026-10-13"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\preflight-path-containment",
+   "branch": "refs/heads/fix/preflight-path-containment",
+   "head": "da3cbe7ada61c74492d905b9b17589301960600e",
+   "last": "2026-09-18"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\r30-records",
+   "branch": "refs/heads/chore/r30-audit-records",
+   "head": "29dc8ea64e6984ae9ae3d6d3012385853937358b",
+   "last": "2026-10-08"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\settings-stale-allow-entries",
+   "branch": "refs/heads/fix/settings-stale-allow-entries",
+   "head": "1448ff6e5792124e1641abbd2c0b80752defd8dc",
+   "last": "2026-10-13"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\subagent-cost-reduction",
+   "branch": "refs/heads/worktree-subagent-cost-reduction",
+   "head": "78d6ed1f201d69ffb6e8bad883cf402a3f3cd40a",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\agent-tooling-followup",
+   "branch": "refs/heads/chore/agent-tooling-followup",
+   "head": "fd622a8792757f26c8431790ae15aa3a8c93a82b",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\census-deal-recon",
+   "branch": "refs/heads/feat/deal-recon-census-tools",
+   "head": "83d744c9b2f772b68e2024fb5e8ee01dcd68e4ec",
+   "last": "2026-09-19"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\census-server",
+   "branch": "refs/heads/feat/census-mcp-server",
+   "head": "36b7d0ce67f3e31fdb0c7eb71c58cf7f91a07e85",
+   "last": "2026-09-19"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\claude-md-lease",
+   "branch": "refs/heads/docs/claude-md-lease-tiebreak",
+   "head": "82a110c580a81796f41593707a723b9176675931",
+   "last": "2026-09-23"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\eventlog-2026-09-22",
+   "branch": "refs/heads/chore/event-log-backlog-2026-09-22",
+   "head": "a847ed8275ba0769460dc06637cf5d61b6f188da",
+   "last": "2026-09-22"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\notion-degraded-followup",
+   "branch": "refs/heads/fix/notion-degraded-review-followup",
+   "head": "35248df9f6680143c85260fb56dc65eeba61ca6e",
+   "last": "2026-09-13"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\notion-email-only",
+   "branch": "refs/heads/fix/notion-publish-degraded-email-only",
+   "head": "798fe8abec31b9a2e304c38adf6629f539b15540",
+   "last": "2026-09-18"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\oi296-round4",
+   "branch": "refs/heads/fix/oi296-runindex-attempts-adhoc-followup",
+   "head": "a5410a89948e2fa166f4941cca7cf5a1924841ff",
+   "last": "2026-09-13"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\pr209-fix",
+   "branch": "refs/heads/fix/headless-register-weekly",
+   "head": "b918521fb7a4af4451807c0686c38e5bc179a371",
+   "last": "2026-09-17"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\probe-tier-land",
+   "branch": "refs/heads/fix/probe-tier-order-land",
+   "head": "29a451386af665804af1ff7fcc2385af04ba6cf4",
+   "last": "2026-09-19"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\refute-routing-doc",
+   "branch": "refs/heads/chore/refute-routing-doc",
+   "head": "42a5117d0f055d24b24c82c646de7294ea2775e3",
+   "last": "2026-10-01"
+  },
+  {
+   "path": "C:\\Users\\Owner\\.claude\\worktrees\\site-gate-slug-exemption",
+   "branch": "refs/heads/fix/site-gate-slug-dir-exemption",
+   "head": "906ba96b65dea7ec1d8e852707ad1cd928ca2b9e",
+   "last": "2026-09-18"
+  },
+  {
+   "path": "C:\\Users\\Owner\\AppData\\Local\\Temp\\ora-broker-gap\\wt-tracker-commit",
+   "branch": "refs/heads/fix/passed-deal-tracker-arms-2026-09-19",
+   "head": "4fae4c2ee6c24d6f61e445ecbb9b90fbebd2789f",
+   "last": "2026-09-19"
+  },
+  {
+   "path": "C:\\Users\\Owner\\ora-worktrees\\mcp-calendar-gate-v2",
+   "branch": "refs/heads/feat/mcp-calendar-gate-v2",
+   "head": "cdc3cda762d1e435dbfb6bb4a504767eadd53c7f",
+   "last": "2026-09-30"
+  },
+  {
+   "path": "C:\\Users\\Owner\\ora-worktrees\\merge-gate-guard-clauses",
+   "branch": "refs/heads/feat/merge-gate-guard-clauses",
+   "head": "b8b1c8998dc6d61f9c729f4cd6627f4eaa86497d",
+   "last": "2026-09-24"
+  }
+ ],
+ "failed": [],
+ "skipped": [
+  {
+   "path": "C:\\Users\\Owner\\.claude\\.claude\\worktrees\\hooks-audit-0930-baseline",
+   "why": "excluded (detached gate/temp)"
+  },
+  {
+   "path": "C:\\Users\\Owner\\AppData\\Local\\Temp\\oi\\base",
+   "why": "excluded (detached gate/temp)"
+  },
+  {
+   "path": "C:\\Users\\Owner\\worktrees\\gate-main",
+   "why": "excluded (detached gate/temp)"
+  }
+ ]
+}
