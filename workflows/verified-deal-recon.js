@@ -112,7 +112,9 @@ ${JSON.stringify(verifs, null, 2)}`,
 // ---- Ledger-row draft (v1.1) — NOT written to disk; the calling session appends this only
 // after Gabriel confirms the verdict in-session. See the file-header note above.
 const dealName = PROPERTY.split('\n')[0].trim()
-const todayISO = new Date().toISOString().slice(0, 10)
+// Date.now()/new Date() are unavailable in workflow scripts (breaks resume); the calling
+// session stamps the date when it appends the ledger row.
+const todayISO = 'YYYY-MM-DD'
 const ledgerRowDraft = brief
   ? `| ${todayISO} | ${dealName} | ${brief.verdict} | ${brief.oneLineThesis || brief.preMortem || ''} | — |`
   : null
