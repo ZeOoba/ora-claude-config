@@ -708,7 +708,7 @@ target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no inst
 disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before a-d).
 Log filtered items with one-line reasons in the run notes; do not
 write them to Notion.
-EXCEPTION (v2.9): a candidate failing (a) on a STEP 2.0 RETAIL/OFFICE/'Other' use IS written
+EXCEPTION (v2.9): a candidate failing (a) or (d) solely on a STEP 2.0 RETAIL/OFFICE/'Other' use IS written
 to Notion as Verdict PASS with the RE-ROUTE Next Action; a MIXED/CONFLICTING/[UNVERIFIED]
 use passes (a) and is capped per STEP 2.0.
 
@@ -852,14 +852,16 @@ WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
   to the >=16 ft bays per STEP 2.5. MIXED-CLEAR RULE (Gabriel-ratified 2026-10-30): if the
   minimum bay is <12 ft AND any bay is >=16 ft, the row is a FAILED physical floor capped at
   T2 WATCH — NOT gate-flagged PASS. The <12 ft gate-flagged PASS applies only when NO bay
-  reaches 16 ft. Eave height is not clear height.
+  reaches 16 ft. The MIXED-CLEAR RULE applies even where functional SF is normalized per
+  STEP 2.5; normalization can clear only a 12 to <16 ft minimum, never a <12 ft one.
+  Eave height is not clear height.
   UNKNOWN is still not FAILED — but an unknown clear height, coverage or truck court cannot
   reach T1 PURSUE: it routes to T1-PENDING-VERIFY (TIER ASSIGNMENT). Origin: 67 & 76
   Washington (13'4", 86% coverage, no court) and 2810 Saratoga (~11.5 ft) both logged T1.
 - INSTANT DISQUALIFIERS: per the buy-box list above.
 
 Gate outcomes (write the outcome to Notion `Floor Result`):
-- PASS — clears basis, no failed physical floor, no disqualifier. ELIGIBLE FOR T1 — but
+- PASS — clears basis, no failed power/parking floor, no disqualifier. ELIGIBLE FOR T1 — but
   (v2.9) clearing the RCT floor alone never makes T1 PURSUE: STEP 2.0, STEP 3A-2 and the
   TIER ASSIGNMENT conditions must ALSO hold. [INTERIM v2.9, pending Gabriel ruling] A
   basis-clearing row with a FAILED v2.9 physical floor (clear, coverage, court) is written
