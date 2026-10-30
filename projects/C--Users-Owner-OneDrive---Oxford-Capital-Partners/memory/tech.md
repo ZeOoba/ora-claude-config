@@ -89,6 +89,8 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - All 8 named guards fail open on internal error, same posture as the write-guards in §3b above.
 - Note: CLAUDE.md's guard-liveness check (`doctrine-integrity-probe.py` Check 11) requires the literal 8 backtick-quoted guard names to stay inline on that line — do not relocate the names themselves out of CLAUDE.md, only their explanatory detail.
 
+- **Engineering OS guard set (moved from CLAUDE.md 2026-10-30):** `doctrine-integrity-probe.py` · `governor-drift-probe.py` · `git-prepush-doctrine-gate.py` · `eos-telemetry` · `eos-plan-gate` · `eos-claude-md-guard` · `commit-provenance-guard.py` · `commit-provenance-recorder.py`; all fail open.
+
 ## 3g. Code-review tie-break — alt-tool/retired-plugin detail (trimmed from CLAUDE.md, word-budget pass 2026-08-14)
 - `requesting-code-review`'s dispatch step routing to native `/code-review` on the diff (rather than a bare subagent) subsumes that skill's own inline review template — the inline template is redundant once the native command handles dispatch.
 - `coderabbit` collides with the same review surface but needs an uninstalled CLI, so it is not a live alternative.
