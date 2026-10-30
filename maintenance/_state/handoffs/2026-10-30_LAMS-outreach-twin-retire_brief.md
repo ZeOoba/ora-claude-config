@@ -1,5 +1,7 @@
 # Handoff — retire the LAMS twin of `ora-owner-outreach-queue-refresh`
 
+> **⛔ SUPERSEDED 2026-10-30. DO NOT EXECUTE THIS BRIEF.** Use `2026-10-30_LAMS-twins-retire_brief.md` instead. Independent review found that this brief's surface rule allowed a Claude Code session to run it. In Claude Code, `delete_scheduled_task` resolves to the CC fleet, so running this brief there would delete the canonical CC outreach task. Kept for history only.
+
 **Execute from:** a **native on-device Cowork session** (the desktop app itself, or Claude Code "Run this task → On your computer"). NOT a cloud-sandbox Cowork session — it carries none of the scheduled-task MCP tools.
 **Ratified:** Gabriel, in-turn 2026-10-30 ("Start Phase 0" of the Deal Sourcing Expansion Plan, Notion page `4096ecd8-9e59-8150-8417-c1d9a30130e4`).
 **Skill:** `register-scheduled-task` — RETIRE, LAMS ordering (archive first, registry second).

@@ -3,7 +3,14 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.9, 2026-10-30).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.10, 2026-10-30).
+
+v2.10 — SOURCE MAPPING (2026-10-30, Gabriel-approved "Build it now", Deal Sourcing Expansion
+Plan Phase 1). NO SCORE, WEIGHT, GATE, FLOOR OR GOVERNOR CHANGED — STEP 5 now states how the
+`Source` select is filled (see SOURCE MAPPING under STEP 5). Origin: the first weekly funnel
+scorecard (2026-10-30) found 131 of 206 scored rows in the trailing 90 days carrying
+Source = 'Other', so channel mix — which channels actually produce screens and PURSUEs — was
+unmeasurable. STEP 5 had listed `Source` as a field with no rule for filling it.
 
 v2.9 — T1 GATE NO LONGER PROMOTES ON REPLACEMENT-NEW DISCOUNT ALONE (2026-10-30,
 Gabriel-ratified). NO GOVERNOR, RCT v03 ROW, VINTAGE RAMP OR SCORE WEIGHT CHANGED. Origin:
@@ -1110,7 +1117,7 @@ when one of these is true:
 STEP 5 — WRITE TO NOTION (canonical record — write BEFORE email)
 CREATE-VERIFY (Deal Sourcing Log rows AND new Broker Relationships rows): if a create returns a grace/quota notice or no page ID, look for it — query the data source for the row's natural key (address / `Listing URL`; `Broker Name` + `Company / Brokerage`), then search by that key (search lags: a miss alone is not proof) — a match created at/after the create call is this run's row, use it; never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — name it under the digest's coverage gaps. Quota errors → `notion-quota-fallback` skill.
 Create/update Deal Sourcing Log records: Deal Name / Address; Metro / Submarket;
-Source; **`Listing URL`** (the working public URL captured in Step 1 — field added
+Source (v2.10 — per SOURCE MAPPING below; never 'Other' by default); **`Listing URL`** (the working public URL captured in Step 1 — field added
 2026-08-12; before that STEP 1 was told to capture a URL for every listing and STEP 5 had
 NOWHERE TO WRITE IT, so every run captured one and silently discarded it. That is why no
 historical row can have its ask provenance reconstructed, and why STEP 5B's cross-write had
@@ -1138,6 +1145,37 @@ PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Actio
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
 v2.9: Notes / Flags carries the `USE-CODE:`, `COMP-TEST:` and (where applicable)
 `T1-PENDING-VERIFY:` tokens immediately after the gate outcome. No new Notion property.
+
+SOURCE MAPPING (v2.10). `Source` records the channel through which ORA FIRST FOUND the listing —
+the FIRST-DISCOVERED page (the one that put the property on the candidate list), which is NOT
+necessarily the page later captured as `Listing URL` (Listing URL is the best *working* page and
+may be rewritten on re-sighting). Key on the first-discovered page's domain (or, with no
+listing page, on how the ask reached ORA). Always write `SOURCE-URL: <first-discovered domain>`
+in Notes / Flags immediately after the gate-outcome tokens, so attribution is auditable even
+when it differs from `Listing URL`. When two scouts surfaced the same listing in the same
+parallel pass and order is not determinable, break the tie F3 broker-direct > F1 Yardi > F2
+Crexi/LoopNet (the SOURCE COVERAGE CONTRACT families). Use ONLY these existing select options:
+  - crexi.com                                        → 'Crexi'
+  - loopnet.com                                      → 'LoopNet'
+  - costar.com                                       → 'CoStar'
+  - a brokerage's OWN website (e.g. Block & Co, Newmark Zimmer, any firm-domain listing page),
+    or an OM / flyer / email received from a broker  → 'Broker — Direct'
+  - any other aggregator or index (commercialcafe.com, commercialsearch.com, other Yardi-network
+    sites, PropertyShark, Revere, municipal/EDC site databases, a search-engine result with no
+    loadable listing page)                           → 'Other', AND add the token
+    `SOURCE-DETAIL: <domain>` to Notes / Flags, so the 'Other' bucket stays decomposable
+    without a schema change.
+  - 'Off-Market' is NEVER written by this scan — it belongs to county-record / owner-outreach
+    leads only.
+  ON UPDATE of an existing row: Source is a first-discovery fact, so a later sighting on a
+  different site NEVER changes it. Never overwrite a non-'Other' Source. Never overwrite an
+  'Other' that already carries a `SOURCE-DETAIL:` token (that is a correct aggregator
+  attribution, not a gap). Only a legacy row whose Source is blank, or 'Other' with NO
+  `SOURCE-DETAIL:`/`SOURCE-URL:` token, may be backfilled — and only from evidence of where it
+  was FIRST seen (its `First Sighted` run's record or the original `Listing URL`), never from
+  where this run happened to see it; note `SOURCE-REMAPPED: <old>→<option> (basis: <evidence>)`.
+  If that evidence is absent, leave it. Never invent a select option; a domain that fits none of
+  the rules is 'Other' + `SOURCE-DETAIL:`.
 
 *** STEP 5A — BROKER FIELD + BROKER RELATION (v2.7, 2026-09-19, Gabriel-directed) ***
 Two writes per listing, both in the Deal Sourcing Log row you just created/updated:
