@@ -15,7 +15,7 @@ Done = TDD (config/throwaway/generated exempt — ask) · typecheck 0 · lint 0 
 
 **Editor note (moved from CLAUDE.md 2026-10-20 as a one-in-one-out trim; the setup-audit plugin tie-break it made room for was dropped at the 2026-10-30 sync to #379, plugin gone from the account per R33-5):** CLAUDE.md's Done bar line used to end with "Spec §7 points here too — do not duplicate." Spec §7 itself contains no such pointer (checked 2026-10-20), so do not re-add that sentence.
 
-This clause is deliberately unmirrored elsewhere (was CLAUDE.md-only; now lives here with a pointer from CLAUDE.md) — do not also paste it into the Engineering OS spec file (`~/.claude/docs/superpowers/specs/2026-06-05-engineering-operating-system-design.md` §7) or any other doctrine file; a second copy is a second thing to keep in sync and CLAUDE.md/§7 both already point here.
+This clause is deliberately unmirrored elsewhere (was CLAUDE.md-only; now lives here with a pointer from CLAUDE.md) — do not also paste it into the Engineering OS spec file (`~/.claude/docs/superpowers/specs/2026-06-05-engineering-operating-system-design.md` §7) or any other doctrine file; a second copy is a second thing to keep in sync and CLAUDE.md already points here (§7 does not; see the editor note above).
 
 **Downstream references that cite this concept (verified not exact-phrase-dependent, 2026-08-13 grep sweep — safe to relocate):** `ora-financial-code-integrity-sweep`, `ora-appsec-sweep`, `ora-pm-ledger` scheduled tasks; `open-items-tracker.md`. All restate the concept in their own words or reference "CLAUDE.md's Done bar" as a location, which still resolves correctly post-extraction.
 
