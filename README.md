@@ -356,6 +356,16 @@ This is a **PRIVATE** GitHub repository (`ZeOoba/ora-claude-config`). Even so:
 - The fleet-floor tripwires used by `fleet-deadman.yml` and by
   `maintenance/_shared/scheduler-stores.json` are defined separately in each; read both
   before reasoning about a "below floor" alarm.
+- The permission posture is deliberate, not an oversight. `settings.json` runs
+  `defaultMode: bypassPermissions` with `skipDangerousModePermissionPrompt`, so the `allow`
+  list is not an effective gate (it mostly documents intent). The real controls are the
+  `deny` list (destructive shell and PowerShell patterns, force-push, `reset --hard`, the
+  Netlify updater MCP tools), the PreToolUse hook chains in section 4a (notably
+  `ora-autonomy-gate`, which keeps the human gates for external sends and oxfordra.net
+  deploys), and the hard invariants in `CLAUDE.md`. `deny` rules and hooks only cover what
+  they pattern-match, so when adding a risky capability add a `deny` pattern or a guard
+  hook, never just an `allow` entry. Deny rules bind Claude's own tool calls, not scripts
+  that hooks or scheduled tasks run.
 
 ---
 

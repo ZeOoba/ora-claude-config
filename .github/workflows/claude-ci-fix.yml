@@ -34,11 +34,11 @@ jobs:
     # that explicitly requested changes, (3) a comment that @-mentions Claude,
     # or (4) a comment from CodeRabbit (our CI review bot). Anything else --
     # random chatter, approvals, etc. -- is left alone.
-    # Actor allow-list: an @claude mention only fires when the commenter is
-    # the repo owner (ZeOoba). Collaborators' @claude mentions are ignored.
+    # Actor allow-list: an @claude mention or a changes-requested review only
+    # fires when its author is the repo owner (ZeOoba). Collaborators are ignored.
     if: |
       (github.event_name == 'check_suite' && github.event.check_suite.conclusion == 'failure' && github.event.check_suite.pull_requests[0] != null) ||
-      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested') ||
+      (github.event_name == 'pull_request_review' && github.event.review.state == 'changes_requested' && github.event.review.user.login == 'ZeOoba') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && ((contains(github.event.comment.body, '@claude') && github.event.comment.user.login == 'ZeOoba') || github.event.comment.user.login == 'coderabbit[bot]')) ||
       (github.event_name == 'pull_request_review_comment' && ((contains(github.event.comment.body, '@claude') && github.event.comment.user.login == 'ZeOoba') || github.event.comment.user.login == 'coderabbit[bot]'))
     runs-on: ubuntu-latest
