@@ -1388,6 +1388,61 @@ def test_dated_audit_memory_file_excluded_unit():
     print("  PASS test_dated_audit_memory_file_excluded_unit")
 
 
+def test_skill_version_changelog_excluded_unit():
+    """versions/CHANGELOG.md is exempt (provenance record); every neighbour stays in scope, and the
+    detection logic itself is untouched (the exemption is by FILE, not by gutting scan_line)."""
+    m = _load_probe_module()
+    for p in (r"C:\Users\Owner\ora-skills\acquisition-underwriting\versions\CHANGELOG.md",
+              "/s/acquisition-underwriting/versions/CHANGELOG-v4.30.md",
+              "/s/acquisition-underwriting/versions/CHANGELOG-v3.2-v4.22.md",
+              "/home/x/ora-skills/acquisition-underwriting/versions/CHANGELOG.md"):
+        assert m._is_skill_version_changelog(p), p
+    for p in (r"C:\Users\Owner\ora-skills\acquisition-underwriting\SKILL.md",
+              "/s/acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+              "/s/acquisition-underwriting/CHANGELOG.md",
+              "/s/versions/NOTES.md",
+              "/s/versions/CHANGELOG.md.bak",
+              "/s/versions/CHANGELOG-notes.md",
+              "/s/acquisition-underwriting/versions/old/CHANGELOG.md",
+              "/s/myversions/CHANGELOG.md"):
+        assert not m._is_skill_version_changelog(p), p
+    assert m.scan_line("DSCR governor floor raised to 1.40x"), (
+        "detection logic must be intact")
+    print("  PASS test_skill_version_changelog_excluded_unit")
+
+
+def test_skill_version_changelog_wiring_hermetic_e2e():
+    """Wiring guard (refute C2): drives the real main() over a temp tree. The same unhedged drift line
+    is EXEMPT in versions/CHANGELOG.md (and its CHANGELOG-vN.N.md archive) but flagged in a neighbouring
+    SKILL.md -- so dropping the helper from main()'s skip clause fails here regardless of live data."""
+    import tempfile, contextlib, io
+    m = _load_probe_module()
+    line = "DSCR governor floor 1.60x\n"
+    def run(rel):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, *rel.split("/"))
+            os.makedirs(os.path.dirname(p))
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(line)
+            old = (m.build_targets, sys.argv)
+            m.build_targets = lambda: [(d, (".md",))]
+            sys.argv = ["governor-drift-probe.py"]
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    try:
+                        m.main()
+                    except SystemExit as e:
+                        return e.code
+            finally:
+                m.build_targets, sys.argv = old
+    assert run("s/versions/CHANGELOG.md") == 0, "versions/CHANGELOG.md must be exempt"
+    assert run("s/versions/CHANGELOG-v4.30.md") == 0, "archived changelog must be exempt"
+    assert run("s/versions/CHANGELOG-v4.31-v4.37.md") == 0, "range-named archive must be exempt"
+    assert run("s/SKILL.md") == 1, "same line in SKILL.md must still flag"
+    assert run("s/CHANGELOG.md") == 1, "CHANGELOG.md outside versions/ must still flag"
+    print("  PASS test_skill_version_changelog_wiring_hermetic_e2e")
+
+
 def test_acquisition_underwriting_skill_file_clean():
     """The live acquisition-underwriting SKILL.md (repo copy) must scan CLEAN line-by-line --
     the 10 false positives of 2026-07-11 (lines 8, 50, 112, 196, 249, 260, 281, 300)."""
@@ -3207,6 +3262,8 @@ def main():
     test_perproperty_non_ratified_ltv_still_flags_unit()
     test_perprop_pairing_vetoed_when_declared_as_acquisition_ceiling_unit()
     test_dated_audit_memory_file_excluded_unit()
+    test_skill_version_changelog_excluded_unit()
+    test_skill_version_changelog_wiring_hermetic_e2e()
     test_acquisition_underwriting_skill_file_clean()
     test_test_files_excluded_from_scan_unit()
     test_eval_harness_run_logs_excluded_from_scan_unit()
