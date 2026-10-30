@@ -2098,6 +2098,27 @@ def _is_eval_harness_run_log(path):
     precision-over-recall design throughout."""
     return "/acquisition-underwriting-eval-harness/runs/" in path.replace("\\", "/").lower()
 
+# CHANGELOG.md plus its rollover archives (CHANGELOG-v4.30.md ...): entries move to the archive name
+# when the index is capped, so exempting only the live file would re-trip the moment v4.37 is archived
+# (same reasoning as exempting open-items-tracker-history.md alongside the live tracker).
+SKILL_CHANGELOG_RE = re.compile(r"/versions/changelog(?:-v[0-9][0-9.]*(?:-v[0-9][0-9.]*)?)?\.md$")
+
+def _is_skill_version_changelog(path):
+    """2026-10-29 path-class exemption. <skill>/versions/CHANGELOG.md is the append-only PROVENANCE
+    record of a skill's ratified versions -- the same NARRATIVE class as event_log.md and the decision
+    ledgers. A v4.37 entry (acquisition-underwriting) quotes the binding-constraint formula
+    ("0.65 x 1.25 x debt constant") and the per-property "LTV governor 65%" while narrating what was
+    ratified, which armed both the DSCR and LTV rules and failed test_event_log_excluded_e2e, blocking
+    every ora-claude-config push. Rewriting a ratified provenance entry to satisfy the probe would
+    falsify the record, so the file class is exempt instead.
+
+    Deliberately narrow: only CHANGELOG.md or a rollover archive CHANGELOG-vN.N[-vN.N].md directly inside a versions/ directory.
+    SKILL.md (which carries the living index row and the governor text), references/*.md and any
+    CHANGELOG.md elsewhere stay fully in scope. Accepted blind spot, unchanged in kind from the
+    ledgers: a governor change recorded ONLY in a versions/CHANGELOG.md and nowhere in SKILL.md /
+    standards.md / rules.md / firm.md / CLAUDE.md / capital-config.ts would go unseen."""
+    return bool(SKILL_CHANGELOG_RE.search(path.replace("\\", "/").lower()))
+
 def main():
     quiet = "--quiet" in sys.argv
     findings = []
@@ -2174,7 +2195,8 @@ def main():
             basename = os.path.basename(path)
             if (os.path.abspath(path) == self_path or basename in skip_names
                     or EVENT_LOG_ARCHIVE_RE.match(basename) or DATED_AUDIT_RE.match(basename)
-                    or _is_test_file(path) or _is_eval_harness_run_log(path)):
+                    or _is_test_file(path) or _is_eval_harness_run_log(path)
+                    or _is_skill_version_changelog(path)):
                 continue
             low_path = path.lower().replace("\\", "/")
             is_code = low_path.endswith((".ts", ".tsx", ".js"))
