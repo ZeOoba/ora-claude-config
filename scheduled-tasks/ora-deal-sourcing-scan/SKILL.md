@@ -702,6 +702,9 @@ target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no inst
 disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before a-d).
 Log filtered items with one-line reasons in the run notes; do not
 write them to Notion.
+EXCEPTION (v2.9): a candidate failing (a) on a STEP 2.0 RETAIL/OFFICE/'Other' use IS written
+to Notion as Verdict PASS with the RE-ROUTE Next Action; a MIXED/CONFLICTING/[UNVERIFIED]
+use passes (a) and is capped per STEP 2.0.
 
 *** (e) OWN-PORTFOLIO GUARD (v2.6, 2026-09-18, Gabriel-directed after a real incident) ***
 On 2026-09-05 this scan logged ORA's OWN Cushman & Wakefield listing — "2000-2026 Zettler
@@ -744,9 +747,10 @@ assessor/auditor land-use or property-class code (listing-enrichment-gate step 5
     "RE-ROUTE: ALT-ASSET-TRACK (acquisition-underwriting Stage 0 Gate 6 / 2.9)". Never T1/T2.
     Origin: 13500 E 40 Hwy (Gordmans anchor, scored Product 15 with Asset Type 'Other');
     2401-2501 International Ln (office, logged T1 as Multi-Tenant Industrial).
-  - MIXED, CONFLICTING (listing says industrial, code says retail/office/commercial) or
-    [UNVERIFIED] only → Product scores 8 (not 15) and the verdict is capped at T2 WATCH /
-    T1-PENDING-VERIFY until resolved.
+  - MIXED or CONFLICTING (listing says industrial, code says retail/office/commercial) →
+    Product scores 8 (not 15); max tier T2 WATCH until a human resolves it.
+  - [UNVERIFIED] only (listing text, no code or structured field) → Product 8 provisional;
+    T1-PENDING-VERIFY at best (STEP 3D resolves it).
 Never write Asset Type 'Other' on a row whose Verdict is T1 PURSUE — that combination is
 self-contradictory and is a bug.
 
@@ -847,7 +851,9 @@ WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
 Gate outcomes (write the outcome to Notion `Floor Result`):
 - PASS — clears basis, no failed physical floor, no disqualifier. ELIGIBLE FOR T1 — but
   (v2.9) clearing the RCT floor alone never makes T1 PURSUE: STEP 2.0, STEP 3A-2 and the
-  TIER ASSIGNMENT conditions must ALSO hold.
+  TIER ASSIGNMENT conditions must ALSO hold. [INTERIM v2.9, pending Gabriel ruling] A
+  basis-clearing row with a FAILED v2.9 physical floor (clear, coverage, court) is written
+  Floor Result PASS; the physical cap is applied in TIER ASSIGNMENT, never by the field.
 - FAIL-BASIS — priced above 75% of replacement. CANNOT BE T1 AT ANY SCORE.
   Maximum tier is T2 WATCH. Log it, state the price at which it WOULD clear, and
   monitor for a cut. Pursuing one requires an explicit Gabriel exception plus a
@@ -917,17 +923,20 @@ STEP 3B — SCORE (Fit Score 0-100 — RANKS WITHIN A GATE OUTCOME, never overri
 
 TIER ASSIGNMENT (gate first, score second):
 - T1 PURSUE      = Floor Result PASS **AND** COMP-TEST PASS **AND** USE-CODE industrial/flex
-                   VERIFIED **AND** every physical floor MET (none unknown) **AND** <50,000 SF
-                   per building **AND** score >=60. Request OM immediately. (v2.9)
-- T1-PENDING-VERIFY = would be T1 PURSUE but one or more of COMP-TEST / USE-CODE / clear /
-                   coverage / truck court is UNKNOWN after STEP 3D. Written to Notion as
+                   VERIFIED **AND** clear height, site coverage and truck court each MET (none
+                   unknown) **AND** no power/parking floor FAILED (power/parking UNKNOWN
+                   permitted, per STEP 3A) **AND** <50,000 SF per building (per-building SF
+                   KNOWN) **AND** score >=60. Request OM immediately. (v2.9)
+- T1-PENDING-VERIFY = would be T1 PURSUE but one or more of COMP-TEST / USE-CODE (unknown or
+                   [UNVERIFIED]) / clear / coverage / truck court / per-building SF
+                   (multi-building) is UNKNOWN after STEP 3D. Written to Notion as
                    Verdict 'T2 WATCH' + token `T1-PENDING-VERIFY: <missing facts>` (fail-safe:
                    verified-deal-recon fires only on T1 PURSUE). Report and count SEPARATELY.
 - T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60. REQUEST PRICE only.
                      Report and count SEPARATELY from T1 PURSUE.
 - T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59, OR COMP-TEST FAIL, OR a
                    FAILED physical floor, OR >=50,000 SF per building, OR USE-CODE
-                   mixed/conflicting/unverified, OR [PROXY] without a COMP-TEST PASS. Log,
+                   mixed/conflicting, OR [PROXY] without a COMP-TEST PASS. Log,
                    monitor for price cuts, no outreach.
 - PASS / DECLINE = priced at or above replacement, OR 2+ failed physical floors, OR
                    an instant disqualifier, OR USE-CODE retail/office/Other (re-route), OR
@@ -955,9 +964,10 @@ TIER ASSIGNMENT (the gate is unchanged; only the 5-pt component moved).
 
 STEP 3D — T1 VERIFY PASS (v2.9; runs after TIER ASSIGNMENT, same budget class as 3C)
 For every row that would be T1 PURSUE but is T1-PENDING-VERIFY for an UNKNOWN in STEP 2.0,
-3A (clear/coverage/court) or 3A-2 (comps): run listing-enrichment-gate steps 1, 5 and 7 (use
+3A (clear/coverage/court), 3A-2 (comps) or per-building SF (multi-building): run listing-enrichment-gate steps 1, 5 and 7 (use
 class, footprint ÷ parcel coverage, listing clear height) and one comp pull, <= 4 page loads +
-2 GIS queries per row. Resolved and passing → T1 PURSUE (and, if its construction is still
+2 GIS queries per row. Test "would be T1 PURSUE" scoring an [UNVERIFIED] use at Product 15;
+after resolution re-score Product and Physical floors and re-apply TIER ASSIGNMENT. Resolved and passing → T1 PURSUE (and, if its construction is still
 UNKNOWN, it then gets the STEP 3C photo check like any T1 row). Resolved and failing → the cap that
 rule names. Still unknown → stays T1-PENDING-VERIFY with Next Action naming the missing
 fact(s) and the decision rule. A skipped row is a §7c coverage gap, named by address.
