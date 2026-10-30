@@ -6,7 +6,8 @@ research passes (robots.txt and terms read per host; no logins, accounts, CAPTCH
 [UNVERIFIED] were inferred or came from search snippets, not read on the primary page.
 
 Mortgage-maturity mining via county recorders is NOT a feed here: ruled out 2026-09-18 (no bulk recorder access
-in any ORA market; Ohio's index carries no maturity date). Do not re-propose it.
+in any ORA market; Ohio's index carries no maturity date). Do not re-propose it as a bulk feed. (v1.5 adds a finalist-only manual
+recorder look-up in SKILL.md step 8 — a per-document check on tens of rows, not a feed; this ruling is unchanged.)
 
 ## Rules for using these feeds
 - A feed row is a LEAD INPUT, never a score input and never a call list on its own. Join to the parcel screen,
