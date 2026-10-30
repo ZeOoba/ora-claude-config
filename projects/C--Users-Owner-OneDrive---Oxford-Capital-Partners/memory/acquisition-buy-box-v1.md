@@ -1,11 +1,11 @@
 ---
 name: acquisition-buy-box-v1
-description: "Canonical durable record of ORA's ratified acquisition Buy Box & Scorecard doctrine — schema v1.1, Rulings 1-5 + Amendments A-G, all ratified 2026-06-09 — extracted from acquisition-underwriting/SKILL.md v4.12. Created 2026-08-17 to close a gap where the ora-skill-store-drift-check task's step 2c has cited this exact memory key since 2026-06-20 and it never existed, silently SKIPPING that check on every run."
+description: "Canonical durable record of ORA's ratified acquisition Buy Box & Scorecard doctrine — schema v1.1, Rulings 1-5 + Amendments A-G (ratified 2026-06-09) + Amendment H small portfolios (ratified 2026-10-30, skill v4.40; open questions decided 2026-10-30, v4.41) — extracted from acquisition-underwriting/SKILL.md v4.12. Created 2026-08-17 to close a gap where the ora-skill-store-drift-check task's step 2c has cited this exact memory key since 2026-06-20 and it never existed, silently SKIPPING that check on every run."
 metadata:
   node_type: memory
   type: reference
   originSessionId: ora-skills-drift-check-remediation-2026-08-17
-  modified: 2026-08-17T17:39:07.204Z
+  modified: 2026-10-30T00:00:00.000Z
 ---
 
 # ORA Acquisition Buy Box & Scorecard — canonical doctrine record (schema v1.1)
@@ -66,6 +66,28 @@ regex or session comparing "the skill's version" against this record must diff a
 - **Amendment E — Outcome Feedback.** Post-decision calibration-loop mechanism.
 - **Amendment F — Exception Register + Tripwire.**
 - **Amendment G — Stage -1 Intake Rules.** Mandatory before any score is quoted.
+
+## Amendment H (ratified 2026-10-30) — Stage 0 item 2 + Stage 1 Portfolios (skill v4.40-v4.41, RE-4.40-1, RE-4.41-1)
+
+Gabriel in-turn 2026-10-30, Deal Sourcing Expansion Plan (Notion 4096ecd8-9e59-8150-8417-c1d9a30130e4)
+§6 and §10, "Ratify as drafted"; its three open questions decided by Gabriel in-turn 2026-10-30 (v4.41).
+Adds an amendment; does NOT move the schema token (no weight changed — still v1.1).
+
+- **Amendment H — Small portfolios.** Scope: 2–5 buildings sold together, ≤$15M total (over either = gate
+  flag that surfaces for Gabriel's call, never a kill, Ruling 5). EACH building individually passes the
+  single-asset buy-box (sub-50K SF, Class B/C, flex/shallow-bay) and the Stage 0 gates + Stage 1 floors; the
+  $500K–$10M single-asset price band is NOT applied per building (the portfolio is bounded by its ≤$15M
+  total, while per-building SF, class and scorecard tests still bind). Any breach flags the portfolio and
+  names the building. Price each building on its own walk first (that walk is its allocated price in ORA's
+  offer); a portfolio premium is allowed only if the portfolio at the premium price clears BOTH the Yield
+  floor (blended stabilized YoC >8%) AND the Stage 1 IRR floor (10-yr unlevered ≥ the greater of 10.0% and
+  10-yr UST + 550 bps, v4.33; the portfolio's floor is the highest floor any building carries, including that building's own risk
+  premiums); portfolio Walk Price = sum of walks + any qualifying premium. The IRR test is the current
+  unlevered floor; there is no separate premium bar, and the levered floor retired in v4.33 stays retired
+  (Gabriel in-turn 2026-10-30).
+  Per-building "scorecard tests" = Stage 0 gates + Stage 1 floors; Combined is scored on the blend. Governors UNCHANGED: DSCR ≥1.25x per property, the 65% per-property refi ceiling, and
+  the 40% aggregate LTV checked post-close at portfolio level (Stage 2.3 Part A). Entry-cluster buildings
+  stay under Ruling 3 (no satellite eligibility until a first close).
 
 ## Explicitly UNRATIFIED — do not treat as current Buy Box doctrine
 
