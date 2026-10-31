@@ -814,13 +814,17 @@ def test_guard_liveness_real_no_orphans():
         "check 11 found an orphan guard in the live doctrine (a named guard with no "
         "settings.json hook / scheduled-task SKILL.md / pre-push shim runner):\n%s"
         % r.stdout)
+    # All 8 named guards, so a guard silently dropped from the list (a wrapped line,
+    # a moved bullet) fails here instead of shrinking the checked set unnoticed.
     for guard in ("doctrine-integrity-probe.py", "governor-drift-probe.py",
-                  "git-prepush-doctrine-gate.py", "eos-telemetry", "eos-plan-gate"):
+                  "git-prepush-doctrine-gate.py", "eos-telemetry", "eos-plan-gate",
+                  "eos-claude-md-guard", "commit-provenance-guard.py",
+                  "commit-provenance-recorder.py"):
         line = next((l for l in r.stdout.splitlines()
                      if l.lstrip().startswith("[OK]") and (" " + guard + " ") in l), "")
         assert "live invocation point found" in line, (
             "%s should resolve to a live invocation point:\n%s" % (guard, r.stdout))
-    print("  PASS test_guard_liveness_real_no_orphans (5 guards resolve, 0 orphans)")
+    print("  PASS test_guard_liveness_real_no_orphans (8 guards resolve, 0 orphans)")
 
 
 def test_guard_liveness_fixture_orphan_and_override_excluded():
@@ -835,8 +839,11 @@ def test_guard_liveness_fixture_orphan_and_override_excluded():
     guards = ("Guards: `eos-telemetry` (compliance) · `zzz-orphan-guard.py` "
               "(4+ edits; override `touch hooks/sessions/<id>/override`); all fail open.")
     path = _write_fixture(_guards_fixture(guards))
+    # Isolate from the live tech.md 3f list, which check 11 unions in: a tech.md
+    # with no guard-set bullet contributes nothing, so the count stays exactly 2.
+    tech = _write_tech_md("## 3f. Engineering OS guards\n- no list here\n")
     try:
-        r = run_probe([path])
+        r = run_probe([path, "--tech-md=" + tech])
         assert r.returncode == 0, (
             "guard-liveness is WARN-only; a lone orphan must not flip the exit code, "
             "got %d\nSTDOUT:\n%s\nSTDERR:\n%s" % (r.returncode, r.stdout, r.stderr))
@@ -855,8 +862,155 @@ def test_guard_liveness_fixture_orphan_and_override_excluded():
             % r.stdout)
     finally:
         os.remove(path)
+        os.remove(tech)
     print("  PASS test_guard_liveness_fixture_orphan_and_override_excluded "
           "(2 guards; wired OK, orphan WARN, override excluded, exit 0)")
+
+
+def _write_tech_md(content):
+    fd, path = tempfile.mkstemp(suffix="_tech.md", text=True)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    return path
+
+
+# A 3f section shaped like the live tech.md: a detail bullet whose backticks are NOT
+# guards (eos-plan-gate's override recipe), then the bold-labelled guard-set bullet.
+# A decoy guard-set bullet in 3g proves the parse is scoped to section 3f.
+TECH_MD_3F = (
+    "## 3e. Other\n- unrelated `not-a-guard-3e`\n\n"
+    "## 3f. Engineering OS calibration guards -- bypass/check detail\n"
+    "- **`eos-plan-gate`** blocks after 4+ unplanned edits; bypass via "
+    "`echo reason: <why> > hooks/sessions/<id>/override`.\n"
+    "- **Engineering OS guard set (moved from CLAUDE.md):** `eos-telemetry` \u00b7 "
+    "`zzz-orphan-guard.py`; all fail open.\n\n"
+    "## 3g. Next\n- **Engineering OS guard set (decoy):** `zzz-decoy-3g.py`\n")
+
+
+def test_guard_liveness_falls_back_to_tech_md():
+    """No 'Guards:' line in CLAUDE.md -> check 11 reads the guard set from tech.md
+    section 3f (its home since the CLAUDE.md word-budget trim). Exactly the 2 guards
+    on the bold guard-set bullet are checked: the 3f detail bullet's backticks, the
+    3e token and the 3g decoy are all excluded; wired guard OK, orphan WARN, exit 0."""
+    path = _write_fixture(_v21_base())
+    tech = _write_tech_md(TECH_MD_3F)
+    try:
+        r = run_probe([path, "--tech-md=" + tech])
+        assert r.returncode == 0, (
+            "fallback list found -> WARN-only orphan must not flip exit, got %d\n"
+            "STDOUT:\n%s\nSTDERR:\n%s" % (r.returncode, r.stdout, r.stderr))
+        assert "Guard liveness: 2 guard(s) checked (source: tech.md" in r.stdout, (
+            "expected 2 guards read from tech.md 3f:\n%s" % r.stdout)
+        ok = next((l for l in r.stdout.splitlines()
+                   if l.lstrip().startswith("[OK]") and " eos-telemetry " in l), "")
+        assert "live invocation point found" in ok, (
+            "eos-telemetry should resolve against the real settings.json:\n%s" % r.stdout)
+        assert ("has no live invocation point found" in r.stdout
+                and "zzz-orphan-guard.py" in r.stdout), (
+            "expected the unwired guard to be flagged an orphan:\n%s" % r.stdout)
+        for bad in ("zzz-decoy-3g", "not-a-guard-3e", "skipped"):
+            assert bad not in r.stdout, (
+                "'%s' leaked into check 11 output:\n%s" % (bad, r.stdout))
+    finally:
+        os.remove(path)
+        os.remove(tech)
+    print("  PASS test_guard_liveness_falls_back_to_tech_md "
+          "(2 guards from 3f only; wired OK, orphan WARN, exit 0)")
+
+
+def test_guard_liveness_pointer_line_does_not_replace_list():
+    """A CLAUDE.md 'Guards:' line that only POINTS at the list (a backticked
+    `tech.md`, or plain prose) names no guard, so check 11 must still read tech.md 3f
+    rather than 'checking' the pointer token and skipping the real guards."""
+    tech = _write_tech_md(TECH_MD_3F)
+    paths = []
+    try:
+        for line in ("Guards (all fail open): see `tech.md` 3f.",
+                     "Guards: see tech.md 3f; all fail open."):
+            path = _write_fixture(_guards_fixture(line))
+            paths.append(path)
+            r = run_probe([path, "--tech-md=" + tech])
+            assert "Guard liveness: 2 guard(s) checked (source: tech.md" in r.stdout, (
+                "pointer line %r must fall back to tech.md 3f:\n%s" % (line, r.stdout))
+            assert " tech.md -> " not in r.stdout, (
+                "the pointer token was treated as a guard:\n%s" % r.stdout)
+    finally:
+        os.remove(tech)
+        for p in paths:
+            os.remove(p)
+    print("  PASS test_guard_liveness_pointer_line_does_not_replace_list "
+          "(backticked and plain pointers both fall back to tech.md)")
+
+
+def test_guard_liveness_partial_claude_line_unions_tech_md():
+    """A CLAUDE.md 'Guards:' line naming only SOME guards, or a decoy identifier, must
+    not shrink the checked set: check 11 unions it with tech.md 3f, so every tech.md
+    guard is still checked (round-2 REFUTE finding)."""
+    tech = _write_tech_md(TECH_MD_3F)
+    paths = []
+    try:
+        for line, n in (("Guards: `eos-telemetry` (detail) -- full list in tech.md 3f.", 2),
+                        ("Guards: listed in `memory` tech.md 3f.", 3)):
+            path = _write_fixture(_guards_fixture(line))
+            paths.append(path)
+            r = run_probe([path, "--tech-md=" + tech])
+            assert ("Guard liveness: %d guard(s) checked (source: CLAUDE.md+tech.md)" % n
+                    in r.stdout), (
+                "line %r: expected %d guards from the union:\n%s" % (line, n, r.stdout))
+            assert "zzz-orphan-guard.py" in r.stdout, (
+                "line %r: tech.md guard dropped from the checked set:\n%s" % (line, r.stdout))
+    finally:
+        os.remove(tech)
+        for p in paths:
+            os.remove(p)
+    print("  PASS test_guard_liveness_partial_claude_line_unions_tech_md "
+          "(partial and decoy lines still check every tech.md guard)")
+
+
+def test_guard_liveness_degraded_tech_md_warns():
+    """CLAUDE.md names a guard but tech.md's list is gone (bullet removed, or the file
+    absent): the CLAUDE.md guard is still checked (exit 0, WARN-only), and the lost
+    home is a loud WARN rather than a silent shrink of the checked set."""
+    path = _write_fixture(_guards_fixture("Guards: `eos-telemetry`; all fail open."))
+    no_list = _write_tech_md("## 3f. Engineering OS guards\n- no list here\n")
+    absent = no_list + ".does-not-exist"
+    try:
+        for tech, needle in ((no_list, "tech.md has no '## 3f.'"),
+                             (absent, "tech.md unreadable")):
+            r = run_probe([path, "--tech-md=" + tech])
+            assert r.returncode == 0, (
+                "%s: expected WARN-only exit 0, got %d\n%s" % (needle, r.returncode, r.stdout))
+            assert "Guard liveness: 1 guard(s) checked (source: CLAUDE.md)" in r.stdout, (
+                "%s: expected the CLAUDE.md guard alone:\n%s" % (needle, r.stdout))
+            assert ("[WARN]    guard-liveness: " + needle) in r.stdout, (
+                "%s: expected a WARN for the lost tech.md list:\n%s" % (needle, r.stdout))
+    finally:
+        os.remove(path)
+        os.remove(no_list)
+    print("  PASS test_guard_liveness_degraded_tech_md_warns "
+          "(bullet removed / tech.md absent -> CLAUDE.md guard checked + WARN)")
+
+
+def test_guard_liveness_fails_closed_without_any_list():
+    """No 'Guards:' line in CLAUDE.md AND no guard set in tech.md 3f (bullet removed,
+    or tech.md absent) -> hard [MISSING], exit 1. A silently skipped meta-guard is the
+    exact failure that let check 11 go dark after the CLAUDE.md trim."""
+    path = _write_fixture(_v21_base())
+    no_list = _write_tech_md(TECH_MD_3F.replace(
+        "- **Engineering OS guard set (moved from CLAUDE.md):**", "- moved:"))
+    absent = no_list + ".does-not-exist"
+    try:
+        for tech, why in ((no_list, "guard-set bullet removed"), (absent, "tech.md absent")):
+            r = run_probe([path, "--tech-md=" + tech])
+            assert r.returncode == 1, (
+                "%s: expected fail-closed exit 1, got %d\n%s" % (why, r.returncode, r.stdout))
+            assert "[MISSING] guard-liveness: no guard list" in r.stdout, (
+                "%s: expected the guard-list [MISSING] line:\n%s" % (why, r.stdout))
+    finally:
+        os.remove(path)
+        os.remove(no_list)
+    print("  PASS test_guard_liveness_fails_closed_without_any_list "
+          "(bullet removed / tech.md absent -> exit 1)")
 
 
 def test_quick_mode_clean_passes():
@@ -1762,6 +1916,11 @@ def main():
     test_leak_formatting_and_excerpt_withholding()
     test_guard_liveness_real_no_orphans()
     test_guard_liveness_fixture_orphan_and_override_excluded()
+    test_guard_liveness_falls_back_to_tech_md()
+    test_guard_liveness_pointer_line_does_not_replace_list()
+    test_guard_liveness_partial_claude_line_unions_tech_md()
+    test_guard_liveness_degraded_tech_md_warns()
+    test_guard_liveness_fails_closed_without_any_list()
     test_quick_mode_clean_passes()
     test_quick_mode_size_budget_fails()
     test_quick_mode_bare_date_fails()
