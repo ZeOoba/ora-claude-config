@@ -350,6 +350,21 @@
         "geometry_type": "esriGeometryPolygon"
       },
       "notes": "No building SF, no use codes, no sale data in this layer (sales are separate Assessor/Sales/FeatureServer year layers, not re-tested this pass)."
+    },
+    "lebanon_pa": {
+      "market": "NON-CANONICAL — Central PA I-81/I-78 corridor (exception screens only)",
+      "state": "PA",
+      "county_name": "Lebanon",
+      "status": "VERIFIED",
+      "verified_date": "2026-10-27",
+      "arcgis": {
+        "service_url": "https://utility.arcgis.com/usrsvcs/servers/7072ca11c43c43feb1ab453851e847b9/rest/services/LandRecords/TaxParcels/MapServer/0",
+        "layer_id": 0,
+        "layer_name": "Tax Parcels",
+        "type": "Feature Layer",
+        "geometry_type": "esriGeometryPolygon"
+      },
+      "notes": "Point query verified (parcel 31-2299214-349556-0000); paged where=1=1 bulk pull verified 2026-10-27 (returnCountOnly 54,395 parcels; resultOffset 0 and 1000, resultRecordCount 1000, exceededTransferLimit true, distinct records per page) — promoted from VERIFIED-PARTIAL. Fields: MAP_NUMBER, OWNER, MAILING_AD, SITUS_ADDR/CITY/ZIP, MUNICIPAL1, SCHOOL_DIS, DEEDED_ACR, DEED_BOOK_, LAND_ASSES, BUILDING_A, TOTAL_ASSE, LIVING_ARE (building SF), SALE_DATE (epoch ms), SALE_PRICE, YEAR_BUILT, PROPERTY_T, LU_CODE. SALE_PRICE can be a nominal $1 (non-arm's-length transfer): never use it as a basis without checking the deed. Utility-proxied ArcGIS Online service behind the county Parcel Viewer (lebcogis web app dc37fec2f8044fc3a7f2898ed5d602ac). Non-canonical: not on any scan cycle or market list. PA is base-year assessed: AV x the PA DOR CLR factor (1.92 for 7/1/2026-6/30/2027) approximates market value."
     }
   }
 }

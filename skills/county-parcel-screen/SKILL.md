@@ -12,7 +12,7 @@ description: >
   broker batch routes to deal-flow-triage.
 ---
 
-# county-parcel-screen (v1.4)
+# county-parcel-screen (v1.6)
 
 Generate off-market industrial acquisition leads for Oxford Realty Advisors from
 public county property data. The screen finds owners with the CAPACITY to sell at
@@ -25,8 +25,10 @@ and Cincinnati; per-county endpoints and quirks live in references/.
 Class B/C industrial / shallow-bay / flex / office-warehouse only. 10,000-80,000
 SF building (sweet spot 15-50K). Deal $1-10M; equity sleeve $0.75-5M at 65% LTV.
 Hard floors: >=25% discount to replacement (~$150/SF benchmark) AND >8% stabilized
-YoC. Instant disqualifiers: retail/office/multifamily, auto-use tenancy,
-institutional Class A pricing, outside ORA's nine clusters.
+YoC. (Legacy off-market screen frame; the $150 benchmark was retired 2026-07-14. Any deal
+that advances to SCREEN is tested on the acquisition-underwriting Stage 1 vintage-ramp
+floor against the construction-type-adjusted RCT LOW.) Instant disqualifiers: retail/office/multifamily, auto-use tenancy,
+institutional Class A pricing, outside ORA's eleven clusters.
 
 ## Workflow
 
@@ -97,7 +99,7 @@ Auditor-to-market factor = median SALEPRICE / appraised-value of in-universe
 arm's-length sales (>=$100K, <=3yr, ratio 0.5-4). Ohio post-2023-reappraisal
 runs ~1.6x (Franklin 1.65 n=57; Hamilton 1.61 n=182). Derive basis-score
 thresholds FROM the factor: 20 pts = >=40% modeled discount to replacement;
-14 = >=25% (the ORA floor); 6 = 10-25%; 0 below. Use ZIP-level ratios where
+14 = >=25% (legacy P1 band, not the Stage 1 floor); 6 = 10-25%; 0 below. Use ZIP-level ratios where
 n>=3 per ZIP - they range 1.0-2.0 within one county.
 
 ### 5. Fix the hold score
@@ -342,13 +344,30 @@ verification ranks quality. Attach a one-line pre-mortem (most likely reason
 the deal fails ORA underwriting) to every presented candidate - ORA project
 doctrine requires it.
 
+**Finalist loan-maturity check (v1.5, Gabriel 2026-10-18).** For each presented
+finalist only (tens of rows, never the universe), look up the most recent
+recorded mortgage/deed of trust on the county recorder's public index (e.g.
+MDLandRec in Maryland) by hand or by a permitted per-document query. Record
+recording date, lender name and lender type (bank / CMBS / life co / private /
+seller), and estimate a maturity window as recording date + 5, 7 and 10 years,
+tagged `[est]` (the index carries no maturity date). A window ending within 24
+months, or a 2016-2021 origination now inside its likely term, is a
+`MATURITY-WINDOW` lead flag: it moves the row up the call order (after estate and delinquent entity owners,
+before sellers-in-motion) and is passed to acquisition-underwriting as a
+Seller/Motivation signal. Lead input only - never a score component. This does
+NOT reverse the 2026-09-18 ruling in references/distress-feeds.md: bulk
+mortgage-maturity mining stays ruled out (no bulk recorder access in any ORA
+market). Honor every host's robots.txt and terms; a recorder that bars scripted
+access is browsed by a person. Also note any finalist that is owner-occupied by
+an operating business as a `SALE-LEASEBACK` candidate.
+
 ### 9. Deliver
 ORA-style workbooks (Oxford Navy 1B2A4A headers, Arial, zero formula errors,
 run the xlsx skill's recalc.py): YYYYMMDD_[Market]-Parcel-Screen_v0N.xlsx
 (ranked screen + README + QC failure-modes sheet) and, when distress data
 exists, YYYYMMDD_[Market]-Motivated-Leads_v0N.xlsx. Save to the Investment
 Candidates folder. Call-order doctrine: estate first, then delinquent entity
-owners, then sellers-in-motion, then absentee portfolios, then long-holds.
+owners, then `MATURITY-WINDOW` finalists (v1.5), then sellers-in-motion, then absentee portfolios, then long-holds.
 
 ## Engineering notes
 
@@ -387,6 +406,8 @@ volume + quarterly re-runs + signal-led call order is the strategy.
 - versions/CHANGELOG-v1.0-v1.3.md - full changelog text.
 
 ## Changelog
+- **v1.6 (2026-10-27):** Added `lebanon_pa` (VERIFIED after a paged `where=1=1` pull the same day; non-canonical) to county-endpoints.v1.json and county-endpoints.md for single-target screens and the acquisition-underwriting v4.37 recent-acquisition check. No scan cycle, scoring rule or market list changed (the 25% / $150 text is annotated as a legacy frame, thresholds untouched).
+- **v1.5 (2026-10-18):** Step 8 adds a finalist-only loan-maturity check (recorded mortgage + assumed 5/7/10-yr term, `[est]`) producing `MATURITY-WINDOW` and `SALE-LEASEBACK` lead flags; call order inserts `MATURITY-WINDOW` after delinquent entity owners. `workflows/parcel-screen-fanout.js` implements it: the verify agent records `recordedMortgage` / `maturityWindow` / `saleLeasebackCandidate`, and ranking uses a `maturity-window` bucket. The 2026-09-18 bulk-mining ruling stands. Parity with acquisition-underwriting v4.33 Seller/Motivation signals. No scored constant changed.
 - **v1.4 (2026-10-02):** Added references/distress-feeds.md (foreclosure and tax-lien sources for Franklin OH, Maryland, Jackson MO) and a step 7 pointer; county-endpoints.md: Jackson DLT cancellation/petition source, Wyandotte count refresh, Maryland `CONVEY1=4` decoded, recording-lag re-check flagged. Docs only. No scored constant changed.
 - **v1.3 (2026-09-18):** Hold/tenure scoring becomes a graduated curve (tau 8 yrs, cap 20 at 38 yrs); 16-point UNKNOWN-HOLD default RETIRED (coverage test, `HOLD-UNKNOWN` / `Hold ceiling`, >20% drops the component); `HOLD-PRE-NOMINAL` fallback; sibling-parcel consolidation closes F6 (`Relationships` sheet, graduated `multi`); hold-data-availability table by market; Maryland hold gap closed (`TRADATE`); Franklin re-scored (mean delta -4.1). **MOVES SCORES.** Full text: versions/CHANGELOG-v1.0-v1.3.md
 - **v1.2 (2026-09-18):** Sub-bands pinned from the Franklin OH pilot; Howard MD / Jackson MO missing-component rescales documented; counterparty floor made FAIL-LOUD on the canonical absolute guard path; Franklin `IsValid` and Jackson paging corrections in `county-endpoints.md`. No scored constant changed. Full text: versions/CHANGELOG-v1.0-v1.3.md
