@@ -64,13 +64,15 @@ Checks:
      or any bullet over SESSION_CONTEXT_MAX_BULLET_WORDS words -- the volatile
      current-state layer must not accrete dated narratives (dated history ->
      event_log.md, per CLAUDE.md's scope-layering rule)             [WARN only]
- 11. Guard liveness: every guard named in CLAUDE.md's "Guards:" line (EOS section)
+ 11. Guard liveness: every guard named in CLAUDE.md's "Guards:" line (EOS section),
+     or, when that line is absent, in tech.md section 3f's bold "guard set" bullet,
      must have a LIVE invocation point -- a settings.json hook command, a CC/MCP
      scheduled-task SKILL.md, or the ~/.claude git pre-push shim -- not merely a
      file that exists on disk. Closes the orphan class that motivated this probe:
      a guard named "active" whose only runner was silently retired, unnoticed.
      Code-surface scope only (no OneDrive LAMS fleet I/O); an unreadable source
-     downgrades an unresolved guard to a soft WARN, never a false orphan  [WARN only]
+     downgrades an unresolved guard to a soft WARN, never a false orphan  [WARN only;
+     no guard list in either home = hard MISSING, fail closed]
  14. Stage-exclusion four-site sync: the five ratified terminal Stage values
      must be present at all four sites that carry the list --
      ora-deal-command-board STEP 1, ora-deal-aging-sla STEP 1,
@@ -484,6 +486,18 @@ GUARD_CHAIN_RE = re.compile(r"^GUARD_CHAIN\s*=\s*\[(.*?)\]", re.S | re.M)
 # command with spaces/slashes, not a guard).
 GUARD_TOKEN_RE = re.compile(r"`([^`]+)`")
 GUARD_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+# The CLAUDE.md word-budget trim (PR #379) removed the inline "Guards:" line and moved
+# the guard list to tech.md section 3f, which silently turned check 11 into a skip for
+# the whole live doctrine. When CLAUDE.md has no "Guards:" line, the list is read from
+# the bold-labelled "...guard set...:" bullet(s) inside tech.md's "## 3f." section ONLY
+# (the 3f detail bullets carry non-guard backticks, e.g. eos-plan-gate's override
+# recipe). If neither home yields a guard, check 11 fails CLOSED with a hard [MISSING]:
+# a meta-guard that can be switched off by moving a line is the orphan it exists to catch.
+TECH_MD = MEMORY_DIR / "tech.md"
+GUARD_NON_GUARD_EXT_RE = re.compile(r"\.(md|json|txt|log)$", re.I)
+TECH_MD_3F_RE = re.compile(r"^##\s+3f\.[^\n]*\n(.*?)(?=^##\s|\Z)", re.S | re.M)
+TECH_MD_GUARD_SET_RE = re.compile(r"^\s*[-*]\s+\*\*[^*\n]*\bguard set\b[^*\n]*:\*\*(.*)$",
+                                  re.M | re.I)
 
 WARN_COUNT = 0
 
@@ -494,6 +508,15 @@ def warn(msg):
     global WARN_COUNT
     WARN_COUNT += 1
     print("  [WARN]    %s" % msg)
+
+
+def tech_md_guard_frags(text):
+    """Text after the label of every bold "...guard set...:" bullet in tech.md's
+    "## 3f." section, or [] if the section or the bullet is absent."""
+    m = TECH_MD_3F_RE.search(text)
+    if m is None:
+        return []
+    return TECH_MD_GUARD_SET_RE.findall(m.group(1))
 
 
 def ascii_safe(s):
@@ -1149,6 +1172,8 @@ def parse_args(argv):
             overrides["quick"] = True
         elif a.startswith("--memory-index="):
             overrides["memory_index"] = Path(a.split("=", 1)[1])
+        elif a.startswith("--tech-md="):
+            overrides["tech_md"] = Path(a.split("=", 1)[1])
         elif a.startswith("--backup-root="):
             overrides["backup_root"] = Path(a.split("=", 1)[1])
         elif a.startswith("--ported-copies="):
@@ -1168,7 +1193,7 @@ def parse_args(argv):
             # A typo'd flag must not silently become the CLAUDE.md path (which
             # would also disable live-mode scanning). Fail loud.
             print("[MISSING] unknown option: %s (known: --session-context= "
-                  "--rules= --terms= --quick --memory-index= --backup-root= "
+                  "--rules= --terms= --quick --memory-index= --tech-md= --backup-root= "
                   "--ported-copies= --roster-files= --live-root=)" % ascii_safe(a))
             sys.exit(1)
         else:
@@ -1560,13 +1585,14 @@ def apply_content_root_override(root):
     -- redirecting them would just make them resolve against unrelated content."""
     global CLAUDE_DIR, COMMANDS_DIR, MEMORY_DIR, RULES_MD, MEMORY_INDEX_MD
     global AGENTS_DIR, WORKFLOWS_DIR, SETTINGS_JSON, SCHEDULED_TASKS_DIR
-    global PRETOOLUSE_DISPATCHER, SKILL_SCAN_ROOTS, AM_BRIEF_SKILL
+    global PRETOOLUSE_DISPATCHER, SKILL_SCAN_ROOTS, AM_BRIEF_SKILL, TECH_MD
     CLAUDE_DIR = root
     COMMANDS_DIR = root / "commands"
     MEMORY_DIR = (root / "projects"
                   / "C--Users-Owner-OneDrive---Oxford-Capital-Partners" / "memory")
     RULES_MD = MEMORY_DIR / "rules.md"
     MEMORY_INDEX_MD = MEMORY_DIR / "MEMORY.md"
+    TECH_MD = MEMORY_DIR / "tech.md"
     AGENTS_DIR = root / "agents"
     WORKFLOWS_DIR = root / "workflows"
     SETTINGS_JSON = root / "settings.json"
@@ -2020,7 +2046,7 @@ def main():
     # doctrine-integrity-probe.py had no live runner after its only scheduled trigger
     # was retired on a false rationale, and nothing noticed. Checks 1-4 prove a named
     # guard's FILE exists; none proved it is actually WIRED to run. This closes that
-    # gap -- each guard in CLAUDE.md's "Guards:" line must resolve to >=1 live
+    # gap -- each guard in the guard list (source resolution below) must resolve to >=1 live
     # invocation home: (a) a settings.json hook command, (b) a CC/MCP scheduled-task
     # SKILL.md, or (c) the ~/.claude git pre-push shim.
     # WARN-ONLY this rollout, deliberately: checks 9 and 10 (added the same day) both
@@ -2032,18 +2058,51 @@ def main():
     # does cross-surface scheduler I/O, and widening scope silently would be its own
     # drift. A guard whose ONLY runner is a LAMS task WARNs here; that is a known,
     # accepted Code-surface limitation, not a false positive to engineer around.
+    # Guard-list source: the UNION of CLAUDE.md's EOS "Guards:" line and tech.md 3f's
+    # guard-set bullet. Union, not precedence: a pointer or partial list left on a
+    # CLAUDE.md "Guards:" line (e.g. "Guards: see `tech.md` 3f") must never stand in
+    # for the full list and quietly shrink the checked set. Doc/data-file tokens are
+    # never guards. Only the per-guard ORPHAN verdicts below stay WARN-only; no guard
+    # in either home is a hard [MISSING] (fail closed).
+    def parse_guards(frags):
+        out = []
+        for frag in frags:
+            # Cut trailing prose at the sentence terminator so "; all fail open." and
+            # any later text on the line never enter the token parse.
+            frag = re.split(r";\s*all fail open\.", frag, maxsplit=1)[0]
+            for t in GUARD_TOKEN_RE.findall(frag):
+                t = t.strip()
+                if (GUARD_NAME_RE.match(t) and not GUARD_NON_GUARD_EXT_RE.search(t)
+                        and t not in out):
+                    out.append(t)
+        return out
+
     guards_line = next((ln for ln in section.splitlines() if "Guards:" in ln), None)
-    if guards_line is None:
-        # The line this check audits is absent from the EOS section. Fail-open to a
-        # WARN (this rollout is WARN-only; a future burn-in could escalate absence to
-        # a hard [MISSING], mirroring check 4's treatment of a vanished section).
-        warn("guard-liveness check skipped: no 'Guards:' line in the EOS section")
-        print("Guard liveness: 0 guard(s) checked (no 'Guards:' line found)")
+    claude_guards = (parse_guards([guards_line.split("Guards:", 1)[1]])
+                     if guards_line else [])
+    tech_md = overrides.get("tech_md") or TECH_MD
+    tech_text, tech_err = read_optional(tech_md)
+    if tech_text is None:
+        warn("guard-liveness: tech.md unreadable (%s)" % ascii_safe(tech_err))
+        tech_guards = []
     else:
-        frag = guards_line.split("Guards:", 1)[1]
-        # Cut trailing prose at the sentence terminator so "; all fail open." and any
-        # later text on the line never enter the token parse.
-        frag = re.split(r";\s*all fail open\.", frag, maxsplit=1)[0]
+        tech_guards = parse_guards(tech_md_guard_frags(tech_text))
+        if not tech_guards:
+            warn("guard-liveness: tech.md has no '## 3f.' bold '...guard set...:' bullet "
+                 "naming a guard -- the list's home is missing or reformatted")
+    guards = claude_guards + [g for g in tech_guards if g not in claude_guards]
+    src_names = [n for n, gs in (("CLAUDE.md", claude_guards), ("tech.md", tech_guards))
+                 if gs]
+    guard_src = " and ".join(
+        {"CLAUDE.md": "CLAUDE.md's Guards: line",
+         "tech.md": "tech.md section 3f guard set"}[n] for n in src_names)
+    if not guards:
+        print("  [MISSING] guard-liveness: no guard list -- CLAUDE.md's EOS section has "
+              "no 'Guards:' line naming a guard and %s has no '## 3f.' bold '...guard set...:' bullet "
+              "naming >=1 guard; check 11 cannot run (fail closed)"
+              % ascii_safe(str(overrides.get("tech_md") or TECH_MD)))
+        missing.append("guard-liveness guard list (CLAUDE.md Guards: line / tech.md 3f)")
+    else:
         # Enumerate guards by EVERY backtick token in the fragment, kept only if it is a
         # bare filename/identifier. This is chosen deliberately over a "split on the
         # middle-dot separator, take the first backtick per entry" parse: a separator
@@ -2053,8 +2112,6 @@ def main():
         # guards". The shape filter still excludes the only non-guard backtick on the
         # line, eos-plan-gate's `touch hooks/sessions/<id>/override` override recipe
         # (spaces/slashes fail GUARD_NAME_RE). Precision over recall, one exact line.
-        guards = [t.strip() for t in GUARD_TOKEN_RE.findall(frag)
-                  if GUARD_NAME_RE.match(t.strip())]
 
         # Build the three invocation-point haystacks, each fail-open. A guard that HITS
         # a readable source resolves regardless; only a ZERO-hit guard is affected by a
@@ -2124,7 +2181,8 @@ def main():
                     warn("guard-liveness: GUARD_CHAIN parsed empty -- in-process "
                          "invocation points not checked this run")
 
-        print("Guard liveness: %d guard(s) checked" % len(guards))
+        print("Guard liveness: %d guard(s) checked (source: %s)"
+              % (len(guards), "+".join(src_names)))
         for name in guards:
             # Match on the filename STEM (trailing .py/.sh dropped) as a substring.
             # This makes the conceptual-name -> file mapping automatic and table-free:
@@ -2145,11 +2203,11 @@ def main():
                      "this run (see notes above) -- not asserting orphan"
                      % ascii_safe(name))
             else:
-                warn("guard '%s' named in CLAUDE.md's Guards: line has no live "
+                warn("guard '%s' named in %s has no live "
                      "invocation point found (checked: settings.json hooks, CC/MCP "
                      "scheduled-task SKILL.mds, ~/.claude pre-push shim, "
                      "pretooluse-dispatcher GUARD_CHAIN)"
-                     % ascii_safe(name))
+                     % (ascii_safe(name), guard_src))
 
     # --- 12. backup-coverage sweep (top-level dirs invisible to the backup) ---
     # Runs live (root = ~/.claude) or on a fixture root via --backup-root=.
