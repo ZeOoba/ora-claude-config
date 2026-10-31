@@ -246,3 +246,13 @@ gap, not a lookup miss — full-file grep confirmed no "Morrison" or "392" entry
 plausible but unconfirmed signing-entity clue; do not use it to sign an executed instrument
 without separate confirmation, per the roster's own Zettler/Banwick-vs-401-Sunburst caution.
 **Follow-up:** confirm the Morrison Rd signing LLC and add it to the roster to close this gap.
+
+### 2026-10-27 — Should owner-outreach letters say ORA owns property "across seven states"?
+**No.** Gabriel, 2026-10-27: ORA does not own in seven states. All three letter templates (T1, T3, T4) now say
+"across several markets"; OR-2026-001 re-hashed the same day (event_log 2026-10-27). Do not reintroduce a state count in letter copy.
+
+### 2026-10-27 — Is off-market master vintage 2026-10-27 (AllMarkets-OffMarket-Master v10) ratified for Notion promotion?
+**Yes.** Gabriel approved in-turn 2026-10-27 21:40 ET; `ratify_outreach.py --ratify-vintage 2026-10-27 --i-have-gabriels-approval`
+recorded it (2026-06-10 and 2026-07-27 vintages superseded). Same session: promote_netnew.py created 108 Owner Outreach Queue pages
+(0 failed; a pre-push Notion query found 0 of the 108 Parcel IDs already present), then `--commit` appended 108 parcels to
+owner-outreach-ledger.csv (372 -> 480). T1 pack 20261027 v01 (48 letters / 50 parcels) is built but NOT yet released/mailed.

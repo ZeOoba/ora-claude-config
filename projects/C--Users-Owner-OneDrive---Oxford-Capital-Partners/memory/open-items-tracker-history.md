@@ -2615,6 +2615,8 @@ Note the repo also has no dependency manifest — `jsonschema` is the single non
 **Closed:** 2026-09-19
 **Closure evidence (2026-09-19, batch verification against live state):** AAOS PR #4 merged (cc8fbc6); .github/workflows/ci.yml on origin/main and check-contract-drift.py referenced in ora-aaos-publish-contracts SKILL. Green CI run not separately confirmed.
 
+**Update 2026-10-29 (stays CLOSED):** AAOS#33 (merged 2026-10-29) adds a `contracts` job to `ci.yml`: validates agent-registry, examples and templates (`--schema` explicit), publishes to `runner.temp`, runs `check-contract-drift.py`. Verified locally on Python 3.11 and 3.13; the 3.10 leg and any GitHub run are unverified (hosted jobs are not starting: [OI-368](#OI-368)). It proves the publish/audit round trip on that commit, not the live seam. Treat the drift wiring as unproven until the first green GitHub run; reopen if that run fails.
+
 ### OI-263
 **Status:** CLOSED 2026-09-19
 **Prior status:** OPEN — blocks [OI-259](#OI-259)

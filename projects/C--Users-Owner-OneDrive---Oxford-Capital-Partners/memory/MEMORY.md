@@ -12,7 +12,7 @@
 ## Projects & system
 - [8625 Troost v06 decisions](project_8625_troost_v06_decisions.md) — 2026-10-17: exit cap 8.25%, 10-yr refi, finite-life primary, bid $1.15M
 - **[Portfolio LTV — current, verified](project_portfolio_ltv_current.md)** — 18.71% as of 2026-09-23 (`00_Home!G7`, live read); internal only, no numeric LTV in counterparty/public text; supersedes 17.9% and every "~15%"
-- **→ [Projects & system sub-index](INDEX_projects_system.md)** — audit revisions 7–25, oxfordra.net, Command Center, platform/governance, PFI, landed + closed work. **Not auto-loaded** — open it before starting project/audit/website/CC work
+- **→ [Projects & system sub-index](INDEX_projects_system.md)** — audit revisions 7–32, oxfordra.net, Command Center, platform/governance, PFI, landed + closed work. **Not auto-loaded** — open it before starting project/audit/website/CC work
 - [System of Record](00_system_of_record.md) — architecture + cold-start runbook + fleet/connector/secret inventory
 - [Event Log](event_log.md) — append-only system changes, deal milestones, decisions (newest first)
 - [Open Items Tracker](open-items-tracker.md) — canonical punch-list; other files POINT here, never restate item text. Closed items: [history](open-items-tracker-history.md).
@@ -23,8 +23,11 @@
 - **[Regression root-cause audit 08-28](project_regression_root_cause_audit_2026-08-28.md)** — 6-repo fix→refix pattern, 3 shared mechanisms (no-source-of-truth · heuristic-not-structure · no-real-failure-gate), report-only, [artifact](https://claude.ai/code/artifact/24cabf38-d976-4312-819e-691492696132)
 - **OPEN/BLOCKED:** [open-items-tracker worktree/HEAD divergence 07-20](project_open_items_tracker_worktree_head_divergence.md) (don't force-resync) · [event_log IWNS block loss](project_event_log_iwns_block_loss_unattributed_2026-07-21.md) (recovered; cause open) · [primary checkout main-move blocked 08-12](project_primary_checkout_main_move_blocked_2026-08-12.md) (CLEARED 08-16: the 117-file/15-session blocker no longer holds — re-measure, never cite a count from here; rule stands: don't force-switch, isolated worktree only) · [rent-comp retirement process gap 08-13](project_rent_comp_retirement_process_gap_2026-08-13.md) (data restored 08-12; no-dependency-check + no-skip-gate PROCESS gaps still open, task_cf7b9098 spawned)
 - **PLANNED, awaiting Gabriel:** [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
-- **⛔ [Automation Audit Rev 32 10-20](project_automation_audit_rev32_2026-10-20.md)** — fleet 26/95, six tasks added since R31; backup push healthy; Fable still dispatched after retirement. Rev 31 → INDEX_projects_system.md
-- **⛔ [Automation Audit Rev 29 10-02](project_automation_audit_rev29_2026-10-02.md)** — latest pass (earlier: Projects & system sub-index; Rev 27 pointer moved there). Fleet 8/87 enabled, unexplained; CLAUDE.md 2w from FAIL; backup push failing; audit-skill copies drift
+- **⛔ [Doctrine guard alarm 10-30](project_doctrine_guard_alarm_2026-10-30.md)** — governor probe flagged CHANGELOG.md:52 (likely false positive); 7 repo-first cache violations incl. loi-generation; 1 backup-coverage ACTION
+- **⛔ [LAMS fleet dark, ora-cowork-heartbeat disabled 10-30](project_lams_fleet_dark_cowork_heartbeat_disabled_2026-10-30.md)** — 27/27 LAMS recurring disabled, no resume queued, not a bounded pause; dead-man producer among them — awaiting Gabriel
+- **⛔ [ora-pm outage 10-28](project_ora_pm_outage_2026-10-28.md)** — Supabase host NXDOMAIN + GitHub Actions billing refusal; check before 11-01 billing
+- **⛔ [Automation Audit Rev 33 10-28](project_automation_audit_rev33_2026-10-28.md)** — fleet 25/94; prepush sweep failing; mirror drift (stale checkout); 109 worktrees. Rev 32 → INDEX_projects_system.md
+- **⛔ [Automation Audit Rev 29 10-02](project_automation_audit_rev29_2026-10-02.md)** — superseded by Rev 33 (10-28); earlier pass. Fleet 8/87 enabled then, unexplained; CLAUDE.md 2w from FAIL; backup push failing; audit-skill copies drift
 - **[R28 plugins/connectors 09-30](project_automation_audit_rev28_plugins_connectors_2026-09-30.md)** — Desktop Commander KEEP (19,310 calls); Notion trial lapses ~10-02; send/CMS guard gap; chains Rev 27
 - **⚠️ [Run-once guard EXISTS as block-sentinel.py](reference_run_once_guard_is_block_sentinel_not_run_once_guard_ps1.md)** — shipped 08-09 (PR #39/#40); NOT `run-once-guard.ps1`, exits are 10/11/12 not 3/4. Re-specced from scratch once already — verify before building
 - **[governor-drift-probe DSCR-changelog-scaling-multiplier fix + duplicate-session finding, 08-22](project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md)** — landed `ecf7b42`; also caught 3+ parallel sessions independently fixing the identical bug — flag for Gabriel
@@ -101,6 +104,8 @@
 - [Livingston Heartland NEVI signed](project_livingston_heartland_nevi_signed.md) — 2026-09-23 site-host agreement executed; ORA pays station power, no host fee (draft terms)
 
 ---
+- [Market-intel sourcing options 2026-10-30](reference_market_intel_sourcing_options_2026-10-30.md) — inbox-as-feed + state bulk sales feeds; Cook/IN endpoints verified
+
 *Index holds pointers, not narration — history in [event_log.md](event_log.md).*
 
 *Size gate RECALIBRATED 2026-07-31 (Gabriel): WARN 17.1KB → 21.5KB. The old target was unsatisfiable — stripping every hook floors this file at 15.2KB, so 17.1KB allowed ~10 chars of description per entry, and the only alternative was deleting ~30 live pointers. Both 07-28 blockers re-verified and still true: archiving the CLOSED entries orphans inbound refs in other memory files, and a sub-index fails check 1. Rationale + measurements: [Memory index size gate is a runway marker](reference_memory_index_size_gate_is_a_runway_marker.md).*
