@@ -88,3 +88,4 @@ metadata:
 - **⛔ [Automation Audit Rev 27 09-22](project_automation_audit_rev27_2026-09-22.md)** — Architecture pass: no comps/listings store; ~48% of the fleet is self-maintenance; 4 never-fired tasks; plan pending. Chains Rev 26
 
 - **⛔ [Automation Audit Rev 30 10-07](project_automation_audit_rev30_2026-10-07.md)** — nothing clearly dead; fleet 16/86 enabled (the 7 "never run" were recreated 10-06, not late); first remediation tranche done 10-08, guarded config edits held for Gabriel; D1/D3/D4/D5 settled, D2 pending
+- **⛔ [Automation Audit Rev 31 10-13](project_automation_audit_rev31_2026-10-13.md)** — nothing delete-grade; fleet 19/88; 56 skips = one outage burst; pm-monthly-billing never ran; backup push 18d stale (closed at Rev 32)

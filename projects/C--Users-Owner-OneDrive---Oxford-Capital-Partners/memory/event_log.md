@@ -26,6 +26,30 @@ Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (fir
 - **Found already closed:** OI-180 (suppression pull moved to REST `pull_suppression.py` 2026-08-24, not on SQL quota); scan/roster doctrine conflict (closed 2026-09-22, local canonical). Master vintage 2026-10-27 ratified.
 - **Open for Gabriel:** 10-27 pack unreleased (next Monday run will exit 3 until `--released`); `outreach-responses.csv` absent (0 responses logged); 16 call-sheet owners with no outcomes.
 
+## 2026-10-23 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `72ce2cfb-dad9-47e1-9a8d-3f5d161cb7b0` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel authorized in chat 2026-10-23 pushing past the test-settings-wiring.py failure this once: it is pre-existing on a clean origin/main checkout (CRLF working tree vs a test that searches raw bytes for LF) and unrelated to this change.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-10-23 19:06:05 local.
+
+## 2026-10-23 - Dirty-tree triage (~/.claude, ora-skills)
+
+- Scan: .claude 35 dirty (live/primary-checkout, ahead 4 / behind 71), ora-skills 4; website-canonical and oxford-command-center clean; no stray clones. Settle check: mtimes unchanged over 16 min.
+- Committed (local, not pushed): .claude 693c30db (rev32 audit memory + MEMORY/INDEX pointers + 3 scheduled-task event_log appends, via allow-config-write, token deleted). ora-skills PR 154 (target-markets v1.14, Madison note; worktree ora-skills-wt-madison).
+- Discarded: skills/adversarial-merge-gate/agent-prompts.md (CRLF-only). Left: untracked runtime state, wt-token-binding (live WIP), 71-behind divergence (Gabriel decision).
+- Pending: restore dirty ora-skills/target-markets.json after PR 154 merges.
+
+## 2026-10-20 - Edge news overlay refresh
+- asOf 2026-10-08 -> 2026-10-20 (BLS Aug 2026 prelim). 55 entries; 18 jobsYoy refreshed, 2 signals changed (Baltimore, Cincinnati). ACS 2025 1-year still undetermined. Email sent.
+
+## 2026-10-20 - Edge mfg scout weekly
+
+- 8 rows in pending file (4 new, 4 repeats); 12 feeds unreachable/partial; email sent to ggoldberg@oxfordra.net.
+
+## 2026-10-20 — Market snapshot refresh digest
+
+Quarterly digest emailed to ggoldberg@oxfordra.net: 11 of 20 figures stale, 1 not yet published (C&W Baltimore Q3), 8 current. Columbus C&W Q3 2026 vacancy 3.4%, rent $6.98 (+7.7% YoY); NAI KLNB Q3 2026 Columbia flex 4.7% / $11.90, Greater Baltimore flex 7.5%. Open: ACS 2020-2024 values unreachable (API key), KLNB small/mid-bay wording changed, C&W restatement question. No site edits.
+
 ## 2026-10-18 -- CLAUDE.md Release-bullet change (bbb20b21): Gabriel approval recorded
 - Gabriel approved the CLAUDE.md Release-bullet change in commit bbb20b21 in-turn on 2026-10-17 ("Proceed with recommendation") after reviewing the CLAUDE.md diff. Recorded here at the dirty-tree-triage parent session's request. No governor constants touched; CLAUDE.md word count 1849 (limit 1850).
 
@@ -35,8 +59,85 @@ Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (fir
 - LTV Fix 1 (pending-debt register / refi-time test) held on ora-skills branch claude/fix-ltv-enforcement-2026-10-17-f355fb (5 REFUTE rounds not clean; KNOWN_ISSUES.md); Fix 2 wording PR in progress; register to be redesigned as one piece.
 - CodeRabbit usage-based billing: declined. OI-278 archive tags on ora-pm origin kept (fix already on main via PR #26).
 
+## 2026-10-17 -- pending-reimport hygiene: stale ledger lines cleared (equality verified)
+
+fleet-advisory-remediation, isolated-commit, communication-intelligence, county-sales-monitor, county-parcel-screen, daily-brief, lease-generation, legal-intelligence, vendor-management, website-perfection, pma-qc, register-scheduled-task, file-reconciliation, repo-architecture-review, automation-health-monitor. These pending-reimport lines predate their content reaching main and being installed. Re-verified 2026-10-17 against origin/main 917b7bf: each installed copy is confirmed equal to main, file by file (line endings and name quoting normalized). This entry records that verification of equality; it does not claim a Save-skill click was witnessed this session. Clearing the stale lines.
+
+## 2026-10-17 -- pending-reimport hygiene: six stale ledger entries cleared
+
+annual-cycle, lease-abstraction-pipeline, lease-renewal-pipeline, market-monitor, ora-millage-lookup and rent-roll-qc were reimported via Cowork Save-skill on 2026-10-16 (reimport confirmed in the 2026-10-16 entries; batch package 2026-10-16_cache-reconcile). The ledger lines were never cleared. Re-verified 2026-10-17: each installed copy equals origin/main 917b7bf file by file. Clearing the stale lines.
+
+## 2026-10-17 -- ora-skills cache reconciliation closeout (includes two corrections)
+
+Closeout of the 2026-10-16/17 cache-ahead reconciliation in ora-skills.
+
+CORRECTIONS to entries logged earlier today: (1) "acquisition-underwriting v4.28 reimport confirmed" is WRONG. The installed copy at that moment was v4.29 (a Cowork draft, captured as PR #131): the CreationTime/main.log reimport check proves an install happened, not which version. v4.31 was confirmed later with a direct cache-vs-package comparison. (2) "cost-seg-tax-layer ledger cleared (no reinstall needed)" is inaccurate: the clear was refused (an equality check is not a logged install) and the entry was left pending on Gabriel's call; the cache did equal the repo at that time.
+
+LANDED: acquisition-underwriting v4.28 + cost-seg-tax-layer (#127); postclick version guard + dirty-shared-dep guard in package_skills/build_plugin (#139); repo_first_check labels the four Code-only skills CODE-ONLY instead of NOT-INSTALLED (#143). REINSTALLED and confirmed equal to their packages: loi-generation v1.10 (the installed v1.9 template and standards put a numeric portfolio LTV into counterparty text), deal-comparison v1.4, orphaned-task-forensics v1.2, artifact-to-docx-report, graph-app-registration v1.0, psa-reconciliation v1.6. First install: ora-open-decisions v1.0.
+
+ARCHIVED (move only, hash-verified) to ora-skills/_archive/2026-10-17_cache-reconcile (MANIFEST.json, MANIFEST-flat.json): 32 rescue dirs, 12 flat rescue files, 9 handoff folders, 14 temp entry files. HELD back in _staging: the eval-harness rescue (gitignored run state), the lease-generation example script, and 5 flat rescue files with content never committed (automation-health-monitor, lease-form-qc, lease-generation, submarket-spatial-analysis, vendor-contract-qc).
+
+OPEN: the baseline-package-version PR (separate session, review rounds ongoing); stale PENDING_REIMPORT entries for skills already installed and equal to their packages (annual-cycle, lease-abstraction-pipeline, lease-renewal-pipeline, market-monitor, ora-millage-lookup, rent-roll-qc); ora-doctrine-integrity-guard SKILL.md line 44 should list CODE-ONLY as a normal verdict when that task is re-enabled (the task is currently disabled; one site only).
+
+## 2026-10-17 -- ora-open-decisions v1.0 reimport confirmed
+
+ora-open-decisions v1.0 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
 ## 2026-10-17 — Two-basis financing convention: Gabriel approval recorded
 - Gabriel confirmed in-turn (2026-10-17, dirty-tree-triage session): he approves the two-basis financing convention (portfolio-LTV numerator = all-cash; with-refi LTV informational) behind commits 71fa176c / 323028da (agents/underwriting-checker.md, ora-skills #130/#135). Invariant 4 permission now on record. Governor constants (DSCR 1.25 / LTV 40 / 65) unchanged. Independent refute pass on those two commits dispatched same day; result to be logged.
+
+## 2026-10-17 -- loi-generation v1.10 reimport confirmed
+
+loi-generation v1.10 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 -- psa-reconciliation v1.6 reimport confirmed
+
+psa-reconciliation v1.6 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 — Dirty-tree triage (.claude primary)
+- Scan: 4 roster repos; .claude 69 entries, ora-skills 3, oxford-command-center 4, website-canonical clean.
+- Committed 9d458ae on live/primary-checkout: 22 settled, unattributed tracked files (14 scheduled-tasks SKILL.md + 1 archived, 7 skills, 1 test) via git commit --only after a 20-min unchanged-mtime re-check; index verified clean first.
+- Left untouched: CLAUDE.md + maintenance/_state/* (blast radius, await approval); memory MEMORY.md/event_log.md/project_8625_troost (live Troost session); ~40 untracked dirs/files; OCC modified files (REFUTE-gated); worktree cleanup candidates ora-cfg-confnorm, ocr-readme-fix.
+
+## 2026-10-17 -- graph-app-registration v1.0 reimport confirmed
+
+graph-app-registration v1.0 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 -- artifact-to-docx-report reimport confirmed
+
+artifact-to-docx-report reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 -- orphaned-task-forensics v1.2 reimport confirmed
+
+orphaned-task-forensics v1.2 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 -- deal-comparison v1.4 reimport confirmed
+
+deal-comparison v1.4 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 -- audit lesson: 8625 Troost v05 after-tax engine vs memo (land share 57.9% vs 75.2%)
+
+The v05 workbook after-tax engine divided the dry-land credit by a hard-coded total (57.9% land share) while the memo used the assessor ratio 75.2%; the Python mirror covered pre-tax only, so QC missed it. Fixed in v06 (land-method selector) and in acquisition-underwriting v4.32 QC parity rule (mirror must tie after-tax and every Sensitivity engine). v06 mirror now ties to the workbook cache: 135 figures, worst relative diff 4e-14 (`mirror/tie6.py`); memo kit has a build-failing tie gate.
+
+## 2026-10-17 -- cost-seg-tax-layer v1.1 landed in repo (PR #138)
+
+Cowork cache already held v1.1 (799065696e44, review card saved). Repo (v1.0 from #127) updated to match byte for byte (blob sha256 799065696e44, +18/-5, v1.1 hunks only). Land-share method selector and placed-in-service timing. Merge gated on adversarial review.
+
+## 2026-10-17 -- acquisition-underwriting v4.32 patch: base-SHA mismatch, NOT applied (PR pending Gabriel's call)
+
+The v4.32 diff is stamped against the Cowork-cache v4.31 (sha256 c864250c2c18). Repo v4.31 (CRLF) hashes 64548923bfdf; the only body difference is the frontmatter `name: "acquisition-underwriting"` (cache, quoted) vs unquoted (repo). The diff dry-runs clean (`git apply --check`), but the result cannot reach 9e98546a47bb without re-quoting the name line. Per the v4.8 rule no hand-merge; A1 stopped for Gabriel. Staged D1 patches re-base on repo HEAD.
+
+## 2026-10-17 -- cost-seg-tax-layer ledger cleared (no reinstall needed)
+
+cost-seg-tax-layer landed in ora-skills via PR #127 (verbatim from capture #122, name: unquoted). Runtime cache copy equals origin/main after name-quoting normalization, so no Save-skill was required; pending-reimport entry cleared on that equality check, not a correlated install.
+
+## 2026-10-17 -- acquisition-underwriting v4.31 reimport confirmed
+
+acquisition-underwriting v4.31 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-10-17 -- acquisition-underwriting v4.28 reimport confirmed
+
+acquisition-underwriting v4.28 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
 
 ## 2026-10-16 -- solar-lease-underwriting v1.3 reimport confirmed
 
