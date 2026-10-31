@@ -126,8 +126,10 @@ def discover_live_store():
 # overlaps ora-health-guard's pre-session probe suite); archived 2026-07-07, on the
 # event_log ratified-retirements list. Its probes are absorbed by the guard trio
 # (ora-health-guard + ora-task-integrity-guard + ora-doctrine-integrity-guard). Dropped here.
+# ora-cowork-heartbeat joined 2026-10-30: migrated LAMS -> CC (the dead-man producer must live
+# on the fleet that actually fires); the union check below still finds it on either fleet.
 EXPECTED_FLEET = {"ora-am-brief", "ora-health-guard",
-                  "ora-pm-ledger", "ora-deal-sourcing-scan"}
+                  "ora-pm-ledger", "ora-deal-sourcing-scan", "ora-cowork-heartbeat"}
 live_path, live = discover_live_store()
 live_tasks = (live or {}).get("scheduledTasks", []) or []
 live_enabled = {t.get("id") for t in live_tasks if t.get("enabled")}
@@ -149,8 +151,9 @@ lams_enabled = {t.get("id") for t in lams_tasks if t.get("enabled")}
 # LAMS expected set (2026-06-14): the LAMS integrity twin `scheduled-task-integrity-guard`
 # was RETIRED 2026-06-11 — the CC task `ora-task-integrity-guard` is now the SOLE integrity
 # runner — so it is dropped here. `ora-skill-store-drift-check` is the live 4th LAMS task.
+# ora-cowork-heartbeat left this set 2026-10-30 (migrated to CC; now in EXPECTED_FLEET).
 EXPECTED_LAMS = {"ora-om-intake-ocr", "ora-replacement-cost-refresh",
-                 "ora-cowork-heartbeat", "ora-skill-store-drift-check"}
+                 "ora-skill-store-drift-check"}
 lams_missing = EXPECTED_LAMS - lams_enabled
 check("LAMS/Cowork fleet present", bool(LAMS) and not lams_missing,
       (f"{len(lams_enabled)} enabled in local-agent-mode-sessions")

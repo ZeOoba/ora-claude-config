@@ -16,7 +16,25 @@ You are the manufacturing-investment scout for Oxford Realty Advisors (ORA), a f
 ## What to sweep
 
 Primary sources (state economic-development press feeds). Fetch each and read the items inside the window:
-PA dced.pa.gov/newsroom - MD commerce.maryland.gov/media - VA vedp.org/news - WV westvirginia.gov news - OH jobsohio.com/newsroom - IN iedc.in.gov/media - MI michiganbusiness.org/press-releases - KY ced.ky.gov/News - MO missouripartnership.com/news - KS kansascommerce.gov/newsroom - WI wedc.org news - IA iowaeda.com/newsroom - NE opportunity.nebraska.gov/newsroom - IL dceo.illinois.gov newsroom - MN mn.gov/deed/newscenter.
+| State | Feed URL (fetch this exact URL) | Note (verified 2026-10-30) |
+|---|---|---|
+| PA | https://dced.pa.gov/newsroom/ | unchanged (not re-verified this pass; reachable on the 10-27 run) |
+| MD | https://commerce.maryland.gov/media | unchanged (not re-verified this pass; reachable on the 10-27 run) |
+| VA | https://www.governor.virginia.gov/newsroom/news-releases/<YYYY>/<month>-releases/ (e.g. .../2026/october-releases/) | Governor's newsroom; VEDP project announcements are issued here. vedp.org returns 403 to fetchers; the bare /news-releases/ index is JS-only. Fetch the current AND prior month folders; the page lists oldest to newest. |
+| WV | https://governor.wv.gov/news | Governor's newsroom, dated items (replaces undated westvirginia.gov news) |
+| OH | https://www.jobsohio.com/newsroom/news-press | STILL UNREACHABLE as of 2026-10-30: JS-only, no items render; governor.ohio.gov and development.ohio.gov return 404 to fetchers. Cover Ohio via the secondary WebSearch (Tax Credit Authority approvals, "Governor DeWine announces N projects") and report OH UNREACHABLE. |
+| IN | https://www.iedc.in.gov/events/news | IEDC, dated items |
+| MI | https://www.michiganbusiness.org/press-releases/ | unchanged (not re-verified this pass; reachable on the 10-27 run) |
+| KY | https://newkentuckyhome.ky.gov/NewsRoom/News_Releases/ | Cabinet for Economic Development (ced.ky.gov now redirects to newkentuckyhome.ky.gov), dated items |
+| MO | https://governor.mo.gov/press-releases | Governor's newsroom, dated; Missouri DED projects are announced here. https://ded.mo.gov/press-room lists DED project items but shows no dates: use it only to cross-check, date each item from its own release page. |
+| KS | https://www.kansascommerce.gov/news/ | Kansas Commerce, dated items |
+| WI | https://wedc.org/news/ | unchanged (not re-verified this pass; reachable on the 10-27 run) |
+| IA | https://opportunityiowa.gov/news/ | IEDA (iowaeda.com now redirects to opportunityiowa.gov), dated items |
+| NE | https://opportunity.nebraska.gov/news/ | DED Nebraska, dated items |
+| IL | https://gov-pritzker-newsroom.prezly.com/feed | RSS of the Illinois Governor's newsroom (DCEO awards are issued jointly). dceo.illinois.gov/media/pressreleases.html is JS-only, no items render. Feed carries daily schedules too; skip those. |
+| MN | https://mn.gov/deed/newscenter/press-releases/ | STILL UNREACHABLE as of 2026-10-30: all mn.gov pages redirect to a ShieldSquare bot-check (validate.perfdrive.com). Never attempt to pass the check. Cover Minnesota via the secondary WebSearch (DEED Minnesota Forward Fund / JCF awards) and report MN UNREACHABLE. |
+
+A governor's-office newsroom counts as PRIMARY (state agency) when the release names the state economic-development agency's award or project.
 
 Secondary (to catch what the feeds miss, and always labeled secondary): Business Facilities and Area Development announcement coverage, regional economic-development agencies, and local business journals. Use WebSearch for "<state> manufacturing plant announced <month year> jobs investment". A feed that will not load (JavaScript-only, blocked, 404) is reported as UNREACHABLE for that run, never skipped silently.
 
