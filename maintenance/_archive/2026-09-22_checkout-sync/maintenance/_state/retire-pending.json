@@ -1,0 +1,25 @@
+{
+  "_comment": "Retirements RATIFIED but not yet EXECUTED (or half-executed). A task listed here is registered with enabled:false ONLY because its retirement is still in flight -- it is NOT paused, and any fleet-wide resume that re-enables it silently reverses a ratified decision. pause-resume-guard.py (native, off-fleet, every 6h) alarms if a listed id is found enabled:true on its named fleet; register-scheduled-task v2.14 requires every bulk resume to carve these ids out. Remove an entry in the same pass that actually completes its retirement. This file is a plain state register consulted by a guard -- it is NOT a scheduler registry, and writing to it retires nothing by itself (Rule 2 is unaffected).",
+  "pending": [
+    {
+      "fleet": "lams",
+      "id": "ora-ar-export-freshness-nudge",
+      "ratified": "2026-09-22",
+      "reason": "Superseded by ora-ar-feed-sweep (CC, weekly, live since 2026-08-17, imports Business/A.R. Reports via ar-import-headless.ts). Gabriel ruled 'Retire it' in the 2026-09-22 ground-truth audit decision form. Currently enabled:false; must NOT be re-enabled by the LAMS resume.",
+      "executeFrom": "native on-device Cowork session"
+    }
+  ],
+  "_completed": [
+    {
+      "fleet": "lams",
+      "id": "ora-passed-deal-tracker",
+      "ratified": "2026-08-22",
+      "completed": "2026-08-24",
+      "completedFrom": "native on-device Cowork session (list_scheduled_tasks present; path field resolved to the LAMS store before the write, per register-scheduled-task RULE 3 / PATH-DISAMBIGUATOR)",
+      "procedure": "STEP 1 archive was already done 2026-08-22. STEP 2: delete_scheduled_task 'ora-passed-deal-tracker' -- returned 'deleted, 2 run sessions archived'. STEP 3 verified via fleet-status.py: 'duplicate registrations 0'; the CC/MCP copy remains enabled:true at cron '30 6 15 * *', next fire 2026-09-15. STEP 4: this entry moved to _completed, event_log.md appended.",
+      "resurrectionNote": "Between the 2026-08-22 archive and this drop, the integrity engine RE-MATERIALISED the LAMS SKILL.md at the live path (md5 identical to the archived copy) because the registry row still pointed at it -- the documented archive-before-registry-delete resurrection hazard, observed 6 consecutive times by ora-task-integrity-guard and root-caused on the 2026-08-23 Connector Pre-Flight beacon. With the registry row gone the engine has nothing to re-create from. The resurrected folder was MOVED (never deleted) to 'Documents\\Claude\\Scheduled\\_archive_2026-08-24_resurrected-copy-after-registry-drop\\ora-passed-deal-tracker\\'; the original 2026-08-22 archive at '_archive_2026-08-22_retired-to-ccmcp\\' is untouched.",
+      "lesson": "ARCHIVE-FIRST-DELETE-SECOND is correct for the FILE, but it opens a resurrection window that lasts until the REGISTRY row is dropped. Any half-executed retirement left in that window will re-materialise its own spec folder and re-alarm every guard run. Close both steps in the same pass where the surface allows it; where it does not, this register plus pause-resume-guard.py is what keeps the window observable.",
+      "history": "memory/event_log.md 2026-08-22 and 2026-08-24; register-scheduled-task SKILL.md v2.14"
+    }
+  ]
+}
