@@ -1,0 +1,222 @@
+# FLEET DEAD-MAN -- external cross-fleet monitor (Task 6, DEADMAN_APPROACH=GITHUB-ACTION,
+# Gabriel-ratified 2026-07-09).
+#
+# WHY THIS LIVES ON GITHUB: on 2026-07-05 a Desktop app reinstall destroyed the CC/MCP
+# scheduled-task registry, and the one guard built to catch that was itself a fleet
+# member and died with it (~14 CC functions dark ~3 weeks). This monitor runs OUTSIDE
+# the machine, so it survives total local fleet loss -- if the machine stops pushing a
+# fresh heartbeat, THIS still fires.
+#
+# HOW (v2, OI-323): maintenance/publish-fleet-heartbeat.py, run daily by
+# maintenance/push-fleet-heartbeat.ps1, writes ONLY the heartbeat JSON (counts + registry
+# hashes, nothing sensitive) to the `deadman-heartbeat` branch through the GitHub API -- no
+# git push, no pre-push gate, no race with main. (v1 rode `git push origin main`, so an
+# unrelated failing hook test or a main that moved mid-gate kept it off GitHub for days.)
+# This workflow checks that branch out at hb/ and FAILS when:
+#   (a) heartbeat timestamp older than 24h vs run time
+#   (b) cc  enabled-recurring count < 10  (ratified floor, 2026-07-09)
+#   (c) lams enabled-recurring count < 18 (ratified floor, 2026-07-09)
+#   (d) heartbeat file missing or unparseable
+#   (e) either registry existence flag is false
+#   (f) the AM cluster did not complete on time -- heartbeat ts later than 08:00 America/
+#       New_York on the run date (ADDED 2026-07-28, Gabriel-directed)
+#
+# WHY (f) EXISTS: (a)'s 24h window is calibrated for TOTAL fleet loss and is structurally
+# blind to the recurring failure that actually happens -- the machine/Desktop app sitting
+# closed overnight, so the whole 05:15-06:30 ET cluster fires hours late in a catch-up
+# burst. Worked example, 2026-07-28: ora-health-guard woke 217 min late (08:52 ET vs its
+# 05:15 target) and ora-am-brief at 08:54 ET, missing the pre-06:00 mirror contract
+# entirely -- yet the heartbeat was pushed at 12:54 UTC during that same burst, so at the
+# 13:00 UTC run it was 0.1h old and this dead-man passed clean. Five such bursts in seven
+# days (07-22/24/26/27/28) were each found only by automation-health-monitor at ~11:05 ET,
+# a 3-6h silent gap. (f) closes the half that matters most: if the machine is STILL down
+# at run time, no on-machine alert can fire at all -- ora-health-guard's own Block A.0
+# wake-lateness alert only works once the machine actually wakes. This check runs off-box
+# and does not need the machine to come back.
+#
+# NOTE on the DST-aware deadline: the deadline is computed in America/New_York, not as a
+# fixed UTC hour, because the local push is scheduled in LOCAL time (07:30 ET) while cron
+# is UTC -- a fixed UTC deadline is correct in summer and wrong by an hour in winter.
+# On failure it opens a GitHub issue (or comments on the existing open one -- deduped
+# on the "FLEET DEAD-MAN:" title prefix).
+#
+# EMAIL LEG: rides GitHub's NATIVE issue-notification email to the repo owner
+# (ggoldberg's GitHub account) -- no SMTP is wired (no secrets exist for it).
+# GABRIEL: confirm this repo's notification settings actually deliver issue emails
+# (repo Watch setting "All Activity", and Settings -> Notifications -> email enabled).
+#
+# Schedule: 14:00 UTC daily (10:00 ET summer / 09:00 ET winter). MOVED from 13:00 UTC on
+# 2026-07-28 so check (f) has usable margin year-round: the 08:00 ET grace deadline (tightened
+# from 08:30 the same day, see the code comment in the evaluator) lands at 13:00 UTC in winter,
+# which a 13:00 UTC run would evaluate AT the deadline, not after it. 14:00 UTC leaves ~120min
+# margin in summer and ~60min in winter, and still alarms
+# ahead of automation-health-monitor's 11:05 ET catch. (a)'s 24h total-loss check is not
+# hour-sensitive, so the 1h shift costs it nothing.
+# Runbook on alarm: memory/oxford-cc-repo-health.md
+# (locally: ~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/).
+
+name: fleet-deadman
+
+on:
+  schedule:
+    - cron: "0 14 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  deadman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # continue-on-error: a missing branch must surface as check (d) below (file missing),
+      # not as a crashed checkout step that opens no issue.
+      - name: Check out heartbeat branch
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: deadman-heartbeat
+          path: hb
+
+      - name: Evaluate heartbeat
+        id: check
+        run: |
+          python3 - <<'PY'
+          import datetime, json, os
+          from zoneinfo import ZoneInfo
+
+          HB_PATH = "hb/fleet-heartbeat.json"
+          MAX_AGE_H = 24
+          FLOORS = {"cc": 10, "lams": 18}  # ratified 2026-07-09; a count below floor = silent registry shrink
+          # (f) AM-cluster completion deadline, LOCAL time (see header). The local push is
+          # scheduled 07:30 ET (and also runs via ora-task-integrity-guard STEP 1.5 at 07:05
+          # + ~10min jitter), so normal completion is ~07:15-07:45 ET. 08:00 leaves ~15-45min
+          # of grace. Deliberately NOT looser: at a 08:30 deadline the real 2026-07-28 burst
+          # tripped by only 24 min, meaning a burst that recovered before 08:30 would have
+          # passed silently -- and a machine back at 08:15 still means the AM cluster ran ~3h
+          # late. Bias is toward catching the miss; a false positive here costs one deduped
+          # GitHub issue, a false negative costs another silent 3-6h gap.
+          AM_TZ = ZoneInfo("America/New_York")
+          AM_DEADLINE_LOCAL_H, AM_DEADLINE_LOCAL_M = 8, 0
+
+          reasons, lines = [], []
+          hb = None
+          try:
+              with open(HB_PATH, encoding="utf-8") as f:
+                  hb = json.load(f)
+          except FileNotFoundError:  # (d) branch absent (never published) or file not on it
+              reasons.append("heartbeat file missing or unparseable (FileNotFoundError): branch "
+                             "`deadman-heartbeat` is absent or has no fleet-heartbeat.json -- has "
+                             "publish-fleet-heartbeat.py ever published?")
+          except Exception as e:  # (d) unparseable
+              reasons.append("heartbeat file missing or unparseable (%s)" % e.__class__.__name__)
+
+          if hb is not None:
+              ts_raw = hb.get("ts")
+              lines.append("- heartbeat ts: `%s`" % ts_raw)
+              lines.append("- probe version: `%s`" % hb.get("probe_version"))
+              try:  # (a) staleness
+                  ts = datetime.datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%SZ").replace(
+                      tzinfo=datetime.timezone.utc)
+                  age_h = (datetime.datetime.now(datetime.timezone.utc) - ts).total_seconds() / 3600
+                  lines.append("- heartbeat age: %.1fh (max %dh)" % (age_h, MAX_AGE_H))
+                  if age_h > MAX_AGE_H:
+                      reasons.append("heartbeat stale (%.1fh > %dh)" % (age_h, MAX_AGE_H))
+                  # --- (f) AM cluster completed late / not at all ---
+                  # Deadline is AM_DEADLINE_LOCAL_* on the RUN's local date. Two failures land
+                  # here: heartbeat still from a previous day (machine never came back --
+                  # (a) also catches this once past 24h, but this catches it sooner), and
+                  # heartbeat from today but pushed after the deadline (catch-up burst).
+                  now_local = datetime.datetime.now(AM_TZ)
+                  deadline_local = now_local.replace(
+                      hour=AM_DEADLINE_LOCAL_H, minute=AM_DEADLINE_LOCAL_M,
+                      second=0, microsecond=0)
+                  ts_local = ts.astimezone(AM_TZ)
+                  lines.append("- AM deadline: `%s` · heartbeat local: `%s`"
+                               % (deadline_local.strftime("%Y-%m-%d %H:%M %Z"),
+                                  ts_local.strftime("%Y-%m-%d %H:%M %Z")))
+                  if ts_local.date() < now_local.date():
+                      reasons.append(
+                          "AM cluster has NOT run today -- newest heartbeat is from %s "
+                          "(machine/Desktop app likely still closed)" % ts_local.date())
+                  elif ts_local > deadline_local:
+                      reasons.append(
+                          "AM cluster completed LATE -- heartbeat pushed %s, %.0f min past "
+                          "the %02d:%02d ET deadline (overnight-offline catch-up burst; the "
+                          "05:15-06:30 ET tasks fired late and ora-am-brief's pre-06:00 "
+                          "mirror contract was missed)"
+                          % (ts_local.strftime("%H:%M %Z"),
+                             (ts_local - deadline_local).total_seconds() / 60,
+                             AM_DEADLINE_LOCAL_H, AM_DEADLINE_LOCAL_M))
+              except Exception:
+                  reasons.append("heartbeat timestamp unparseable (%r)" % ts_raw)
+              for label, floor in FLOORS.items():  # (b)/(c) counts, (e) existence
+                  count = (hb.get("fleets") or {}).get(label)
+                  reg = (hb.get("registries") or {}).get(label) or {}
+                  lines.append("- %s: count=%s (floor %d) · registry exists=%s · sha256=%s"
+                               % (label, count, floor, reg.get("exists"), reg.get("sha256")))
+                  if not isinstance(count, int) or isinstance(count, bool) or count < floor:
+                      reasons.append("%s enabled count %r below ratified floor %d" % (label, count, floor))
+                  if reg.get("exists") is not True:
+                      reasons.append("%s registry file existence flag is false" % label)
+
+          alert = bool(reasons)
+          today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
+          body = "\n".join(
+              ["**ORA fleet dead-man tripped** (run %s UTC)." % datetime.datetime.now(
+                  datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"),
+               "", "Failure condition(s):"]
+              + ["- %s" % r for r in reasons]
+              + ["", "Parsed heartbeat values:"] + (lines or ["- (none -- file unreadable)"])
+              + ["",
+                 "Runbook: `memory/oxford-cc-repo-health.md` (July 2026 fleet-loss incident record; "
+                 "locally under `~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/`).",
+                 "First checks: is the Desktop app open on the workstation? Did "
+                 "`maintenance/push-fleet-heartbeat.ps1` publish last night (its .log, lines starting `publish:`; "
+                 "`python maintenance/publish-fleet-heartbeat.py --status`)? Then run "
+                 "`maintenance/registry-membership-probe.py` locally for the per-task drop detail."])
+          with open("deadman-body.md", "w", encoding="utf-8") as f:
+              f.write(body + "\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("alert=%s\n" % str(alert).lower())
+              out.write("reason=%s\n" % (reasons[0] if reasons else "healthy"))
+              out.write("date=%s\n" % today)
+
+          print(("ALERT: " + "; ".join(reasons)) if alert else "OK -- heartbeat healthy")
+          for ln in lines:
+              print(" " + ln)
+          PY
+
+      - name: Open or update dead-man issue
+        if: steps.check.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REASON: ${{ steps.check.outputs.reason }}
+          RUN_DATE: ${{ steps.check.outputs.date }}
+        run: |
+          # Dedupe on the title prefix: comment on an existing OPEN dead-man issue
+          # instead of opening a duplicate.
+          existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --json number,title \
+            --jq '[.[] | select(.title | startswith("FLEET DEAD-MAN:"))][0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open dead-man issue #$existing exists -- commenting."
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body-file deadman-body.md
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "FLEET DEAD-MAN: $REASON — $RUN_DATE" \
+              --body-file deadman-body.md
+          fi
+
+      - name: Fail run on alert
+        if: steps.check.outputs.alert == 'true'
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
+        run: |
+          echo "::error::FLEET DEAD-MAN tripped: $REASON"
+          exit 1
