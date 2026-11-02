@@ -94,6 +94,44 @@ def main():
     p = llc.plan(includes=["hooks/x"])
     check("--include-path is not a string prefix", p["status"] == "BLOCKED_NON_MEMORY", p)
 
+    # a rename out of hooks/ into memory/ must still block (the deletion is non-memory)
+    live2 = fixture()
+    use(live2)
+    git(live2, "mv", "hooks/x.py", llc.MEMORY + "x.py")
+    git(live2, "commit", "-q", "-m", "sneaky rename")
+    p = llc.plan()
+    check("rename out of hooks/ -> BLOCKED_NON_MEMORY", p["status"] == "BLOCKED_NON_MEMORY"
+          and "hooks/x.py" in p.get("blocked_paths", []), p)
+
+    # squash-merged earlier: content on main, commits not -> ALREADY_LANDED
+    live3 = fixture()
+    use(live3)
+    write(live3, llc.MEMORY + "event_log.md", "# log\n## e1\n")
+    git(live3, "commit", "-q", "-am", "memory: sweep 1")
+    sq = tempfile.mkdtemp(prefix="llc-sq-")
+    subprocess.run(["git", "clone", "-q", git(live3, "remote", "get-url", "origin"), sq],
+                   check=True, capture_output=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t")):
+        git(sq, "config", k, v)
+    write(sq, llc.MEMORY + "event_log.md", "# log\n## e1\n")
+    git(sq, "commit", "-q", "-am", "squash of sweep 1")
+    git(sq, "push", "-q", "origin", "main")
+    p = llc.plan()
+    check("squash-landed content -> ALREADY_LANDED", p["status"] == "ALREADY_LANDED", p)
+
+    # someone pushed to the land branch -> BLOCKED_LAND_DIVERGED, never a force-push
+    write(live3, llc.MEMORY + "event_log.md", "# log\n## e2\n## e1\n")
+    git(live3, "commit", "-q", "-am", "memory: sweep 2")
+    git(sq, "switch", "-q", "-c", "tmp")
+    write(sq, llc.MEMORY + "other.md", "x\n")
+    git(sq, "add", "-A")
+    git(sq, "commit", "-q", "-m", "foreign push")
+    git(sq, "push", "-q", "origin", "tmp:refs/heads/" + llc.LAND_BRANCH)
+    p = llc.plan()
+    check("foreign commit on land branch -> BLOCKED_LAND_DIVERGED",
+          p["status"] == "BLOCKED_LAND_DIVERGED", p)
+    use(live)
+
     rc = llc.main(["--repo", live, "--dry-run"])
     check("main() exit 3 on BLOCKED_NON_MEMORY", rc == 3, rc)
     rc = llc.main(["--repo", live, "--dry-run", "--include-path", "hooks"])
