@@ -1,5 +1,5 @@
 {
- "ts": "2026-11-02T14:37:53Z",
+ "ts": "2026-11-02T14:43:15Z",
  "probe_version": "emit-fleet-heartbeat v1.0 (2026-07-09)",
  "fleets": {
   "cc": 43,
@@ -9,7 +9,7 @@
   "cc": {
    "path": "C:\\Users\\Owner\\AppData\\Roaming\\Claude\\claude-code-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json",
    "exists": true,
-   "sha256": "2f6382e8b734639287961200550fa7e050e810414ba5fb287b1c1696beaa74f8"
+   "sha256": "005dc4cde80c261d273631598fa6facc6670821ef76b13ec2c895d996974cdee"
   },
   "lams": {
    "path": "C:\\Users\\Owner\\AppData\\Roaming\\Claude\\local-agent-mode-sessions\\a6ad2c61-c3c8-4a48-98a5-e40c1db22ad3\\583f08bc-0123-4111-8158-8fe3d927e350\\scheduled-tasks.json",
