@@ -1,11 +1,22 @@
 ---
 name: ora-memory-commit-sweep
-description: Sweep memory/ for settled uncommitted changes and commit them, closing the head_orphans() index/content gap [MODEL: claude-sonnet-5-5 | set 2026-10-06]
+description: Sweep memory/ for settled uncommitted changes and commit them, closing the head_orphans() index/content gap, then land the live branch's memory commits on main via one standing PR (land-live-commits.py, 2026-11-02) [MODEL: claude-sonnet-5-5 | set 2026-10-06]
 ---
 
-Run this exact command and report only if it errors or exits non-zero:
+STEP 1 -- run this exact command and report only if it errors or exits 2:
 
 python "C:\Users\Owner\.claude\maintenance\memory-commit-sweep.py"
+
+STEP 2 -- whatever STEP 1 returned (0, 1 or 2), then run:
+
+python "C:\Users\Owner\.claude\maintenance\land-live-commits.py" --json
+
+It pushes the checkout's current branch to `land/live-memory` and opens (or updates) ONE PR to main, but only when every path the branch changed since its merge-base with origin/main is under memory/. It never merges, never force-pushes, and never touches the working tree. Its push runs the repo's pre-push gate, which takes several minutes; wait for it. Read `status` from the JSON:
+- NOTHING, OPENED, UPDATED: healthy. For OPENED/UPDATED, write one completion-note line with the PR url and "merge with a MERGE COMMIT, not squash".
+- BLOCKED_NON_MEMORY: non-memory commits are riding on the live branch. Write one completion-note line listing `blocked_paths`. Do NOT pass --include-path from this task; that flag is for supervised manual runs only.
+- ERROR: one completion-note line with `detail`. A pre-push gate failure shows up here; do not retry it and do not mint an override.
+
+WHY STEP 2 (2026-11-02): STEP 1's commits stay on the live branch and never reach main. event_log backlogs reached 30+ entries, and the live branch diverged by 15 commits, which had to be landed by hand (#381, #386). Shipping the branch itself, merged with a merge commit, keeps ora-checkout-merge-forward a fast-forward. A PR cut from main with the log copied in conflicts with the next sweep's superset at the newest-first head.
 
 Context (do not re-derive, do not improvise around this): this script performs a bounded, self-contained commit-cadence sweep of the ORA memory/ directory (C:\Users\Owner\.claude\projects\C--Users-Owner-OneDrive---Oxford-Capital-Partners\memory\). memory/ is git-tracked but has no write gate the way event_log.md has (append-event-log.py's mtime-guard + atomic-replace + spool-on-lock) -- with 5-6 concurrent Claude Code/Cowork sessions editing memory files directly, a session can commit an index edit (a new pointer in MEMORY.md or a sub-index) without git-adding the file it points to, in a different commit or not at all. memory-integrity-probe.py's head_orphans() check DETECTS this (a committed pointer with no committed target -- broken for any reader but the authoring machine); this script CLOSES it, on a cadence, instead of leaving it for someone to notice and hand-fix (happened live 2026-08-14 and again 2026-08-16, see reference_memory_dir_not_in_single_writer_list_2026-08-14.md).
 
@@ -20,4 +31,4 @@ The script is entirely self-contained and requires no judgment calls from you:
 
 Do not inspect, second-guess, or override what the script decides to commit -- it already embeds all the safety logic (quiet-window, no-deletes, staged-set verification). Your job is only to run it and flag exit 2. On exit 2, or on a Python traceback/crash, write one line to the completion notes describing the exact error text -- do not attempt to diagnose or fix it yourself. On exit 0 or 1, no report is needed; a silent successful run is the expected, common case.
 
-Do not send any email or Outlook message for this task under any circumstances -- it is a silent background maintenance sweep, not a reporting task. Do not touch Notion. Do not touch any file other than what the script itself touches.
+Do not send any email or Outlook message for this task under any circumstances -- it is a silent background maintenance sweep, not a reporting task. Do not touch Notion. Do not touch any file other than what the two scripts themselves touch.
