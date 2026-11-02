@@ -114,12 +114,15 @@ def commit_all(repo_dir, message):
 # Minimal fixture valid under the FULL live-mode probe -- mirrors
 # maintenance/test-doctrine-integrity-probe.py's proven-clean _v21_base() (required
 # headers, nothing referenced inside them, so checks 1-4 have nothing to flag). Every
-# other check the full live-mode probe runs (8, 9, 10, 11, 12, 13) is WARN-only/
+# other check the full live-mode probe runs (8, 9, 10, 12, 13) is WARN-only/
 # fail-open on an absent file (verified against doctrine-integrity-probe.py directly),
 # so a throwaway repo with no memory/, settings.json, scheduled-tasks/, etc. still
-# resolves clean overall.
+# resolves clean overall. Check 11 is the exception: with no guard list in either
+# home (CLAUDE.md "Guards:" line / memory tech.md 3f) it fails CLOSED, so the fixture
+# carries a one-guard "Guards:" line (its orphan verdict alone is WARN-only).
 CLEAN_CLAUDE_MD = ("## Engineering OS (test fixture)\n"
                     " no commands here\n"
+                    "Guards: `eos-telemetry`; all fail open.\n"
                     "## Skill tie-breaks (test fixture)\n"
                     "- nothing referenced\n"
                     "\nEverything here is clean, no bare dates, short.\n")

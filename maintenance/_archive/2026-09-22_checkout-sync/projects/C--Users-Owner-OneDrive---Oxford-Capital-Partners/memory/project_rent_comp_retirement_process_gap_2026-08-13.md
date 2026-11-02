@@ -1,0 +1,21 @@
+---
+name: project-rent-comp-retirement-process-gap-2026-08-13
+description: "rent-comp was retired 2026-08-05 on a false \"zero use\" read (acquisition-underwriting actually called it), scoped-restored 2026-08-12; the PROCESS gap (no inbound-dependency check before retiring, no general skip-count-zero CI gate) is still open, follow-up spawned as task_cf7b9098"
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: b34ec269-3c65-4bc6-ba23-039298513853
+  modified: 2026-08-13T04:33:12.406Z
+---
+
+`rent-comp` was retired from `ora-skills` in commit `da80e05` (2026-08-05) on a justification that didn't survive inspection: its `RETIRED.md` credited `market-monitor` v1.2 with absorbing its "comp-sourcing discipline", but that skill's actual Sourcing Discipline section is about vendor/operator-report credibility — an unrelated match on a shared name. `acquisition-underwriting` had four live dependencies on `rent-comp` for its COMPS mode, which a "zero use" audit missed because it didn't check for skill-invoked-by-skill references (only direct invocation signal). Gabriel ruled a SCOPED RESTORE in-turn 2026-08-12; commit `d03fe62` restored the comp-grid capability into `acquisition-underwriting` v4.11 (rent-comp's replacement-cost method and benchmark table deliberately NOT carried over — superseded by RCT v03 and target-markets.json respectively). The DATA is fixed.
+
+**Why this matters going forward:** the same incident also caused a silent test-skip for over a week — `tools/test_skill_drift_report_realdata.py` pinned a fixture (`BLOCK_SCALAR_SKILL`) to `rent-comp`, which then vanished out from under it when the skill was retired; nothing caught this until the 2026-08-12 sweep, over a week later. That specific fixture was already repointed (now `ratify-hurdle-rate`) as part of the same fix commit.
+
+**Still open — the PROCESS, not the data:**
+1. No inbound-dependency check (e.g. `git grep -l <skill-name>` across all `SKILL.md` bodies) runs before a skill is retired or counted as "zero use" — whatever produced `da80e05` had no such gate, so the same mistake can recur on the next retirement.
+2. No general CI assertion that the `tools/` test suite's skip count is zero (or an explicit reviewed allowlist) — so the next stale-fixture-from-a-retired-skill will again go undetected until someone happens to notice, not immediately.
+
+**Follow-up spawned:** `task_cf7b9098` ("Add inbound-dependency + skip-count gates to ora-skills") — a dedicated session scoped to implement both gates in the `ora-skills` repo (single-writer; needs its own claim/coordination check before editing). Not yet started as of 2026-08-13. **Partially closed 2026-09-17 at the PROCEDURE level only:** ora-skills PR #61 turned README step 7 (the skill archive procedure) into a four-part retirement check — inbound-dependency `git grep` + scheduled-task-folder grep, dated `_archive/<name>_retired-YYYY-MM-DD` move, `test_build_plugin` `RETIRED` map entry, full `tools/` suite loop printing FAIL/SKIP. Triggered by the same class of miss recurring: `investor-relations` retired 2026-09-09 left `main` red until PR #60. Gap 2 (a CI-enforced zero-skip / dependency gate) is still NOT built — the check is documented, not enforced. Related: [[reference_oxfordra_seo_audit_2026-07]] is unrelated (different repo) — do not conflate; this is `ora-skills`, not the website.
+
+**Meta-note on how this surfaced:** these findings arrived as optimization-queue items during a session that was actually launched as a scheduled `ora-site-exposure-probe` fire (a narrowly-scoped weekly detection task, unrelated to skill retirement) and got redirected to general work instead. That task's `SKILL.md` had no guidance for this situation — added 2026-08-13 (a REDIRECTED-TO-GENERAL-WORK section: complete or explicitly skip-and-log the probe's own Notion contract rather than let the week silently go unreported, since a diverted-but-live session looks identical to the documented app-closed miss otherwise). Edit applied to the live checkout working tree, not yet committed (same staging-contention state as the other pending edits this session — see [[reference_oi140_check_open_items_duplicate_ids_cli_fix_2026-08-13]]).

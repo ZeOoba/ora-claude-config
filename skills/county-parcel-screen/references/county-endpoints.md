@@ -564,6 +564,11 @@ ORA county-parcel-screen pipeline · verified 2026-06-09
 - Polk: `dp` 14-digit district/parcel (e.g. 25200010004000) = screen key; `gp` 12-digit geoparcel (e.g. 812414400007) for GIS joins.
 - Dallas: `PARCELID` 10-digit pin (e.g. 1425201010), identical in Public/Parcels, Sales layers, DBA, Beacon.
 
+## Lebanon County PA (NON-CANONICAL — exception screens only; added 2026-10-27)
+- Parcel + CAMA + last sale: LandRecords/TaxParcels/MapServer/0 (utility.arcgis.com proxy; see v1.json `lebanon_pa`). Point query in WGS84 returns polygon + SALE_PRICE/SALE_DATE. Paged `where=1=1` bulk pull verified 2026-10-27 (54,395 parcels; 1,000 per page) — status VERIFIED. A SALE_PRICE of 1 is a nominal transfer, not a market sale.
+- Zoning is municipal, not county: South Londonderry Twp publishes one FeatureServer per district under services.arcgis.com/ScrFRghegsvm14RG (see ora-flood-zoning-dd endpoints).
+- Assessment basis: base-year; multiply AV by the current PA DOR CLR factor for an assessor-implied market value.
+
 ## Blocked / dead
 - `gis.polkcountyiowa.gov`, `maps.dallascountyiowa.gov` — DNS fail in sandbox.
 - Overpass API (overpass-api.de 406, kumi.systems timeout) — OSM landuse unavailable this pass.

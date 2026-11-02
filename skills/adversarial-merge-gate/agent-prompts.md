@@ -42,6 +42,27 @@ expected vs actual, proposed fix. Then a short list of what you probed that PASS
 Follow the preamble with exactly one mandate below, plus a line telling the agent to
 ignore every dimension outside it.
 
+### Round 2+ regression probes (required from round 2 on whenever the ledger holds FIXED-CLAIMED items)
+
+Paste after the preamble, into every mandate, when the ledger holds FIXED-CLAIMED items
+(SKILL.md, *Round budget and the findings ledger*). List only those reproductions; never
+open items and never another mandate's findings.
+
+```
+REGRESSION PROBES (round <N>, pinned SHA <HEAD_SHA>): a previous round claims these are
+fixed. Adjudicate each; they are questions, not findings.
+1. At the pinned SHA, run `<command 1>`. Does it still produce <symptom 1>? Report the
+   output either way.
+2. At the pinned SHA, run `<command 2>`. Does it still produce <symptom 2>? Report the
+   output either way.
+Run each probe read-only against the pinned worktree; a probe that mutates code runs on a
+copy in a scratch directory outside any worktree, never in the worktree. Paste the real output. A probe that still
+reproduces is a REGRESSION finding, severity at least the original, under the evidence
+bar above. A probe is a test, not a hint: do not infer from the list where else to look
+or what other defects exist. Your own mandate and the VALID OUTCOME clause are unchanged;
+ZERO regressions and ZERO findings is a valid result.
+```
+
 ## 1. CORRECTNESS PROVER
 
 > For each changed unit of behavior, construct CONCRETE inputs that break it. Report

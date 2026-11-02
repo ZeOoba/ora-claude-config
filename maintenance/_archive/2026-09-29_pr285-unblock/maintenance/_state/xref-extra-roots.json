@@ -1,0 +1,6 @@
+{
+  "_comment": "Additional search roots for session-context-xref-probe.py, per its own extra_roots() mechanism. Each entry is an absolute directory a bare-filename citation may resolve against, tried after the built-in search_roots() list.",
+  "roots": [
+    "C:\\Users\\Owner\\.claude\\maintenance\\_state"
+  ]
+}

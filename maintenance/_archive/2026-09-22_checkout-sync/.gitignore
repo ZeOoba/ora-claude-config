@@ -1,0 +1,268 @@
+# ============================================================
+# ~/.claude .gitignore — FAIL-CLOSED (default-deny).
+# Ignore everything; explicitly opt in ONLY versionable machinery.
+# Rationale: this dir mixes secrets (.credentials.json), confidential
+# deal terms (hooks/confidential-terms.json) and transient runtime
+# state with the config worth tracking. Default-deny prevents an
+# accidental secret commit — matches the firm's fail-closed doctrine.
+# To track a new machinery dir, add an explicit "!/<dir>/" line.
+# ============================================================
+
+# 1) Ignore everything at root by default (matches dotfiles too)
+/*
+
+# 2) Opt IN the machinery worth versioning
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/CLAUDE.md
+!/settings.json
+!/keybindings.json
+!/confidential-repos.json
+!/uuid-baseline.json
+!/check-uuid-drift.sh
+!/daily-setup-audit-prompt.md
+!/scheduled-tasks-starter-pack.md
+!/hooks/
+!/commands/
+!/agents/
+!/skills/
+!/maintenance/
+!/docs/
+!/ora-ops-plugin/
+!/.github/
+# (2026-07-16) Named Workflow scripts + their test rigs — versioned for durability, same
+# rationale as 2b/2c: cc-audit-army.js was unversioned when parameterized; its pre-change
+# prompt snapshot (_tests/cc-mode-prompts.snapshot.json) byte-pins the proven cc pipeline
+# and must survive scratchpad cleanup. Contents pre-checked: no secrets, no deal terms.
+!/workflows/
+# (2026-07-16) Four opt-ins ratified by Gabriel after the probe's new backup-coverage
+# sweep (check 12) flagged them. Each scrubbed pre-commit: zero confidential-term hits
+# (E. Fulton mentions are declassified historical references, matching already-tracked
+# memory files); the ONE embedded secret found (FRED API key in a retired
+# ora-debt-maturity-snapshot SKILL.md) was redacted to {{FRED_API_KEY}} before opt-in.
+!/prompts/
+!/mcp-servers/
+!/obsidian-fleet-mirror/
+# live runtime state rewritten every few minutes by write-fleet.ps1 -- tracking it
+# would recreate the doctrine-status.json perpetual-dirty-tree noise; scripts only.
+obsidian-fleet-mirror/session-state.json
+# 2026-07-25: fleet-session-hook.py migrated session-state.json (one shared file) to
+# one file per session under this directory -- same live-runtime-noise reasoning.
+obsidian-fleet-mirror/session-state.d/
+!/_scheduled_tasks_backup/
+
+# 2b) Scheduled-task SPECS (SKILL.md only) — versioned 2026-07-12 for durability.
+#     Previously unversioned runtime state (repeated loss→restore incidents).
+#     ONLY SKILL.md is tracked; runtime state (_state/ _unsent/ logs .bak) stays ignored.
+!/scheduled-tasks/
+/scheduled-tasks/*
+!/scheduled-tasks/*/
+/scheduled-tasks/*/*
+!/scheduled-tasks/*/SKILL.md
+# (2026-07-12) The former E. Fulton HOLD block was removed once the deal was confirmed
+# declassified (confidential-terms.json e_fulton active:false, §7b). All scheduled-task
+# SKILL.mds are now versioned; runtime state (_state/ _unsent/ logs/.bak) stays ignored below.
+
+# (2026-07-24, Gabriel-authorized) 2b's ONLY-SKILL.md rule caught two non-runtime-state
+# files by pattern accident: `ora-task-integrity-guard`'s `guard.ps1`/`membership-guard.ps1`
+# engines (found with ZERO backup anywhere, same loss class 2b exists to prevent — fixed via
+# force-add, not this rule, since they live one level up from a normal task's structure) and
+# these two, found in the same audit: `ora-appsec-sweep/suppressions.md` (Gabriel-ratified
+# suppression list — "only Gabriel adds entries here") and `ora-pm-ledger`'s 294-line engine
+# script. Per-file allow-list, same shape as the `_shared/` ladder below — NOT a widened
+# directory or extension pattern (a `*.ps1`/`*.py` negation here would also sweep in ~40
+# deliberately-scratch `_tmp_*`/dated files that live inside individual task folders in
+# other contexts and are meant to stay untracked). Name each durable file individually.
+!/scheduled-tasks/ora-appsec-sweep/suppressions.md
+!/scheduled-tasks/ora-pm-ledger/tenant_db_snapshot_diff.py
+# (2026-07-24) Same loss class, same per-file rule: ora-pm-ledger's Block B sweep-window
+# planner. Durable engine, not scratch — Block B's coverage tracking is unusable without
+# it. Its `state/` sibling stays untracked on purpose: that is per-run data that churns
+# daily, and losing it degrades safely to the old today-only window rather than breaking.
+!/scheduled-tasks/ora-pm-ledger/outbox_qc_window.py
+# (2026-07-27) Same loss class, same per-file rule: ora-pm-ledger's CapEx & Maintenance Log
+# snapshot-diff engine — generalizes tenant_db_snapshot_diff.py's approach to a second
+# uniform-stamp Notion source (see SKILL.md A.1). Durable engine, not scratch. Its `state/`
+# sibling stays untracked on purpose, same reasoning as the two entries above.
+!/scheduled-tasks/ora-pm-ledger/capex_snapshot_diff.py
+# (2026-08-14) Same loss class, same per-file rule: ora-pm-ledger's Property Register
+# snapshot-diff engine — the third and last A.1 uniform-stamp detector (SKILL.md A.2 step 2,
+# built 2026-08-11). Durable engine, not scratch: without it a Property Register edit is
+# undetectable, because all 14 rows share one batch-write `last_edited_time`. Caught by
+# task-folder-backup-completeness-probe (guard STEP 2.8) — it shipped three days after its
+# two siblings were force-tracked here and inherited none of their coverage. Its `state/`
+# sibling stays untracked on purpose, same reasoning as the three entries above.
+!/scheduled-tasks/ora-pm-ledger/property_register_snapshot_diff.py
+# (2026-09-17, Gabriel-authorized) Same loss class, arriving by a NEW route: the 2026-09-06
+# size-reduction pass moved 13 dated build-history NOTE sections (30KB) out of
+# ora-pm-ledger/SKILL.md into references/CHANGELOG-2026-07-08-to-2026-08-16.md, which 2b's
+# `/scheduled-tasks/*/*` rule ignores -- so the SKILL.md that cites it is tracked while the
+# extracted text it points at sits in no backup at all. Found by dirty-tree-triage while
+# committing that SKILL.md. This is a DIRECTORY negation, not the per-file form used above:
+# a `!` on a file cannot reach inside a directory the parent rule already excluded. Scope is
+# still one task's one folder, and `references/` is durable extracted spec text by
+# construction -- the churning per-run data lives in `state/`, which stays ignored.
+!/scheduled-tasks/ora-pm-ledger/references/
+
+# (2026-07-17, Gabriel-authorized) 2b covered live task SKILL.mds but not retired ones: a
+# _archive_*_retired/<id>/SKILL.md sits one level deeper than */SKILL.md matches, so EVERY
+# retired task spec has been silently untracked since 2b shipped -- the identical failure
+# mode 2b/2c exist to prevent, just one directory layer down. Same durability rationale,
+# same ladder shape, one level deeper, scoped to _archive_* only (does not widen anything
+# else under scheduled-tasks/, e.g. _shared/ stays exactly as untracked as before).
+!/scheduled-tasks/_archive_*/*/
+/scheduled-tasks/_archive_*/*/*
+!/scheduled-tasks/_archive_*/*/SKILL.md
+
+# (2026-07-24, Gabriel-authorized) 2b/2c versioned task SPECS and memory, but left
+# `_shared/` untracked -- the note above even says so explicitly. That leaves
+# `send-via-outlook.ps1`, the SOLE automated send path for BOTH fleets, with no history
+# and no backup: every scheduled task's email leg depends on one unversioned file, and an
+# accidental truncation would be unrecoverable and silent. Same durability rationale as
+# 2b/2c, third occurrence of the same failure mode.
+#
+# ALLOW-LIST, NOT A DIRECTORY OPT-IN -- deliberately. `_shared/` is a working drawer that
+# also holds LIVE CREDENTIALS (`anthropic-key.dat`, `netlify-token.dat`), the full
+# `send-log.txt` (every recipient + subject ORA has ever auto-sent), and ~30 `_tmp_*` /
+# `hg-*` / dated `.html` email-body scratch files. This repo pushes to GitHub
+# (ZeOoba/ora-claude-config), so a directory-level `!` here would publish secrets. Verified
+# 2026-07-24: no `*.dat` has ever been committed on any ref. Name each durable file
+# individually; never negate the directory, and never add a glob that could catch `*.dat`.
+!/scheduled-tasks/_shared/send-via-outlook.ps1
+!/scheduled-tasks/_shared/Send-OraReport.ps1
+!/scheduled-tasks/_shared/Send-OutreachQueueEmail.ps1
+!/scheduled-tasks/_shared/EMAIL_DELIVERY.md
+!/scheduled-tasks/_shared/README-SEND-PATTERN.md
+# (2026-08-09) Double-fire entry guard. Same durability rationale as send-via-outlook.ps1:
+# these are now load-bearing for ora-am-brief and ora-deal-aging-sla, and an unversioned
+# guard that silently truncates fails OPEN -- the tasks would resume double-sending with
+# no error anywhere. Named individually per the allow-list rule above; still no glob, and
+# nothing here can catch `*.dat`.
+!/scheduled-tasks/_shared/block-sentinel.py
+!/scheduled-tasks/_shared/test-block-sentinel.py
+!/scheduled-tasks/_shared/outlook-sent-probe.ps1
+!/scheduled-tasks/_shared/README-DOUBLE-FIRE-GUARD.md
+
+# 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
+#     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
+#     got a matching opt-in for memory, so every memory file except rules.md (already
+#     tracked since 2026-07-09, predating the lockdown) silently fell out of git backup —
+#     82 files, unnoticed for 3 days, the identical failure mode 2b exists to prevent.
+#     Pre-commit checked: 0 active confidential-deal terms found in any memory file
+#     (doctrine-integrity-probe.py's own term-matching functions, reused directly; matcher
+#     self-check against a synthetic control term confirmed the scan itself works).
+#     `projects/` also holds hundreds of raw session-transcript .jsonl files alongside
+#     memory/ -- those must NEVER be tracked (arbitrary conversation content). The nested
+#     opt-in below reaches memory/ only; everything else under projects/ stays ignored.
+!/projects/
+/projects/*
+!/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/*
+!/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/
+
+# 3) Re-ignore secrets, caches & transient state INSIDE opted-in dirs
+hooks/confidential-terms.json
+hooks/sessions/
+# Cross-session claim broadcast markers (task_17998414, 2026-07-25) -- ephemeral,
+# TTL-expired, agent-declared state naming an in-progress subsystem claim. Same
+# reasoning as hooks/sessions/ above: this is per-machine runtime state, not
+# durable config, and MUST never be re-minted with a stale mtime/timestamp by a
+# clone/checkout the way the override sentinels were (668f9d4).
+hooks/active-work/
+# git-prepush-hook-tests-gate.py's override-frequency counter (OI-136 candidate fix 2,
+# 2026-08-12): an append-only JSONL of every allow-hook-test-failure USE, grown on every
+# override across the fleet. Same reasoning as maintenance/_state/phantom-dispatch.json
+# above (per-machine, ever-growing, read only to compute a rolling-window count) --
+# tracking it would churn a commit on every override use for no reader.
+hooks/_state/override-usage-log.jsonl
+# Human-authorization override sentinels (allow-external-send / allow-website-change /
+# allow-doctrine-drift). NEVER track one: the gates validate a sentinel by mtime age, and
+# git stamps a checked-out file with CHECKOUT time -- so a tracked token is re-minted with
+# age ~0 by every clone/checkout/pull, self-granting a live 60-min override with no human
+# in the loop. Not theoretical: 668f9d4 swept a live allow-website-change into the repo and
+# a fresh clone was empirically shown to let `netlify deploy --prod` through ora-autonomy-gate
+# (exit 0; empty-dir control exit 2) -- an invariant-2 bypass on the MIGRATION_RUNBOOK
+# restore path. Guarded by hooks/tests/test-override-token-hygiene.py (2026-07-16).
+hooks/overrides/
+# generated probe-state snapshot (doctrine-integrity-probe.py / ora-doctrine-integrity-guard);
+# rewritten on every run -> was showing as a tracked modification on every single probe fire,
+# recurring dirty-tree noise with no review value (2026-07-12 systematization follow-up)
+maintenance/_state/doctrine-status.json
+# roster-staleness runtime breadcrumb written by confidentiality-guard.py (transient; never track)
+hooks/state/
+# append-event-log.py's in-place-fallback safety-net copy (overwritten every use;
+# recoverable from event_log.md's own git history anyway -- never track, 2026-07-16)
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.inplace-backup
+# append-event-log.py's atomic-insert scratch file. The script now cleans up both of
+# these itself; these lines are the backstop for the one case it can't cover -- a kill
+# between the tmp write and os.replace. Added 2026-07-16 after a stranded 480KB copy
+# showed up as an untracked `??` next to the log, one `git add -A` from being committed.
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.tmp-append
+# append-event-log.py's lock-contention spool (drains automatically into event_log.md on
+# the next successful append; transient by design, never track) -- see 2c above.
+projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md.pending/
+# county-parcel-screen code is TRACKED (counterparty names externalized 2026-06-11);
+# its data/ tree (public county dumps + the pipeline-guard.local.json counterparty
+# floor) stays local-only. *.local.json is the standing convention for
+# never-track local data files anywhere in the repo.
+skills/county-parcel-screen/data/
+*.local.json
+**/__pycache__/
+*.pyc
+*.log
+*.bak
+*.bak-*
+# Per-run probe snapshot: rewritten every fleet-deadman cycle, read only on this
+# machine. Tracking it would churn a commit a day for no reader (same trap as the
+# portfolio.json generatedAt churn). The durable ledger next to it,
+# health-guard-beacon.json, IS tracked on purpose -- the GitHub dead-man reads it.
+maintenance/_state/phantom-dispatch.json
+# Failure marker written by publish-fleet-heartbeat.py when the GitHub publish fails and cleared on
+# the next success (OI-323). Read only by fleet-deadman.ps1 on this machine; tracking it would
+# commit an outage marker.
+maintenance/_state/heartbeat-publish-failed.json
+maintenance/_state/heartbeat-publish-failed.json.tmp
+maintenance/_state/heartbeat-publish-ok.json
+maintenance/_state/heartbeat-publish-ok.json.tmp
+# ora-setup-audit follow-up (2026-08-16, README diagram-review scope): 7 more
+# maintenance/_state/ files verified same-class as phantom-dispatch.json above --
+# each is regenerated by a LOCAL probe script only (registry-membership-probe.py,
+# model-canary-probe.py, model-currency-probe.py, wake-cause-probe.ps1,
+# ora-task-integrity-guard/guard.ps1), with zero external/CI reader found across
+# fleet-deadman.yml, oxford-command-center, and ora-pm (grepped, not assumed).
+# health-guard-beacon.json was checked and correctly excluded from this list --
+# it keeps the external-reader exemption above. The one cited audit-trail
+# counterexample (AM-cluster late-wake root cause, reference_am_cluster_late_wake_
+# root_cause_2026-08-13.md) was reconstructed entirely from Windows Event Log +
+# Claude Desktop's own logs, never from git history of these files -- so tracking
+# them was not actually earning the audit-trail benefit it was kept for.
+maintenance/_state/fleet-roster.md
+maintenance/_state/model-canary.json
+maintenance/_state/model-currency-cc.md
+maintenance/_state/registry-membership.json
+maintenance/_state/task-content-ledger.json
+maintenance/_state/task-content-ledger.json.lock
+maintenance/_state/wake-cause.json
+# (2026-08-24, close-out work-order item 3) Six more maintenance/_state/ files audited
+# individually against readers (grepped, not assumed) rather than swept as a class --
+# fleet-heartbeat.json/health-guard-beacon.json/retire-pending.json are durable registers
+# with an external or cross-session reader and stay TRACKED (see their own notes above /
+# in pause-resume-guard.py); these three are pure local-probe run state, same class as
+# phantom-dispatch.json above: dispatch-skip.json is dispatch-skip-probe.py's per-run
+# snapshot (regenerated every automation-health-monitor invocation, read only within that
+# same run); pause-resume-guard-state.json is load_state()/save_state()'s own private
+# checkpoint, read/written only by pause-resume-guard.py itself; task-progress/ is
+# task-progress-marker.py's per-task progress-marker directory, read only by that script
+# and pause-resume-guard.py's stall check, no external consumer found.
+maintenance/_state/dispatch-skip.json
+maintenance/_state/pause-resume-guard-state.json
+maintenance/_state/task-progress/
+# (2026-08-26) log-liveness.json — _shared/log_liveness.py's per-run snapshot,
+# written by ora-health-guard A.0d and re-read only within the same run. Same
+# class as dispatch-skip.json / phantom-dispatch.json above: pure local-probe run
+# state, regenerated every fire, no external or cross-session reader (grepped
+# against fleet-deadman.yml, oxford-command-center and ora-pm, not assumed). The
+# cross-fleet consumer reads the Connector Pre-Flight beacon's log_liveness line,
+# not this file.
+maintenance/_state/log-liveness.json

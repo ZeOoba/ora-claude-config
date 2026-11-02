@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-13T22:40:00.000Z
+  modified: 2026-10-31T19:30:00.000Z
 ---
 
 # ORA Tech Stack & Reference
@@ -87,7 +87,7 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 ## 3f. Engineering OS calibration guards — bypass/check detail (trimmed from CLAUDE.md, word-budget pass 2026-07-26)
 - CLAUDE.md's Engineering OS "Calibrate" line names 8 guards but, as of this trim, no longer spells out two operational details, kept here instead: **`eos-plan-gate`** blocks after 4+ unplanned edits in a session; bypass by writing a non-empty one-line reason to `hooks/sessions/<id>/override` (e.g. `echo reason: <why> > hooks/sessions/<id>/override` — an empty/whitespace-only file is rejected, presence alone no longer counts, per `eos-plan-gate.py`). **`eos-claude-md-guard`** is the PreToolUse deny that enforces CLAUDE.md's word-budget and bare-date rules (gates CLAUDE.md's own edits specifically, by path match).
 - All 8 named guards fail open on internal error, same posture as the write-guards in §3b above.
-- Note: CLAUDE.md's guard-liveness check (`doctrine-integrity-probe.py` Check 11) requires the literal 8 backtick-quoted guard names to stay inline on that line — do not relocate the names themselves out of CLAUDE.md, only their explanatory detail.
+- Note: the guard-liveness check (`doctrine-integrity-probe.py` Check 11) checks the union of CLAUDE.md's EOS `Guards:` line (if any) and the bold "guard set" bullet below (§3f only) — keep that bullet's bold label containing "guard set" and ending in a colon, and the names as backtick tokens on that one line. If neither list exists the probe fails closed (hard MISSING, blocks push).
 
 - **Engineering OS guard set (moved from CLAUDE.md 2026-10-30):** `doctrine-integrity-probe.py` · `governor-drift-probe.py` · `git-prepush-doctrine-gate.py` · `eos-telemetry` · `eos-plan-gate` · `eos-claude-md-guard` · `commit-provenance-guard.py` · `commit-provenance-recorder.py`; all fail open.
 

@@ -7,7 +7,8 @@ description: Use when a pull request or branch is about to merge and a single re
 
 Five reviewers, one narrow mandate each, no knowledge of each other's findings, all
 against one pinned diff. Then fixes for confirmed findings only, then the whole swarm
-again on the patched diff. Nothing merges without a clean pass.
+again on the patched diff. Nothing merges without a clean pass (or the user's explicit
+risk decision, see *Round budget and the findings ledger*).
 
 **Core principle: independence is the product.** One reviewer with five concerns
 subconsciously trades them off and returns the two easiest. Five reviewers with one
@@ -38,15 +39,19 @@ digraph gate {
     pin [shape=box, label="Pin SHA + isolated read-only worktree"];
     swarm [shape=box, label="Dispatch 5 mandates in ONE message"];
     consolidate [shape=box, label="Consolidate → one findings table"];
-    triage [shape=diamond, label="Any CONFIRMED findings?"];
+    triage [shape=diamond, label="Any CONFIRMED finding, or\nunreproduced MEDIUM+?"];
+    budget [shape=diamond, label="Round 3 with any CONFIRMED,\nround 2 with MEDIUM+ CONFIRMED,\nor unreproduced MEDIUM+?"];
     decide [shape=diamond, label="Branch held by\nanother session?"];
     fix [shape=box, label="Dispatch fix agents\n(CONFIRMED only)"];
     ask [shape=box, label="STOP — surface to human"];
+    table [shape=box, label="STOP — decision table to user\n(fix / accept-risk / defer / redesign)"];
     merge [shape=box, label="Clean pass → merge"];
 
     pin -> swarm -> consolidate -> triage;
     triage -> merge [label="no"];
-    triage -> decide [label="yes"];
+    triage -> budget [label="yes"];
+    budget -> table [label="yes"];
+    budget -> decide [label="no"];
     decide -> ask [label="yes"];
     decide -> fix [label="no"];
     fix -> pin [label="re-pin patched head,\nre-run FULL swarm"];
@@ -54,7 +59,9 @@ digraph gate {
 ```
 
 Re-run the **full** swarm on the patched diff, not just the mandates that fired. A fix is
-a new change and earns a new review; fixes are exactly where regressions enter.
+a new change and earns a new review; fixes are exactly where regressions enter. Rounds are
+budgeted: after round 2 a MEDIUM+ finding goes to the user, not into round 3 (see *Round
+budget and the findings ledger*).
 
 ## Step 1 — Pin before you look
 
@@ -235,11 +242,16 @@ unconfirmed findings is how a review swarm damages a working branch.
 - A finding is real but the right fix is a judgment call (doctrine conflict, scope
   question, product decision).
 - Agents disagree, or a finding contradicts the commit message's account of intent.
+- The round budget is exhausted, or round 2 still has a CONFIRMED MEDIUM+ finding (see
+  *Round budget and the findings ledger*).
 
 Report these. Do not guess. A merge gate that resolves ambiguity by guessing is worse than
 no gate, because it launders the guess as a verdict.
 
 ## Step 5 — Fix and re-run
+
+Before dispatching round N+1, check the round counter and update the ledger (see *Round
+budget and the findings ledger*).
 
 Fix agents get one confirmed finding each and the same read-only discipline everywhere
 except their assigned file. Their prompts carry the two NEVER lines at
@@ -248,8 +260,12 @@ encoding or splitting command text to pass a guard), verbatim, plus: do not invo
 skills (/plan, /build, /debug, /refactor, /research, /ship) and do not write under
 `docs/superpowers/plans/` or `.claude/plans/` (either writes `plan-approved`). Then re-pin the new head and re-run the **full** swarm.
 
-Merge only on a clean pass: zero CONFIRMED findings, every mandate reporting either
-findings-resolved or no-surface-with-evidence.
+Merge only on a clean pass: zero CONFIRMED findings, no unreproduced MEDIUM+ finding, no
+ledger row still FIXED-CLAIMED, every mandate reporting either findings-resolved or
+no-surface-with-evidence, or the user explicitly chose accept-risk / defer for each open
+finding (see Round budget). Accept-risk does not override the other-session-claim stop in
+Step 4, and does not satisfy a repo's own refute gate (`check:refute` / `Refute-Reviewed:`
+trailer for financial code).
 
 **Stop reviewers a fix has superseded.** When a fix re-pins the head, in-flight reviewers
 on the old SHA are reviewing a diff nobody will merge. Stop them (TaskStop) instead of
@@ -274,6 +290,109 @@ the delta no mandate saw is on the page. A comment-only or test-cleanup tidy aft
 last pass is the same kind of unreviewed delta: verify it with the build and tests, and
 list it in the verdict as unreviewed.
 
+## Round budget and the findings ledger
+
+The loop above has no ceiling and, left alone, no memory. Three real gates show what that
+costs:
+
+| Gate | Rounds | What each round found | What ended it |
+|---|---|---|---|
+| Aggregate-LTV register change | 8 BLOCK | One more case per round; one fix introduced a NEW high-severity regression | Nothing: the work stayed frozen and uncommitted; no decision point was ever forced |
+| Upload-parser hardening PR | 11 | A new bypass of the same mechanism every round | Design change: child-process isolation |
+| Hook stating whether a push/commit/merge landed | 4 BLOCK | Each round, another shell construct that made it name the wrong repo | Redesign: state only observed facts |
+
+In each, a decision after round 2 would have beaten another full swarm.
+
+**A round** is one pinned swarm dispatch, its consolidation, and the fixes for its
+CONFIRMED findings. Round 1 is the first swarm. A user-authorized scoped re-run counts as
+a round. A re-dispatch caused only by main moving (Step 1) keeps its round number. **Default
+cap: 3 rounds per gate.** The cap binds the orchestrating agent; only the **user** can
+raise it, explicitly, and the ledger records who raised it and why. If this PR was gated
+before and no ledger is found, do not restart at round 1: rebuild the round count from the
+prior verdicts or ask the user, and put the round number and any cap raise in every verdict.
+
+**Severity is the reviewer's.** The orchestrator may raise it but never lowers it without
+the user's words, recorded in the ledger.
+
+**Stop rule after round 2.** If round 2 (the first re-run on a patched diff) has any
+CONFIRMED finding of MEDIUM or above, new or carried over, do NOT start round 3 on your own. Stop and give the
+user ONE decision table, one row per open CONFIRMED finding:
+
+| ID | Sev | Class | Agent, file:line | Reproduction | Verdict | Fix cost (small/medium/large + files) | Recommendation |
+|---|---|---|---|---|---|---|---|
+
+For each finding the user chooses exactly one of:
+
+- **fix** — another round. After round 2 this is round 3 and stays inside the default cap;
+  only at the cap does "fix" mean the user is raising it (see "At the cap").
+- **accept-risk** — merge with the finding open; the user's explicit words go in the ledger
+  and the verdict.
+- **defer** — merge only once it has a named human owner and a tracking entry outside the
+  scratch directory (issue or KNOWN_ISSUES.md), linked in the ledger and verdict; MEDIUM and
+  below only.
+- **redesign** — stop patching; change the approach.
+
+Ask it as multiple choice, recommended option first. The orchestrating agent NEVER picks
+accept-risk or defer for any finding, and never merges with an open finding unless the user
+chose accept-risk or defer for it in words. Only the user's words set ACCEPTED-RISK or
+DEFERRED. Silence is not a choice. An unreproduced (UNCONFIRMED) MEDIUM+ finding is not
+fixed, but it joins the table as UNCONFIRMED for the user's call.
+
+**A clean round escapes the cap.** A round 2 or 3 with zero CONFIRMED findings and no
+unreproduced MEDIUM+ finding is a clean pass; the gate proceeds to merge normally. The cap
+only bites when rounds keep finding things.
+
+**At the cap.** Round 3 with CONFIRMED findings of MEDIUM or above ends the gate with NO
+merge and the same table, without "fix (another round)" as the default; it is offered only
+as an explicit user choice that raises the cap. Open LOW findings join the table; still no
+merge on your own.
+
+**Defect class and the redesign signal.** Give every finding a short class label, e.g.
+`wrong-repo via shell construct`, `bypass of guard X`, `false fact from inferring intent`,
+`test masks defect`. A class names the mechanism, not the instance; reuse an earlier class
+unless the ledger states why not. When two consecutive rounds each produce a new finding in
+the SAME class, or a fix introduced a new finding of equal or higher severity (a fix-induced
+regression; any finding whose file:line is in a fix commit's hunk counts), say so in the table and make **redesign** the recommended option: the
+mechanism is leaking, and patching instances will not converge (table above).
+
+**Full suite after every fix.** Run the repo's FULL test suite, not only the test written
+for the finding, and record pass/fail counts in the ledger. A fix that turns a previously
+passing test red is a fix-induced regression and counts as a new finding. A CPU-bound
+suite must not run while a review swarm is running: load turns tests into timeouts and the
+failures get misread as regressions. Run it with no reviewer active. A failure seen under
+load is re-run with no reviewer active before it is dismissed, and a caveated run never
+counts as the after-fix suite.
+
+### The findings ledger
+
+`findings-ledger.md`, next to `pr.diff` in the Step 1 SCRATCH directory — never under
+`~/.claude/hooks/`, never committed to the reviewed branch. One row per finding. Keep each
+reproduction as a file or fenced block next to the ledger (`repro-F-001.sh`) and cite it in
+the row: a command pasted through a table cell loses its pipes and quoting, and a mangled
+probe "no longer reproduces" for the wrong reason. Probes are pasted from those files.
+
+| ID | Round | Sev | Class | Mandate | file:line | Reproduction | Status | Fix SHA | Verified in round | Suite after fix | User decision (words) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| F-001 | 1 | HIGH | wrong-repo via shell construct | Correctness | hook.py:88 | see `repro-F-001.sh` | VERIFIED-CLOSED | a1b2c3d | 2 | 212/212 | — |
+| F-002 | 2 | HIGH | wrong-repo via shell construct | Blast radius | hook.py:131 | see `repro-F-002.sh` | OPEN (redesign recommended: same class two rounds running) | — | — | — | — |
+| F-003 | 2 | MEDIUM | test masks defect | Test-validity | test_hook.py:40 | see `repro-F-003.sh` (mutated copy in scratch) | OPEN | — | — | — | — |
+
+Status is one of OPEN / FIXED-CLAIMED / VERIFIED-CLOSED / ACCEPTED-RISK / DEFERRED /
+REDESIGNED-AWAY, and moves only on evidence: FIXED-CLAIMED becomes VERIFIED-CLOSED only
+when a LATER round's reviewer re-ran the reproduction at the new pinned SHA and it no
+longer reproduces. The decision table is the Step 4 table with Class, Fix cost and
+Recommendation columns added, not a new report format.
+
+**How the ledger reaches reviewers without breaking independence.** The Step 3 rule —
+*suspicions as questions, never findings* — applies across rounds. From round 2 on, give
+every mandate the FIXED-CLAIMED reproductions as **regression probes** phrased as
+questions (wording: `agent-prompts.md`, *Round 2+ regression probes*), e.g. "At the pinned
+SHA, run `<command>`. Does it still produce `<symptom>`? Report the output either way."
+Do NOT hand over other mandates' current findings or open items. Reviewers keep their own
+mandate and the zero-findings clause. A probe that still reproduces is reported as a
+REGRESSION finding, severity at least the original. A probe is a test, not a hint to find
+more.
+
 ## Common mistakes
 
 | Mistake | Why it breaks the gate |
@@ -289,6 +408,11 @@ list it in the verdict as unreviewed.
 | Letting superseded reviewers finish | Their verdict applies to a diff nobody will merge |
 | Running the swarm on a trivial diff | Trains everyone to ignore the gate |
 | Treating a green bot check as a review | A bot check is never a review verdict |
+| Starting round 4 (or round 3 after a MEDIUM+ round 2) without the user because the last fix was small | Fix-induced regressions arrive exactly in the small ones; the cap exists to force the decision |
+| Patching the Nth instance of one defect class | The mechanism is leaking; stop and offer redesign |
+| Running the full suite only for the new test | Regressions from fixes pass the narrow test |
+| Running a CPU-bound gate while the swarm runs | Load turns tests into timeouts; failures get misread as regressions |
+| Handing last round's other findings to reviewers | Independence: hand over only FIXED-CLAIMED regression probes as questions |
 
 ## Red flags — STOP
 
@@ -296,6 +420,10 @@ list it in the verdict as unreviewed.
 - "This finding is obviously right, no need to reproduce it."
 - "Another session owns this branch but the fix is small."
 - "Only mandate 4 fired, no need to re-run the others." (Unless the user explicitly chose a scoped re-run, Step 5.)
+- "This is round 3, but only a LOW/MEDIUM cosmetic one is left, I will just run one more."
+  — **Round 3 is the cap.** Stop, write the decision table, let the user choose.
+- "The user is waiting, so I will pick accept-risk for them." — **Never.** Ask the table as
+  multiple choice; no answer means no merge.
 - "The agent found nothing, it must not have tried hard enough." — **A well-evidenced
   no-findings result is a pass, not a failure.** Re-dispatching until an agent produces a
   finding manufactures one.

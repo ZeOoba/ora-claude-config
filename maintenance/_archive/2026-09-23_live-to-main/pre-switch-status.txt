@@ -1,0 +1,113 @@
+ M CLAUDE.md
+ M commands/cleardisk.md
+ M maintenance/_state/hubspot-closeout-log.jsonl
+ M maintenance/_state/retire-pending.json
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/INDEX_markets.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/INDEX_projects_system.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/INDEX_reference.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/INDEX_reference_resolved.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/MEMORY.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/deal-decision-ledger.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/deal_1100_rarig_disposition_2026-07.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/event_log.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/open-items-tracker-history.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/open-items-tracker.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/people.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/project_rent_comp_retirement_process_gap_2026-08-13.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_ar_subsystem_exists_but_dark_2026-08-16.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_hubspot_lease_renewal_pipeline_stalled_2026-08-23.md
+ M projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_notion_free_block_quota_exhausted_2026-09-12.md
+ M scheduled-tasks/ora-weekly-hygiene/SKILL.md
+ M settings.json
+ M skills/county-parcel-screen/SKILL.md
+ M skills/county-parcel-screen/references/county-endpoints.md
+ M skills/county-parcel-screen/references/county-endpoints.v1.json
+ M skills/county-parcel-screen/references/market-status.md
+ M skills/county-parcel-screen/scripts/institutional_owners.py
+ M skills/county-parcel-screen/workflows/parcel-screen-fanout.js
+ M skills/county-parcel-screen/workflows/test-pipeline-match.mjs
+ M skills/county-sales-monitor/SKILL.md
+ M skills/evidence-dossier-drafting/SKILL.md
+ M skills/ora-setup-audit/SKILL.md
+ M skills/security-and-hardening/SKILL.md
+?? _scheduled_tasks_backup/ora-754-flaute-escalation-check/
+?? _scheduled_tasks_backup/ora-brainvault-session-backlog-catchup/
+?? _scheduled_tasks_backup/ora-checkout-merge-forward/
+?? _scheduled_tasks_backup/ora-ground-truth-auditor/
+?? _scheduled_tasks_backup/ora-hubspot-notion-contact-sync/
+?? _scheduled_tasks_backup/ora-lams-fleet-resume-20260911/
+?? _scheduled_tasks_backup/ora-psa-drift-watch-recheck-0826/
+?? _scheduled_tasks_backup/ora-routine-pause-resume-2026-09-11/
+?? agents/noi-opportunity-scout.md
+?? commands/cleardisk-sessions.md
+?? docs/2026-09-18_eos-plan-gate-scratch-exclusion_spec.md
+?? docs/plans/
+?? docs/superpowers/plans/2026-09-02-rev21-remediation.md
+?? docs/superpowers/plans/2026-09-10-repo-architecture-remediation.md
+?? docs/superpowers/plans/2026-09-19-advisor-friction-remediation.md
+?? docs/superpowers/plans/2026-09-21-oxfordra-seo-followups.md
+?? maintenance/_archive/2026-09-09_dead-non-fleet-task-sweep/
+?? maintenance/_archive/2026-09-22_checkout-sync/
+?? maintenance/_archive/2026-09-22_weekly-window/
+?? maintenance/_archive/2026-09-23_deadman-restore/
+?? maintenance/_archive/2026-09-23_live-ff-to-main/
+?? maintenance/_archive/2026-09-23_live-to-main/
+?? maintenance/_archive/2026-09-23_pr260-merge/
+?? maintenance/_archive/2026-09-23_pr269-merge/
+?? maintenance/_archive/session-audit-logs/
+?? maintenance/_state/_archive/2026-09-12_fleet-pause-windows_pre-refute-fix.json
+?? maintenance/_state/_archive/2026-09-12_fleet-pause-windows_v1-text-derived.json
+?? maintenance/_state/audit-log-sweep-history.jsonl
+?? maintenance/_state/checkout-merge-forward-last-run.json
+?? maintenance/_state/fleet-pause-windows.json
+?? maintenance/_state/ground-truth/
+?? maintenance/_state/guard-alarm-body-2026-08-25.html
+?? maintenance/_state/guard-email-2026-09-06.txt
+?? maintenance/_state/guard-note-2026-09-06.md
+?? maintenance/_state/guard-note-2026-09-13.md
+?? maintenance/_state/handoffs/
+?? maintenance/_state/headless-findings/
+?? maintenance/_state/ora-arch-review-followup-status.json
+?? maintenance/_state/r27-baseline/
+?? maintenance/_state/stuck-session-watchdog.task.BACKUP-2026-09-21.xml
+?? maintenance/_state/task-xml-backup-2026-09-17-weekly/
+?? maintenance/_state/task-xml-backup-2026-09-17/
+?? maintenance/_state/task-xml-backup-2026-09-22-r27/
+?? maintenance/_state/xref-extra-roots.json
+?? maintenance/_tests/_diag_log_format.py
+?? maintenance/_tests/test_loan_balance_check.py
+?? maintenance/_tests/test_powershell_suites_runner.py
+?? maintenance/audit-log-sweep.py
+?? maintenance/loan_balance_check.py
+?? maintenance/test-powershell-suites.py
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/feedback_relay_model_output_in_full.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/project_automation_audit_rev27_2026-09-22.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/project_financial_code_integrity_sweep_2026-09-14_rent_zeroing.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_2207_northwood_mtm_tenants_not_holdover_2026-09-18.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_broker_coverage_gap_map_findings_2026-09-19.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_costar_loopnet_subscriptions.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_mortgage_maturity_signal_not_bulk_accessible_2026-09-18.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_noi_opportunity_sweep_2026-09-19.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_register_basis_and_loan_balance_check_2026-09-21.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_renewal_cohort_rulings_and_lease_basis_2026-09-18.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_tax_appeal_sweep_2026-09-19_no_candidates_underassessed.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_tax_basis_register_corporate_folder_findings_2026-09-21.md
+?? projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_worktrees_freeze_stale_memory.md
+?? scheduled-tasks/_archive_2026-08-28_onetime-complete/ora-psa-drift-watch-recheck-0826/
+?? scheduled-tasks/_archive_2026-09-18_completed-onetime/
+?? scheduled-tasks/ora-audit-log-sweep/
+?? scheduled-tasks/ora-hubspot-renewal-closeout-tasks/
+?? scheduled-tasks/ora-incentive-registry-refresh/
+?? scheduled-tasks/ora-jackson-boe-prep-reminder/
+?? scheduled-tasks/ora-loan-balance-check/
+?? scheduled-tasks/ora-loopnet-listings-sync/
+?? scheduled-tasks/ora-noi-opportunity-digest/
+?? scheduled-tasks/ora-recovery-structure-audit-annual/
+?? scheduled-tasks/ora-resume-0928-attend-reminder/
+?? scheduled-tasks/ora-routine-pause-resume-09-28/
+?? scheduled-tasks/ora-wicomico-reassessment-reminder/
+?? skills/county-parcel-screen/references/engineering-notes.md
+?? skills/county-parcel-screen/references/hold-data-availability.md
+?? skills/county-parcel-screen/references/run-history.md
+?? skills/county-parcel-screen/references/scoring-rationale.md
+?? skills/synced/
