@@ -1,0 +1,440 @@
+{
+  "cleanupPeriodDays": 14,
+  "skillListingMaxDescChars": 1536,
+  "skillListingBudgetFraction": 0.02,
+  "env": {
+    "USER": "Owner",
+    "NETLIFY_SITE_ID": "95ac0a0f-a84d-4400-b919-b8d7a8526646"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(start chrome *)",
+      "Bash(node *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(netlify *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(curl *)",
+      "Bash(du *)",
+      "Bash(wc *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(find *)",
+      "Bash(echo *)",
+      "Bash(export PATH*)",
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(/c/Windows/System32/wsl.exe *)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "WebFetch",
+      "WebSearch",
+      "mcp__Desktop_Commander__read_file",
+      "mcp__Desktop_Commander__read_multiple_files",
+      "mcp__Desktop_Commander__list_directory",
+      "mcp__Desktop_Commander__get_file_info",
+      "mcp__Desktop_Commander__write_file",
+      "mcp__Desktop_Commander__edit_block",
+      "mcp__Desktop_Commander__create_directory",
+      "mcp__Desktop_Commander__move_file",
+      "mcp__Desktop_Commander__start_search",
+      "mcp__Desktop_Commander__stop_search",
+      "mcp__Desktop_Commander__get_more_search_results",
+      "mcp__Desktop_Commander__list_searches",
+      "mcp__Desktop_Commander__get_recent_tool_calls",
+      "mcp__scheduled-tasks__list_scheduled_tasks",
+      "mcp__scheduled-tasks__create_scheduled_task",
+      "mcp__scheduled-tasks__update_scheduled_task",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-search",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-fetch",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-pages",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-page",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-comment",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-get-comments",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-get-teams",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-get-users",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-move-pages",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-duplicate-page",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-database",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-create-view",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-data-source",
+      "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-update-view",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__get_crm_objects",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__search_crm_objects",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__get_properties",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__manage_crm_objects",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__search_owners",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__search_properties",
+      "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__get_user_details",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_email_search",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__outlook_calendar_search",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__read_resource",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__sharepoint_search",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__sharepoint_folder_search",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__find_meeting_availability",
+      "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__chat_message_search",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-deploy-services-reader",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-project-services-reader",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-team-services-reader",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-user-services-reader",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-extension-services-reader",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__get-netlify-coding-context",
+      "mcp__claude-in-chrome__*",
+      "mcp__excel__*",
+      "mcp__pdf-viewer__*",
+      "mcp__plugin_desktop-commander_desktop-commander__*",
+      "Read(//c/Users/Owner/.claude/plugins/cache/**)",
+      "Read(//c/Users/Owner/.claude/plugins/marketplaces/**)",
+      "Bash(tasklist *)",
+      "Bash(powershell.exe -NoProfile*)",
+      "Bash(rg *)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf $HOME)",
+      "Bash(rm -rf /c/Users/Owner )",
+      "Bash(rm -rf C:/)",
+      "Bash(rm -rf C:/*)",
+      "Bash(rm -rf *worktrees/*)",
+      "Bash(rm -rf *worktrees)",
+      "Bash(rm -rf *worktrees\\*)",
+      "Bash(del /s *)",
+      "Bash(format *)",
+      "Edit(.env*)",
+      "Edit(*.credentials*)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(*Remove-Item*-Recurse*)",
+      "Bash(*Remove-Item*-Force*)",
+      "Bash(*rm -Recurse*)",
+      "Bash(*Format-Volume*)",
+      "Bash(*Clear-Disk*)",
+      "Bash(*Remove-Item -Path C:\\*)",
+      "Bash(*Stop-Computer*)",
+      "Bash(*Restart-Computer*)",
+      "Read(**/node_modules/**)",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-deploy-services-updater",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-project-services-updater",
+      "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__netlify-extension-services-updater"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "claude-sonnet-5",
+  "skillOverrides": {
+    "simplify": "user-invocable-only",
+    "init": "user-invocable-only",
+    "run": "user-invocable-only",
+    "verify": "user-invocable-only",
+    "security-review": "user-invocable-only",
+    "keybindings-help": "user-invocable-only",
+    "loop": "user-invocable-only",
+    "fewer-permission-prompts": "user-invocable-only"
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/engineering-router.py\""
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/ora-skills/tools/catch_up_main.py\" --hook",
+            "timeout": 360
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'INPUT=$(cat); CMD=$(echo \"$INPUT\" | grep -o \"deploy\" || true); if [ -n \"$CMD\" ]; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after deploy\" >&2; fi; fi'"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'INPUT=$(cat); TOOL=$(echo \"$INPUT\" | C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_name\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$TOOL\" | grep -qE \"updater$\"; then STATUS=$(curl -s -o /dev/null -w \"%{http_code}\" https://oxfordra.net); if [ \"$STATUS\" != \"200\" ]; then echo \"WARNING: oxfordra.net returned HTTP $STATUS after Netlify MCP $TOOL\" >&2; fi; fi'"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|Task|TaskCreate|TaskUpdate|Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/fleet-session-hook.py\"",
+            "async": true
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-plan-marker.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-gate-sentinel.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/commit-provenance-recorder.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-nag-correction.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-postguard.py\""
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/pretooluse-dispatcher.py\" --chain bash"
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit|mcp__.*netlify.*-updater",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/ora-autonomy-gate.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'INPUT=$(cat); FILE=$(echo \"$INPUT\" | C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe -c \"import sys,json; print(json.load(sys.stdin).get(\\\"tool_input\\\",{}).get(\\\"file_path\\\",\\\"\\\"))\" 2>/dev/null || echo \"\"); if echo \"$FILE\" | grep -qiE \"(credentials|\\.env|password)\"; then echo \"BLOCKED: Cannot edit sensitive file: $FILE\" >&2; exit 2; fi'"
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit|mcp__.*notion-(create|update|append|duplicate|move|comment)|mcp__.*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/confidentiality-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/registry-write-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/config-write-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/lint-config-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/workbook-write-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/memory-index-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__scheduled-tasks__update_scheduled_task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/scheduled-task-update-preguard.py\""
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat \"C:/Users/Owner/.claude/session-context.md\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/repo-freshness.py\"",
+            "timeout": 25,
+            "statusMessage": "Checking oxford-command-center freshness"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/active-work-broadcast.py\"",
+            "timeout": 10,
+            "statusMessage": "Checking for cross-session claims"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/fleet-session-hook.py\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/fleet-session-hook.py\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/fleet-session-hook.py\"",
+            "async": true
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/eos-telemetry.py\""
+          }
+        ]
+      }
+    ]
+  },
+  "worktree": {
+    "baseRef": "head"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/statusline-command.py\""
+  },
+  "enabledPlugins": {
+    "superpowers@superpowers-marketplace": true,
+    "pr-review-toolkit@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-plugins-official": {
+      "source": {
+        "source": "github",
+        "repo": "anthropics/claude-plugins-official"
+      }
+    }
+  },
+  "effortLevel": "high",
+  "autoUpdatesChannel": "latest",
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark",
+  "autoCompactEnabled": true,
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
+}

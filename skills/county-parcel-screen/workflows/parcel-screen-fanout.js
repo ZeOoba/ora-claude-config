@@ -192,6 +192,9 @@ const VERDICT_SCHEMA = {
     listingSignal: { type: 'string', description: 'archived/delisted listing = motivated-seller signal' },
     principal: { type: 'string', description: 'entity principal per state SOS, if found' },
     preMortem: { type: 'string', description: 'single most likely reason this fails ORA underwriting' },
+    recordedMortgage: { type: 'string', description: 'v1.5: most recent recorded mortgage/deed of trust — recording date, lender, lender type; "not found" or "recorder not browsable" if so' },
+    maturityWindow: { type: 'boolean', description: 'v1.5: true if recording date + 5/7/10 yrs [est] ends within 24 months, or a 2016-2021 origination is inside its likely term' },
+    saleLeasebackCandidate: { type: 'boolean', description: 'v1.5: true if the building is owner-occupied by an operating business' },
   },
 }
 
@@ -214,7 +217,8 @@ const perCounty = await pipeline(
     return parallel(scored.candidates.map((c) => () =>
       agent(
         `Verify this off-market industrial acquisition candidate before anyone calls (skill step 8): ${JSON.stringify(c)}.\n` +
-        `Do an occupant web check (flag auto-use / policy-blocked tenancy), an archived/delisted listing check (motivated-seller signal), and identify the entity principal via the state SOS. Attach a one-line pre-mortem: the single most likely reason this fails ORA underwriting.`,
+        `Do an occupant web check (flag auto-use / policy-blocked tenancy), an archived/delisted listing check (motivated-seller signal), and identify the entity principal via the state SOS. Attach a one-line pre-mortem: the single most likely reason this fails ORA underwriting.\n` +
+        `Finalist loan-maturity check (skill v1.5 step 8): look up the most recent recorded mortgage on the county recorder's public index for THIS parcel only (honor robots.txt and terms; if the recorder bars scripted access, report "recorder not browsable" — never work around it). Estimate maturity as recording date + 5/7/10 years [est]; set maturityWindow and saleLeasebackCandidate per the schema.`,
         { label: `verify:${county}:${c.parcelId || c.owner}`, phase: 'Verify Finalists', schema: VERDICT_SCHEMA },
       ).then((v) => ({ ...c, county, verification: v })),
     )).then((verified) => ({
@@ -231,7 +235,12 @@ const guard = {
 }
 log(`pipeline guard (${cfg.pipelineGuard ? 'from args' : 'phase-0 fetch'}): ${guard.deals.length} deals · ${guard.counterparties.length} counterparties`)
 
-const callOrder = { estate: 0, 'delinquent-entity': 1, 'seller-in-motion': 2, absentee: 3, 'long-hold': 4 }
+// v1.5: MATURITY-WINDOW finalists sit after delinquent entity owners, before sellers-in-motion.
+const callOrder = { estate: 0, 'delinquent-entity': 1, 'maturity-window': 2, 'seller-in-motion': 3, absentee: 4, 'long-hold': 5 }
+const effectiveBucket = (c) =>
+  c.verification && c.verification.maturityWindow && !['estate', 'delinquent-entity'].includes(c.callBucket)
+    ? 'maturity-window'
+    : c.callBucket
 const all = perCounty.filter(Boolean).flatMap((r) => r.finalists || [])
 const tagged = all.map((c) => ({ ...c, pipelineMatch: pipelineMatch(c, guard) }))
 
@@ -246,7 +255,7 @@ const ranked = tagged
     ? { ...c, pipelineConflict: 'ROAD-REVIEW — same street as a live ORA pipeline deal; confirm it is NOT the same asset/seller before any call' }
     : c)
   .sort((a, b) =>
-    ((callOrder[a.callBucket] ?? 9) - (callOrder[b.callBucket] ?? 9)) ||
+    ((callOrder[effectiveBucket(a)] ?? 9) - (callOrder[effectiveBucket(b)] ?? 9)) ||
     ((b.score || 0) - (a.score || 0)),
   )
 
