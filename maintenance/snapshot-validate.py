@@ -47,6 +47,12 @@ Truncation is still caught, and does not depend on the count check to catch it. 
 advises; losing half the fleet still fails. --strict-count restores v1.0 behaviour
 for any caller that wants an exact match to be fatal.
 
+v1.2 (2026-11-02) — AHM SUFFIXES. ora-automation-health-monitor (CC, ported from LAMS
+2026-10-30) writes .ahm-cc.json / .ahm-lams.json so it collides with neither
+ora-task-integrity-guard's .cc.json nor the frozen LAMS .lams.json. --fleet now
+accepts ahm-cc / ahm-lams. The glob is "*.<fleet>.json", so cc never matches
+.ahm-cc.json and ahm-cc never matches .cc.json (pinned by test case 10).
+
 Exit codes:  0 = structurally valid   1 = INVALID (>=1 [ACTION])   2 = could not look
              (a ROSTER-DELTA advisory alone does NOT change the exit code)
 
@@ -160,7 +166,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--path")
     ap.add_argument("--dir")
-    ap.add_argument("--fleet", choices=("lams", "cc"), default="lams")
+    ap.add_argument("--fleet", choices=("lams", "cc", "ahm-cc", "ahm-lams"), default="lams")
     ap.add_argument("--newest-valid", action="store_true")
     ap.add_argument("--expect-count", type=int)
     ap.add_argument("--strict-count", action="store_true",
