@@ -303,6 +303,24 @@ def test_lender_and_fund_figures_ignored_unit():
         assert_clean(line, "financing figure, not the buy-box: %r" % line)
 
 
+def test_review_round2_unit():
+    # C3: "portfolio of 25 tenants" and negated qualifiers are not the portfolio path
+    assert_flags("- Buy-box: sub-$10M; current portfolio of 25 tenants.\n", "portfolio of 25")
+    assert_flags("- Buy-box: sub-$10M, buildings not sold together only.\n", "negated sold together")
+    assert_flags("- Buy-box: sub-$10M (Amendment H does not apply here).\n", "negated Amendment H")
+    assert_clean("- Buy-box: sub-$10M single; portfolio of 2-5 buildings sold together to $15M.\n",
+                 "portfolio of 2-5 still qualifies")
+    # C6: the financing veto must not swallow a buy-box line; debt/refi figures are financing
+    assert_flags("- Fund I buy-box: sub-$10M.\n", "fund-labelled buy-box")
+    assert_flags("- Buy-box (equity check): sub-$10M.\n", "equity-labelled buy-box")
+    assert_clean("- Debt size: up to $12M.\n", "debt size")
+    assert_clean("- Refi proceeds up to $12M per deal.\n", "refi proceeds")
+    # C2: only a heading that IS a history heading allowlists its section
+    assert_flags("## History of the buy-box decision\n- Buy-box: sub-$10M.\n", "History-of heading")
+    assert_flags("## Changes to the screening funnel\n- Buy-box: sub-$10M.\n", "Changes-to heading")
+    assert_clean("## Changelog — v1.x\n- ORA targets sub-$10M.\n", "changelog with version suffix")
+
+
 # --------------------------------------------------------------------------- UNIT: canon anchor
 
 def test_check_canon_accepts_current_canon_unit():
@@ -447,6 +465,17 @@ def test_missing_or_bad_root_exits_2_e2e():
                            encoding="utf-8", errors="replace")
         assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
         r = subprocess.run([sys.executable, PROBE, "--claude-root", "--quiet", "--skills-root", t.skills],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
+        # round 2: "--flag=value" form and unknown args must not fall back to the real ~/.claude
+        for bad in (["--claude-root=" + t.claude, "--skills-root", t.skills], ["--bogus"]):
+            r = subprocess.run([sys.executable, PROBE] + bad, capture_output=True, text=True,
+                               encoding="utf-8", errors="replace")
+            assert r.returncode == 2, (bad, r.returncode, r.stdout, r.stderr)
+        # round 2: an existing but EMPTY ~/.claude root scans nothing -> probe error, not OK
+        empty = os.path.join(t.base, "empty")
+        os.makedirs(empty)
+        r = subprocess.run([sys.executable, PROBE, "--claude-root", empty, "--skills-root", t.skills],
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         assert r.returncode == 2, (r.returncode, r.stdout, r.stderr)
     _with_tree(body)
