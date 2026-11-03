@@ -27,7 +27,7 @@ metadata:
 
 ## Investment criteria / governor
 - Below-replacement-cost, value-add **Class B/C shallow-bay industrial & flex.**
-- **$1M–$10M per acquisition, sub-50,000 SF per building.** Portfolio path (acquisition-underwriting Amendment H, Gabriel in-turn 2026-10-30): 2–5 buildings sold together up to **$15M total**, each building tested on its own; >5 buildings, >$15M or a failing building = flag for Gabriel, never a drop.
+- **$1M–$10M per acquisition as the SOURCING filter, sub-50,000 SF per building.** Two floors, both live (Gabriel in-turn 2026-11-03): **$500K is the screen floor** (acquisition-underwriting STAGE 0 Gate 2: $500K–$10M single asset); **$1M is the sourcing filter** (ora-deal-sourcing-scan, deal-flow-triage, the am-brief broker screen) — sub-$1M finds are listed for Gabriel's hand override, not screened by default. Portfolio path (acquisition-underwriting Amendment H, Gabriel in-turn 2026-10-30): 2–5 buildings sold together up to **$15M total**, each building tested on its own; >5 buildings, >$15M or a failing building = flag for Gabriel, never a drop.
 - **DSCR ≥ 1.25× hard governor, LTV ≤ 40% portfolio-aggregate** (canonical per CLAUDE.md; corrected from 1.75 → 1.25 on 2026-06-03, G5); per-property refi-sizing ceiling = LESSER of 65% LTV / 1.25× DSCR (Gabriel-ratified 2026-07-11 — detail: [standards.md](standards.md)).
 - 10-year fully dynamic Excel underwriting models; replacement-cost analysis per acquisition ($85–$120/SF).
 
