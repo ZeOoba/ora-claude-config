@@ -7,7 +7,9 @@ Reproduces both live defect classes plus the 2026-08-14 false-invalid case.
 import json, os, subprocess, sys, tempfile
 
 PY = sys.executable
-VAL = r"C:\Users\Owner\.claude\maintenance\snapshot-validate.py"
+# Resolve next to this test so a worktree tests its own copy, not the live one.
+VAL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                   "snapshot-validate.py")
 D = os.path.join(tempfile.gettempdir(), "ora_snapval_test", "fixtures")
 os.makedirs(D, exist_ok=True)
 
@@ -43,6 +45,14 @@ noschedule = write("2026-08-09.lams.json", json.dumps(
 
 # clean truncation: well-formed rows, just far too few. Count is the ONLY signal.
 clean_trunc = write("2026-08-08.lams.json", json.dumps(doc(14, "2026-08-08"), indent=1))
+
+# ora-automation-health-monitor (CC) writes .ahm-cc.json / .ahm-lams.json beside the
+# integrity guard's .cc.json and the frozen .lams.json. Dated NEWER than every sibling
+# so a glob that cross-matched would pick them and fail case 7 / case 10.
+ahm_cc = write("2026-08-20.ahm-cc.json", json.dumps(doc(40, "2026-08-20"), indent=1))
+ahm_lams = write("2026-08-20.ahm-lams.json", json.dumps(doc(29, "2026-08-20"), indent=1))
+ahm_lams_bad = write("2026-08-21.ahm-lams.json", whole + tail)
+gcc = write("2026-08-19.cc.json", json.dumps(doc(22, "2026-08-19"), indent=1))
 
 def run(*args):
     r = subprocess.run([PY, VAL] + list(args), capture_output=True, text=True)
@@ -103,6 +113,17 @@ check("no advisory when counts agree", "ROSTER-DELTA" not in out)
 print("\n9. VALIDATOR CANNOT MASQUERADE AS CLEAN")
 code, out = run("--path", os.path.join(D, "does-not-exist.json"), "--expect-count", "28")
 check("missing file is non-zero", code != 0, "exit=%d" % code)
+
+print("\n10. AHM SUFFIXES - each fleet name selects only its own producer's files")
+code, out = run("--dir", D, "--fleet", "ahm-cc", "--newest-valid")
+check("ahm-cc accepted", code == 0, out)
+check("ahm-cc picks .ahm-cc.json", "2026-08-20.ahm-cc.json" in out, out)
+code, out = run("--dir", D, "--fleet", "ahm-lams", "--newest-valid")
+check("ahm-lams skips the newer unparseable file", "2026-08-20.ahm-lams.json" in out, out)
+code, out = run("--dir", D, "--fleet", "cc", "--newest-valid")
+check("cc never selects .ahm-cc.json", code == 0 and "2026-08-19.cc.json" in out, out)
+code, out = run("--dir", D, "--fleet", "lams", "--newest-valid")
+check("lams never selects .ahm-lams.json", "ahm-lams" not in out, out)
 
 print("\n" + ("ALL PASS" if not FAILURES else "FAILURES: " + ", ".join(FAILURES)))
 sys.exit(1 if FAILURES else 0)
