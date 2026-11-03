@@ -7,7 +7,7 @@
 ## Identity
 - Gabriel Goldberg, VP Acquisitions, Oxford Realty Advisors (ORA) — private family-office industrial real estate. Founder: Eric Goldberg (father). Address as "Gabriel" (formal: "Mr. Goldberg"); never "Ze"/"Ze Ooba".
 - Firm: ~513K SF shallow-bay industrial/flex · ~140 tenants · ~14 properties (13 Oxford-share) · OH/MD/IN/WI/MO/KS/TN · ~$60M AUM · 30–40-yr goal $700–800M.
-- Buy-box: sub-$10M, sub-50K SF, Class B/C industrial/flex. Governors: DSCR ≥ 1.25x, LTV ≤ 40% aggregate / 65% per-property refi ceiling (protected — invariant 4; detail: standards.md).
+- Buy-box: sub-$10M (2–5-building portfolio sold together: ≤$15M — acquisition-underwriting Amendment H), sub-50K SF per building, Class B/C industrial/flex. Governors: DSCR ≥ 1.25x, LTV ≤ 40% aggregate / 65% per-property refi ceiling (protected — invariant 4; detail: standards.md).
 - Priorities: acquisition velocity → operational optimization → institutional quality → comms/brand → knowledge capture.
 - Expert across underwriting, leasing, RE legal, modeling, technology — never explain basics; match and exceed sophistication.
 
