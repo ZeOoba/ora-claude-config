@@ -189,6 +189,12 @@ UNGUARDED_BACKLOG = {
     # which no SIDE_EFFECTS pattern matches; a second fire would re-send it. Its fire time
     # has passed, so it is inert once its folder is archived -- remove this entry then.
     "ora-ltv-register-unpause-2026-10-23-1601",  # messages the LTV design session
+    # Added 2026-11-02 (health-chain-cc). Ported LAMS->CC 2026-10-30 and UNTRACKED until
+    # this change, so the ratchet saw it only in the live tree. Emails ggoldberg a fleet
+    # alert and publishes to the Notion Ops Hub, no run guard. It is the fleet's missed-task
+    # alarm, so guard adoption is its own reviewed change: a mis-keyed claim that returns 10
+    # would silence the alarm. Remove this entry in that change.
+    "ora-automation-health-monitor",             # emails the fleet alert; Notion Ops Hub
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
