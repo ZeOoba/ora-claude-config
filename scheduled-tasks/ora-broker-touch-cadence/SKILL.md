@@ -1,9 +1,9 @@
 ---
 name: ora-broker-touch-cadence
-description: Monthly (2nd, 1:40 PM ET) broker relationship touch cadence — reads the Notion Broker Relationships DB, checks Outlook for recent contact, DRAFTS (never sends) personal pocket-listing check-ins to up to 5 brokers via Outlook COM .Save(); summary to ggoldberg only. Draft-only by design (Hard Invariant 1). Serves acquisition velocity (priority #1); Gabriel-ratified G4b 2026-07-16. v1.2. Re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
+description: Monthly (2nd, 1:40 PM ET) broker relationship touch cadence — reads the Notion Broker Relationships DB, checks Outlook for recent contact, DRAFTS (never sends) personal pocket-listing check-ins to up to 5 brokers via Outlook COM .Save(); summary to ggoldberg only. Draft-only by design (Hard Invariant 1). Serves acquisition velocity (priority #1); Gabriel-ratified G4b 2026-07-16. v1.3. Re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA Broker Relationship Touch Cadence (v1.2, Gabriel-ratified G4b 2026-07-16; v1.1/v1.2 fixes Gabriel-directed 2026-09-19)
+ORA Broker Relationship Touch Cadence (v1.3, Gabriel-ratified G4b 2026-07-16; v1.1/v1.2 fixes Gabriel-directed 2026-09-19; v1.3 buy-box text 2026-11-03)
 
 AUTOMATION-BUDGET JUSTIFICATION: Serves ORA priority #1 (acquisition velocity) — opens the pocket-listing/relationship deal-flow channel that every existing sourcing task (ora-deal-sourcing-scan, ora-entry-market-scan) deliberately avoids, since those are on-market/public-listing scans only. Gabriel-ratified as ruling G4b on 2026-07-16. DRAFT-ONLY BY DESIGN — this task never sends an external communication; it exists specifically to stay inside Hard Invariant 1 while still opening the relationship channel.
 
@@ -167,7 +167,7 @@ fixed at source instead of the gate absorbing the same collision every month. Do
 Notion from this task; report it.
 
 STEP 3 — Draft personal check-ins.
-For each selected broker, DRAFT a short, personal check-in email: institutional-direct tone, references their market and any live thread context found in Outlook search, asks specifically about off-market/pocket industrial or flex listings in ORA's buy-box (sub-$10M, sub-50K SF, Class B/C industrial/flex). No form-letter feel. 4-6 sentences max. Sign per the Property→LLC Signature Roster convention only if the correspondence is property-specific; otherwise sign as Gabriel Goldberg, Oxford Realty Advisors, per Voice Register (broker mail is relationship correspondence, not landlord-to-tenant mail, so the personal/firm signature applies, not a property LLC).
+For each selected broker, DRAFT a short, personal check-in email: institutional-direct tone, references their market and any live thread context found in Outlook search, asks specifically about off-market/pocket industrial or flex listings in ORA's buy-box (single assets up to $10M, or 2–5 buildings sold together up to $15M; under 50K SF per building; Class B/C industrial/flex). Say it plainly in the email, e.g. "up to $10M, or up to $15M for a small portfolio sold together". No form-letter feel. 4-6 sentences max. Sign per the Property→LLC Signature Roster convention only if the correspondence is property-specific; otherwise sign as Gabriel Goldberg, Oxford Realty Advisors, per Voice Register (broker mail is relationship correspondence, not landlord-to-tenant mail, so the personal/firm signature applies, not a property LLC).
 
 STEP 4 — Park drafts in Outlook. NEVER send.
 Create each broker draft as an Outlook DRAFT via COM — never via .Send(). Use exactly this pattern (spelled out verbatim so an unattended run never improvises):
@@ -188,7 +188,7 @@ Create each broker draft as an Outlook DRAFT via COM — never via .Send(). Use 
 # reached this task's own output: the 2026-07-22 Nathan Pealer draft reads
 # "under  -" where "$10M" belongs and is still sitting unsent in Drafts (audit
 # 2026-09-19_BrokerDraftsBacklog_Audit_v01.md, §6). It bites this task hard —
-# broker check-ins are numbers-forward and name the buy-box ($10M / 50K SF).
+# broker check-ins are numbers-forward and name the buy-box ($10M / $15M / 50K SF).
 #
 # v1.1 RULE (mandatory): the draft body is NEVER assembled in PowerShell at all.
 # It is written to a UTF-8 FILE as literal text and read back. Two permitted
@@ -293,6 +293,9 @@ HARD GUARDRAILS (verbatim, non-negotiable):
 This task is registered on the CC/MCP fleet deliberately: it needs native shell access for the Outlook COM draft-creation pattern in Step 4.
 
 CHANGELOG
+- v1.3 — 2026-11-03 (Gabriel in-turn, buy-box drift sweep). Step 3's buy-box text now names the
+  Amendment H portfolio path (2–5 buildings sold together up to $15M) next to the $10M single-asset
+  ceiling, instead of "sub-$10M". Text only; selection, cap, routing and draft-only behaviour unchanged.
 - v1.2 — 2026-09-19 (Gabriel-directed, approved in-turn). Two structural gates added; nothing existing
   removed.
   (1) BACKLOG GATE (new Step 0.5). The 2026-09-19 audit found 8 unsent cadence drafts, zero sent, none
