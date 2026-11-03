@@ -109,6 +109,19 @@ ret, raised, err = run_leg("import time\ntime.sleep(30)\n", timeout=1)
 expect("hang: no raise", raised is None, repr(raised))
 expect("hang: WARN timeout note", "[WARN]" in err and "timed out" in err.lower(), err)
 
+# 7b) REFUTE round 1 (C4): a GRANDCHILD that inherits the output handles must not hold the
+#     push past the timeout (pipes + communicate() blocked ~15 s here before the fix)
+import time as _time
+grandchild = ("import subprocess, sys, time\n"
+              "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(15)'])\n"
+              "time.sleep(30)\n")
+_t0 = _time.time()
+ret, raised, err = run_leg(grandchild, timeout=1)
+_elapsed = _time.time() - _t0
+expect("grandchild: no raise", raised is None, repr(raised))
+expect("grandchild: bounded (< timeout + 6s)", _elapsed < 7, "elapsed %.1fs" % _elapsed)
+expect("grandchild: WARN timeout note", "timed out" in err.lower(), err)
+
 # 8) run_doctrine_probe's verdict is untouched by the advisory leg, even if it explodes
 calls = {}
 orig = (dg.materialize_pushed_commit, dg.remove_worktree, dg.run_buybox_advisory,
