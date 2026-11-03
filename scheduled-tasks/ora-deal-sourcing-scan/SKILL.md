@@ -3,7 +3,22 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.11, 2026-10-30).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.12, 2026-11-03).
+
+v2.12 — PORTFOLIO-FLAG WIRED THROUGH TIERING (2026-11-03, Gabriel in-turn "Fix all here" on
+the /code-review of #378). v2.11 opened the STEP 2 gate but left the later steps unaware of
+portfolios, so: a flagged portfolio could still score into T1 PURSUE; a retail/office
+building still forced PASS/RE-ROUTE via the v2.9 EXCEPTION, STEP 2.0 and TIER ASSIGNMENT; the
+term "gate flag" collided with this file's GATE-FLAGGED (= Verdict PASS, clear <12 ft); the
+10-80K SF band had no portfolio reading; and (e) ran on the listing title only. Now: the
+portfolio flag is the distinct token `PORTFOLIO-FLAG: <cause>`, its causes aligned to
+acquisition-underwriting Amendment H (i) (any per-building gate or floor, incl. >=50,000 SF);
+it caps the row at T2 WATCH until Gabriel rules in the Deal Sourcing Log `Gate Review` field
+(Cleared- lifts the cap, Rejected- = PASS; unpriced rows keep REQUEST PRICE), is never PASS on
+a building's own failure, and is listed in digest (4a); SF and (e) run PER BUILDING; STEP 2.0,
+the EXCEPTION and TIER ASSIGNMENT carve portfolios out; STEP 3B's Capital-sleeve line is
+annotated in place. NO score, weight, floor or governor changed; the v2.11 OPEN QUESTION on the
+Capital sleeve stays open.
 
 v2.11 — AMENDMENT H PORTFOLIO PATH IN THE STEP 2 ELIGIBILITY GATE (2026-10-30, Gabriel in-turn:
 "update the upstream filters" once acquisition-underwriting v4.40/v4.41 merged, ora-skills
@@ -725,17 +740,24 @@ STEP 2 — ELIGIBILITY GATE
 Keep a candidate only if: (a) industrial/flex/office-warehouse product, per STEP 2.0; (b) in a
 target cluster; (c) within or plausibly within 10-80K SF and $1-10M — PORTFOLIO PATH (v2.11,
 Amendment H): buildings sold together as one deal pass (c) up to $15M total, with no
-per-building price band; a portfolio >5 buildings, >$15M, or containing a building outside
-the size/product rules is KEPT as a GATE FLAG naming the cause (Notes / Flags), never dropped
-here. For a portfolio, (a), (d) and STEP 2.0 are applied PER BUILDING: one failing building
-(e.g. a RETAIL/OFFICE use under STEP 2.0) makes the whole portfolio a gate flag, NOT a fail of
-(a)/(d) and NOT the STEP 2.0 PASS/RE-ROUTE — only Gabriel carves a building out; (d) no instant
-disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before a-d).
+per-building price band. For a portfolio the SF test is PER BUILDING, never on the portfolio
+total, and the 10-80K LOG band does not apply to its buildings (v2.12). A portfolio >5
+buildings, >$15M, or containing a building that fails ANY per-building test (acquisition-
+underwriting Amendment H (i) — the single-asset gates and floors per building: (a)/(b)/(d)/
+STEP 2.0 product or use, >=50,000 SF, a failed or <12 ft physical floor per STEP 3A, an
+instant disqualifier) is KEPT, never dropped here, and carries the token `PORTFOLIO-FLAG: <cause>` in Notes / Flags (v2.12 —
+deliberately NOT "GATE-FLAGGED", which in this file means Verdict PASS for clear <12 ft; see
+TIER ASSIGNMENT). For a portfolio, (a), (d) and STEP 2.0 are applied PER BUILDING: one failing
+building (e.g. a RETAIL/OFFICE use under STEP 2.0) makes the whole portfolio a PORTFOLIO-FLAG,
+NOT a fail of (a)/(d) and NOT the STEP 2.0 PASS/RE-ROUTE — only Gabriel carves a building out;
+(d) no instant disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before
+a-d; for a portfolio, PER BUILDING ADDRESS — v2.12).
 Log filtered items with one-line reasons in the run notes; do not
 write them to Notion.
 EXCEPTION (v2.9): a candidate failing (a) or (d) solely on a STEP 2.0 RETAIL/OFFICE/'Other' use IS written
 to Notion as Verdict PASS with the RE-ROUTE Next Action; a MIXED/CONFLICTING/[UNVERIFIED]
-use passes (a) and is capped per STEP 2.0.
+use passes (a) and is capped per STEP 2.0. NOT for a portfolio (v2.12): a failing building
+there is a PORTFOLIO-FLAG cause, never this PASS/RE-ROUTE.
 
 *** (e) OWN-PORTFOLIO GUARD (v2.6, 2026-09-18, Gabriel-directed after a real incident) ***
 On 2026-09-05 this scan logged ORA's OWN Cushman & Wakefield listing — "2000-2026 Zettler
@@ -753,6 +775,12 @@ For EVERY candidate, before any scoring or Notion read/write:
     Not a drop by itself; verify the address against the roster by hand and state the
     check in Notes / Flags before logging.
   - exit 0 / CLEAR → continue to (a)-(d).
+  PORTFOLIO (v2.12): a portfolio title rarely lists every building, so run the guard ONCE PER
+  BUILDING ADDRESS (from the OM, flyer or listing detail), not on the title alone. Any building
+  exit 2 → treat the portfolio as containing an own asset: do NOT score or log it as a lead;
+  put it under "OWN ASSETS SEEN ON MARKET" naming the owned building(s). If the per-building
+  addresses cannot be obtained, write `PORTFOLIO-FLAG: building addresses unverified — own-
+  portfolio guard ran on title only` and state it in digest (4a).
   The matcher is RANGE-AWARE (a "2000-2026" listing hits owned 2018) and normalizes
   suffixes/directionals. Roster: _shared\ora-own-portfolio-exclusions.json (v1.0).
   ROSTER REFRESH each run (v2.8: EXECUTED IN STEP 0b, before scouting — use its in-memory
@@ -776,6 +804,9 @@ assessor/auditor land-use or property-class code (listing-enrichment-gate step 5
   - INDUSTRIAL/FLEX verified (1) or (2) → proceed; Product scores normally.
   - RETAIL, OFFICE, or Notion Asset Type 'Other' → Verdict PASS, Next Action
     "RE-ROUTE: ALT-ASSET-TRACK (acquisition-underwriting Stage 0 Gate 6 / 2.9)". Never T1/T2.
+    PORTFOLIO EXCEPTION (v2.12): when the RETAIL/OFFICE/'Other' building is one building of a
+    portfolio, this outcome does NOT apply — record that building's USE-CODE, add
+    `PORTFOLIO-FLAG: <address> USE-CODE <value>`, and tier the portfolio per TIER ASSIGNMENT.
     Origin: 13500 E 40 Hwy (Gordmans anchor, scored Product 15 with Asset Type 'Other');
     2401-2501 International Ln (office, logged T1 as Multi-Tenant Industrial).
   - MIXED or CONFLICTING (listing says industrial, code says retail/office/commercial) →
@@ -951,7 +982,9 @@ STEP 3B — SCORE (Fit Score 0-100 — RANKS WITHIN A GATE OUTCOME, never overri
   NEVER A DISQUALIFIER — a metal building is a preference penalty, not a floor.
 - Stabilized YoC (10): >8% achievable on stated/estimated NOI 10; 7-8% 6; <7% 2;
   unknown 5 provisional.
-- Capital sleeve (10): $1.5-6M 10; $1-1.5M or $6-10M 6; outside 0.
+- Capital sleeve (10): $1.5-6M 10; $1-1.5M or $6-10M 6; outside 0. (v2.12 note: a $10-15M
+  Amendment H portfolio scores 0 here BY DESIGN pending Gabriel's ratification — see the
+  v2.11 OPEN QUESTION. It is NOT a STEP 2 filtering error; never drop or re-flag it for this.)
 - Value-add bias (5): vacancy/below-market rents/short WALT present 5; stabilized 2.
 - Physical floors (10): meets power+parking+clear+coverage+court 10; one unknown 6; one
   failed 3; two+ failed 0. Thresholds per STEP 3A (v2.9).
@@ -963,13 +996,16 @@ TIER ASSIGNMENT (gate first, score second):
                    VERIFIED **AND** clear height, site coverage and truck court each MET (none
                    unknown) **AND** no power/parking floor FAILED (power/parking UNKNOWN
                    permitted, per STEP 3A) **AND** <50,000 SF per building (per-building SF
-                   KNOWN) **AND** score >=60. Request OM immediately. (v2.9)
+                   KNOWN) **AND** score >=60 **AND** no unruled `PORTFOLIO-FLAG` (v2.12). Request OM
+                   immediately. (v2.9)
 - T1-PENDING-VERIFY = would be T1 PURSUE but one or more of COMP-TEST / USE-CODE (unknown or
                    [UNVERIFIED]) / clear / coverage / truck court / per-building SF
                    (multi-building) is UNKNOWN after STEP 3D. Written to Notion as
                    Verdict 'T2 WATCH' + token `T1-PENDING-VERIFY: <missing facts>` (fail-safe:
                    verified-deal-recon fires only on T1 PURSUE). Report and count SEPARATELY.
-- T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60. REQUEST PRICE only.
+- T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60 AND no unruled
+                     `PORTFOLIO-FLAG` (v2.12 — a flagged one is T2 WATCH that still keeps
+                     REQUEST PRICE; see PORTFOLIO-FLAG). REQUEST PRICE only.
                      Report and count SEPARATELY from T1 PURSUE. (v2.9, Gabriel-ratified
                      2026-10-30) Written to Notion as Verdict 'T2 WATCH' + the literal tag
                      `T1-PENDING-PRICE` in Next Action AND Notes / Flags — NEVER as Verdict
@@ -977,11 +1013,44 @@ TIER ASSIGNMENT (gate first, score second):
                      verified-deal-recon (same pattern as T1-PENDING-VERIFY).
 - T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59, OR COMP-TEST FAIL, OR a
                    FAILED physical floor, OR >=50,000 SF per building, OR USE-CODE
-                   mixed/conflicting, OR [PROXY] without a COMP-TEST PASS. Log,
-                   monitor for price cuts, no outreach.
+                   mixed/conflicting, OR [PROXY] without a COMP-TEST PASS, OR a
+                   `PORTFOLIO-FLAG` row (v2.12) not yet Cleared by Gabriel that no
+                   portfolio-level PASS / DECLINE clause catches (see PORTFOLIO-FLAG below). Log, monitor for price cuts, no outreach.
+- PORTFOLIO-FLAG (v2.12) = a CAP pending Gabriel's ruling, not a verdict: max tier T2 WATCH,
+                   never T1 PURSUE / T1-PENDING-VERIFY. Write Verdict 'T2 WATCH' + the literal
+                   token `PORTFOLIO-FLAG: <cause>` in Next Action AND Notes / Flags ("Gabriel to
+                   rule on Amendment H carve-out"), and list it in digest (4a). UNPRICED: if the
+                   row would otherwise be T1-PENDING-PRICE, keep "REQUEST PRICE" in Next Action
+                   beside the token — price discovery stays allowed; nothing else is outreach.
+                   RULING (read, never written, by this scan): Gabriel records his ruling in the
+                   Deal Sourcing Log `Gate Review` field, the same field ora-entry-market-scan
+                   uses — `Cleared-<date>` / `Rejected-<date>` + note (e.g. which building is
+                   carved out). On `Cleared-` at an unchanged price and building set, the cap
+                   is LIFTED: apply normal TIER ASSIGNMENT to the portfolio as Gabriel cleared
+                   it (a carved-out building is removed and the rest re-tested), keeping the
+                   token in Notes / Flags as history. A breach Gabriel CLEARED is not re-raised
+                   as a flag cause; a single-asset cap it triggers (e.g. >=50,000 SF → T2)
+                   still applies unless his ruling note lifts it.
+                   BASELINE: every run that writes or updates a flagged row APPENDS
+                   `PORTFOLIO-BASIS: ask $<x> | <n> bldgs | <date>` to Notes / Flags. "Unchanged
+                   price and building set" means the current ask and building count equal the
+                   latest PORTFOLIO-BASIS line dated on or before the ruling date. NO such
+                   line (e.g. a row written before v2.12) → treat as CHANGED: cap applies and
+                   (4a) re-asks (fail closed). On `Rejected-` at an unchanged price and
+                   building set: Verdict PASS, reason "Rejected by Gabriel <date>". A changed
+                   price, building set or status voids the ruling for this run — cap applies
+                   and (4a) re-asks. Any other `Gate Review` value (blank, `N/A …`, sibling-task
+                   text) is NOT a ruling for a portfolio. The flag itself is NEVER a PASS
+                   reason, and a building's own failure never PASSes the portfolio. The ONLY
+                   PASS / DECLINE clauses that apply to a flagged, unruled portfolio are the
+                   portfolio-level ones (exhaustive): blended basis at or above replacement, or
+                   score <50 — name the clause and keep the token in Notes / Flags.
 - PASS / DECLINE = priced at or above replacement, OR 2+ failed physical floors, OR
                    an instant disqualifier, OR USE-CODE retail/office/Other (re-route), OR
-                   clear <12 ft with no bay >=16 ft (gate-flagged), OR score <50. Log with the reason.
+                   clear <12 ft with no bay >=16 ft (gate-flagged), OR score <50. Log with the
+                   reason. For a PORTFOLIO (v2.12), the 2+ failed floors, instant disqualifier,
+                   USE-CODE and clear <12 ft clauses are tested per building and are
+                   PORTFOLIO-FLAG causes, never a PASS of the whole portfolio.
 A score >=60 NEVER promotes a FAIL-BASIS deal into T1. If you find yourself writing
 "scores 78 but fails basis — worth a look," STOP: that is the exact failure this
 redesign exists to prevent. It is a T2.
@@ -1383,6 +1452,15 @@ Body order:
       brokerage — one call often covers several listings.
   (4) T2 WATCH — including every FAIL-BASIS deal, with the price at which it WOULD
       clear. State plainly that a high score does not override a failed floor.
+  (4a) PORTFOLIO-FLAG — FOR GABRIEL (v2.12): every Amendment H portfolio carrying a
+      `PORTFOLIO-FLAG` this run, one line each: title, building count, total ask, the cause
+      (>5 buildings / >$15M / which building fails which rule / addresses unverified), current
+      tier, and the carve-out decision needed. Never fold these into 7d FILTERED BY DESIGN.
+      A row whose `Gate Review` already records Gabriel's ruling (`Cleared-<date>` /
+      `Rejected-<date>`) at an unchanged price and building set is marked "ruled <date>"
+      here (and tiered per the RULING clause) instead of re-asked; re-ask only if price,
+      building set or status changed. When updating a flagged row, APPEND to Notes / Flags —
+      never rewrite or drop prior tokens or Gabriel's note.
   (5) One-line count of PASS/DECLINE logged.
   (6) Benchmark honesty note: which replacement-cost figure was used, that it is
       [EST] and PROVISIONAL, and any deal within ~3 ppt of the floor line.
@@ -1406,7 +1484,8 @@ Body order:
          (possible but unlikely — ~15-18 industrial-for-sale addresses seen 2026-10-05 — and ONLY when
          Madison's F1, F2 and F3 matrix cells are all loaded; a Madison nil with any unread family
          is a §7c gap, not by-design), Montgomery County MD skipped (not first Tuesday — STEP 0d),
-         sub-scale exclusions (<10K SF or <$1M: address + SF + ask, one line each — the
+         sub-scale exclusions (<10K SF or <$1M, single assets only — never a portfolio building,
+         v2.12: address + SF + ask, one line each — the
          buy-box floor is unchanged; this list lets Gabriel override by hand), clear <12 ft
          GATE-FLAGGED rows (v2.9 STEP 3A: address + clear + ask, one line each, for hand
          override), and the own-assets-seen-on-market list.
