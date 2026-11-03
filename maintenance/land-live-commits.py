@@ -41,8 +41,10 @@ Status (exit code):
 """
 import argparse
 import json
+import re
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -112,9 +114,53 @@ def _body(p):
     ])
 
 
+_GATE_LINE = re.compile(r"(FAIL|BLOCKED|hook-tests-gate:|fail-retry|timeout-retry|error:)")
+
+
+def _gate_log_path():
+    d = REPO / "maintenance" / "_state"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "land-live-commits-last-push.log"
+
+
+def push_clean(sha):
+    """Push `sha` from a temporary worktree detached at it.
+
+    WHY (2026-11-03): the pre-push gate tests the PUSHING checkout's working tree. In the
+    primary checkout that includes other sessions' uncommitted specs, which failed three
+    spec lints that pass on main (run guard, send contract, command paths) and blocked a
+    memory-only push. A clean worktree at the checked SHA gates exactly what is pushed.
+    The gate's full output goes to maintenance/_state/land-live-commits-last-push.log; its
+    FAIL/summary lines go into the ERROR detail (they used to be lost: only git's last
+    stderr line survived).
+    """
+    wt = Path(tempfile.mkdtemp(prefix="land-push-"))
+    wt.rmdir()  # git worktree add wants to create it
+    git("worktree", "add", "-q", "--detach", str(wt), sha)
+    try:
+        r = subprocess.run(["git", "-C", str(wt), "push", "origin", f"{sha}:refs/heads/{LAND_BRANCH}"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        out = (r.stdout or "") + (r.stderr or "")
+        try:
+            _gate_log_path().write_text(out, encoding="utf-8")
+        except OSError:
+            pass
+        if r.returncode != 0:
+            lines = [ln.strip() for ln in out.splitlines() if _GATE_LINE.search(ln)]
+            raise RuntimeError("push failed (exit %d); gate lines: %s; full log: %s"
+                               % (r.returncode, " | ".join(lines[:20]) or "(none)", _gate_log_path()))
+    finally:
+        rm = subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(wt)],
+                            capture_output=True, text=True)
+        if rm.returncode != 0:  # e.g. a Windows file lock: delete what we can, then unregister
+            import shutil
+            shutil.rmtree(wt, ignore_errors=True)
+            subprocess.run(["git", "-C", str(REPO), "worktree", "prune"], capture_output=True, text=True)
+
+
 def land(p):
     # push the SHA plan() checked, never HEAD: another session may commit in between
-    git("push", "-q", "origin", f"{p['head']}:refs/heads/{LAND_BRANCH}")
+    push_clean(p["head"])
     existing = json.loads(gh("pr", "list", "--head", LAND_BRANCH, "--base", BASE, "--state", "open",
                              "--json", "number,url"))
     if existing:
