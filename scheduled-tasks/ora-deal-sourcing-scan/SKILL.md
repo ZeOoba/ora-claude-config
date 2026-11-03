@@ -3,7 +3,11 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.12, 2026-11-03).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.13, 2026-11-03).
+
+v2.13 — TWO FLOORS DOCUMENTED (2026-11-03, Gabriel in-turn). The $1M floor in the buy-box
+block and the §7d sub-scale list is this scan's SOURCING filter; the SCREEN floor is $500K
+(acquisition-underwriting Stage 0 Gate 2). Both numbers stay where they were; text only.
 
 v2.12 — PORTFOLIO-FLAG WIRED THROUGH TIERING (2026-11-03, Gabriel in-turn "Fix all here" on
 the /code-review of #378). v2.11 opened the STEP 2 gate but left the later steps unaware of
@@ -272,8 +276,11 @@ ORA BUY-BOX (screening filter — apply unchanged)
 - Product: Class B/C industrial, shallow-bay, flex, office-warehouse ONLY.
 - Size: ~10,000-80,000 SF building to LOG; <50,000 SF PER BUILDING to reach T1
   (acquisition-underwriting Stage 0 Gate 2 — v2.9; >=50,000 SF caps at T2, not a kill).
-  Deal size $1M-$10M (sweet spot $1.5-6M); a portfolio sold together up to $15M total
-  (Amendment H — see STEP 2 (c)).
+  Deal size $1M-$10M is this scan's SOURCING filter (sweet spot $1.5-6M); a portfolio sold
+  together up to $15M total (Amendment H — see STEP 2 (c)). The SCREEN floor is lower, $500K
+  (acquisition-underwriting Stage 0 Gate 2: $500K-$10M single asset) — two floors, both
+  ratified (Gabriel in-turn 2026-11-03, v2.13): a $500K-$1M single asset is not screened here
+  but goes on the §7d sub-scale hand-override list, where Gabriel can send it to SCREEN.
 - Capital sleeve: $0.75-5.0M equity at 65% LTV; all-cash close + post-close refi.
 - Hard floors (independent): >=25% discount to replacement cost (basis-buyer
   doctrine — basis beats cap rate) AND >8% stabilized yield-on-cost.
