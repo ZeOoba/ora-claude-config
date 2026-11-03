@@ -171,32 +171,43 @@ def test_review_round1():
     check("xargs -I sed", "ls | xargs -I{} sed -i 's/a/b/' {}", True)
     # D1 -- no quadratic scan; bounded wall time on a 126KB hostile body
     big = "python -c \"" + "open('" * 21000 + "\""  # closed quote: tokeniser must accept it
-    t0 = time.time()
-    rc, out, err = run(payload(big), "script")
-    el = time.time() - t0
-    if rc == 0 and el < 4.0:
-        PASSES[0] += 1
-    else:
-        FAILS.append("126KB open( payload took %.1fs rc=%s (budget 4s)" % (el, rc))
+    _timed("126KB open( payload", big, budget=4.0)
     big2 = "open(" * 26000
+    _timed("open( x26000", "python -c \"" + big2 + "\"", budget=4.0)
+
+
+# A budget miss with rc == 0 is retried ONCE at double the budget before it counts as a
+# failure (same rule as git-prepush-hook-tests-gate.py's TIMEOUT_RETRY_MULTIPLIER). These
+# budgets exist to catch quadratic blow-ups, which miss by far more than 2x; a 3s budget
+# measured at 4.8s/5.5s under ~88% CPU load (2026-11-02, 160/161 pre-push) is load, not
+# a regression, and passed in isolation on the same commit.
+TIMED_RETRY_MULTIPLIER = 2.0
+TIMED_RETRIES = []  # names that recovered on the retry, printed in the summary
+
+
+def _timed_once(cmd):
+    import time
     t0 = time.time()
-    rc, out, err = run(payload("python -c \"" + big2 + "\""), "script")
-    el = time.time() - t0
-    if rc == 0 and el < 4.0:
-        PASSES[0] += 1
-    else:
-        FAILS.append("open( x26000 took %.1fs rc=%s (budget 4s)" % (el, rc))
+    rc, out, err = run(payload(cmd), "script")
+    return rc, time.time() - t0
 
 
 def _timed(name, cmd, budget=4.0):
-    import time
-    t0 = time.time()
     try:
-        rc, out, err = run(payload(cmd), "script")
+        rc, el = _timed_once(cmd)
+        if rc == 0 and el >= budget:
+            rc2, el2 = _timed_once(cmd)
+            if rc2 == 0 and el2 < budget * TIMED_RETRY_MULTIPLIER:
+                TIMED_RETRIES.append("%s: %.1fs > %.0fs, retry %.1fs < %.0fs"
+                                     % (name, el, budget, el2, budget * TIMED_RETRY_MULTIPLIER))
+                PASSES[0] += 1
+                return
+            FAILS.append("%s took %.1fs then %.1fs on retry rc=%s (budget %.0fs, retry %.0fs)"
+                         % (name, el, el2, rc2, budget, budget * TIMED_RETRY_MULTIPLIER))
+            return
     except subprocess.TimeoutExpired:
         FAILS.append("%s: guard run exceeded the 60s harness timeout" % name)
         return
-    el = time.time() - t0
     if rc == 0 and el < budget:
         PASSES[0] += 1
     else:
@@ -282,6 +293,37 @@ def test_coexists_with_pipe_mask():
         FAILS.append("merge dropped the advisory or the rewrite: %r" % buf.getvalue()[:300])
 
 
+def test_timed_retry_rule():
+    """_timed's own contract: one retry at 2x, recorded; a real blow-up still fails."""
+    global _timed_once
+    real = _timed_once
+    seen_fails, seen_passes = list(FAILS), PASSES[0]
+    try:
+        seq = iter([(0, 3.5), (0, 4.0)])           # miss 3s, recover under 6s
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-recovers", "x", budget=3.0)
+        recovered = PASSES[0] == seen_passes + 1 and FAILS == seen_fails \
+            and TIMED_RETRIES and TIMED_RETRIES[-1].startswith("selftest-recovers")
+        seq = iter([(0, 9.0), (0, 9.0)])           # quadratic-class miss: fails
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-blowup", "x", budget=3.0)
+        blew = len(FAILS) == len(seen_fails) + 1 and "selftest-blowup" in FAILS[-1]
+        seq = iter([(1, 0.1)])                     # wrong rc is never retried
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-rc", "x", budget=3.0)
+        rcfail = len(FAILS) == len(seen_fails) + 2 and "selftest-rc" in FAILS[-1]
+    finally:
+        _timed_once = real
+        del FAILS[len(seen_fails):]
+        PASSES[0] = seen_passes
+        TIMED_RETRIES[:] = [r for r in TIMED_RETRIES if not r.startswith("selftest-")]
+    if recovered and blew and rcfail:
+        PASSES[0] += 1
+    else:
+        FAILS.append("_timed retry rule self-test: recovered=%s blowup=%s rc=%s"
+                     % (bool(recovered), blew, rcfail))
+
+
 def main():
     test_sed()
     test_python()
@@ -290,7 +332,10 @@ def main():
     test_review_round2()
     test_chain()
     test_coexists_with_pipe_mask()
+    test_timed_retry_rule()
     print("test-rewrite-advisory-guard: %d pass, %d fail" % (PASSES[0], len(FAILS)))
+    for r in TIMED_RETRIES:
+        print("timed-retry (load, not a regression): " + r)
     for f in FAILS:
         print("FAIL: " + f)
     return 1 if FAILS else 0
