@@ -310,6 +310,11 @@ def test_review_round2_unit():
     assert_flags("- Buy-box: sub-$10M (Amendment H does not apply here).\n", "negated Amendment H")
     assert_clean("- Buy-box: sub-$10M single; portfolio of 2-5 buildings sold together to $15M.\n",
                  "portfolio of 2-5 still qualifies")
+    # round 3: a "never"/"do not" belonging to the CEILING clause does not negate the qualifier
+    assert_clean("- Buy-box: sub-$10M single asset; buildings sold together never exceed $15M.\n",
+                 "'never exceed' bounds the portfolio, it does not negate it")
+    assert_clean("- Buy-box: sub-$10M single; if sold together, do not exceed $15M.\n",
+                 "'do not exceed' bounds the portfolio")
     # C6: the financing veto must not swallow a buy-box line; debt/refi figures are financing
     assert_flags("- Fund I buy-box: sub-$10M.\n", "fund-labelled buy-box")
     assert_flags("- Buy-box (equity check): sub-$10M.\n", "equity-labelled buy-box")

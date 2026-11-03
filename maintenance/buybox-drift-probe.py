@@ -119,7 +119,9 @@ RE_PORTFOLIO = re.compile(
     r"|\b2\s?" + _DASH + r"\s?5[\s-]+buildings?|portfolios?\s+(?:up to|to|of up to|≤|<=)\s*\$", re.I)
 # "not sold together", "Amendment H does not apply" negate the qualifier (review round 2).
 RE_NEGATION_BEFORE = re.compile(r"\b(?:not|no|never|without|excludes?)\b[^.;]{0,6}$", re.I)
-RE_NEGATION_AFTER = re.compile(r"^[^.;]{0,6}\b(?:does not|doesn't|do not|never|n/a)\b", re.I)
+# Only an explicit non-application counts after the qualifier: "never exceed $15M" / "do not exceed"
+# BOUND the portfolio path rather than negate it (review round 3).
+RE_NEGATION_AFTER = re.compile(r"^[^.;]{0,6}(?:\b(?:does not|doesn't|do not|never) apply\b|\bn/a\b)", re.I)
 
 RE_HEADING = re.compile(r"^(#{1,6})\s+(.*)")
 # Anchored to the START of the heading text: "## Tenant history" or "CRITICAL PROVISIONS
