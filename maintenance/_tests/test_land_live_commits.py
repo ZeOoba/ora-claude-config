@@ -132,6 +132,42 @@ def main():
           p["status"] == "BLOCKED_LAND_DIVERGED", p)
     use(live)
 
+    # push_clean: gates the CLEAN tree at the SHA, and keeps the gate's FAIL lines on failure
+    live4 = fixture()
+    use(live4)
+    write(live4, llc.MEMORY + "event_log.md", "# log\n## e9\n")
+    git(live4, "commit", "-q", "-am", "memory: sweep 9")
+    hook = os.path.join(live4, ".git", "hooks", "pre-push")
+    with open(hook, "w", encoding="utf-8", newline="\n") as f:
+        # fails iff the PUSHING worktree has a stray untracked file
+        f.write("#!/bin/sh\nif [ -e stray-untracked.md ]; then echo 'FAIL: stray spec lint'; "
+                "echo 'hook-tests-gate: 1 pass, 1 fail'; exit 1; fi\nexit 0\n")
+    os.chmod(hook, 0o755)
+    write(live4, "stray-untracked.md", "other session's WIP\n")
+    sha = git(live4, "rev-parse", "HEAD")
+    try:
+        llc.push_clean(sha)
+        pushed = git(live4, "ls-remote", "origin", llc.LAND_BRANCH).split()[:1] == [sha]
+    except RuntimeError as e:
+        pushed = "ERR " + str(e)
+    check("push_clean ignores the live checkout's untracked files", pushed is True, pushed)
+    check("push_clean leaves no temp worktree", len(git(live4, "worktree", "list").splitlines()) == 1)
+    os.remove(os.path.join(live4, "stray-untracked.md"))
+    with open(hook, "w", encoding="utf-8", newline="\n") as f:
+        f.write("#!/bin/sh\necho 'FAIL: some real failure'\necho 'hook-tests-gate: 1 pass, 1 fail'\nexit 1\n")
+    write(live4, llc.MEMORY + "event_log.md", "# log\n## e10\n## e9\n")
+    git(live4, "commit", "-q", "-am", "memory: sweep 10")
+    try:
+        llc.push_clean(git(live4, "rev-parse", "HEAD"))
+        detail = ""
+    except RuntimeError as e:
+        detail = str(e)
+    check("failed push keeps the gate FAIL lines in the error", "FAIL: some real failure" in detail
+          and "hook-tests-gate: 1 pass, 1 fail" in detail, detail)
+    check("full gate output is logged", os.path.exists(os.path.join(
+        live4, "maintenance", "_state", "land-live-commits-last-push.log")))
+    use(live)
+
     rc = llc.main(["--repo", live, "--dry-run"])
     check("main() exit 3 on BLOCKED_NON_MEMORY", rc == 3, rc)
     rc = llc.main(["--repo", live, "--dry-run", "--include-path", "hooks"])
