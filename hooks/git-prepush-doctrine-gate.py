@@ -394,6 +394,56 @@ def _safe_echo(stream, text):
     stream.flush()
 
 
+BUYBOX_PROBE_REL = os.path.join("maintenance", "buybox-drift-probe.py")
+BUYBOX_TIMEOUT_S = 60
+
+
+def _buybox_probe_argv(worktree_path):
+    """argv for the pushed commit's OWN buybox-drift-probe.py, aimed at the worktree (the
+    content being pushed), not the live ~/.claude. --skills-root stays the probe's default
+    (live ~/ora-skills): the canon lives there and is not part of this repo."""
+    return [sys.executable, os.path.join(worktree_path, BUYBOX_PROBE_REL),
+            "--claude-root", worktree_path, "--quiet"]
+
+
+def run_buybox_advisory(worktree_path, timeout=BUYBOX_TIMEOUT_S):
+    """Buy-box ADVISORY leg (Gabriel 2026-11-03: WARN now, BLOCK only after the known stale
+    lines are fixed -- see ZeOoba/ora-claude-config#395). FAIL-OPEN BY CONSTRUCTION, the
+    reverse of the doctrine leg: the result is printed as [WARN] and returned for tests, but
+    the caller never feeds it into decide(), and every failure -- absent script (a commit
+    older than #395), crash, timeout -- is a one-line note, never a raise.
+    Returns the probe's exit code, or None when the script is absent or could not run."""
+    try:
+        argv = _buybox_probe_argv(worktree_path)
+        if not os.path.isfile(argv[1]):
+            return None
+        env = _clean_git_env()
+        env["PYTHONIOENCODING"] = "utf-8"
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
+                                    errors="replace", env=env, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            sys.stderr.write("pre-push [WARN] buy-box advisory: probe timed out after %ds "
+                             "(not blocking).\n" % timeout)
+            return None
+        if result.returncode == 0:
+            return 0
+        if result.returncode == 2:
+            sys.stderr.write("pre-push [WARN] buy-box advisory: probe error (exit 2, not "
+                             "blocking): %s\n" % (result.stderr or "").strip()[:300])
+            return 2
+        _safe_echo(sys.stderr, "pre-push [WARN] buy-box advisory (exit %d, not blocking -- "
+                               "fix before the gate flips to BLOCK):\n" % result.returncode)
+        _safe_echo(sys.stderr, (result.stdout or "") + (result.stderr or ""))
+        return result.returncode
+    except Exception as e:  # pragma: no cover - defensive; advisory must never raise
+        try:
+            sys.stderr.write("pre-push [WARN] buy-box advisory skipped (%s).\n" % e)
+        except Exception:
+            pass
+        return None
+
+
 def run_doctrine_probe():
     """Materialize the commit about to be pushed into a scratch worktree (see
     materialize_pushed_commit()) and run the probe against it with --live-root=, so it
@@ -446,6 +496,13 @@ def run_doctrine_probe():
         # turn a real probe verdict into "could not launch" (2026-09-22).
         _safe_echo(sys.stdout, result.stdout)
         _safe_echo(sys.stderr, result.stderr)
+        # Advisory only, against the same materialized commit: its outcome never reaches
+        # decide(), and its own exceptions are contained here so a buy-box failure cannot
+        # turn a real doctrine verdict into this function's fail-closed "could not launch".
+        try:
+            run_buybox_advisory(worktree_path)
+        except Exception:
+            pass
         return result.returncode, (result.stdout or "")
     except Exception as e:  # pragma: no cover - defensive
         sys.stderr.write(
