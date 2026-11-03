@@ -1,6 +1,6 @@
 ---
 name: ora-sourcing-construction-verify
-description: Weekly follow-on to ora-deal-sourcing-scan: resolves Construction Type for T1/T2 Deal Sourcing Log rows still 'Unknown — CONFIRM' by reading listing photos in the browser pane; corrects the construction score only. [MODEL: claude-sonnet-5 | set 2026-09-23]
+description: Weekly follow-on to ora-deal-sourcing-scan: resolves Construction Type for T1/T2 Deal Sourcing Log rows still 'Unknown — CONFIRM' by reading listing photos in the browser pane; corrects the construction score only. Re-enabled 2026-10-30 (Gabriel in-turn; companion to the re-enabled scan). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
 ORA SOURCING CONSTRUCTION-VERIFY — weekly, Tue 14:15, after ora-deal-sourcing-scan (Tue 10:45). Compute the run date once: `date '+%A %Y-%m-%d'` and reuse it in every title, subject and note.

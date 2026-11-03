@@ -195,6 +195,15 @@ UNGUARDED_BACKLOG = {
     # alarm, so guard adoption is its own reviewed change: a mis-keyed claim that returns 10
     # would silence the alarm. Remove this entry in that change.
     "ora-automation-health-monitor",             # emails the fleet alert; Notion Ops Hub
+    # Added 2026-11-03 (land live CC specs). All three registered 2026-10-30 on Gabriel's
+    # in-turn approval and UNTRACKED until this change, so the ratchet saw them only in the
+    # live tree. Each now sends in send-via-outlook contract mode (-DedupTaskId/-DedupPeriodKey
+    # keyed on the run date), which suppresses a same-day duplicate send but not a duplicate
+    # Notion page or output file; the two annual tasks also carry their own file/Sent-Items
+    # idempotency guard. No block-sentinel claim yet: adopt it per task and remove the entry.
+    "ora-annual-budget-kickoff",                 # emails the FY budget draft; Notion Ops Hub page
+    "ora-year-end-review",                       # emails the year-in-review; Notion Ops Hub page
+    "ora-cc-acq-sync-weekly",                    # emails ggoldberg only on a failed sync
 }
 
 # The ONLY way to declare a task harmless. Each entry means a human read the spec
