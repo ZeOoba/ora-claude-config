@@ -419,23 +419,43 @@ def run_buybox_advisory(worktree_path, timeout=BUYBOX_TIMEOUT_S):
             return None
         env = _clean_git_env()
         env["PYTHONIOENCODING"] = "utf-8"
-        try:
-            result = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
-                                    errors="replace", env=env, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            sys.stderr.write("pre-push [WARN] buy-box advisory: probe timed out after %ds "
-                             "(not blocking).\n" % timeout)
-            return None
-        if result.returncode == 0:
+        # Output goes to temp FILES, not pipes (REFUTE round 1, 2026-11-03): with pipes,
+        # subprocess.run's post-kill communicate() blocks until every holder of the pipe
+        # handles exits, so a grandchild that inherited them held the push ~15 s past a 1 s
+        # timeout. With files nothing waits on the handles; on timeout the whole tree is
+        # killed (taskkill /T) so no orphan lingers either.
+        with tempfile.TemporaryFile() as out_f, tempfile.TemporaryFile() as err_f:
+            proc = subprocess.Popen(argv, stdout=out_f, stderr=err_f, env=env)
+            try:
+                rc = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)],
+                                   capture_output=True, timeout=10)
+                except Exception:
+                    pass
+                try:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                except Exception:
+                    pass
+                sys.stderr.write("pre-push [WARN] buy-box advisory: probe timed out after "
+                                 "%ds (not blocking).\n" % timeout)
+                return None
+            out_f.seek(0)
+            err_f.seek(0)
+            stdout = out_f.read().decode("utf-8", "replace")
+            stderr = err_f.read().decode("utf-8", "replace")
+        if rc == 0:
             return 0
-        if result.returncode == 2:
-            sys.stderr.write("pre-push [WARN] buy-box advisory: probe error (exit 2, not "
-                             "blocking): %s\n" % (result.stderr or "").strip()[:300])
+        if rc == 2:
+            _safe_echo(sys.stderr, "pre-push [WARN] buy-box advisory: probe error (exit 2, "
+                                   "not blocking): %s\n" % stderr.strip()[:300])
             return 2
         _safe_echo(sys.stderr, "pre-push [WARN] buy-box advisory (exit %d, not blocking -- "
-                               "fix before the gate flips to BLOCK):\n" % result.returncode)
-        _safe_echo(sys.stderr, (result.stdout or "") + (result.stderr or ""))
-        return result.returncode
+                               "fix before the gate flips to BLOCK):\n" % rc)
+        _safe_echo(sys.stderr, stdout + stderr)
+        return rc
     except Exception as e:  # pragma: no cover - defensive; advisory must never raise
         try:
             sys.stderr.write("pre-push [WARN] buy-box advisory skipped (%s).\n" % e)
