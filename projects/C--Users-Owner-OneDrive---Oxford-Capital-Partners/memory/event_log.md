@@ -5,12 +5,121 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-30T22:55:27.851Z
+  modified: 2026-11-02T20:57:47.389Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-11-02 -- acquisition-underwriting-eval-harness v1.3 (post-#199, 82a83b5e) reimport confirmed
+
+- Package sha 2aa5a645c378f3e7, 24 entries, saved by Gabriel via Cowork Save skill.
+- reimport_correlate postclick: CONFIRMED, with CreationTime moving 15:19:41 -> 15:55:59 and main.log "1 downloaded" at an exact-second match.
+- This is a second v1.3 install. It carries #199's record_run rollback and the parse_replays OSError catch. It is distinct from the earlier v1.3 entry, which had the same title minus the commit.
+
+## 2026-11-02 -- retail-underwrite-lens reimport confirmed
+
+retail-underwrite-lens reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-11-02 -- repo-architecture v1.0.1 reimport confirmed
+
+repo-architecture v1.0.1 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-11-02 -- deal-folder-intake v1.2 reimport confirmed
+
+deal-folder-intake v1.2 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-11-02 -- acquisition-underwriting v4.41 reimport confirmed
+
+acquisition-underwriting v4.41 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-11-02 -- ora-skills #199 merged (82a83b5e): #196 residuals + 3-round gate; ~/.claude fast-forwarded to main
+
+- #199 fixes the #196 round-3 MEDIUM + 4 LOWs Gabriel accepted at merge:
+  - _unquote does a real closing-quote scan;
+  - parse_replays --record catches OSError;
+  - record_run rolls back the snapshot and truncates a partial summary.csv row on any exception, and an empty CSV counts as new;
+  - the .tmp cleanup is best-effort.
+- Full 5-reviewer adversarial gate, 3 rounds; all HIGH/MEDIUM issues fixed. Gabriel: "Merge now, note A+B".
+- Known limitations (LOW, accepted):
+  - (A) no test catches removal of the partial-row truncate (a probe proved it works);
+  - (B) truncate-to-stale-size can drop a CONCURRENT writer's CSV row when one writer fails. This needs two same-dir runs at once; the harness is a single daily poll.
+- acquisition-underwriting-eval-harness repackaged from 82a83b5e (sha 2aa5a645c378f3e7, 24 entries) and handed over for Save skill. It is pending re-import.
+- The 4 DIVERGENT skills (acquisition-underwriting be118330, deal-folder-intake d0a629d3, repo-architecture 732da111, retail-underwrite-lens 77cdbc46) were handed over for Save skill. They are pending clicks.
+- Primary ~/.claude: live/primary-checkout fast-forwarded 0c9ca4fe..ee49f5ed (0/0 vs origin/main).
+  - The 15 unique commits had already landed via #381-#384 (another session).
+  - The 2 overlapping dirty files were archived to maintenance/_archive/2026-11-02_primary-checkout-repoint/ and reset (one byte-identical to main, one an older heartbeat ts).
+  - The checkout stays on live/primary-checkout because `main` is held by the main-checkout worktree.
+  - 146 dirty files are left for dirty-tree-triage.
+
+## 2026-11-02 -- merge-ready force-cleared from PENDING_REIMPORT (Gabriel in-turn)
+- Gabriel approved force-clearing merge-ready's ledger entry (from 819ef1ce, landed as #194 a9560c1d). No Save-skill click was logged for that commit, so `pending_reimport.py clear` refused. Its evidence: the repo SKILL.md was byte-identical (EOL-normalized) to the installed copy before the merge, checked on 2026-10-30 and again on 2026-11-02 at head 819ef1ce, and repo_first_check reads merge-ready IN-SYNC. The platform already serves this content, so no reinstall is needed. Cleared with --force after this entry was appended.
+
+## 2026-11-02 -- acquisition-underwriting-eval-harness v1.3 reimport confirmed
+
+acquisition-underwriting-eval-harness v1.3 reimported via Cowork Save-skill; reimport_correlate CONFIRMED.
+
+## 2026-11-02 -- ora-skills #196 merged (run state no longer ships; cache-ahead false positives; eval-harness v1.3)
+- **#196 squash-merged** as beb43040 (Gabriel in-turn "go ahead"; after round 3 he chose "merge now, fix in follow-up"). Merged from the exact head the gate reviewed, c44058d2 on a9560c1d. CI green: skill-gates, skill-tests (GitHub ubuntu-latest) and tools-tests.
+- **Root cause corrected.** package_skills.is_bundled shipped the git-ignored runs/ and .pytest_cache/ folders, so the 10-30 eval-harness package carried 41 entries against 23 tracked files. My 10-30 explanation (a run launched from the installed folder) was wrong. Both folders are now excluded. The v1.3 package has 24 entries for 24 tracked files and contains no run state.
+- **adversarial-merge-gate: 3 rounds, 5 reviewers each, 0 bypass-marker breaches.**
+  - Round 1: 5 confirmed, fixed. The HIGH was the mirror sync refusing on the new RUNTIME-STATE verdict.
+  - Round 2: 2 MEDIUM plus the wrong root cause. Fixed after Gabriel chose the root-cause fix; the RUNTIME-STATE machinery was removed.
+  - Round 3: 1 MEDIUM and 4 LOWs, accepted as known risk by Gabriel. The MEDIUM: a quoted value followed by a comment ending in a quote mark compares equal to a different value (0 of 90 repo / 119 installed frontmatters).
+- **Follow-up PR owed** for the MEDIUM and the LOWs (parse_replays catches only ValueError; two untested decode paths; one misleading test comment; one stale .gitignore comment).
+- **Scheduled task ora-acquisition-underwriting-eval-harness** (~/.claude/scheduled-tasks/.../SKILL.md, Step 4): it no longer advances state when the parse_replays report carries record_error. Edited in place (Gabriel approved), backup in ora-skills/_staging/handoff/2026-11-02_merge-194-196/, not re-registered, and uncommitted in the live checkout.
+- **Pre-existing, not caused by #196:** acquisition-underwriting, deal-folder-intake, repo-architecture and retail-underwrite-lens read DIVERGENT. That verdict is identical under the pre-#196 tools at a9560c1d. county-parcel-screen moved from DIVERGENT to IN-SYNC.
+
+## 2026-11-02 -- ora-skills #194 merged (merge-ready strict-YAML quoting); no reimport needed
+- **#194 squash-merged** (a9560c1d, Gabriel in-turn "go ahead"). merge-ready/SKILL.md line 3 is now the double-quoted description the platform already stored on install, so the frontmatter parses as strict YAML. The decoded text is unchanged (882 chars).
+- **Gates:** CLEAN/MERGEABLE, no overlapping PR. tools-tests was cancelled twice by the shared 15-min CI timeout (main hits it too) and passed on attempt 3. The commit's 4 claims were re-checked at head 819ef1ce before merge: old line fails strict YAML, new parses, value identical, file == installed cache. adversarial-merge-gate was not run: its own skip clause covers trivial single-file, single-session changes.
+- **Ledger:** merge-ready cleared from PENDING_REIMPORT without a Save-skill click. The repo copy was byte-identical (EOL-normalized) to the installed copy before the merge (checked 2026-10-30 and again today), so the platform already serves this content. The post-merge hook's mirror sync then rewrote the same bytes.
+
+## 2026-11-02 — ora-automation-health-monitor weekly run: am-brief stalled after Block A, ora-pm backups failing, alert sent
+- **Surface:** CC/MCP, scheduled Monday fire (throttled +121 min). Base skill v1.15, liveness PASS. No multi-day outage; host off 11-01 18:05 → 11-02 09:34 ET, 42-task catch-up burst (8 HOST-UNAVAILABLE, 13 THROTTLED-THEN-RECOVERED, 0 open).
+- **Flagged:** (1) ⚠️ PRODUCER-STALE-OUTPUT ora-am-brief B/C/D: session local_b4b9d9fe ran 14:58–15:04Z and stopped mid-Block B; only the Rate Snapshot landed. No Daily Brief 11-01 or 11-02, no Inbox Pre-Brief 11-02, no Cash Position Snapshot since 10-05. (2) ⚠️ BACKUP-FAILED ora-pm monthly-billing-backup 11-01 (HTTP 500, Cloudflare 1016). (3) ⚠️ BACKUP-FAILED/STALE delinquency-backup (HTTP 500 11-01; 10 straight failures). (4) ⚠️ mirror-drift-check ALERT-LATE +150 (host up, self-recovered).
+- **Cleared:** the 10-30 ACTIONS-BILLING-BLOCKED finding. The watchdog has been green since 11-01 03:19Z.
+- **Outputs:** Notion `40c6ecd8-9e59-8103-abcc-fa74a073a06b` (verified). Snapshots `2026-11-02.ahm-cc.json` (71) and `.ahm-lams.json` (29), both SNAPSHOT OK; diff vs 10-30 clean. Alert email sent (send-log [OK] 13:26:10 ET, Sent Items confirmed).
+
+## 2026-10-31 — Phase 3: live ~/.claude checkout repointed to origin/main (0c9ca4fe)
+
+- **Gabriel in-turn ("Yes, run it") on the Phase 3 plan.** Before: `live/primary-checkout` f3d3b798, 22 ahead / 6 behind origin/main, 7 files differing. Phase 2 had already landed every unique commit as #381–#384 and #386, and #385 replaced the guard-liveness code. Backup ref `backup/primary-checkout-20261031` = f3d3b798 (the 10-30 `backup/primary-checkout-20261030` = bd1ea863 is kept).
+- **Loss check:** every line on live but not on main was an older version of something main superseded (#382 done-bar, #383 deal-recon, #385 probe/tests/tech.md). No content existed only on live.
+- **Overlap:** the only dirty file among the 7, `skills/branch-catchup/SKILL.md`, was the ora-skills post-commit copy of Phase 2's 59b60598 upstream. It is byte-identical (EOL-normalised) to ora-skills dd94bd2a and to the ora-claude-config mirror branch 000b4dbf. preflight-shared-checkout flagged it CONTESTED (no live owner); that was resolved by provenance. It was copied to `maintenance/_state/_archive/2026-10-31_phase3-repoint/` and stashed alone (`stash@{0}` fb066981, "phase3-repoint-branch-catchup-59b60598-20261031"). The live copy returns when the 000b4dbf mirror PR merges.
+- **Move:** `git reset --keep origin/main` plus upstream set to origin/main; HEAD 0c9ca4fe, 0/0. `main` stays checked out in the stale `.claude/worktrees/main-checkout` (c7e05d82), which was not touched. The other 137 dirty entries were preserved; dirty-tree triage is a separate pass. Nothing was pushed.
+- **Verify:** doctrine probe exit 0 (CLAUDE.md 1,744 words; guard liveness 8 guards checked from tech.md, so the #379-inherited check-11 skip is closed by #385); governor-drift OK (DSCR 1.25x / LTV 40%); hook suite 72/72 (PYTHONIOENCODING=utf-8).
+- **Rollback:** `git reset --keep backup/primary-checkout-20261031`.
+
+## 2026-10-31 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `c460ebbe-769e-4e81-9c03-d37c0051403e` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel in-turn 2026-10-31 approved the override for the 4 recon/* branches, then separately "Yes, use override" for recon/live-checkpoint-f3d3b798. Sole expected failure: pre-existing test_guard_liveness_real_no_orphans (#379); fix on fix/guard-liveness-techmd.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-10-31 14:43:48 local.
+
+## 2026-10-31 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `c460ebbe-769e-4e81-9c03-d37c0051403e` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel in-turn 2026-10-31 "Yes, override and push" for the 4 recon/* Phase 2 branches. Sole failure is pre-existing on main: test_guard_liveness_real_no_orphans (#379 removed CLAUDE.md Guards: line); fix tracked in session local_19332dfc.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-10-31 14:17:10 local.
+
+## 2026-10-31 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `c460ebbe-769e-4e81-9c03-d37c0051403e` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel in-turn 2026-10-31 "Yes, override and push" for the 4 recon/* Phase 2 branches. Sole failure is pre-existing on main: test_guard_liveness_real_no_orphans (#379 removed CLAUDE.md Guards: line); fix tracked in session local_19332dfc.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-10-31 14:11:05 local.
+
+## 2026-10-31 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `c460ebbe-769e-4e81-9c03-d37c0051403e` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel in-turn 2026-10-31 "Yes, override and push" for the 4 recon/* Phase 2 branches. Sole failure is pre-existing on main: test_guard_liveness_real_no_orphans (#379 removed CLAUDE.md Guards: line); fix tracked in session local_19332dfc.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-10-31 14:06:22 local.
+
+## 2026-10-31 — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)
+
+- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real failure, but session `c460ebbe-769e-4e81-9c03-d37c0051403e` held a valid `allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from mtime), so the push was ALLOWED rather than blocked.
+- Reason recorded in the token: Gabriel in-turn 2026-10-31 "Yes, override and push" for the 4 recon/* Phase 2 branches. Sole failure is pre-existing on main: test_guard_liveness_real_no_orphans (#379 removed CLAUDE.md Guards: line); fix tracked in session local_19332dfc.
+- Mechanical record only, per the rules.md override protocol (token created only after Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override used at 2026-10-31 14:00:42 local.
 
 ## 2026-10-30 -- acquisition-underwriting-eval-harness v1.2 reimport confirmed
 
