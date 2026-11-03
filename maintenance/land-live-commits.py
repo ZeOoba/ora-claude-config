@@ -150,8 +150,12 @@ def push_clean(sha):
             raise RuntimeError("push failed (exit %d); gate lines: %s; full log: %s"
                                % (r.returncode, " | ".join(lines[:20]) or "(none)", _gate_log_path()))
     finally:
-        subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(wt)],
-                       capture_output=True, text=True)
+        rm = subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(wt)],
+                            capture_output=True, text=True)
+        if rm.returncode != 0:  # e.g. a Windows file lock: delete what we can, then unregister
+            import shutil
+            shutil.rmtree(wt, ignore_errors=True)
+            subprocess.run(["git", "-C", str(REPO), "worktree", "prune"], capture_output=True, text=True)
 
 
 def land(p):
