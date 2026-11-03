@@ -108,21 +108,29 @@ RE_FIRM_SCALE = re.compile(r"\bAUM\b|assets under management", re.I)
 FIRM_SCALE_MIN_M = 100
 # Financing figures (loan size, lender appetite, fund/equity raise) right before the amount are
 # not the buy-box. Kept to a short reach so "Buy-box: sub-$10M; lender ..." still flags.
-RE_FINANCING = re.compile(r"\b(?:loans?|lenders?|fund|equity|raise)\b", re.I)
+RE_FINANCING = re.compile(r"\b(?:loans?|lenders?|fund|equity|raise|debt|refi\w*|proceeds)\b", re.I)
+RE_BUYBOX_WORD = re.compile(r"buy[- ]?box", re.I)
 FINANCING_BEFORE = 40
 
 # The Amendment H qualifier itself -- NOT any "portfolio" (in ORA prose that is usually the owned
 # book: "fits the existing portfolio mix", "see portfolio-growth"). Review C3, 2026-11-03.
 RE_PORTFOLIO = re.compile(
-    r"amendment h\b|sold together|portfolio path|multi-building portfolio|portfolio of 2"
+    r"amendment h\b|sold together|portfolio path|multi-building portfolio|portfolio of 2(?![0-9])"
     r"|\b2\s?" + _DASH + r"\s?5[\s-]+buildings?|portfolios?\s+(?:up to|to|of up to|≤|<=)\s*\$", re.I)
+# "not sold together", "Amendment H does not apply" negate the qualifier (review round 2).
+RE_NEGATION_BEFORE = re.compile(r"\b(?:not|no|never|without|excludes?)\b[^.;]{0,6}$", re.I)
+RE_NEGATION_AFTER = re.compile(r"^[^.;]{0,6}\b(?:does not|doesn't|do not|never|n/a)\b", re.I)
 
 RE_HEADING = re.compile(r"^(#{1,6})\s+(.*)")
 # Anchored to the START of the heading text: "## Tenant history" or "CRITICAL PROVISIONS
 # (history-derived)" are live sections, not changelogs (review C2).
+# The WHOLE heading must be the history label, optionally with a parenthetical or a version/date
+# suffix: "Changelog (v1.x)", "Changelog -- v1.x". "History of the buy-box decision" and "Changes to
+# the screening funnel" are live sections (review round 2).
 RE_HISTORY_HEADING = re.compile(
-    r"^[\W_]*(?:change\s?log|changes\b|history\b|release notes"
-    r"|(?:version|revision|build|update|change|edit|release|amendment)\s+(?:history|log|notes)\b)", re.I)
+    r"^[\W_]*(?:change\s?log|changes|history|release notes"
+    r"|(?:version|revision|build|update|change|edit|release|amendment)\s+(?:history|log|notes))[*_`]*"
+    r"\s*(?:\([^)]*\))?\s*(?:[:–—-]+\s*v?[\d.x]+(?:\s*[–—-]\s*v?[\d.x]+)?)?[\W_]*$", re.I)
 RE_LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 RE_FENCE = re.compile(r"^\s*(```|~~~)")
 # A version/date token followed directly by changelog punctuation ("v1.10 (", "2026-10-30:",
@@ -219,7 +227,10 @@ def _scan_unit(numbered):
     def has_context(ms, me):
         return RE_CONTEXT.search(joined[max(0, ms - CONTEXT_BEFORE):me + CONTEXT_AFTER]) is not None
 
-    has_portfolio = RE_PORTFOLIO.search(joined) is not None
+    has_portfolio = any(
+        not RE_NEGATION_BEFORE.search(joined[max(0, q.start() - 20):q.start()])
+        and not RE_NEGATION_AFTER.search(joined[q.end():q.end() + 20])
+        for q in RE_PORTFOLIO.finditer(joined))
     out = []
     seen = set()
     for rx in (RE_PRICE_CEIL_WORD, RE_PRICE_CEIL_RANGE, RE_PRICE_CEIL_SUFFIX):
@@ -233,7 +244,8 @@ def _scan_unit(numbered):
             window = joined[max(0, m.start() - CONTEXT_BEFORE):m.end() + CONTEXT_AFTER]
             if v >= FIRM_SCALE_MIN_M or RE_FIRM_SCALE.search(window):
                 continue
-            if RE_FINANCING.search(joined[max(0, m.start() - FINANCING_BEFORE):m.start()]):
+            reach = joined[max(0, m.start() - FINANCING_BEFORE):m.start()]
+            if RE_FINANCING.search(reach) and not RE_BUYBOX_WORD.search(reach):
                 continue
             reason = None
             if v == CANON_SINGLE_CEIL_M and not has_portfolio:
@@ -335,8 +347,17 @@ def _arg(argv, flag, default):
     return default
 
 
+KNOWN_FLAGS = ("--quiet", "--claude-root", "--skills-root")
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
+    # Unknown args ("--claude-root=X", typos) would otherwise fall back to the real ~/.claude.
+    for i, a in enumerate(argv):
+        if a.startswith("--") and a not in KNOWN_FLAGS:
+            print("[ACTION] buybox-drift-probe: unknown argument %s (use '--flag value')" % a,
+                  file=sys.stderr)
+            sys.exit(2)
     quiet = "--quiet" in argv
     claude_root = _arg(argv, "--claude-root", os.path.join(HOME, ".claude"))
     skills_root = _arg(argv, "--skills-root", os.path.join(HOME, "ora-skills"))
@@ -362,7 +383,13 @@ def main(argv=None):
 
     findings = []
     scanned = 0
-    for path in iter_targets(claude_root, skills_root):
+    targets = list(iter_targets(claude_root, skills_root))
+    # An existing but empty/wrong ~/.claude root would scan nothing and read as clean.
+    if not any(not os.path.relpath(p, claude_root).startswith("..") for p in targets):
+        print("[ACTION] buybox-drift-probe: no target files under %s -- wrong root?" % claude_root,
+              file=sys.stderr)
+        sys.exit(2)
+    for path in targets:
         try:
             with open(path, "r", encoding="utf-8", errors="replace") as fh:
                 text = fh.read()
