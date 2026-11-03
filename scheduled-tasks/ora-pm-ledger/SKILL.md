@@ -117,7 +117,8 @@ weekday only where a format names one). This is an INTERNAL status report to Gab
 counterparty communication — sending it is permitted.
 
 ORA context: ~600K SF shallow-bay industrial/flex, ~140 tenants, ~27
-properties across OH, MD, IN, WI, MO, KS, TN. Acquisition focus: sub-$10M,
+properties across OH, MD, IN, WI, MO, KS, TN. Acquisition focus: $500K–$10M
+single asset; up to $15M for 2–5 buildings sold together (Amendment H);
 shallow-bay, multi-tenant, below replacement cost.
 
 ### A.1 SOURCES — THE NOTION SURFACE TO SCAN
