@@ -183,20 +183,26 @@ def test_review_round1():
 # a regression, and passed in isolation on the same commit.
 TIMED_RETRY_MULTIPLIER = 2.0
 TIMED_RETRIES = []  # names that recovered on the retry, printed in the summary
-# Third tier, load-independent (2026-11-04): when a case can be rebuilt at a QUARTER of
-# its size (`quarter=`), a miss that survives the 2x retry is judged by growth, not wall
-# clock. Linear work at 4x the input takes ~4x the time; the quadratic blow-ups these
-# budgets exist for take ~16x. Pass iff t_full <= TIMED_GROWTH_CEILING * t_quarter.
-# Measured 2026-11-03 on LAPTOP-CSHSCBE6 at 100% CPU: 200k heredoc 5.7s vs 50k 1.66s
-# (3.4x), while the fixed 3s/6s budget failed at 7.6s then 11.3s.
-TIMED_GROWTH_CEILING = 8.0
+# Third tier, load-independent (2026-11-04): when a case can be rebuilt at an EIGHTH of
+# its size (`quarter=` holds that small variant; kept the name for the call sites), a
+# miss that survives the 2x retry is judged by growth, not wall clock: pass iff
+# t_full <= TIMED_GROWTH_CEILING * t_small. Linear work grows <= 8x over the step; a
+# quadratic grows 64x. Why an eighth and 10x, not a quarter and 8x (review of 98bef9a1):
+# the case's existing linear work dilutes a quadratic term, and at 1/4 with an 8x ceiling
+# an injected O(n^2) adding ~4s to the 200k heredoc still passed (6.1x). Measured with
+# that shim at 1/8 + 10x: unshimmed heredoc 6.5x (pass); +1.15s quadratic 7.8x (pass);
+# +2.2s 13.6x, +3.4s 16.1x (fail). So a hidden quadratic is bounded to roughly a third
+# of the 3s budget. Only cases whose small variant follows the SAME code path are wired
+# (heredoc, 120 python -c stages); find/xargs small variants hit the work cap at a
+# different point (review F2/F3), so those keep the two-tier rule.
+TIMED_GROWTH_CEILING = 10.0
 
 
 def _timed_once(cmd):
     import time
-    t0 = time.time()
+    t0 = time.perf_counter()
     rc, out, err = run(payload(cmd), "script")
-    return rc, time.time() - t0
+    return rc, time.perf_counter() - t0
 
 
 def _timed(name, cmd, budget=4.0, quarter=None):
@@ -238,20 +244,19 @@ def test_review_round2():
     """Regressions from adversarial review round 2 (2026-10-28)."""
     # D1 -- global work budget: nested / flat find -exec chains must not stall
     _timed("nested find -exec x220", "find . " + "-exec find " * 220)
-    _timed("flat find -exec 880KB", "find . " + "-exec echo " * 80000, budget=8.0,
-           quarter="find . " + "-exec echo " * 20000)
+    _timed("flat find -exec 880KB", "find . " + "-exec echo " * 80000, budget=8.0)
     _timed("nested bash -c", "bash -c \"" * 40 + "sed -i s/a/b/ f")
-    _timed("xargs chain", "xargs " * 50000, budget=8.0, quarter="xargs " * 12500)
+    _timed("xargs chain", "xargs " * 50000, budget=8.0)
     # round 3: the python -c scan and heredoc stripping are inside the budget too.
     # BALANCED quotes (an unbalanced quote is rejected by the tokeniser and tests nothing)
     stage = 'python -c "' + "open(" * 1638 + '"'
     _timed("60 python -c stages (492KB)", ";".join([stage] * 60), budget=3.0)
     _timed("120 python -c stages (985KB)", ";".join([stage] * 120), budget=3.0,
-           quarter=";".join([stage] * 30))
+           quarter=";".join([stage] * 15))
     _timed("bash -c around 70 python stages", "bash -c '" + ";".join(
         ['python -c "' + "open(" * 1638 + '"'] * 70) + "'", budget=3.0)
     _timed("200k heredoc operators", "cat " + "<<A" * 200000 + "\n" + "A\n" * 200000,
-           budget=3.0, quarter="cat " + "<<A" * 50000 + "\n" + "A\n" * 50000)
+           budget=3.0, quarter="cat " + "<<A" * 25000 + "\n" + "A\n" * 25000)
     # D2 -- open( arguments are parsed, not windowed
     for c in ("python -c \"print(open('f').read().replace('foo', 'bar'))\"",
               "python -c \"import json; d=json.load(open('f')); print(d.get('name', 'x'))\"",
@@ -330,11 +335,13 @@ def test_timed_retry_rule():
         _timed_once = lambda cmd: next(seq)
         _timed("selftest-blowup", "x", budget=3.0)
         blew = len(FAILS) == len(seen_fails) + 1 and "selftest-blowup" in FAILS[-1]
-        seq = iter([(0, 9.0), (0, 9.0), (0, 2.5)])  # over 2x, but linear growth (3.6x): pass
+        seq = iter([(0, 9.0), (0, 9.0), (0, 1.2)])  # over 2x, but linear growth (7.5x): pass
         _timed_once = lambda cmd: next(seq)
         _timed("selftest-linear", "x", budget=3.0, quarter="q")
-        linear = len(FAILS) == len(seen_fails) + 1 and TIMED_RETRIES[-1].startswith("selftest-linear")
+        linear = (len(FAILS) == len(seen_fails) + 1 and PASSES[0] == seen_passes + 2
+                  and TIMED_RETRIES[-1].startswith("selftest-linear"))
         seq = iter([(0, 9.0), (0, 9.0), (0, 0.5)])  # 18x growth = quadratic class: fail
+        passes_after_linear = PASSES[0]
         _timed_once = lambda cmd: next(seq)
         _timed("selftest-quadratic", "x", budget=3.0, quarter="q")
         quad = len(FAILS) == len(seen_fails) + 2 and "selftest-quadratic" in FAILS[-1]
