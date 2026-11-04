@@ -183,6 +183,13 @@ def test_review_round1():
 # a regression, and passed in isolation on the same commit.
 TIMED_RETRY_MULTIPLIER = 2.0
 TIMED_RETRIES = []  # names that recovered on the retry, printed in the summary
+# Third tier, load-independent (2026-11-04): when a case can be rebuilt at a QUARTER of
+# its size (`quarter=`), a miss that survives the 2x retry is judged by growth, not wall
+# clock. Linear work at 4x the input takes ~4x the time; the quadratic blow-ups these
+# budgets exist for take ~16x. Pass iff t_full <= TIMED_GROWTH_CEILING * t_quarter.
+# Measured 2026-11-03 on LAPTOP-CSHSCBE6 at 100% CPU: 200k heredoc 5.7s vs 50k 1.66s
+# (3.4x), while the fixed 3s/6s budget failed at 7.6s then 11.3s.
+TIMED_GROWTH_CEILING = 8.0
 
 
 def _timed_once(cmd):
@@ -192,7 +199,7 @@ def _timed_once(cmd):
     return rc, time.time() - t0
 
 
-def _timed(name, cmd, budget=4.0):
+def _timed(name, cmd, budget=4.0, quarter=None):
     try:
         rc, el = _timed_once(cmd)
         if rc == 0 and el >= budget:
@@ -201,6 +208,19 @@ def _timed(name, cmd, budget=4.0):
                 TIMED_RETRIES.append("%s: %.1fs > %.0fs, retry %.1fs < %.0fs"
                                      % (name, el, budget, el2, budget * TIMED_RETRY_MULTIPLIER))
                 PASSES[0] += 1
+                return
+            if rc2 == 0 and quarter is not None:
+                rcq, elq = _timed_once(quarter)
+                full = min(el, el2)
+                if rcq == 0 and elq > 0 and full <= TIMED_GROWTH_CEILING * elq:
+                    TIMED_RETRIES.append("%s: %.1fs/%.1fs over budget, but quarter-size %.2fs -> "
+                                         "growth %.1fx <= %.0fx (linear under load)"
+                                         % (name, el, el2, elq, full / elq, TIMED_GROWTH_CEILING))
+                    PASSES[0] += 1
+                    return
+                FAILS.append("%s took %.1fs then %.1fs; quarter-size %.2fs rc=%s -> growth %.1fx > %.0fx"
+                             % (name, el, el2, elq, rcq, full / elq if elq else float("inf"),
+                                TIMED_GROWTH_CEILING))
                 return
             FAILS.append("%s took %.1fs then %.1fs on retry rc=%s (budget %.0fs, retry %.0fs)"
                          % (name, el, el2, rc2, budget, budget * TIMED_RETRY_MULTIPLIER))
@@ -218,18 +238,20 @@ def test_review_round2():
     """Regressions from adversarial review round 2 (2026-10-28)."""
     # D1 -- global work budget: nested / flat find -exec chains must not stall
     _timed("nested find -exec x220", "find . " + "-exec find " * 220)
-    _timed("flat find -exec 880KB", "find . " + "-exec echo " * 80000, budget=8.0)
+    _timed("flat find -exec 880KB", "find . " + "-exec echo " * 80000, budget=8.0,
+           quarter="find . " + "-exec echo " * 20000)
     _timed("nested bash -c", "bash -c \"" * 40 + "sed -i s/a/b/ f")
-    _timed("xargs chain", "xargs " * 50000, budget=8.0)
+    _timed("xargs chain", "xargs " * 50000, budget=8.0, quarter="xargs " * 12500)
     # round 3: the python -c scan and heredoc stripping are inside the budget too.
     # BALANCED quotes (an unbalanced quote is rejected by the tokeniser and tests nothing)
     stage = 'python -c "' + "open(" * 1638 + '"'
     _timed("60 python -c stages (492KB)", ";".join([stage] * 60), budget=3.0)
-    _timed("120 python -c stages (985KB)", ";".join([stage] * 120), budget=3.0)
+    _timed("120 python -c stages (985KB)", ";".join([stage] * 120), budget=3.0,
+           quarter=";".join([stage] * 30))
     _timed("bash -c around 70 python stages", "bash -c '" + ";".join(
         ['python -c "' + "open(" * 1638 + '"'] * 70) + "'", budget=3.0)
     _timed("200k heredoc operators", "cat " + "<<A" * 200000 + "\n" + "A\n" * 200000,
-           budget=3.0)
+           budget=3.0, quarter="cat " + "<<A" * 50000 + "\n" + "A\n" * 50000)
     # D2 -- open( arguments are parsed, not windowed
     for c in ("python -c \"print(open('f').read().replace('foo', 'bar'))\"",
               "python -c \"import json; d=json.load(open('f')); print(d.get('name', 'x'))\"",
@@ -308,20 +330,28 @@ def test_timed_retry_rule():
         _timed_once = lambda cmd: next(seq)
         _timed("selftest-blowup", "x", budget=3.0)
         blew = len(FAILS) == len(seen_fails) + 1 and "selftest-blowup" in FAILS[-1]
+        seq = iter([(0, 9.0), (0, 9.0), (0, 2.5)])  # over 2x, but linear growth (3.6x): pass
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-linear", "x", budget=3.0, quarter="q")
+        linear = len(FAILS) == len(seen_fails) + 1 and TIMED_RETRIES[-1].startswith("selftest-linear")
+        seq = iter([(0, 9.0), (0, 9.0), (0, 0.5)])  # 18x growth = quadratic class: fail
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-quadratic", "x", budget=3.0, quarter="q")
+        quad = len(FAILS) == len(seen_fails) + 2 and "selftest-quadratic" in FAILS[-1]
         seq = iter([(1, 0.1)])                     # wrong rc is never retried
         _timed_once = lambda cmd: next(seq)
         _timed("selftest-rc", "x", budget=3.0)
-        rcfail = len(FAILS) == len(seen_fails) + 2 and "selftest-rc" in FAILS[-1]
+        rcfail = len(FAILS) == len(seen_fails) + 3 and "selftest-rc" in FAILS[-1]
     finally:
         _timed_once = real
         del FAILS[len(seen_fails):]
         PASSES[0] = seen_passes
         TIMED_RETRIES[:] = [r for r in TIMED_RETRIES if not r.startswith("selftest-")]
-    if recovered and blew and rcfail:
+    if recovered and blew and rcfail and linear and quad:
         PASSES[0] += 1
     else:
-        FAILS.append("_timed retry rule self-test: recovered=%s blowup=%s rc=%s"
-                     % (bool(recovered), blew, rcfail))
+        FAILS.append("_timed retry rule self-test: recovered=%s blowup=%s rc=%s linear=%s quad=%s"
+                     % (bool(recovered), blew, rcfail, linear, quad))
 
 
 def main():
