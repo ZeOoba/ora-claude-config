@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""commit-own-edit.py -- at the end of an unattended run, commit the ONE memory file the run
-edited, but only when preflight-shared-checkout.py proves this session is its sole recorded
-owner. Anything less leaves the file for ora-memory-commit-sweep, exactly as before.
+"""commit-own-edit.py -- land the ONE memory file an unattended run edited, at the end of the
+run, but only when this session provably owns every uncommitted byte of it. Anything less
+leaves the file for ora-memory-commit-sweep, exactly as before.
 
 WHY (2026-11-05): ora-appsec-sweep appends its findings to open-items-tracker.md and, being
 report-only, never committed them. The only backstop, ora-memory-commit-sweep, runs weekly
@@ -11,52 +11,71 @@ the ended run, labelled ORPHANED). The 2026-11-04 rows (OI-389..395) blocked ano
 until it landed them by hand as e8b708c6; dirty-tree triage had landed earlier backlogs the same
 way (09482331, 4e8aa134).
 
-WHAT IT DOES -- one path, one commit, or nothing:
-  1. Refuses (ERROR) anything that is not a tracked file under MEMORY_PREFIX, the tree
-     land-live-commits.py ships to main (a commit outside it would block that pipeline with
-     BLOCKED_NON_MEMORY), and refuses to run without a session id or a message.
-  2. Leaves the file (LEFT_FOR_SWEEP) unless ALL of these hold:
-       - HEAD is on a branch and no merge, rebase, cherry-pick or revert is in progress;
-       - the index holds HEAD's version of the path (nobody has staged a version of it);
-       - the preflight (no --since, no --accept-stale) says CLEAR with the path in
-         dirty_overlap_mine: this session is its only live recorded owner, no other session's
-         live claim covers it, and no owner is stale-only or unknown;
-       - the file's bytes did not change while that was checked (hashed before and after).
-  3. Commits with `git commit --only -- <path>`: the working-tree content of that one path,
-     ignoring whatever else sits in the shared index (other staged paths stay staged).
-  4. Verifies the commit it made, found by a per-run trailer: one parent, exactly that path,
-     exactly the blob that was checked, on the branch that was checked.
+TWO CALLS, around the run's own edits:
+  --begin --path P       BEFORE the first edit. Records a baseline for (this session, P) beside
+                         this session's provenance: whether P matched HEAD at that moment, and
+                         HEAD's blob of it. BEGUN = clean. DIRTY_AT_BEGIN = someone's
+                         uncommitted content was already in P, so the landing will refuse.
+  --path P --message M   AFTER the last edit. Commits P, or leaves it.
 
-WHY A SCRIPT, NOT TWO COMMANDS IN THE TASK SPEC: the git sequence has documented traps in this
+THE LANDING COMMITS ONLY WHEN ALL OF THESE HOLD:
+  - P is a tracked file under MEMORY_PREFIX (the tree land-live-commits.py ships; a commit
+    outside it would block that pipeline with BLOCKED_NON_MEMORY); a session id and a message
+    were given;
+  - HEAD is on a branch, no merge/rebase/cherry-pick/revert is in progress, nothing of P is
+    staged, and the baseline (if any) was clean;
+  - P has been untouched for QUIET_SECONDS, so every Edit-tool write before the check has its
+    touch record on disk (recorder lag measured live 2026-11-05: p50 0.3 s, p99 4.7 s);
+  - preflight-shared-checkout.py says CLEAR with P in dirty_overlap_mine and provenance fully
+    readable: this session is P's only LIVE recorded owner and no other session's claim covers
+    it. STALE owners (sessions that touched P before its last commit -- the live tracker always
+    has some) contest P, because a partial commit can leave their hunk dirty. They are excused
+    (--accept-stale) only by a clean baseline with P not committed since: P then held no
+    uncommitted content when this run began, so whatever they wrote was already committed;
+  - the bytes `git add` would store for P are the same before the check, after it, and right
+    before the commit, and HEAD's blob of P has not moved.
+Then: `git commit --only -- P` (P's working-tree content, ignoring everything else in the shared
+index -- other staged paths stay staged), and verification of the commit found by its per-run
+trailer: one parent, parent's P unchanged, only P, the checked blob, on the checked branch. A
+commit that fails verification is taken back (branch moved back if it still points at it, P's
+index entry restored): UNDONE. If taking it back fails too: COMMITTED_UNVERIFIED.
+
+WHY A SCRIPT, NOT GIT COMMANDS IN THE TASK SPEC: the sequence has documented traps in this
 checkout (a pathspec commit re-reads the working tree, a bare commit takes the whole shared
-index, index.lock contention), and an unattended run should not improvise around them -- the
-same reasoning as memory-commit-sweep.py and append-event-log.py.
+index, `git add` keeps CRLF for a path whose indexed blob has CRLF while hash-object normalises,
+index.lock contention), and an unattended run should not improvise around them -- the same
+reasoning as memory-commit-sweep.py and append-event-log.py.
 
-ACCEPTED LIMITATION, inherited from the preflight (see its docstring): "sole owner" means sole
-RECORDED owner. Provenance comes from the Edit/Write tool hook, so a foreign edit made through
-Bash or a script and left uncommitted BEFORE this run's edit is invisible and would be committed
-with it. The weekly sweep commits such content blind already, so this exposure is strictly
-smaller. A foreign write DURING the check changes the hash and is caught. Callers must write the
-file with the Edit tool; otherwise their own edit reads as unowned and is left for the sweep
-(safe, but nothing lands).
+RESIDUAL EXPOSURE. Provenance comes only from the Edit/Write tool hook. So a foreign write made
+with Bash or a script DURING the run's window (after --begin, before the landing) is invisible,
+and would be committed with the run's rows; without --begin, that window reaches back to P's
+last commit. The same holds for a foreign Edit-tool touch recorded under a spelling the
+preflight's owner lookup cannot match (a since-removed junction, an NTFS stream suffix). This
+helper refuses anything with a recorded foreign owner; the weekly sweep it replaces for this
+case commits any settled content without looking at owners.
 
-Never pushes, never stages any other path, never resets, stashes or checks out, never touches a
-lock it did not take. Landing on main stays land-live-commits.py's job (memory-commit-sweep
-STEP 2).
+Never pushes; never stages any path but P; never stashes or checks out; never touches a lock it
+did not take; moves a ref only to take back its own just-made commit. Landing on main stays
+land-live-commits.py's job (memory-commit-sweep STEP 2).
 
-Exit: 0 COMMITTED or NOTHING_TO_COMMIT | 1 LEFT_FOR_SWEEP (not provably this run's alone, or the
-index stayed locked; the weekly sweep lands it) | 2 ERROR (refused input or a git/preflight
-failure; nothing committed) | 3 COMMITTED_UNVERIFIED (a commit landed but failed verification; a
-human must look at it). The last stdout line is always RESULT_JSON={...}.
+Exit: 0 COMMITTED, NOTHING_TO_COMMIT, BEGUN | 1 LEFT_FOR_SWEEP, DIRTY_AT_BEGIN | 2 ERROR
+(refused input or a git/preflight failure; nothing committed) | 3 UNDONE, COMMITTED_UNVERIFIED (a
+commit failed verification; a human should look). The last stdout line is always
+RESULT_JSON={...}.
 
 Usage:
-  python commit-own-edit.py --path <memory file> --message "<commit subject>" [--session ID]
+  python commit-own-edit.py --begin --path <memory file>
+  python commit-own-edit.py --path <memory file> --message "<commit subject>"
 """
 import argparse
+import hashlib
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import traceback
 import uuid
@@ -67,13 +86,18 @@ PREFLIGHT = os.path.join(HERE, "preflight-shared-checkout.py")
 # Must equal land-live-commits.py's MEMORY (pinned by test_memory_prefix_matches_land_live_commits).
 MEMORY_PREFIX = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/"
 
-EXIT = {"COMMITTED": 0, "NOTHING_TO_COMMIT": 0, "LEFT_FOR_SWEEP": 1, "ERROR": 2,
-        "COMMITTED_UNVERIFIED": 3}
+EXIT = {"COMMITTED": 0, "NOTHING_TO_COMMIT": 0, "BEGUN": 0,
+        "LEFT_FOR_SWEEP": 1, "DIRTY_AT_BEGIN": 1, "ERROR": 2,
+        "UNDONE": 3, "COMMITTED_UNVERIFIED": 3}
 
 GIT_TIMEOUT = 60
 COMMIT_TIMEOUT = 120  # generous: a killed `git commit` can strand .git/index.lock
 PREFLIGHT_TIMEOUT = 300  # ~1 s on the live checkout (2026-11-05)
+QUIET_SECONDS = 15
+QUIET_MAX_WAIT = 180
 IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
+_LOCK_RE = re.compile(r"\.lock\b|cannot lock ref", re.I)  # index.lock, <ref>.lock contention
+BASELINE_DIR = "commit-own-edit"
 
 # Repository-selecting variables a parent git process (a hook) may export; inheriting one would
 # point every call below at another repository or index.
@@ -81,28 +105,168 @@ _GIT_ENV_VARS = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
                  "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_PREFIX")
 
 COMMIT_BODY = ("Landed by maintenance/commit-own-edit.py at the end of an unattended run: "
-               "preflight-shared-checkout.py found this session to be the path's sole recorded "
-               "owner, so the run committed its own edit instead of leaving it uncommitted for "
-               "the weekly memory-commit-sweep.")
+               "preflight-shared-checkout.py found this session to be the path's only live "
+               "recorded owner (stale owners excused only by a clean --begin baseline), so the "
+               "run committed its own edit instead of leaving it for the weekly "
+               "memory-commit-sweep.")
 
 
-def _env():
+def _env(extra=None):
     env = dict(os.environ)
     for name in _GIT_ENV_VARS:
         env.pop(name, None)
+    if extra:
+        env.update(extra)
     return env
 
 
-def _git(repo, *args, timeout=GIT_TIMEOUT):
+def _git(repo, *args, timeout=GIT_TIMEOUT, extra_env=None):
     """(returncode, stdout, stderr). returncode is None when git could not run or timed out.
     --literal-pathspecs: every path argument is a file name, never a glob."""
     try:
         p = subprocess.run(["git", "--literal-pathspecs"] + list(args), cwd=repo,
                            capture_output=True, text=True, encoding="utf-8",
-                           errors="replace", timeout=timeout, env=_env())
-    except (OSError, subprocess.SubprocessError) as exc:
+                           errors="replace", timeout=timeout, env=_env(extra_env))
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
         return None, "", str(exc)
     return p.returncode, p.stdout, p.stderr
+
+
+def _session(session):
+    if session is None:
+        session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    return (session or "").strip()
+
+
+def _default_sessions_dir():
+    # Same default as hooks/lib/commit_provenance.py sessions_dir().
+    return (os.environ.get("COMMIT_PROVENANCE_SESSIONS_DIR")
+            or os.path.join(os.path.expanduser("~"), ".claude", "hooks", "sessions"))
+
+
+def _locate(path):
+    """({full, repo, rel}, None) for a tracked file under MEMORY_PREFIX, else (None, reason)."""
+    try:
+        full = os.path.realpath(os.path.abspath(path))
+    except (OSError, ValueError) as exc:
+        return None, "cannot resolve %s: %s" % (path, exc)
+    if not os.path.isfile(full):
+        return None, "not an existing file: %s" % path
+    rc, out, err = _git(os.path.dirname(full), "rev-parse", "--show-toplevel")
+    if rc != 0 or not out.strip():
+        return None, "not inside a git work tree: %s" % (err.strip() or path)
+    repo = os.path.realpath(out.strip())
+    try:
+        rel = os.path.relpath(full, repo).replace(os.sep, "/")
+    except ValueError as exc:
+        return None, "cannot place %s inside %s: %s" % (path, repo, exc)
+    if rel == ".." or rel.startswith("../"):
+        return None, "%s is outside %s" % (path, repo)
+    rc, out, _ = _git(repo, "ls-files", "-z", "--full-name", "--", rel)
+    entries = [e for e in out.split("\0") if e] if rc == 0 else []
+    if len(entries) != 1:
+        return None, "not a tracked file: %s" % rel
+    rel = entries[0]  # the index's own spelling
+    if not rel.startswith(MEMORY_PREFIX):
+        return None, ("%s is outside %s; land-live-commits.py would refuse to ship a commit of "
+                      "it (BLOCKED_NON_MEMORY)" % (rel, MEMORY_PREFIX))
+    return {"full": full, "repo": repo, "rel": rel}, None
+
+
+def _branch(repo):
+    rc, out, _ = _git(repo, "symbolic-ref", "-q", "--short", "HEAD")
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def _head(repo):
+    rc, out, _ = _git(repo, "rev-parse", "--verify", "-q", "HEAD")
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def _blob_at(repo, rev, rel):
+    rc, out, _ = _git(repo, "rev-parse", "--verify", "-q", "%s:%s" % (rev, rel))
+    return out.strip() if rc == 0 and out.strip() else None
+
+
+def _busy(git_dir):
+    return [n for n in IN_PROGRESS if os.path.exists(os.path.join(git_dir, n))]
+
+
+def _last_commit_time(repo, rel):
+    """Committer time of the newest commit touching rel -- the same instant the preflight's
+    stale-owner rule compares touches against."""
+    rc, out, _ = _git(repo, "log", "-1", "--format=%ct", "--", rel)
+    try:
+        return float(out.split()[0]) if rc == 0 else None
+    except (IndexError, ValueError):
+        return None
+
+
+def _staged_blob(repo, rel, head):
+    """The blob `git commit --only -- rel` would store right now: `git add` into a throwaway
+    index seeded from `head`, which is the path commit --only takes. A CRLF-stored blob keeps
+    its CRLF here exactly as git add keeps it, where hash-object would normalise it to LF and
+    every check below would false-alarm."""
+    tmp = tempfile.mkdtemp(prefix="coe-index-")
+    try:
+        env = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+        if _git(repo, "read-tree", head, extra_env=env)[0] != 0:
+            return None
+        if _git(repo, "add", "--", rel, extra_env=env)[0] != 0:
+            return None
+        rc, out, _ = _git(repo, "ls-files", "-s", "--", rel, extra_env=env)
+        meta = out.split("\t", 1)[0].split() if rc == 0 else []
+        return meta[1] if len(meta) == 3 else None
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _wait_quiet(full, quiet, max_wait):
+    """True once `full` has gone `quiet` seconds without a write; False if that has not
+    happened within `max_wait` seconds (or the file vanished)."""
+    deadline = time.time() + max_wait
+    while True:
+        try:
+            age = time.time() - os.stat(full).st_mtime
+        except OSError:
+            return False
+        if age >= quiet:
+            return True
+        pause = quiet - age
+        if time.time() + pause > deadline:
+            return False
+        time.sleep(pause)
+
+
+def _baseline_path(sessions_dir, session, repo, rel):
+    key = hashlib.sha1(("%s|%s" % (os.path.normcase(repo), rel)).encode("utf-8")).hexdigest()
+    return os.path.join(sessions_dir, session, BASELINE_DIR, key[:16] + ".json")
+
+
+def _load_baseline(path):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            rec = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def _baseline_excuses_stale(rec, repo, rel, head_blob):
+    """(True, why) when a CLEAN baseline proves every touch older than P's last commit carries
+    no uncommitted content: P matched HEAD when this run began, and has not been committed
+    since (same HEAD blob, last commit not newer than the baseline)."""
+    if rec is None:
+        return False, "no --begin baseline for this session and path"
+    if os.path.normcase(rec.get("repo") or "") != os.path.normcase(repo) or rec.get("rel") != rel:
+        return False, "the baseline is for another file"
+    if rec.get("base_blob") != head_blob:
+        return False, "the file was committed after --begin"
+    begun, last = rec.get("begun_at"), _last_commit_time(repo, rel)
+    if not isinstance(begun, (int, float)) or last is None or last > begun:
+        return False, "the file's last commit is not older than the baseline"
+    return True, "clean baseline from %s, file not committed since" % time.strftime(
+        "%Y-%m-%dT%H:%M:%S", time.localtime(begun))
 
 
 def run_preflight(repo, path, session, extra_args=()):
@@ -129,23 +293,19 @@ def _same_path(a, b):
 
 
 def _preflight_summary(code, report, rel):
-    mine = any(_same_path(d.get("path"), rel) for d in report.get("dirty_overlap_mine") or [])
     return {
         "verdict": report.get("verdict"),
         "exit_code": code,
-        "path_is_mine": mine,
+        "path_is_mine": any(_same_path(d.get("path"), rel)
+                            for d in report.get("dirty_overlap_mine") or []),
+        "provenance_available": report.get("provenance_available"),
+        "provenance_partial": report.get("provenance_partial"),
         "foreign": [{"path": d.get("path"), "owners": d.get("owners"),
                      "stale_owners": d.get("stale_owners")}
                     for d in report.get("dirty_overlap_foreign") or []],
         "competing_claims": [{"slug": c.get("slug"), "session_id": c.get("session_id")}
                              for c in report.get("competing_claims") or []],
     }
-
-
-def _hash(repo, rel):
-    """Blob id `git add` would store for the working-tree file (filters applied)."""
-    rc, out, _ = _git(repo, "hash-object", "--", rel)
-    return out.strip() if rc == 0 and out.strip() else None
 
 
 def _find_commit(repo, nonce):
@@ -158,22 +318,24 @@ def _find_commit(repo, nonce):
     return shas[0] if len(shas) == 1 else None
 
 
-def verify_commit(repo, sha, rel, expected_blob, branch=None):
+def verify_commit(repo, sha, rel, expected_blob, branch=None, parent_blob=None):
     """Problems with `sha` as the landing of `rel` at `expected_blob` ([] == verified)."""
     problems = []
     rc, out, err = _git(repo, "rev-list", "--parents", "-n", "1", sha)
     if rc != 0:
         return ["cannot read commit %s: %s" % (sha, err.strip())]
-    parents = len(out.split()) - 1
-    if parents != 1:
-        problems.append("commit %s has %d parents, expected 1" % (sha, parents))
-    rc, out, err = _git(repo, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", sha)
+    parents = out.split()[1:]
+    if len(parents) != 1:
+        problems.append("commit %s has %d parents, expected 1" % (sha, len(parents)))
+    elif parent_blob is not None and _blob_at(repo, parents[0], rel) != parent_blob:
+        problems.append("commit %s's parent is not the HEAD that was checked (its %s differs)"
+                        % (sha, rel))
+    rc, out, _ = _git(repo, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", sha)
     paths = sorted(p for p in out.split("\0") if p) if rc == 0 else None
     if paths != [rel]:
         problems.append("commit %s touched %s, expected only %s"
                         % (sha, paths if paths is not None else "(unreadable)", rel))
-    rc, out, _ = _git(repo, "rev-parse", "--verify", "-q", "%s:%s" % (sha, rel))
-    blob = out.strip() if rc == 0 else None
+    blob = _blob_at(repo, sha, rel)
     if blob != expected_blob:
         problems.append("commit %s stored blob %s for %s, expected %s"
                         % (sha, blob, rel, expected_blob))
@@ -184,17 +346,99 @@ def verify_commit(repo, sha, rel, expected_blob, branch=None):
     return problems
 
 
+def _undo(repo, branch, sha, rel):
+    """Take back this run's own just-made commit: move `branch` back to the commit's parent only
+    if it still points at the commit, then restore rel's index entry. None on success."""
+    parent = (_git(repo, "rev-parse", "--verify", "-q", sha + "^1")[1] or "").strip()
+    if not parent:
+        return "cannot read the parent of %s" % sha
+    rc, _, err = _git(repo, "update-ref", "-m", "commit-own-edit: take back an unverified commit",
+                      "refs/heads/" + branch, parent, sha)
+    if rc != 0:
+        return "could not move %s back to %s: %s" % (branch, parent[:10], err.strip())
+    rc, out, _ = _git(repo, "ls-tree", "-z", parent, "--", rel)
+    meta = out.split("\0")[0].split("\t", 1)[0].split() if rc == 0 else []
+    if len(meta) != 3:
+        return ("%s is back at %s, but %s's old index entry could not be read; run: "
+                "git reset -q -- %s" % (branch, parent[:10], rel, rel))
+    err = ""
+    for attempt in range(3):
+        if attempt:
+            time.sleep(1)
+        rc, _, err = _git(repo, "update-index", "--cacheinfo", "%s,%s,%s" % (meta[0], meta[2], rel))
+        if rc == 0:
+            return None
+    return ("%s is back at %s, but restoring %s's index entry failed (%s); run: "
+            "git reset -q -- %s" % (branch, parent[:10], rel, err.strip(), rel))
+
+
+def _result(mode, session):
+    return {"status": None, "exit_code": None, "mode": mode, "path": None, "repo": None,
+            "session": session or None, "branch": None, "commit": None, "reason": ""}
+
+
+def begin(path, session=None, sessions_dir=None):
+    """Record the baseline the landing needs: did `path` match HEAD before this run touched it?
+    Idempotent: a second call keeps the first record while HEAD's blob of the path is unchanged,
+    so the run's own edits can never turn a clean baseline dirty."""
+    session = _session(session)
+    res = _result("begin", session)
+
+    def done(status, reason):
+        res.update(status=status, exit_code=EXIT[status], reason=reason)
+        return res
+
+    if not session:
+        return done("ERROR", "no session id (pass --session or set CLAUDE_CODE_SESSION_ID)")
+    loc, err = _locate(path)
+    if err:
+        return done("ERROR", err)
+    repo, rel = loc["repo"], loc["rel"]
+    res.update(repo=repo, path=rel)
+    branch = _branch(repo)
+    if not branch:
+        return done("ERROR", "HEAD is detached; the landing would refuse anyway")
+    res["branch"] = branch
+    head_blob = _blob_at(repo, "HEAD", rel)
+    target = _baseline_path(sessions_dir or _default_sessions_dir(), session, repo, rel)
+    res["baseline_file"] = target
+    prior = _load_baseline(target)
+    if prior and prior.get("base_blob") == head_blob:
+        if prior.get("clean"):
+            return done("BEGUN", "baseline already recorded for this run: the file matched HEAD")
+        return done("DIRTY_AT_BEGIN", "baseline already recorded for this run: the file had "
+                                      "uncommitted content before this run touched it")
+    wt_rc = _git(repo, "diff", "--quiet", "HEAD", "--", rel)[0]
+    ix_rc = _git(repo, "diff", "--cached", "--quiet", "--", rel)[0]
+    if wt_rc not in (0, 1) or ix_rc not in (0, 1) or not head_blob:
+        return done("ERROR", "could not compare the file with HEAD")
+    clean = wt_rc == 0 and ix_rc == 0
+    rec = {"version": 1, "repo": repo, "rel": rel, "branch": branch, "base_blob": head_blob,
+           "clean": clean, "begun_at": time.time()}
+    try:
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        tmp = target + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+        os.replace(tmp, target)
+    except OSError as exc:
+        return done("ERROR", "could not record the baseline: %s" % exc)
+    if clean:
+        return done("BEGUN", "baseline recorded: the file matches HEAD")
+    return done("DIRTY_AT_BEGIN", "the file already has uncommitted content this run did not "
+                                  "write; the landing will leave it for the weekly sweep")
+
+
 def land(path, message, session=None, sessions_dir=None, claims_dir=None,
-         transcripts_dir=None, lock_attempts=3, lock_wait=3.0, preflight=None):
-    """Commit `path` if this session provably owns all of its uncommitted content. Never raises
-    for an expected condition; returns the result dict printed as RESULT_JSON."""
-    if session is None:
-        session = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
-    session = (session or "").strip()
+         transcripts_dir=None, lock_attempts=3, lock_wait=3.0, quiet_seconds=QUIET_SECONDS,
+         quiet_max_wait=QUIET_MAX_WAIT, preflight=None):
+    """Commit `path` if this session provably owns all of its uncommitted content. Returns the
+    result dict printed as RESULT_JSON."""
+    session = _session(session)
     message = (message or "").strip()
-    res = {"status": None, "exit_code": None, "path": None, "repo": None,
-           "session": session or None, "branch": None, "commit": None, "reason": "",
-           "preflight": None}
+    res = _result("land", session)
+    res["preflight"] = None
+    res["baseline"] = {"used": False, "reason": ""}
 
     def done(status, reason):
         res.update(status=status, exit_code=EXIT[status], reason=reason)
@@ -205,34 +449,21 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
                              "ownership cannot be proven without one")
     if not message:
         return done("ERROR", "empty commit message")
-    full = os.path.realpath(os.path.abspath(path))
-    if not os.path.isfile(full):
-        return done("ERROR", "not an existing file: %s" % path)
-    rc, out, err = _git(os.path.dirname(full), "rev-parse", "--show-toplevel")
-    if rc != 0 or not out.strip():
-        return done("ERROR", "not inside a git work tree: %s" % (err.strip() or path))
-    repo = os.path.realpath(out.strip())
-    res["repo"] = repo
-    rel = os.path.relpath(full, repo).replace(os.sep, "/")
-    rc, out, err = _git(repo, "ls-files", "-z", "--full-name", "--", rel)
-    entries = [e for e in out.split("\0") if e] if rc == 0 else []
-    if len(entries) != 1:
-        return done("ERROR", "not a tracked file: %s" % rel)
-    rel = entries[0]  # the index's own spelling
-    res["path"] = rel
-    if not rel.startswith(MEMORY_PREFIX):
-        return done("ERROR", "%s is outside %s; land-live-commits.py would refuse to ship a "
-                             "commit of it (BLOCKED_NON_MEMORY)" % (rel, MEMORY_PREFIX))
+    loc, err = _locate(path)
+    if err:
+        return done("ERROR", err)
+    full, repo, rel = loc["full"], loc["repo"], loc["rel"]
+    res.update(repo=repo, path=rel)
 
-    rc, out, _ = _git(repo, "symbolic-ref", "-q", "--short", "HEAD")
-    if rc != 0 or not out.strip():
+    branch = _branch(repo)
+    if not branch:
         return done("LEFT_FOR_SWEEP", "HEAD is detached; a commit here would sit on no branch")
-    res["branch"] = out.strip()
+    res["branch"] = branch
     rc, out, err = _git(repo, "rev-parse", "--absolute-git-dir")
     if rc != 0 or not out.strip():
         return done("ERROR", "cannot locate the git dir: %s" % err.strip())
     git_dir = out.strip()
-    busy = [n for n in IN_PROGRESS if os.path.exists(os.path.join(git_dir, n))]
+    busy = _busy(git_dir)
     if busy:
         return done("LEFT_FOR_SWEEP", "repository is mid-operation (%s)" % ", ".join(busy))
 
@@ -248,34 +479,61 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
     if rc != 0:
         return done("ERROR", "git diff --cached failed: %s" % err.strip())
 
-    checked_blob = _hash(repo, rel)
-    if not checked_blob:
-        return done("ERROR", "could not hash %s" % rel)
+    sessions_dir = sessions_dir or _default_sessions_dir()
+    rec = _load_baseline(_baseline_path(sessions_dir, session, repo, rel))
+    if rec is not None and not rec.get("clean") and rec.get("rel") == rel:
+        return done("LEFT_FOR_SWEEP", "the file already had uncommitted content before this run "
+                                      "touched it (--begin found it dirty)")
+    if not _wait_quiet(full, quiet_seconds, quiet_max_wait):
+        return done("LEFT_FOR_SWEEP", "the file is still being written (no %gs quiet period "
+                                      "within %gs)" % (quiet_seconds, quiet_max_wait))
+
+    head0 = _head(repo)
+    head_blob0 = _blob_at(repo, head0, rel) if head0 else None
+    checked = _staged_blob(repo, rel, head0) if head_blob0 else None
+    if not checked:
+        return done("ERROR", "could not compute the blob git would store for %s" % rel)
+    excused, why = _baseline_excuses_stale(rec, repo, rel, head_blob0)
+    res["baseline"] = {"used": excused, "reason": why}
     extra = []
     for flag, value in (("--sessions-dir", sessions_dir), ("--claims-dir", claims_dir),
                         ("--session-transcripts-dir", transcripts_dir)):
         if value:
             extra += [flag, value]
+    if excused:
+        extra += ["--accept-stale", full]
     code, report, detail = (preflight or run_preflight)(repo, full, session, extra)
     if report is None:
         return done("ERROR", "preflight returned no verdict (exit %s): %s" % (code, detail))
     summary = _preflight_summary(code, report, rel)
     res["preflight"] = summary
+    if summary["provenance_available"] is not True or summary["provenance_partial"]:
+        return done("LEFT_FOR_SWEEP", "provenance is not fully readable (%s session file(s) "
+                                      "unreadable), so ownership is unknown"
+                    % summary["provenance_partial"])
     if code != 0 or summary["verdict"] != "CLEAR" or not summary["path_is_mine"]:
         return done("LEFT_FOR_SWEEP", "preflight %s: this session is not provably the file's "
-                                      "sole recorded owner" % summary["verdict"])
+                                      "only live recorded owner" % summary["verdict"])
 
     nonce = uuid.uuid4().hex
     trailers = "Commit-Own-Edit-Session: %s\nCommit-Own-Edit-Run: %s" % (session, nonce)
-    lock = os.path.join(git_dir, "index.lock")
+    attempts = max(1, lock_attempts)
     sha, last = None, ""
-    for attempt in range(max(1, lock_attempts)):
+    for attempt in range(attempts):
         if attempt:
             time.sleep(lock_wait)
-        if os.path.exists(lock):
-            last = "index.lock present"
-            continue
-        if _hash(repo, rel) != checked_blob:
+        now_branch = _branch(repo)
+        if now_branch != branch:
+            return done("LEFT_FOR_SWEEP", "the branch changed during the landing (now %s)"
+                        % (now_branch or "detached HEAD"))
+        busy = _busy(git_dir)
+        if busy:
+            return done("LEFT_FOR_SWEEP", "repository is mid-operation (%s)" % ", ".join(busy))
+        head_now = _head(repo)
+        if not head_now or _blob_at(repo, head_now, rel) != head_blob0:
+            return done("LEFT_FOR_SWEEP", "the file was committed by someone else during the "
+                                          "landing")
+        if _staged_blob(repo, rel, head_now) != checked:
             return done("LEFT_FOR_SWEEP", "the file changed while it was being checked")
         rc, out, err = _git(repo, "commit", "--only", "--quiet", "-m", message,
                             "-m", COMMIT_BODY, "-m", trailers, "--", rel,
@@ -284,45 +542,76 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
         if sha:
             break
         last = (err or out).strip()
-        if "index.lock" not in last:
-            return done("ERROR", "git commit failed (exit %s): %s" % (rc, last[:500]))
+        if _LOCK_RE.search(last):
+            continue
+        if _git(repo, "diff", "--quiet", "HEAD", "--", rel)[0] == 0:
+            return done("NOTHING_TO_COMMIT", "the file matched HEAD by the time git read it "
+                                             "(it changed during the landing)")
+        return done("ERROR", "git commit failed (exit %s): %s" % (rc, last[:500]))
     if not sha:
-        return done("LEFT_FOR_SWEEP", "the index stayed locked by another git process (%d "
-                                      "attempts): %s" % (max(1, lock_attempts), last[:300]))
+        return done("LEFT_FOR_SWEEP", "the repository stayed locked by another git process "
+                                      "(%d attempts): %s" % (attempts, last[:300]))
 
     res["commit"] = sha
-    problems = verify_commit(repo, sha, rel, checked_blob, branch=res["branch"])
+    problems = verify_commit(repo, sha, rel, checked, branch=branch, parent_blob=head_blob0)
     if problems:
-        return done("COMMITTED_UNVERIFIED", "; ".join(problems))
-    rc, _, _ = _git(repo, "diff", "--quiet", sha, "--", rel)
-    res["worktree_matches_commit"] = rc == 0
-    return done("COMMITTED", "committed %s as %s on %s" % (rel, sha[:10], res["branch"]))
+        undo_error = _undo(repo, branch, sha, rel)
+        if undo_error is None:
+            return done("UNDONE", "commit %s failed verification and was taken back: %s"
+                        % (sha[:10], "; ".join(problems)))
+        return done("COMMITTED_UNVERIFIED", "%s; taking it back failed: %s"
+                    % ("; ".join(problems), undo_error))
+    res["worktree_matches_commit"] = _git(repo, "diff", "--quiet", sha, "--", rel)[0] == 0
+    return done("COMMITTED", "committed %s as %s on %s" % (rel, sha[:10], branch))
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        """A usage error still ends with RESULT_JSON (exit 2), like every other outcome."""
+        self.print_usage(sys.stderr)
+        r = {"status": "ERROR", "exit_code": EXIT["ERROR"], "mode": None, "path": None,
+             "reason": "usage: %s" % message}
+        print("COMMIT-OWN-EDIT ERROR -- usage: %s" % message)
+        print("RESULT_JSON=" + json.dumps(r))
+        sys.exit(EXIT["ERROR"])
 
 
 def _parse_args(argv):
-    ap = argparse.ArgumentParser(
+    ap = _Parser(
         description="Commit ONE memory file this session edited, only when "
-                    "preflight-shared-checkout.py proves this session is its sole recorded "
-                    "owner; otherwise leave it for ora-memory-commit-sweep. Exit 0 "
-                    "COMMITTED/NOTHING_TO_COMMIT, 1 LEFT_FOR_SWEEP, 2 ERROR, 3 "
-                    "COMMITTED_UNVERIFIED. See the module docstring.")
-    ap.add_argument("--path", required=True, help="the memory file this run edited")
-    ap.add_argument("--message", required=True,
-                    help="commit subject, e.g. 'memory(open-items): ora-appsec-sweep "
-                         "2026-11-11 files OI-397..OI-399'")
+                    "preflight-shared-checkout.py proves this session is its only live recorded "
+                    "owner; otherwise leave it for ora-memory-commit-sweep. Run once with "
+                    "--begin before the first edit, then without it after the last. See the "
+                    "module docstring.")
+    ap.add_argument("--begin", action="store_true",
+                    help="record the baseline (before the run's first edit of --path)")
+    ap.add_argument("--path", required=True, help="the memory file this run edits")
+    ap.add_argument("--message", default=None,
+                    help="commit subject (required without --begin), e.g. 'memory(open-items): "
+                         "ora-appsec-sweep 2026-11-11 files OI-397..OI-399'")
     ap.add_argument("--session", default=None,
                     help="this run's session id (default: $CLAUDE_CODE_SESSION_ID)")
-    ap.add_argument("--sessions-dir", default=None, help="preflight pass-through (tests)")
+    ap.add_argument("--sessions-dir", default=None,
+                    help="provenance sessions dir (default: ~/.claude/hooks/sessions)")
     ap.add_argument("--claims-dir", default=None, help="preflight pass-through (tests)")
     ap.add_argument("--transcripts-dir", default=None, help="preflight pass-through (tests)")
-    return ap.parse_args(argv)
+    ap.add_argument("--quiet-seconds", type=float, default=QUIET_SECONDS,
+                    help="quiet period before the check (default %(default)s; tests use 0)")
+    args = ap.parse_args(argv)
+    if not args.begin and not (args.message or "").strip():
+        ap.error("--message is required unless --begin is given")
+    return args
 
 
 def main(argv=None):
     args = _parse_args(sys.argv[1:] if argv is None else argv)  # -h exits here, before any git
     try:
-        r = land(args.path, args.message, session=args.session, sessions_dir=args.sessions_dir,
-                 claims_dir=args.claims_dir, transcripts_dir=args.transcripts_dir)
+        if args.begin:
+            r = begin(args.path, session=args.session, sessions_dir=args.sessions_dir)
+        else:
+            r = land(args.path, args.message, session=args.session,
+                     sessions_dir=args.sessions_dir, claims_dir=args.claims_dir,
+                     transcripts_dir=args.transcripts_dir, quiet_seconds=args.quiet_seconds)
     except Exception as exc:  # the verdict must survive anything, like the preflight's
         r = {"status": "ERROR", "exit_code": EXIT["ERROR"], "path": args.path,
              "reason": "unexpected %s: %s" % (type(exc).__name__, exc),
