@@ -104,7 +104,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    `deal-retirement`. A row that is plainly ORA's acquisition but is not yet `WON` is
    reported under QUESTIONS FOR GABRIEL (see the Step 4 ORA-grantee rule), never classified.
 
-   **Address-level, not row-level.** After the duplicate-address merge, also drop every
+   **Address-level, not row-level.** Matching on normalized address (the Step 2 duplicate rule), also drop every
    row whose normalized address matches ANY row carrying `WON` — an older sighting, a
    later re-listing or an unflagged duplicate of a property ORA owns is not a passed deal.
    Name each address dropped this way in the run summary so the drop stays visible.
@@ -193,7 +193,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    is UNCONFIRMED and goes to QUESTIONS FOR GABRIEL. On a roster match: record
    nothing on the row (no clearing or winning price, no `Loss Class`, no 4b fields),
    and route the row to QUESTIONS FOR GABRIEL so it can be stamped `WON` through
-   `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped.
+   `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped. An
+   ORA-grantee match is not a trade: on the zero-trades branch (Step 6) it rides the
+   Ops Hub note as a one-line "stamp WON" question, so it is never silently lost.
 
    **4b — LOST-AT-LOI rows: write STRUCTURED fields, not prose (added 2026-08-16).**
    For any watch-list row that arrived via the Step 2a arm, the free-text log above
@@ -400,7 +402,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **Exception (added 2026-08-16): an overdue re-engagement tickler still emails.**
    Before taking this branch, check for Sourcing Log rows where
    `Re-Engagement Flag` is ticked, `Re-Engagement Tickler Date` has passed, and
-   `LOI Outcome` is not `WON` (2d — a deal ORA bought has no re-engagement to chase). A
+   the row passes 2b and 2d (`Exclude from Calibration` unchecked, `LOI Outcome` not
+   `WON`, address not carrying a `WON` row — a deal ORA bought, or a duplicate of one,
+   has no re-engagement to chase). A
    bust-and-re-engage window is time-sensitive and does not depend on a new trade
    being detected, so if any such row exists, take the Step 7 path instead and
    report it — otherwise the one output with a live clock is the one output that
@@ -426,7 +430,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    this sweep, add a section with ONE line per newly-resolved outcome:
    deal · ORA offer · winning price (confidence) · winner type · Loss Class ·
    evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
-   passed with `Re-Engagement Flag` still ticked (excluding `WON` rows, 2d). **If nothing resolved, print
+   passed with `Re-Engagement Flag` still ticked (same 2b/2d filter as the Step 6 exception). **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
 
    **RE-MARKETED PASSES** — table: Property · Flag · Ask · Last ask · Max Defensible ·
