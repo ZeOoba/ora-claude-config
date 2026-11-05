@@ -37,7 +37,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 2. Build the watch list from Notion Deal Sourcing Log
    (collection://9a6ae219-85a3-4621-899c-c757fd062f8b): Status in
    {Passed, Dead, Screened} OR Verdict in {PASS, KILLED} OR notes contain
-   GATE-FLAGGED / FLOOR-FLAGGED — i.e., everything ORA saw and did not buy.
+   GATE-FLAGGED / FLOOR-FLAGGED — i.e., everything ORA saw and did not buy
+   (a deal ORA bought is removed by 2d below, whatever its Status, Verdict or notes say).
 
    **2a — LOST-AT-LOI arm (added 2026-08-16, P3 lost-deal ledger).** Additionally
    include every row where `LOI Outcome` in {LOST, PENDING, WINNER-BUSTED}. These
@@ -90,6 +91,18 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    field and the value it should hold, and hold it out of 4b for that sweep (4b's own
    exclusion clause covers this). 2b's `Exclude from Calibration` filter applies to
    this arm exactly as to the others.
+
+   **2d — WON EXCLUSION (added 2026-11-05, Gabriel in-turn).** Apply
+   `AND LOI Outcome is not WON` to EVERY arm above (Status/Verdict arm, flag-notes
+   arm, 2a and 2c). SQL form: `coalesce("LOI Outcome",'') <> 'WON'`. `WON` marks a
+   deal ORA bought: `deal-retirement` v1.7 step 2b stamps it at closing, including a
+   deal closed without an LOI. Before that, no skill wrote `WON`, so a closed deal
+   that still carried a screen-time GATE-FLAGGED / FLOOR-FLAGGED note, a stale
+   `Status` or a `PENDING` outcome stayed on this list, and once its deed recorded,
+   ORA's own purchase could be logged here as a clearing or winning price. Do not set
+   or clear `LOI Outcome` from this task; that is a lifecycle write owned by
+   `deal-retirement`. A row that is plainly ORA's acquisition but is not yet `WON` is
+   reported under QUESTIONS FOR GABRIEL (see 3a), never classified.
 3. For each (batch by market): check for a sale/trade since last run via
    (a) the **County Sales Comps** Notion database FIRST — see below — then
    (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
@@ -115,6 +128,14 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
      non-arms-length/nominal transfers. A seller re-titling their own LLC looks
      identical to a sale to a new buyer from the outside. Inherit the flag and
      route the row to QUESTIONS FOR GABRIEL.
+   - **ORA's own purchase is NONARMS for this task (added 2026-11-05).** If the
+     grantee is an ORA entity (a firm entity such as Oxford Realty Advisors LLC,
+     EGFLLC or Oxford Industrial LLC, or a property LLC on the Voice Register's
+     `Claude_Workspace\00_Governance\References\Voice\ORA_Property-LLC-Signature-Roster_v01.md`),
+     the trade is ORA's own acquisition, not a competitor's price. Never record it
+     as a clearing or winning price and never classify it; route the row to
+     QUESTIONS FOR GABRIEL so its Sourcing Log row can be stamped `WON` through
+     `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped.
    - **Ambiguity is a null, not a guess.** Two candidate parcels, address variants,
      suite splits → `Winning Price Confidence = UNCONFIRMED` and surface it. Never
      silently pick the closer match.
