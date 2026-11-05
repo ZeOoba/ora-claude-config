@@ -100,11 +100,13 @@ EXIT = {"COMMITTED": 0, "NOTHING_TO_COMMIT": 0, "BEGUN": 0,
         "UNDONE": 3, "COMMITTED_UNVERIFIED": 3}
 
 GIT_TIMEOUT = 60
-COMMIT_TIMEOUT = 120  # generous: a killed `git commit` can strand .git/index.lock
-PREFLIGHT_TIMEOUT = 300  # ~1 s on the live checkout (2026-11-05)
+COMMIT_TIMEOUT = 60  # ~1 s normally; generous because a killed `git commit` can strand index.lock
+PREFLIGHT_TIMEOUT = 120  # ~1 s on the live checkout (2026-11-05)
 QUIET_SECONDS = 15
-# Capped so the worst case (quiet wait + lock retries + git and preflight time) stays inside the
-# Bash tool's default 120 s timeout; a call that outlives it prints no RESULT_JSON to the run.
+# Capped so a normal landing (quiet wait + git and preflight time) stays well inside the Bash
+# tool's default 120 s timeout. The hang guards below can push the true worst case past that, so
+# the task spec runs the landing with a 600 s timeout; a call that outlives its timeout prints
+# no RESULT_JSON, which the spec treats as a tooling failure.
 QUIET_MAX_WAIT = 60
 IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
 _LOCK_RE = re.compile(r"\.lock\b|cannot lock ref", re.I)  # index.lock, <ref>.lock contention
@@ -374,16 +376,6 @@ def _set_index_entry(repo, rel, entry):
     return err.strip() or "update-index failed"
 
 
-def _looks_like_ours(repo, sha, parent, rel, blob):
-    """True when `sha` is a single-parent commit on `parent` that changed only rel, to blob --
-    this run's commit with its trailer stripped (a commit-msg hook), as far as git can tell."""
-    rc, out, _ = _git(repo, "rev-list", "--parents", "-n", "1", sha)
-    if rc != 0 or out.split()[1:] != [parent]:
-        return False
-    rc, out, _ = _git(repo, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", sha)
-    return rc == 0 and [p for p in out.split("\0") if p] == [rel] and _blob_at(repo, sha, rel) == blob
-
-
 def verify_commit(repo, sha, rel, expected_blob, branch=None, parent_blob=None):
     """Problems with `sha` as the landing of `rel` at `expected_blob` ([] == verified).
     `branch` is a full ref (refs/heads/x) or a bare branch name."""
@@ -425,6 +417,8 @@ def _undo(repo, ref, sha, rel):
                       ref, parent, sha)
     if rc != 0:
         return "could not move %s back to %s: %s" % (_short(ref), parent[:10], err.strip())
+    if _index_blob(repo, rel) != _blob_at(repo, sha, rel):
+        return None  # someone staged their own version since; theirs to keep, not ours to reset
     entry = _tree_entry(repo, parent, rel)
     err = _set_index_entry(repo, rel, entry) if entry else "its entry could not be read"
     if err:
@@ -612,13 +606,14 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
         if sha:
             commit_rc = rc
             break
-        now = _head(repo)
-        if now and now != head_now and _looks_like_ours(repo, now, head_now, rel, checked):
-            res["commit"] = now
-            return done("COMMITTED_UNVERIFIED", "HEAD moved to %s, a commit of exactly this file "
-                                                "and content, but it lacks this run's trailer (a "
-                                                "commit-msg hook?), so it is not provably this "
-                                                "run's; check it by hand" % now[:10])
+        if rc == 0:
+            # git says it committed, but no commit carries this run's trailer (a commit-msg
+            # hook?). Something landed that cannot be verified as this run's: never report
+            # that as nothing or as an error.
+            res["commit"] = _head(repo)
+            return done("COMMITTED_UNVERIFIED", "git committed, but no commit carries this run's "
+                                                "trailer (a commit-msg hook?); HEAD is now %s. "
+                                                "Check it by hand" % (res["commit"] or "?")[:10])
         last = (err or out).strip()
         if _LOCK_RE.search(last):
             continue

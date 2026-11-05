@@ -937,12 +937,142 @@ def test_land_rejects_a_negative_or_nan_quiet_period(f):
         _status(f.land(quiet_seconds=bad), "ERROR", 2)
 
 
-def test_worst_case_runtime_fits_the_default_bash_timeout():
-    # The scheduled run's Bash tool times out after 120 s by default; a landing still running
-    # then would print no RESULT_JSON while possibly committing later.
-    worst = coe.QUIET_MAX_WAIT + 2 * 3.0 + 30  # quiet cap + lock retries + git/preflight time
-    assert worst < 120, worst
-    print("PASS test_worst_case_runtime_fits_the_default_bash_timeout")
+def test_worst_case_runtime_fits_the_spec_timeout():
+    # A landing that outlives its Bash timeout prints no RESULT_JSON while possibly committing
+    # later. The spec must grant at least the helper's true worst case (every hang guard hit).
+    worst = (coe.QUIET_MAX_WAIT + coe.PREFLIGHT_TIMEOUT + 3 * coe.COMMIT_TIMEOUT
+             + 2 * 3.0 + 60)  # + lock waits + a minute of ordinary git calls
+    spec = os.path.join(HERE, os.pardir, "scheduled-tasks", "ora-appsec-sweep", "SKILL.md")
+    with open(spec, encoding="utf-8") as fh:
+        m = re.search(r"(\d+) ms timeout", fh.read())
+    assert m, "spec step 7c no longer states a timeout"
+    assert worst * 1000 <= int(m.group(1)), (worst, m.group(1))
+    print("PASS test_worst_case_runtime_fits_the_spec_timeout")
+
+
+@_fixture_test
+def test_trailerless_commit_under_someone_elses_commit_is_unverified(f):
+    # Repro A2 (pass 3): a hook strips the trailer AND another session commits on top at once.
+    hook = os.path.join(f.repo, ".git", "hooks", "commit-msg")
+    with open(hook, "w", newline="\n") as fh:
+        fh.write("#!/bin/sh\nsed -i '/^Commit-Own-Edit-/d' \"$1\"\n")
+    os.chmod(hook, 0o755)
+    _own_edit(f)
+    real_git = coe._git
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args:
+            out = real_git(repo, *args, **kwargs)
+            git(f.repo, "commit", "-q", "--allow-empty", "--no-verify", "-m", "theirs, on top")
+            return out
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "COMMITTED_UNVERIFIED", 3)
+
+
+@_fixture_test
+def test_someone_elses_identical_hand_landing_is_nothing_to_commit(f):
+    # Repro D4 (pass 3): another session commits exactly our content just before our commit.
+    _own_edit(f)
+    real_git = coe._git
+
+    def landing_git(repo, *args, **kwargs):
+        if "commit" in args:
+            git(f.repo, "commit", "-q", "-m", "hand-landed by someone", "--", TRACKER)
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = landing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "NOTHING_TO_COMMIT", 0)
+
+
+@_fixture_test
+def test_undo_keeps_a_version_someone_staged_meanwhile(f):
+    # Repro C (pass 3): verification fails, and another session stages the path before the undo.
+    _own_edit(f)
+    real_git = coe._git
+    staged = {}
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args:
+            f.append(TRACKER, "| OI-777 | foreign write in the commit window |\n")
+            out = real_git(repo, *args, **kwargs)
+            body = git(f.repo, "show", "HEAD:" + TRACKER) + "| OI-888 | staged by someone |\n"
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=body.encode(),
+                                  cwd=f.repo, capture_output=True, env=_env()).stdout.decode().strip()
+            git(f.repo, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, TRACKER))
+            staged["blob"] = blob
+            return out
+        return real_git(repo, *args, **kwargs)
+
+    before = f.head()
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "UNDONE", 3)
+    assert f.head() == before
+    assert git(f.repo, "rev-parse", ":" + TRACKER).strip() == staged["blob"], "their staged version was reset"
+
+
+@_fixture_test
+def test_undo_with_a_tag_named_like_the_branch_moves_the_branch(f):
+    # The take-back must name the full ref: `update-ref main` would write .git/main.
+    git(f.repo, "tag", "main")
+    before = f.head()
+    _own_edit(f)
+    real_git = coe._git
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args:
+            f.append(TRACKER, "| OI-777 | foreign write in the commit window |\n")
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "UNDONE", 3)
+    assert git(f.repo, "rev-parse", "refs/heads/main").strip() == before
+    assert not os.path.exists(os.path.join(f.repo, ".git", "main"))
+
+
+@_fixture_test
+def test_index_write_failure_with_a_third_version_staged_is_reported(f):
+    # git exits 128 after committing and the index holds neither the old nor the new blob:
+    # someone else's version, to be reported, never overwritten.
+    _own_edit(f)
+    real_git = coe._git
+    third = {}
+
+    def failing_index_git(repo, *args, **kwargs):
+        if "commit" in args:
+            real_git(repo, *args, **kwargs)
+            body = git(f.repo, "show", "HEAD:" + TRACKER) + "| OI-999 | third version |\n"
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=body.encode(),
+                                  cwd=f.repo, capture_output=True, env=_env()).stdout.decode().strip()
+            real_git(repo, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, TRACKER))
+            third["blob"] = blob
+            return 128, "", "fatal: unable to write new index file"
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = failing_index_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "COMMITTED_UNVERIFIED", 3)
+    assert git(f.repo, "rev-parse", ":" + TRACKER).strip() == third["blob"]
 
 
 @_fixture_test
@@ -1192,7 +1322,12 @@ TESTS = [
     test_main_turns_an_unexpected_exception_into_result_json,
     test_content_change_that_keeps_mtime_and_size_is_caught,
     test_land_rejects_a_negative_or_nan_quiet_period,
-    test_worst_case_runtime_fits_the_default_bash_timeout,
+    test_worst_case_runtime_fits_the_spec_timeout,
+    test_trailerless_commit_under_someone_elses_commit_is_unverified,
+    test_someone_elses_identical_hand_landing_is_nothing_to_commit,
+    test_undo_keeps_a_version_someone_staged_meanwhile,
+    test_undo_with_a_tag_named_like_the_branch_moves_the_branch,
+    test_index_write_failure_with_a_third_version_staged_is_reported,
     test_cli_rejects_a_negative_or_nan_quiet_period,
     test_refuses_path_outside_memory,
     test_refuses_untracked_file,
