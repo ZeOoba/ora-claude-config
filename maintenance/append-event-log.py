@@ -312,12 +312,19 @@ def spool_dir_for(log):
 
 def spool_entry(log, entry, now_ns):
     """Durably park `entry` for later draining. Filename is monotonic (ns) so a later
-    drain replays oldest-first. Returns the spooled path."""
+    drain replays oldest-first. Returns the spooled path.
+
+    Written to a non-.md staging name, then os.replace'd into place (2026-11-05,
+    REFUTE finding #3): drain_spool lists only '*.md' and reads outside the lock, so
+    a direct write could be seen half-done. A large entry would then be inserted
+    truncated, verify as present, and have its spool file deleted."""
     d = spool_dir_for(log)
     os.makedirs(d, exist_ok=True)
     p = os.path.join(d, "%d.md" % now_ns)
-    with open(p, "w", encoding="utf-8") as f:
+    tmp = p + ".partial"
+    with open(tmp, "w", encoding="utf-8") as f:
         f.write(entry)
+    os.replace(tmp, p)
     return p
 
 
@@ -478,11 +485,29 @@ def _entry_present(log, entry):
     compare equal to any single block and could never verify -- drain would re-insert
     it (the block dedup misses it too) on every run, forever. And NOT a header-only
     check: identical headers are routine (see is_duplicate_entry), so a header match
-    can be another entry's and prove nothing about this one's body."""
+    can be another entry's and prove nothing about this one's body.
+
+    A line-bounded match also has to END where an entry ends: the next non-blank line
+    must be a dated entry header, rollover's '---' pointer rule, or end of file
+    (REFUTE 2026-11-05, C3). Without that, a spooled entry that is a strict prefix of
+    a longer existing entry, or that is quoted mid-body in another entry, read as
+    present. Residual: a verbatim quote that sits at the very END of another entry's
+    body still matches. Only a writer that ignores the lock can erase the entry
+    between insert and this check, so that narrow case needs two coincidences.
+    """
     try:
         with open(log, encoding="utf-8") as f:
             content = f.read()
-        return ("\n" + normalize_entry(entry) + "\n") in ("\n" + normalize_entry(content) + "\n")
+        hay = "\n" + normalize_entry(content) + "\n"
+        needle = "\n" + normalize_entry(entry) + "\n"
+        i = hay.find(needle)
+        while i != -1:
+            rest = hay[i + len(needle):].lstrip("\n")
+            first = rest.split("\n", 1)[0]
+            if not rest or ENTRY_HEADER_RE.match(first) or first.strip() == "---":
+                return True
+            i = hay.find(needle, i + 1)
+        return False
     except Exception:
         return False
 
@@ -515,7 +540,10 @@ def drain_spool(log, attempts=3, lock_timeout=None):
     except the race above. The lock is a byte-range lock the OS drops when its
     holder dies, so it cannot go stale -- a refused drain simply retries on the next
     append. One timeout per drain, not one per attempt: a held lock is not going to
-    clear in the 0.2 s retry sleeps.
+    clear in the 0.2 s retry sleeps. Trade-off: under that contention main()'s own
+    newer entry still fails open and lands first, so the deferred older entries
+    drain in ABOVE it next run (newest-on-top inverted for those few). Order is
+    cosmetic; the entries are dated and none is lost.
 
     Spool files whose first line is not a dated ENTRY_HEADER_RE header are LEFT
     PARKED (with a stderr note) and skipped, not deleted: main() never spools one,
@@ -558,6 +586,17 @@ def drain_spool(log, attempts=3, lock_timeout=None):
             with _log_lock(log, timeout=lock_timeout) as locked:
                 if locked is False:
                     refused = True
+                elif _entry_present(log, entry):
+                    # Already there (an earlier drain wrote it but could not delete
+                    # the spool file, or another run landed the same text). Checked
+                    # BEFORE inserting because the block dedup in _atomic_insert
+                    # misses entries whose body has a dated '##' line, and would
+                    # write those again on every replay (REFUTE finding #2).
+                    verified = True
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
                 else:
                     try:
                         _insert_or_inplace(log, entry, try_inplace, lock_held=True)

@@ -97,16 +97,25 @@ with ael._log_lock(log) as locked:
     with open(log, encoding="utf-8") as f:
         snapshot = f.read()
     open(ready, "w").close()
+    import os
+    m0 = os.stat(log).st_mtime_ns
+    # Poll with os.stat, not open(): a read handle held at the wrong instant makes the
+    # intruder's os.replace fail (WinError 5) and changes its path, which made the
+    # old-code repro miss ~1 run in 5 (REFUTE C6).
     while time.monotonic() - t0 < hold_s:
         try:
+            changed = os.stat(log).st_mtime_ns != m0
+        except OSError:
+            changed = False
+        if changed and not os.path.exists(clobbered):
+            time.sleep(0.3)  # let the intruder finish its write
             with open(log, encoding="utf-8") as f:
                 now = f.read()
-        except OSError:
-            now = ""
-        if marker in now and not __import__("os").path.exists(clobbered):
-            with open(log, "w", encoding="utf-8") as f:
-                f.write(snapshot)
-            open(clobbered, "w").close()
+            if marker in now:
+                with open(log, "w", encoding="utf-8") as f:
+                    f.write(snapshot)
+                open(clobbered, "w").close()
+            m0 = os.stat(log).st_mtime_ns
         time.sleep(0.02)
 """
 
@@ -227,9 +236,16 @@ def main():
     log = make_log(tmp, [OLD, SPOOLED])  # SPOOLED already present -> dedup
     m.spool_entry(log, SPOOLED, time.time_ns())
     m.spool_entry(log, NEW, time.time_ns() + 1)
+    t0 = time.time()
     n = m.drain_spool(log)
+    took = time.time() - t0
     final = read(log)
     expect("drain resolves a duplicate and a fresh entry (2 drained)", n == 2, n)
+    # Guards against a nested-lock regression: a second byte-range lock from this
+    # process times out after LOCK_ACQUIRE_TIMEOUT_S and then writes anyway, which
+    # would otherwise pass every content assertion here (REFUTE C4, mutation m3).
+    expect("uncontended drain never waits on its own lock",
+           took < m.LOCK_ACQUIRE_TIMEOUT_S / 2, took)
     expect("duplicate not re-written, fresh entry landed once",
            final.count("SPOOLMARK") == 1 and final.count("NEWMARK") == 1, final)
     expect("both spool files removed after verification", spool_files(log) == [],
@@ -251,6 +267,36 @@ def main():
     m.drain_spool(log)
     expect("re-spooled copy of it does not wedge the queue",
            spool_files(log) == [], spool_files(log))
+    expect("...and is not written a second time",
+           read(log).count("MULTIMARK") == 1, read(log).count("MULTIMARK"))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 4c. _entry_present must not accept a prefix of a longer entry, or a copy
+    # quoted mid-body inside another entry (REFUTE C3).
+    tmp = tempfile.mkdtemp(prefix="ael-drainv-")
+    short = "## 2026-11-04 — Prefix case PFX\n\nFirst paragraph."
+    longer = short + "\n\nSecond paragraph only in the longer entry."
+    quoting = ("## 2026-11-04 — Quoter\n\nQuoting:\n\n" + short
+               + "\n\nMore text after the quote.")
+    log = make_log(tmp, [longer, OLD])
+    expect("prefix of a longer entry is NOT present", not m._entry_present(log, short))
+    log2 = os.path.join(tmp, "q.md")
+    with open(log2, "w", encoding="utf-8") as f:
+        f.write("---\nname: x\n---\n\n" + quoting + "\n\n" + OLD + "\n")
+    expect("copy quoted mid-body is NOT present", not m._entry_present(log2, short))
+    log3 = make_log(tmp, [short, OLD])
+    expect("a real whole entry IS present", m._entry_present(log3, short))
+    log4 = make_log(tmp, [short])
+    expect("a whole entry at end of file IS present", m._entry_present(log4, short))
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 4d. spool_entry stages under a non-.md name (drain never sees a half file).
+    tmp = tempfile.mkdtemp(prefix="ael-drainv-")
+    log = make_log(tmp, [OLD])
+    p = m.spool_entry(log, NEW, 42)
+    expect("spool_entry lands the final .md and leaves no .partial",
+           os.path.basename(p) == "42.md" and read(p) == NEW
+           and os.listdir(log + ".pending") == ["42.md"], os.listdir(log + ".pending"))
     shutil.rmtree(tmp, ignore_errors=True)
 
     # --- 5. A spooled entry with an undated header can never verify; it must not
