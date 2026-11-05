@@ -396,8 +396,11 @@ HISTORY_COMMIT_CAP = 1000
 def _committed_blobs(repo_path, ref, rel_path):
     """Every blob `rel_path` has had in `ref`'s history (last HISTORY_COMMIT_CAP
     commits touching it), or None when git cannot answer. One `git log --raw`."""
-    rc, out = _git(["--no-optional-locks", "log", "--format=", "--raw", "--no-abbrev",
-                    "--no-renames", "-n", str(HISTORY_COMMIT_CAP), ref, "--", rel_path],
+    # -m --full-history: without them a blob that only ever existed as a MERGE result
+    # (never on either parent) emits no --raw line and would read as a local patch.
+    rc, out = _git(["--no-optional-locks", "log", "-m", "--full-history", "--format=",
+                    "--raw", "--no-abbrev", "--no-renames", "-n", str(HISTORY_COMMIT_CAP),
+                    ref, "--", rel_path],
                    repo_path)
     if rc != 0:
         return None
