@@ -251,10 +251,11 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    - **A malformed or unparseable `RE-CHECK:` line is reported verbatim under QUESTIONS FOR
      GABRIEL, never silently dropped and never date-guessed.**
    - **Scope limit, stated so it is not mistaken for coverage:** this scan changes nothing
-     about when this task sends. A sweep with zero trades and zero overdue 4c ticklers still
-     takes the Step 6 no-email branch even if a `RE-CHECK` line is due — the due list then
-     rides the one-line Ops Hub note. Widening the Step 6 gate is a separate, deliberate
-     change and is not made here.
+     about when this task sends. Since 2026-11-05 every sweep takes the Step 7 email path
+     anyway, because Step 5b's back-test block (or its WARN line) promotes it; see the last
+     Step 6 exception. A due `RE-CHECK` list therefore rides that email's PASSED-DEAL
+     RE-CHECKS DUE section and the Ops Hub post. A due `RE-CHECK` line on its own still
+     promotes nothing.
 
    **4e — DILIGENCE-EXIT classifier (added 2026-09-19, Gabriel-directed). Requires NO
    competitor price.** For every row that arrived via the Step 2c arm, produce the block
@@ -336,11 +337,47 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
    - RCT: implied $/SF vs RCT v02 point ± band for that market (flag if outside band);
    - P(exec) bands: did deals in each seller-signal band trade near ORA's walk?
-   Tabulate cumulative evidence; recommendations go to the December back-test, run
-   from `~/ora-skills/annual-cycle/SKILL.md` — weights and bands move ONLY there,
-   and only with Gabriel's explicit sign-off. Do not duplicate the back-test in
-   this task, and never write to any governor constant or Buy Box weight/band
-   file directly from this task.
+   Tabulate cumulative evidence; recommendations go to the back-test (Step 5b below).
+   Weights and bands move ONLY with Gabriel's explicit sign-off, never from this task.
+   Never write to any governor constant or Buy Box weight/band file directly from this
+   task.
+
+   **"The December back-test" (named in Steps 4b and 4e and in other specs) means Step
+   5b's 2026-12-15 run, reviewed with Gabriel** (added 2026-11-05). Until then the phrase
+   pointed at `~/ora-skills/annual-cycle/SKILL.md`, which never carried a back-test step and
+   moved its year-in-review to late February (annual-cycle v1.2, 2026-10-30), so every
+   recommendation routed there had no destination.
+
+5b. **SOURCING BACK-TEST (monthly; added 2026-11-05, Gabriel in-turn "Monthly back-test
+   block").** Report-only: it reads eight read-only exports and computes calibration
+   evidence. It never writes Notion, a weight, a band, a gate or a doctrine file, and never
+   sets a Verdict or Loss Class. Run it on every sweep, after Step 4 and before Step 6/7. The
+   engine is `C:/Users/Owner/.claude/maintenance/funnel-backtest.py`; its docstring holds the
+   eight queries verbatim (`QUERY_A` once per partition value, `QUERY_B`, `QUERY_P`,
+   `QUERY_N`). Copy them from there, never from memory.
+   (i) Make the folder `C:/Users/Owner/AppData/Local/Temp/ora-backtest-YYYY-MM-DD/`, where
+   YYYY-MM-DD is the run date's date part only (the same date the Step 7 subject uses; never
+   the weekday). Run each query with `notion-query-data-sources` against
+   `collection://9a6ae219-85a3-4621-899c-c757fd062f8b`, and write each RESPONSE OBJECT
+   verbatim (Write tool, UTF-8, keeping its `has_more` key) into that folder:
+   `a_t1.json`, `a_t2.json`, `a_pass.json`, `a_killed.json`, `a_none.json` (QUERY_A with
+   params `["T1 PURSUE"]`, `["T2 WATCH"]`, `["PASS"]`, `["KILLED"]`, `["(none)"]`),
+   `b_t1rows.json` (QUERY_B), `p_pexec.json` (QUERY_P) and `n_count.json` (QUERY_N, the
+   log's total row count, which the engine reconciles against the five partitions). Do not
+   edit, merge, drop or reorder anything. If a query errors (quota, schema), stop 5b and
+   record one WARN line naming the query and the error; never re-run a query to get it right.
+   (ii) Run, from that folder:
+
+   ```bash
+   cd C:/Users/Owner/AppData/Local/Temp/ora-backtest-YYYY-MM-DD
+   python C:/Users/Owner/.claude/maintenance/funnel-backtest.py --rows a_t1.json --rows a_t2.json --rows a_pass.json --rows a_killed.json --rows a_none.json --t1-rows b_t1rows.json --pexec-rows p_pexec.json --expect-rows n_count.json --out-md backtest.md
+   ```
+
+   Exit 0: `backtest.md` goes verbatim into the Step 7 email as its SOURCING BACK-TEST
+   section and onto the Ops Hub post. Exit 2: record one WARN line quoting its `[FATAL]` line
+   verbatim; never hand-fix an input file and re-run.
+   (iii) Any change the block prompts (a gate, a weight, a band, a doctrine edit) is a
+   proposal for Gabriel, listed under QUESTIONS FOR GABRIEL, never an action.
 
    **Repo path, not a skill name (2026-08-05):** `annual-cycle` was unpublished
    from the skill store (audit-driven fleet cleanup — usageCount 1 lifetime), so
@@ -349,7 +386,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    expecting the model to discover it by name.
 
 ## Output
-6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`, full UUID) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
+6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email, unless an exception below promotes the sweep to Step 7. Since 2026-11-05 one always does (Step 5b's back-test block or its WARN line; see the last exception), so this no-email branch now applies only when Step 5b did not run at all. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`, full UUID) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
    found any passed-deal `RE-CHECK:` line due or overdue, carry that list on the Ops Hub
    note** (added 2026-09-19) — it is the only surface this branch writes, and a due
    re-check that lands nowhere is the same silent-loss failure 4d was added to close.
@@ -358,11 +395,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
    **The send gate is NOT widened by 4e. Stated explicitly so a later reader does not
    "fix" it:** a diligence exit is a post-mortem on a decision ORA already made and
-   already acted on — it carries no live clock, unlike 4c's re-engagement tickler, which
-   is the ONLY condition that promotes a zero-trades sweep to the Step 7 email path. A
-   sweep with zero trades and zero overdue ticklers still takes this branch even when a
-   4e block was produced this month. Zero trades AND zero overdue ticklers → this branch,
-   unchanged.
+   already acted on — it carries no live clock. Exactly two conditions promote a zero-trades
+   sweep to the Step 7 email path: 4c's overdue re-engagement tickler, and (since
+   2026-11-05) Step 5b's back-test block or WARN line. A 4e block on its own never does.
 
    **Exception (added 2026-08-16): an overdue re-engagement tickler still emails.**
    Before taking this branch, check for Sourcing Log rows where
@@ -370,7 +405,16 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    bust-and-re-engage window is time-sensitive and does not depend on a new trade
    being detected, so if any such row exists, take the Step 7 path instead and
    report it — otherwise the one output with a live clock is the one output that
-   silently never sends. Zero trades AND zero overdue ticklers → this branch.
+   silently never sends. Zero trades AND zero overdue ticklers → this branch, unless the
+   next exception applies.
+
+   **Exception (added 2026-11-05, Gabriel in-turn "Monthly back-test block"): a Step 5b
+   block or WARN line also takes the Step 7 path,** so the back-test reaches Gabriel by
+   email every month even when nothing traded. Step 5b produces one or the other on every
+   sweep, so in practice every sweep now emails; this branch's Ops Hub rules carry over to the
+   Step 7 post unchanged. On a zero-trades sweep, Step 7's email opens with
+   `No trades detected this sweep.` in place of the trades block. This is the one deliberate
+   widening of the send gate. 4e still does not widen it.
 
    **Close the entry guard on this path too.** This is the easy one to miss: the zero-trades branch sends nothing, so there is no send step to hang the terminal call off, and a run that ends here still holds the claim it took at Step 0. Once the Ops Hub note lands:
 
@@ -394,6 +438,11 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
    passed with `Re-Engagement Flag` still ticked. **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
+
+   **"SOURCING BACK-TEST" section (added 2026-11-05).** Step 5b's `backtest.md` verbatim,
+   or its WARN line. Always printed, every month: it is the calibration record that the
+   scan doctrine's evidence tags and P(exec) bands are judged against. Do not summarize,
+   re-round or re-label its numbers.
 
    **RE-MARKETED PASSES** — table: Property · Flag · Ask · Last ask · Max Defensible ·
    Broker/sender · Email date. Omit the section when there are no hits; UNCONFIRMED

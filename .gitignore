@@ -294,6 +294,9 @@ maintenance/_state/wake-cause.json
 # and pause-resume-guard.py's stall check, no external consumer found.
 maintenance/_state/dispatch-skip.json
 maintenance/_state/pause-resume-guard-state.json
+# (2026-11-05) save_state() now writes atomically through this temp file; a run killed
+# mid-save can leave one behind, and it must never show up as dirty-tree WIP.
+maintenance/_state/.pause-resume-guard-state.*.tmp
 maintenance/_state/task-progress/
 # (2026-08-26) log-liveness.json — _shared/log_liveness.py's per-run snapshot,
 # written by ora-health-guard A.0d and re-read only within the same run. Same
