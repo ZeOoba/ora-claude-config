@@ -6,8 +6,8 @@ Run: python test-commit-own-edit.py   (exit 0 = all pass)
 Every test builds a throwaway repo that mirrors the live layout (a `projects/<project>/memory/`
 tree, `* text=auto`, core.autocrlf=true, CRLF files on disk), plus fixture provenance
 (touched-files.txt per session), claims and transcripts dirs. It then drives the REAL
-preflight-shared-checkout.py through land(). Only the content-changes-mid-check test injects
-behaviour, and it does so by wrapping the real preflight.
+preflight-shared-checkout.py through land(). Tests that need a race inject it by wrapping the
+real preflight or the module's own git runner; nothing else is mocked.
 """
 import importlib.util
 import json
@@ -18,6 +18,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import traceback
 
@@ -125,10 +126,21 @@ class Fixture:
     def head(self):
         return git(self.repo, "rev-parse", "HEAD").strip()
 
+    def snap(self, rel=TRACKER):
+        """Everything a refusal must leave exactly as it was."""
+        with open(self.p(rel), "rb") as fh:
+            body = fh.read()
+        return {"head": self.head(), "index": git(self.repo, "ls-files", "-s"), "body": body,
+                "rel": rel}
+
+    def begin(self, rel=TRACKER, session=MINE):
+        return coe.begin(self.p(rel), session=session, sessions_dir=self.sessions)
+
     def land(self, rel=TRACKER, session=MINE, message="memory(open-items): fixture run", **kw):
         kw.setdefault("sessions_dir", self.sessions)
         kw.setdefault("claims_dir", self.claims)
         kw.setdefault("transcripts_dir", self.transcripts)
+        kw.setdefault("quiet_seconds", 0)
         return coe.land(self.p(rel), message, session=session, **kw)
 
     def cli(self, *args):
@@ -158,13 +170,30 @@ def _status(r, status, code):
     assert r["exit_code"] == code, "expected exit %d, got %r" % (code, r)
 
 
+def _assert_left(f, r, snap, reason, body_unchanged=True):
+    """LEFT_FOR_SWEEP for the stated reason (so a test cannot pass through a different guard),
+    with HEAD and the whole index exactly as they were and the edit still in the working tree."""
+    _status(r, "LEFT_FOR_SWEEP", 1)
+    assert reason in r["reason"], "expected reason containing %r, got %r" % (reason, r["reason"])
+    assert f.head() == snap["head"], "a commit was made"
+    assert git(f.repo, "ls-files", "-s") == snap["index"], "the index changed"
+    assert snap["rel"] in changed(f.repo), "the edit was lost"
+    if body_unchanged:
+        with open(f.p(snap["rel"]), "rb") as fh:
+            assert fh.read() == snap["body"], "the working-tree file changed"
+
+
+def _own_edit(f, rel=TRACKER, text="| OI-002 | own |\n"):
+    f.append(rel, text)
+    f.touch(MINE, rel)
+
+
 # --- the case it exists for ------------------------------------------------------------
 
 @_fixture_test
 def test_commits_sole_owner_edit_and_only_that_path(f):
     before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f, text="| OI-002 | second |\n")
     f.append(NOTES, "another session's line\n")  # unrelated dirt must stay dirty
     r = f.land(message="memory(open-items): fixture files OI-002")
     _status(r, "COMMITTED", 0)
@@ -182,6 +211,20 @@ def test_commits_sole_owner_edit_and_only_that_path(f):
 
 
 @_fixture_test
+def test_lands_despite_stale_foreign_touches_after_a_clean_begin(f):
+    # The production shape: the live tracker always carries stale owners (sessions that touched
+    # it before its last commit), and the preflight contests a stale-only file. A clean
+    # baseline taken before this run's first edit proves none of their content is uncommitted.
+    f.touch(OTHER, TRACKER, when=BEFORE_PAST)
+    _status(f.begin(), "BEGUN", 0)
+    _own_edit(f)
+    r = f.land()
+    _status(r, "COMMITTED", 0)
+    assert r["baseline"]["used"] is True, r
+    assert git(f.repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split() == [TRACKER]
+
+
+@_fixture_test
 def test_nothing_to_commit_when_file_matches_head(f):
     before = f.head()
     r = f.land()
@@ -193,8 +236,7 @@ def test_nothing_to_commit_when_file_matches_head(f):
 def test_other_staged_paths_stay_staged_and_uncommitted(f):
     f.append(NOTES, "staged by another session\n")
     git(f.repo, "add", "--", NOTES)
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     r = f.land()
     _status(r, "COMMITTED", 0)
     assert git(f.repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split() == [TRACKER]
@@ -203,102 +245,246 @@ def test_other_staged_paths_stay_staged_and_uncommitted(f):
 
 @_fixture_test
 def test_own_claim_does_not_block(f):
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     f.claim(MINE, TRACKER, slug="sched-open-items-tracker")
     _status(f.land(), "COMMITTED", 0)
 
 
+@_fixture_test
+def test_crlf_stored_blob_lands_without_a_false_alarm(f):
+    # Three live memory files are stored as CRLF blobs. `git add` keeps CRLF for a path whose
+    # indexed blob already has it, where hash-object would normalise to LF, so the expected
+    # blob must come from git add itself, or every such landing reads as unverified.
+    rel = MEM + "rules.md"
+    with open(f.p(rel), "wb") as fh:
+        fh.write(b"# Rules\r\n\r\n- one\r\n")
+    blob = git(f.repo, "hash-object", "-w", "--no-filters", "--", rel).strip()
+    git(f.repo, "update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, rel))
+    git(f.repo, "commit", "-q", "-m", "a CRLF blob", dated=True)
+    assert changed(f.repo) == [], "fixture: a CRLF blob over a CRLF file should read clean"
+    _own_edit(f, rel=rel, text="- two\n")
+    r = f.land(rel=rel)
+    _status(r, "COMMITTED", 0)
+    stored = subprocess.run(["git", "cat-file", "-p", "HEAD:" + rel], cwd=f.repo,
+                            capture_output=True, env=_env()).stdout
+    assert stored.count(b"\r\n") == stored.count(b"\n") == 4, stored
+    assert git(f.repo, "diff", "--numstat", "HEAD~1", "HEAD").split()[:2] == ["1", "0"]
+
+
 # --- every shape where the content is not provably this session's alone ----------------
-
-def _assert_left(f, r, before, reason):
-    """LEFT_FOR_SWEEP for the stated reason (so a test cannot pass via a different guard),
-    with no commit made and the edit still in the working tree."""
-    _status(r, "LEFT_FOR_SWEEP", 1)
-    assert reason in r["reason"], "expected reason containing %r, got %r" % (reason, r["reason"])
-    assert f.head() == before, "a commit was made"
-    assert TRACKER in changed(f.repo), "the edit was lost"
-
 
 @_fixture_test
 def test_leaves_file_when_another_session_also_touched_it(f):
-    before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     f.touch(OTHER, TRACKER)
+    s = f.snap()
     r = f.land()
-    _assert_left(f, r, before, "preflight CONTESTED")
+    _assert_left(f, r, s, "preflight CONTESTED")
     assert sorted(r["preflight"]["foreign"][0]["owners"]) == sorted([OTHER, MINE]), r
 
 
 @_fixture_test
 def test_leaves_file_with_no_recorded_owner(f):
-    before = f.head()
     f.append(TRACKER, "| OI-002 | written by a script, not the Edit tool |\n")
+    s = f.snap()
     r = f.land()
-    _assert_left(f, r, before, "preflight CONTESTED")
+    _assert_left(f, r, s, "preflight CONTESTED")
     assert r["preflight"]["foreign"][0]["owners"] == [], r
 
 
 @_fixture_test
 def test_leaves_file_when_another_sessions_claim_covers_it(f):
-    before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     f.claim(OTHER, TRACKER)
+    s = f.snap()
     r = f.land()
-    _assert_left(f, r, before, "preflight CONTESTED")
+    _assert_left(f, r, s, "preflight CONTESTED")
     assert [c["session_id"] for c in r["preflight"]["competing_claims"]] == [OTHER], r
 
 
 @_fixture_test
-def test_leaves_file_when_a_foreign_touch_is_only_stale(f):
-    # OTHER touched before the last commit: a partial commit may have left its hunk dirty,
-    # so the preflight's stale-only rule must not be overridden (no --accept-stale).
-    before = f.head()
+def test_leaves_file_when_a_foreign_touch_is_only_stale_and_there_is_no_begin(f):
+    # Without a baseline nothing proves the stale owner's content was committed (a partial
+    # commit can leave its hunk dirty), so the preflight's stale-only rule stands.
     f.touch(OTHER, TRACKER, when=BEFORE_PAST)
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
+    s = f.snap()
     r = f.land()
-    _assert_left(f, r, before, "preflight CONTESTED")
+    _assert_left(f, r, s, "preflight CONTESTED")
     assert r["preflight"]["foreign"][0]["stale_owners"] == [OTHER], r
+    assert r["baseline"]["used"] is False, r
+
+
+@_fixture_test
+def test_begin_on_a_dirty_file_makes_land_refuse(f):
+    # Foreign content written with Bash (no provenance) before this run started: the preflight
+    # alone would read the file as this session's. The dirty baseline is the proof otherwise.
+    f.append(TRACKER, "| OI-666 | someone's uncommitted script write |\n")
+    _status(f.begin(), "DIRTY_AT_BEGIN", 1)
+    _own_edit(f)
+    s = f.snap()
+    _assert_left(f, f.land(), s, "before this run")
+
+
+@_fixture_test
+def test_baseline_is_void_once_the_path_is_committed_after_begin(f):
+    f.touch(OTHER, TRACKER, when=BEFORE_PAST)
+    _status(f.begin(), "BEGUN", 0)
+    _own_edit(f, text="| OI-002 | own, then committed by someone else |\n")
+    git(f.repo, "add", "--", TRACKER)
+    git(f.repo, "commit", "-q", "-m", "someone lands the tracker")
+    _own_edit(f, text="| OI-003 | own |\n")
+    s = f.snap()
+    r = f.land()
+    _assert_left(f, r, s, "preflight CONTESTED")
+    assert r["baseline"]["used"] is False, r
+
+
+@_fixture_test
+def test_baseline_does_not_excuse_a_live_foreign_owner(f):
+    _status(f.begin(), "BEGUN", 0)
+    _own_edit(f)
+    f.touch(OTHER, TRACKER)
+    s = f.snap()
+    _assert_left(f, f.land(), s, "preflight CONTESTED")
+
+
+@_fixture_test
+def test_baseline_does_not_excuse_a_foreign_claim(f):
+    _status(f.begin(), "BEGUN", 0)
+    _own_edit(f)
+    f.claim(OTHER, TRACKER)
+    s = f.snap()
+    _assert_left(f, f.land(), s, "preflight CONTESTED")
+
+
+@_fixture_test
+def test_late_foreign_touch_is_seen_after_the_quiet_window(f):
+    # A foreign Edit-tool write whose touch record lands a moment after the write (recorder lag
+    # measured live: p99 4.7 s). The quiet window holds the preflight until the record exists.
+    _own_edit(f)
+    f.append(TRACKER, "| OI-888 | foreign Edit-tool row |\n")
+    s = f.snap()
+    timer = threading.Timer(1.5, f.touch, args=(OTHER, TRACKER))
+    timer.start()
+    try:
+        r = f.land(quiet_seconds=4)
+    finally:
+        timer.join()
+    _assert_left(f, r, s, "preflight CONTESTED")
+
+
+@_fixture_test
+def test_gives_up_when_the_file_never_goes_quiet(f):
+    _own_edit(f)
+    s = f.snap()
+    stop = threading.Event()
+
+    def keep_touching():
+        while not stop.is_set():
+            os.utime(f.p(TRACKER), None)
+            time.sleep(0.2)
+
+    th = threading.Thread(target=keep_touching)
+    th.start()
+    try:
+        r = f.land(quiet_seconds=1, quiet_max_wait=2)
+    finally:
+        stop.set()
+        th.join()
+    _assert_left(f, r, s, "still being written")
+
+
+@_fixture_test
+def test_leaves_file_when_provenance_is_partial(f):
+    # A session's touched-files.txt that exists but cannot be read leaves ownership unknown.
+    os.makedirs(os.path.join(f.sessions, OTHER, "touched-files.txt"))
+    _own_edit(f)
+    s = f.snap()
+    _assert_left(f, f.land(), s, "provenance")
 
 
 @_fixture_test
 def test_leaves_file_when_a_version_of_it_is_staged(f):
-    before = f.head()
     f.append(TRACKER, "| OI-002 | staged by someone |\n")
     git(f.repo, "add", "--", TRACKER)
-    staged_blob = git(f.repo, "rev-parse", ":" + TRACKER).strip()
-    f.append(TRACKER, "| OI-003 | working tree only |\n")
-    f.touch(MINE, TRACKER)
-    _assert_left(f, f.land(), before, "staged in the shared index")
-    assert git(f.repo, "rev-parse", ":" + TRACKER).strip() == staged_blob, "staged version changed"
+    _own_edit(f, text="| OI-003 | working tree only |\n")
+    s = f.snap()
+    _assert_left(f, f.land(), s, "staged in the shared index")
 
 
 @_fixture_test
 def test_leaves_file_when_it_changes_during_the_check(f):
-    before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
+    s = f.snap()
 
     def racing_preflight(*args, **kwargs):
         out = coe.run_preflight(*args, **kwargs)
         f.append(TRACKER, "| OI-999 | concurrent unrecorded write |\n")
         return out
 
-    _assert_left(f, f.land(preflight=racing_preflight), before, "changed while")
+    _assert_left(f, f.land(preflight=racing_preflight), s, "changed while", body_unchanged=False)
+
+
+@_fixture_test
+def test_leaves_file_when_the_branch_changes_during_the_check(f):
+    before = f.head()
+    _own_edit(f)
+
+    def switching_preflight(*args, **kwargs):
+        out = coe.run_preflight(*args, **kwargs)
+        git(f.repo, "checkout", "-q", "-b", "elsewhere")
+        return out
+
+    r = f.land(preflight=switching_preflight)
+    _status(r, "LEFT_FOR_SWEEP", 1)
+    assert "branch" in r["reason"], r
+    assert git(f.repo, "rev-parse", "main").strip() == before
+    assert git(f.repo, "rev-parse", "elsewhere").strip() == before
+
+
+@_fixture_test
+def test_leaves_file_when_the_path_is_committed_during_the_check(f):
+    # Another session commits its own version of the file straight from the index while this
+    # run is checking. Committing our working tree on top would silently revert their commit.
+    _own_edit(f)
+
+    def landing_preflight(*args, **kwargs):
+        out = coe.run_preflight(*args, **kwargs)
+        theirs = git(f.repo, "show", "HEAD:" + TRACKER) + "| OI-555 | theirs, index only |\n"
+        blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=theirs.encode(),
+                              cwd=f.repo, capture_output=True, env=_env()).stdout.decode().strip()
+        git(f.repo, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, TRACKER))
+        git(f.repo, "commit", "-q", "-m", "someone else commits the tracker meanwhile")
+        return out
+
+    r = f.land(preflight=landing_preflight)
+    _status(r, "LEFT_FOR_SWEEP", 1)
+    assert "committed" in r["reason"], r
+    assert "OI-555" in git(f.repo, "show", "HEAD:" + TRACKER), "their commit was reverted"
 
 
 @_fixture_test
 def test_leaves_file_while_the_index_is_locked(f):
-    before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
+    s = f.snap()
     lock = os.path.join(f.repo, ".git", "index.lock")
     open(lock, "w").close()
     try:
-        _assert_left(f, f.land(lock_attempts=2, lock_wait=0), before, "index stayed locked")
+        _assert_left(f, f.land(lock_attempts=2, lock_wait=0), s, "locked")
+        assert os.path.exists(lock), "another process's lock was removed"
+    finally:
+        os.remove(lock)
+
+
+@_fixture_test
+def test_branch_ref_lock_is_contention_not_an_error(f):
+    _own_edit(f)
+    s = f.snap()
+    lock = os.path.join(f.repo, ".git", "refs", "heads", "main.lock")
+    open(lock, "w").close()
+    try:
+        _assert_left(f, f.land(lock_attempts=2, lock_wait=0), s, "locked")
         assert os.path.exists(lock), "another process's lock was removed"
     finally:
         os.remove(lock)
@@ -307,45 +493,232 @@ def test_leaves_file_while_the_index_is_locked(f):
 @_fixture_test
 def test_leaves_file_on_detached_head(f):
     git(f.repo, "checkout", "-q", "--detach")
-    before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
-    _assert_left(f, f.land(), before, "detached")
+    _own_edit(f)
+    s = f.snap()
+    _assert_left(f, f.land(), s, "detached")
 
 
 @_fixture_test
-def test_leaves_file_mid_merge(f):
-    before = f.head()
-    with open(os.path.join(f.repo, ".git", "MERGE_HEAD"), "w") as fh:
-        fh.write(before + "\n")
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
-    _assert_left(f, f.land(), before, "mid-operation")
+def test_leaves_file_mid_merge_cherry_pick_revert_or_rebase(f):
+    _own_edit(f)
+    s = f.snap()
+    gd = os.path.join(f.repo, ".git")
+    for marker, is_dir in (("MERGE_HEAD", False), ("CHERRY_PICK_HEAD", False),
+                           ("REVERT_HEAD", False), ("rebase-merge", True), ("rebase-apply", True)):
+        p = os.path.join(gd, marker)
+        if is_dir:
+            os.makedirs(p)
+        else:
+            with open(p, "w") as fh:
+                fh.write(s["head"] + "\n")
+        try:
+            r = f.land()
+            _assert_left(f, r, s, "mid-operation")
+            assert r["preflight"] is None, "checks ran in a repository that is mid-operation"
+        finally:
+            shutil.rmtree(p) if is_dir else os.remove(p)
+
+
+@_fixture_test
+def test_leaves_file_when_a_merge_starts_during_the_check(f):
+    _own_edit(f)
+    s = f.snap()
+
+    def merging_preflight(*args, **kwargs):
+        out = coe.run_preflight(*args, **kwargs)
+        with open(os.path.join(f.repo, ".git", "MERGE_HEAD"), "w") as fh:
+            fh.write(s["head"] + "\n")
+        return out
+
+    try:
+        _assert_left(f, f.land(preflight=merging_preflight), s, "mid-operation")
+    finally:
+        os.remove(os.path.join(f.repo, ".git", "MERGE_HEAD"))
+
+
+@_fixture_test
+def test_baseline_is_void_when_the_path_was_committed_and_reverted_after_begin(f):
+    # HEAD's blob is back to the baseline's, but a commit after --begin means a foreign touch
+    # made after the baseline can read as stale while its content is still uncommitted.
+    _status(f.begin(), "BEGUN", 0)
+    time.sleep(2)  # integer commit seconds must land after the foreign touch below
+    f.append(TRACKER, "| OI-444 | foreign, still uncommitted |\n")
+    f.touch(OTHER, TRACKER, when=time.time() - 1.0)
+    base = git(f.repo, "rev-parse", "HEAD:" + TRACKER).strip()
+    other = subprocess.run(["git", "hash-object", "-w", "--stdin"],
+                           input=(git(f.repo, "show", "HEAD:" + TRACKER) + "x\n").encode(),
+                           cwd=f.repo, capture_output=True, env=_env()).stdout.decode().strip()
+    for blob, msg in ((other, "someone commits a change"), (base, "and reverts it")):
+        git(f.repo, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, TRACKER))
+        git(f.repo, "commit", "-q", "-m", msg)
+    _own_edit(f)
+    s = f.snap()
+    r = f.land()
+    _assert_left(f, r, s, "preflight CONTESTED")
+    assert r["baseline"]["used"] is False, r
 
 
 @_fixture_test
 def test_requires_positive_proof_not_just_an_exit_0(f):
     # CLEAR with the path absent from dirty_overlap_mine (a spelling mismatch, say) proves
-    # nothing; STALE_UNTRACKED_KNOWN_BLOB also exits 0. Neither may commit.
-    before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
-    base = {"dirty_overlap_foreign": [], "competing_claims": []}
-    for verdict, mine in (("CLEAR", []), ("STALE_UNTRACKED_KNOWN_BLOB", [{"path": TRACKER}])):
+    # nothing; STALE_UNTRACKED_KNOWN_BLOB also exits 0; a non-zero exit never counts.
+    _own_edit(f)
+    s = f.snap()
+    base = {"dirty_overlap_foreign": [], "competing_claims": [], "provenance_available": True,
+            "provenance_partial": 0}
+    for code, verdict, mine in ((0, "CLEAR", []),
+                                (0, "STALE_UNTRACKED_KNOWN_BLOB", [{"path": TRACKER}]),
+                                (1, "CLEAR", [{"path": TRACKER}])):
         fake = dict(base, verdict=verdict, dirty_overlap_mine=mine)
-        r = f.land(preflight=lambda *a, **k: (0, fake, ""))
-        _assert_left(f, r, before, "preflight %s" % verdict)
+        r = f.land(preflight=lambda *a, **k: (code, fake, ""))
+        _assert_left(f, r, s, "preflight %s" % verdict)
 
 
 @_fixture_test
 def test_errors_when_the_preflight_returns_no_verdict(f):
     before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     r = f.land(preflight=lambda *a, **k: (1, None, "Traceback: boom"))
     _status(r, "ERROR", 2)
     assert "boom" in r["reason"], r
     assert f.head() == before
+
+
+# --- the commit window ----------------------------------------------------------------------
+
+@_fixture_test
+def test_undoes_a_commit_that_fails_verification(f):
+    # A write that lands between the last check and git's own read of the file. The commit
+    # cannot be prevented, so it must be taken back: branch, index entry, nothing lost.
+    before = f.head()
+    old_entry = git(f.repo, "ls-files", "-s", "--", TRACKER)
+    _own_edit(f)
+    real_git = coe._git
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args:
+            f.append(TRACKER, "| OI-777 | foreign write in the commit window |\n")
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "UNDONE", 3)
+    assert f.head() == before, "the unverified commit is still on the branch"
+    assert git(f.repo, "ls-files", "-s", "--", TRACKER) == old_entry, "index entry not restored"
+    with open(f.p(TRACKER), encoding="utf-8") as fh:
+        body = fh.read()
+    assert "OI-002" in body and "OI-777" in body, "working-tree content was lost"
+
+
+@_fixture_test
+def test_undoes_a_commit_made_on_top_of_someone_elses_commit_of_the_path(f):
+    # Someone commits their own version of the file in the instant before git commit runs.
+    # Our commit would silently revert theirs; verification must catch the parent and undo.
+    _own_edit(f)
+    real_git = coe._git
+    theirs = {}
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args and not theirs:
+            body = git(f.repo, "show", "HEAD:" + TRACKER) + "| OI-555 | theirs, index only |\n"
+            blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=body.encode(),
+                                  cwd=f.repo, capture_output=True, env=_env()).stdout.decode().strip()
+            git(f.repo, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, TRACKER))
+            git(f.repo, "commit", "-q", "-m", "theirs")
+            theirs["sha"] = f.head()
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "UNDONE", 3)
+    assert f.head() == theirs["sha"], "their commit is no longer the branch tip"
+    assert "OI-555" in git(f.repo, "show", "HEAD:" + TRACKER)
+    assert changed(f.repo, staged=True) == [], "index entry not restored to the branch tip"
+
+
+@_fixture_test
+def test_begin_twice_keeps_the_clean_baseline(f):
+    # A second --begin after the run's own edits must not turn the clean baseline dirty.
+    f.touch(OTHER, TRACKER, when=BEFORE_PAST)
+    _status(f.begin(), "BEGUN", 0)
+    _own_edit(f)
+    _status(f.begin(), "BEGUN", 0)
+    _status(f.land(), "COMMITTED", 0)
+
+
+@_fixture_test
+def test_reverted_file_in_the_commit_window_is_not_an_error(f):
+    before = f.head()
+    _own_edit(f)
+    real_git = coe._git
+
+    def reverting_git(repo, *args, **kwargs):
+        if "commit" in args:
+            real_git(repo, "checkout", "--", TRACKER)
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = reverting_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "NOTHING_TO_COMMIT", 0)
+    assert f.head() == before
+
+
+@_fixture_test
+def test_failing_commit_hook_is_an_error_not_a_lock(f):
+    hook = os.path.join(f.repo, ".git", "hooks", "pre-commit")
+    with open(hook, "w", newline="\n") as fh:
+        fh.write("#!/bin/sh\necho blocked-by-test-hook >&2\nexit 1\n")
+    os.chmod(hook, 0o755)
+    before = f.head()
+    _own_edit(f)
+    r = f.land(lock_attempts=3, lock_wait=0)
+    _status(r, "ERROR", 2)
+    assert "blocked-by-test-hook" in r["reason"], r
+    assert f.head() == before
+
+
+@_fixture_test
+def test_ignores_an_inherited_git_environment(f):
+    # A parent git process (a hook) can export GIT_DIR / GIT_INDEX_FILE.
+    _own_edit(f)
+    bogus = os.path.join(f.root, "bogus-index")
+    saved = {k: os.environ.get(k) for k in ("GIT_INDEX_FILE", "GIT_DIR")}
+    os.environ["GIT_INDEX_FILE"] = bogus
+    os.environ["GIT_DIR"] = os.path.join(f.root, "no-such-git-dir")
+    try:
+        r = f.land()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    _status(r, "COMMITTED", 0)
+    assert not os.path.exists(bogus)
+
+
+@_fixture_test
+def test_bracketed_file_name_is_matched_literally(f):
+    odd, twin = MEM + "x[1].md", MEM + "x1.md"
+    f.write(odd, "odd\n")
+    f.write(twin, "twin\n")
+    git(f.repo, "add", "--", odd, twin)
+    git(f.repo, "commit", "-q", "-m", "two look-alike names", dated=True)
+    f.append(twin, "twin's own change\n")
+    _own_edit(f, rel=odd, text="odd's own change\n")
+    r = f.land(rel=odd)
+    _status(r, "COMMITTED", 0)
+    assert git(f.repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD").split() == [odd]
+    assert twin in changed(f.repo)
 
 
 # --- refusals: nothing it should ever commit ---------------------------------------------
@@ -356,6 +729,7 @@ def test_refuses_path_outside_memory(f):
     f.append(OUTSIDE, "print('y')\n")
     f.touch(MINE, OUTSIDE)
     _status(f.land(rel=OUTSIDE), "ERROR", 2)
+    _status(f.begin(rel=OUTSIDE), "ERROR", 2)
     assert f.head() == before
 
 
@@ -369,19 +743,37 @@ def test_refuses_untracked_file(f):
 
 
 @_fixture_test
+def test_refuses_a_directory_or_a_deleted_file(f):
+    # A directory holding exactly one tracked file must not land that file instead, and a
+    # tracked file missing from disk must never be committed as a deletion.
+    only = MEM + "sub/only.md"
+    f.write(only, "only\n")
+    git(f.repo, "add", "--", only)
+    git(f.repo, "commit", "-q", "-m", "one file in a subdirectory", dated=True)
+    before = f.head()
+    _own_edit(f, rel=only, text="own\n")
+    kw = dict(session=MINE, sessions_dir=f.sessions, claims_dir=f.claims,
+              transcripts_dir=f.transcripts, quiet_seconds=0)
+    _status(coe.land(os.path.dirname(f.p(only)), "m", **kw), "ERROR", 2)
+    os.remove(f.p(TRACKER))
+    f.touch(MINE, TRACKER)
+    _status(coe.land(f.p(TRACKER), "m", **kw), "ERROR", 2)
+    assert f.head() == before
+
+
+@_fixture_test
 def test_refuses_without_a_session_id(f):
     before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     _status(f.land(session=""), "ERROR", 2)
+    _status(f.begin(session=""), "ERROR", 2)
     assert f.head() == before
 
 
 @_fixture_test
 def test_refuses_an_empty_message(f):
     before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     _status(f.land(message="   "), "ERROR", 2)
     assert f.head() == before
 
@@ -392,14 +784,23 @@ def test_refuses_a_missing_path(f):
 
 
 @_fixture_test
+def test_extended_length_path_is_refused_not_raised(f):
+    if os.name != "nt":
+        return
+    r = coe.land("\\\\?\\" + f.p(TRACKER), "m", session=MINE, sessions_dir=f.sessions,
+                 claims_dir=f.claims, transcripts_dir=f.transcripts, quiet_seconds=0)
+    assert r["status"] in ("ERROR", "NOTHING_TO_COMMIT"), r
+
+
+@_fixture_test
 def test_resolves_a_lowercased_path_spelling(f):
     # touched-files.txt and some callers spell paths lowercased; git's index keeps the real case.
     if os.name != "nt":
         return
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     r = coe.land(f.p(TRACKER).lower(), "memory(open-items): lowercased", session=MINE,
-                 sessions_dir=f.sessions, claims_dir=f.claims, transcripts_dir=f.transcripts)
+                 sessions_dir=f.sessions, claims_dir=f.claims, transcripts_dir=f.transcripts,
+                 quiet_seconds=0)
     _status(r, "COMMITTED", 0)
     assert r["path"] == TRACKER, r
 
@@ -407,7 +808,7 @@ def test_resolves_a_lowercased_path_spelling(f):
 # --- post-commit verification -------------------------------------------------------------
 
 @_fixture_test
-def test_verify_commit_flags_extra_paths_and_wrong_content(f):
+def test_verify_commit_flags_extra_paths_wrong_content_and_wrong_branch(f):
     f.append(TRACKER, "| OI-002 | second |\n")
     f.append(NOTES, "swept in\n")
     git(f.repo, "add", "--", TRACKER, NOTES)
@@ -430,6 +831,20 @@ def test_verify_commit_flags_extra_paths_and_wrong_content(f):
         "a commit off the checked branch passed verification"
 
 
+@_fixture_test
+def test_verify_commit_flags_a_merge_commit(f):
+    git(f.repo, "checkout", "-q", "-b", "side")
+    f.append(NOTES, "side\n")
+    git(f.repo, "commit", "-q", "-am", "side")
+    git(f.repo, "checkout", "-q", "main")
+    f.append(TRACKER, "| OI-002 | main |\n")
+    git(f.repo, "commit", "-q", "-am", "main")
+    git(f.repo, "merge", "-q", "--no-ff", "-m", "merge side", "side")
+    sha = f.head()
+    blob = git(f.repo, "rev-parse", sha + ":" + TRACKER).strip()
+    assert any("parents" in p for p in coe.verify_commit(f.repo, sha, TRACKER, blob))
+
+
 def test_memory_prefix_matches_land_live_commits():
     # A commit outside land-live-commits.py's allowlist blocks the standing landing PR
     # (BLOCKED_NON_MEMORY), so the two must name the same tree.
@@ -443,39 +858,52 @@ def test_memory_prefix_matches_land_live_commits():
 # --- CLI contract -------------------------------------------------------------------------
 
 def _result_json(proc):
-    last = proc.stdout.strip().splitlines()[-1]
-    assert last.startswith("RESULT_JSON="), proc.stdout
-    return json.loads(last[len("RESULT_JSON="):])
+    lines = proc.stdout.strip().splitlines()
+    assert lines and lines[-1].startswith("RESULT_JSON="), (proc.stdout, proc.stderr)
+    return json.loads(lines[-1][len("RESULT_JSON="):])
 
 
 @_fixture_test
-def test_cli_reports_result_json_last_with_matching_exit_code(f):
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
-    common = ["--session", MINE, "--sessions-dir", f.sessions, "--claims-dir", f.claims,
-              "--transcripts-dir", f.transcripts]
-    p = f.cli("--path", f.p(TRACKER), "--message", "memory(open-items): cli", *common)
+def test_cli_begin_then_land_with_matching_exit_codes(f):
+    f.touch(OTHER, TRACKER, when=BEFORE_PAST)
+    common = ["--session", MINE, "--sessions-dir", f.sessions]
+    land_args = common + ["--claims-dir", f.claims, "--transcripts-dir", f.transcripts,
+                          "--quiet-seconds", "0"]
+    p = f.cli("--begin", "--path", f.p(TRACKER), *common)
+    assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
+    assert _result_json(p)["status"] == "BEGUN"
+
+    _own_edit(f)
+    p = f.cli("--path", f.p(TRACKER), "--message", "memory(open-items): cli", *land_args)
     assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
     assert _result_json(p)["status"] == "COMMITTED"
 
-    p = f.cli("--path", f.p(TRACKER), "--message", "memory(open-items): cli", *common)
+    p = f.cli("--path", f.p(TRACKER), "--message", "memory(open-items): cli", *land_args)
     assert p.returncode == 0, (p.returncode, p.stdout, p.stderr)
     assert _result_json(p)["status"] == "NOTHING_TO_COMMIT"
 
-    f.append(TRACKER, "| OI-003 | third |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f, text="| OI-003 | third |\n")
     f.touch(OTHER, TRACKER)
-    p = f.cli("--path", f.p(TRACKER), "--message", "memory(open-items): cli", *common)
+    p = f.cli("--path", f.p(TRACKER), "--message", "memory(open-items): cli", *land_args)
     assert p.returncode == 1, (p.returncode, p.stdout, p.stderr)
     assert _result_json(p)["status"] == "LEFT_FOR_SWEEP"
+
+
+@_fixture_test
+def test_cli_usage_errors_still_end_with_result_json(f):
+    p = f.cli("--path", f.p(TRACKER))  # --message missing
+    assert p.returncode == 2, (p.returncode, p.stdout, p.stderr)
+    assert _result_json(p)["status"] == "ERROR"
+    p = f.cli("--path", f.p(TRACKER), "--message", "m", "--sesion", MINE)  # typo'd flag
+    assert p.returncode == 2, (p.returncode, p.stdout, p.stderr)
+    assert _result_json(p)["status"] == "ERROR"
 
 
 @_fixture_test
 def test_cli_help_touches_nothing(f):
     # memory-commit-sweep.py once ran its real sweep on `--help` (2026-08-16).
     before = f.head()
-    f.append(TRACKER, "| OI-002 | second |\n")
-    f.touch(MINE, TRACKER)
+    _own_edit(f)
     p = f.cli("--help")
     assert p.returncode == 0, (p.returncode, p.stderr)
     assert "usage" in p.stdout.lower(), p.stdout
@@ -485,41 +913,68 @@ def test_cli_help_touches_nothing(f):
 
 TESTS = [
     test_commits_sole_owner_edit_and_only_that_path,
+    test_lands_despite_stale_foreign_touches_after_a_clean_begin,
     test_nothing_to_commit_when_file_matches_head,
     test_other_staged_paths_stay_staged_and_uncommitted,
     test_own_claim_does_not_block,
+    test_crlf_stored_blob_lands_without_a_false_alarm,
     test_leaves_file_when_another_session_also_touched_it,
     test_leaves_file_with_no_recorded_owner,
     test_leaves_file_when_another_sessions_claim_covers_it,
-    test_leaves_file_when_a_foreign_touch_is_only_stale,
+    test_leaves_file_when_a_foreign_touch_is_only_stale_and_there_is_no_begin,
+    test_begin_on_a_dirty_file_makes_land_refuse,
+    test_baseline_is_void_once_the_path_is_committed_after_begin,
+    test_baseline_does_not_excuse_a_live_foreign_owner,
+    test_baseline_does_not_excuse_a_foreign_claim,
+    test_late_foreign_touch_is_seen_after_the_quiet_window,
+    test_gives_up_when_the_file_never_goes_quiet,
+    test_leaves_file_when_provenance_is_partial,
     test_leaves_file_when_a_version_of_it_is_staged,
     test_leaves_file_when_it_changes_during_the_check,
+    test_leaves_file_when_the_branch_changes_during_the_check,
+    test_leaves_file_when_the_path_is_committed_during_the_check,
     test_leaves_file_while_the_index_is_locked,
+    test_branch_ref_lock_is_contention_not_an_error,
     test_leaves_file_on_detached_head,
-    test_leaves_file_mid_merge,
+    test_leaves_file_mid_merge_cherry_pick_revert_or_rebase,
+    test_leaves_file_when_a_merge_starts_during_the_check,
+    test_baseline_is_void_when_the_path_was_committed_and_reverted_after_begin,
     test_requires_positive_proof_not_just_an_exit_0,
     test_errors_when_the_preflight_returns_no_verdict,
+    test_undoes_a_commit_that_fails_verification,
+    test_undoes_a_commit_made_on_top_of_someone_elses_commit_of_the_path,
+    test_begin_twice_keeps_the_clean_baseline,
+    test_reverted_file_in_the_commit_window_is_not_an_error,
+    test_failing_commit_hook_is_an_error_not_a_lock,
+    test_ignores_an_inherited_git_environment,
+    test_bracketed_file_name_is_matched_literally,
     test_refuses_path_outside_memory,
     test_refuses_untracked_file,
+    test_refuses_a_directory_or_a_deleted_file,
     test_refuses_without_a_session_id,
     test_refuses_an_empty_message,
     test_refuses_a_missing_path,
+    test_extended_length_path_is_refused_not_raised,
     test_resolves_a_lowercased_path_spelling,
-    test_verify_commit_flags_extra_paths_and_wrong_content,
+    test_verify_commit_flags_extra_paths_wrong_content_and_wrong_branch,
+    test_verify_commit_flags_a_merge_commit,
     test_memory_prefix_matches_land_live_commits,
-    test_cli_reports_result_json_last_with_matching_exit_code,
+    test_cli_begin_then_land_with_matching_exit_codes,
+    test_cli_usage_errors_still_end_with_result_json,
     test_cli_help_touches_nothing,
 ]
 
 
 if __name__ == "__main__":
+    only = set(sys.argv[1:])
     failed = []
-    for t in TESTS:
+    selected = [t for t in TESTS if not only or t.__name__ in only]
+    for t in selected:
         try:
             t()
         except Exception:
             failed.append(t.__name__)
             print("FAIL %s" % t.__name__)
             traceback.print_exc(limit=3)
-    print("\ncommit-own-edit tests: %d/%d passed" % (len(TESTS) - len(failed), len(TESTS)))
+    print("\ncommit-own-edit tests: %d/%d passed" % (len(selected) - len(failed), len(selected)))
     sys.exit(1 if failed else 0)
