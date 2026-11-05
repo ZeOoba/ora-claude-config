@@ -137,7 +137,8 @@ UNGUARDED_BACKLOG = {
     "ora-financial-code-integrity-sweep",
     "ora-lease-snapshot-refresh", "ora-master-workbook-ingest",
     "ora-model-release-watch", "ora-pm-daily-crons", "ora-pm-ledger",
-    "ora-pm-monthly-billing", "ora-routine-pause-resume-2026-09-11",
+    # ora-pm-monthly-billing left this list 2026-11-05: Step 0 month claim (ratchet).
+    "ora-routine-pause-resume-2026-09-11",
     "ora-site-exposure-probe", "ora-sofr-direct-prefetch",
     "ora-task-integrity-guard", "ora-weekly-hygiene",
     # Added 2026-09-10 after review: all four were wrongly cleared by the
