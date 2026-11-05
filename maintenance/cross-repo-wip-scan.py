@@ -390,6 +390,27 @@ def _parse_generated_at(raw, where):
     return dt, None
 
 
+HISTORY_COMMIT_CAP = 1000
+
+
+def _committed_blobs(repo_path, ref, rel_path):
+    """Every blob `rel_path` has had in `ref`'s history (last HISTORY_COMMIT_CAP
+    commits touching it), or None when git cannot answer. One `git log --raw`."""
+    rc, out = _git(["--no-optional-locks", "log", "--format=", "--raw", "--no-abbrev",
+                    "--no-renames", "-n", str(HISTORY_COMMIT_CAP), ref, "--", rel_path],
+                   repo_path)
+    if rc != 0:
+        return None
+    blobs = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if line.startswith(":") and len(parts) >= 4:
+            for sha in (parts[2], parts[3]):
+                if sha.strip("0"):
+                    blobs.add(sha)
+    return blobs
+
+
 def _snapshot_freshness(repo_path, rel_path, canonical):
     """Compare the working-tree snapshot readers open against origin/<canonical>'s
     committed copy. Read-only; never raises."""
@@ -464,6 +485,17 @@ def _snapshot_freshness(repo_path, rel_path, canonical):
     rc, head_blob = _git(["--no-optional-locks", "rev-parse", "--verify", "--quiet",
                           "HEAD:%s" % rel_path], repo_path)
     if rc == 0 and head_blob and head_blob == origin_blob:
+        # ...but only for bytes main never committed. A working tree holding an OLDER
+        # committed version (stash/checkout of the old file, a dev server persisting a
+        # stale in-memory copy) is exactly the stale case and must not pass as a patch.
+        history = _committed_blobs(repo_path, ref, rel_path)
+        if history is None:
+            out["snapshot_error"] = ("cannot read %s history of %s to tell a local patch from "
+                                     "a reverted copy" % (ref, rel_path))
+            return out
+        if local_blob in history:
+            out["snapshot_reverted_to_older"] = True
+            return out                                # stale: an old committed copy
         out["snapshot_locally_modified"] = True
         out["snapshot_stale"] = False
         return out
@@ -662,6 +694,8 @@ def format_report(results, freshness_only=False):
                              "generatedAt %s; readers see bytes main has replaced" % (
                                  r["path"], r["snapshot_path"], r["snapshot_ref"],
                                  r["snapshot_local_generated_at"]))
+                if r.get("snapshot_reverted_to_older"):
+                    lines[-1] += " (working tree holds an OLDER committed version of the file)"
             else:
                 lines.append("[ACTION] SNAPSHOT_STALE %s -- %s generatedAt %s trails %s's %s by "
                              "%.1fh; every reader of the on-disk copy sees older data. Advance the "
