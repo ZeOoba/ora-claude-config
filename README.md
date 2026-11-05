@@ -353,9 +353,10 @@ This is a **PRIVATE** GitHub repository (`ZeOoba/ora-claude-config`). Even so:
 - Live task counts, crons and enablement are never hand-maintained here; read the
   registries via `fleet-status.py`. `docs/system-inventory.md` is only as current as its
   last `ora-weekly-hygiene` run.
-- The fleet-floor tripwires used by `fleet-deadman.yml` and by
-  `maintenance/_shared/scheduler-stores.json` are defined separately in each; read both
-  before reasoning about a "below floor" alarm.
+- The fleet-floor tripwires live in one place: `maintenance/_shared/scheduler-stores.json`
+  (`fleetFloors`). `fleet-deadman.yml` reads them from there at run time (since 2026-11-05)
+  and fails closed if it cannot; `maintenance/test-fleet-deadman-workflow.py` pins that
+  parity. Its alarms open one GitHub issue per failure class (`FLEET DEAD-MAN [<class>]: ...`).
 - The permission posture is deliberate, not an oversight. `settings.json` runs
   `defaultMode: bypassPermissions` with `skipDangerousModePermissionPrompt`, so the `allow`
   list is not an effective gate (it mostly documents intent). The real controls are the

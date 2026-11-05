@@ -1,5 +1,5 @@
 {
-  "_doc": "SINGLE SOURCE OF TRUTH for scheduler registry store roots + ratified fleet floors (2026-07-09). A store-path move or floor recalibration is an edit HERE only. Consumers: maintenance/_shared/store_discovery.py (cc-verifier-probe, registry-membership-probe, fleet-status, setup-self-audit) and the PowerShell engines guard.ps1 / membership-guard.ps1 (each falls back to built-in defaults if this file is unreadable — fail-open). fleet-deadman.ps1 deliberately does NOT read this file: it is the independent backstop and stays self-contained.",
+  "_doc": "SINGLE SOURCE OF TRUTH for scheduler registry store roots + ratified fleet floors (2026-07-09). A store-path move or floor recalibration is an edit HERE only. Consumers: maintenance/_shared/store_discovery.py (cc-verifier-probe, registry-membership-probe, fleet-status, setup-self-audit) and the PowerShell engines guard.ps1 / membership-guard.ps1 (each falls back to built-in defaults if this file is unreadable — fail-open). fleet-deadman.ps1 deliberately does NOT read this file: it is the independent backstop and stays self-contained. The GitHub Actions dead-man (.github/workflows/fleet-deadman.yml) DOES read fleetFloors from this file (2026-11-05) and fails closed if it cannot.",
   "ratified": "2026-07-09",
   "storeRoots": [
     "%APPDATA%\\Claude",
@@ -16,7 +16,7 @@
   },
   "fleetFloors": {
     "cc": 13,
-    "lams": 4,
-    "_note": "Tripwires, not targets. cc=13 ratified 2026-07-09 (post CC->LAMS consolidation, Gabriel); lams=4 enabled-recurring minimum (2026-06-10). A live count below a floor means a silent registry shrink -- investigate before touching the floor."
+    "lams": 0,
+    "_note": "Tripwires, not targets. cc=13 ratified 2026-07-09 (post CC->LAMS consolidation, Gabriel); lams=0 since 2026-11-05 (Gabriel): the LAMS/Cowork fleet is deliberately dark per his 2026-10-30 ruling (was 4, the 2026-06-10 enabled-recurring minimum) -- raise it again if LAMS is ever revived. A live count below a floor means a silent registry shrink -- investigate before touching the floor. Read by .github/workflows/fleet-deadman.yml too (2026-11-05), so a recalibration here moves the off-machine dead-man with it."
   }
 }
