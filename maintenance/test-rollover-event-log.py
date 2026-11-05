@@ -46,15 +46,18 @@ INVALID_HANDLE_VALUE = -1
 
 class _HoldWithoutDeleteShare:
     """Opens `path` without FILE_SHARE_DELETE for the block's duration -- blocks
-    os.replace/os.rename onto that path while leaving direct read/write working."""
+    os.replace/os.rename onto that path while leaving direct read/write working.
+    share=FILE_SHARE_READ alone also denies writers: open(path, "w") then fails
+    with a sharing violation (the deny-write case, REFUTE round 2 q2)."""
 
-    def __init__(self, path):
+    def __init__(self, path, share=FILE_SHARE_READ | FILE_SHARE_WRITE):
         self.path = path
+        self.share = share
         self.handle = None
 
     def __enter__(self):
         self.handle = _k32.CreateFileW(
-            self.path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            self.path, GENERIC_READ, self.share,
             None, OPEN_EXISTING, 0, None)
         if self.handle in (0, INVALID_HANDLE_VALUE):
             raise OSError("CreateFileW failed, GetLastError=%d" % ctypes.get_last_error())
@@ -177,6 +180,616 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
+
+# --- 4b-4g. main()'s _unwind must not clobber a concurrent append ---------------
+# Test 4 proves write_live_log REFUSES a stale write. But main() then calls
+# _unwind, which saw `current != text` and wrote the pre-rollover snapshot back
+# over the log -- deleting the very entry the refusal was protecting, then
+# reporting the log "verified intact" (finding rollover-unwind-clobbers-concurrent-
+# append, I-12a, 2026-11-05). _unwind must tell "damage this run did" (restore)
+# from "someone else wrote" (never overwrite).
+
+def _intro_and_body(content):
+    i = content.index("\n## ") + 1
+    return content[:i], content[i:]
+
+
+def _insert_newest(content, entry):
+    """Newest-first insert after the intro, plus a frontmatter stamp change -- the
+    shape append-event-log._atomic_insert/stamp_modified produce, not an EOF append."""
+    intro, body = _intro_and_body(content)
+    intro = intro.replace("2026-08-16T00:00:00.000Z", "2026-11-05T12:00:00.000Z")
+    return intro + entry + body
+
+
+def _wrap_write(mutate):
+    """Replace rollover.write_live_log with one that lets `mutate(log)` land a
+    foreign write first, then calls the real function (whose mtime guard raises)."""
+    real = rollover.write_live_log
+
+    def wrapped(log, new_live, mtime_before, *a, **k):
+        mutate(log)
+        return real(log, new_live, mtime_before, *a, **k)
+    rollover.write_live_log = wrapped
+    return real
+
+
+def _state(d, p):
+    adir = os.path.join(d, "_archive")
+    return {
+        "log": (open(p, encoding="utf-8", errors="replace").read()
+                if os.path.exists(p) else None),
+        "backup": (open(p + ".rollover-backup", encoding="utf-8").read()
+                   if os.path.exists(p + ".rollover-backup") else None),
+        "archive": sorted(os.listdir(adir)) if os.path.isdir(adir) else [],
+        "tmp": os.path.exists(p + ".tmp-rollover"),
+    }
+
+
+def _mark_own(log):
+    """What the real _inplace_write does immediately before it truncates the log.
+    A no-op on code that predates the ownership flag, so these fakes run on both."""
+    getattr(rollover, "_note_own_truncation", lambda _log: None)(log)
+
+
+FOREIGN = "## 2026-11-05 -- concurrent append\n\n- landed during the rollover window\n\n"
+
+print("4b. concurrent newest-first append survives main()'s unwind")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    _, original_body = _intro_and_body(original)
+
+    def _foreign(log):
+        with open(log, encoding="utf-8") as f:
+            cur = f.read()
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(_insert_newest(cur, FOREIGN))
+    real = _wrap_write(_foreign)
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover.write_live_log = real
+    s = _state(d, p)
+    check("4b main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4b foreign entry survived", s["log"] is not None and "concurrent append" in s["log"])
+    check("4b every original entry survived verbatim",
+          s["log"] is not None and original_body in s["log"])
+    check("4b log not reverted to the pre-rollover snapshot", s["log"] != original)
+    check("4b archive removed (re-run not wedged)", s["archive"] == [], "(left: %r)" % s["archive"])
+    check("4b no .tmp-rollover left", not s["tmp"])
+    check("4b backup kept and holds the original", s["backup"] == original)
+    rc2 = rollover.main(["--log", p, "--keep-min", "100"])
+    check("4b re-run succeeds and keeps the foreign entry",
+          rc2 == 0 and "concurrent append" in open(p, encoding="utf-8").read()
+          + "".join(open(os.path.join(d, "_archive", f), encoding="utf-8").read()
+                    for f in os.listdir(os.path.join(d, "_archive"))),
+          "(rc2=%r)" % rc2)
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+print("4c. ambiguous foreign content is left untouched, scratch retained")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    ambiguous = _insert_newest(original, FOREIGN).replace(
+        "- detail line 3 for entry 5\n", "- detail line 3 for entry 5 (edited)\n")
+
+    def _edit(log):
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(ambiguous)
+    real = _wrap_write(_edit)
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover.write_live_log = real
+    s = _state(d, p)
+    check("4c main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4c log left exactly as the foreign writer left it", s["log"] == ambiguous)
+    check("4c backup retained with the original", s["backup"] == original)
+    check("4c archive retained", len(s["archive"]) == 1, "(got %r)" % s["archive"])
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+print("4d. no dated headers: a superset is NOT proof -- keep everything")
+UNDATED = FRONT + "".join(
+    "## entry %d\n\n%s\n" % (i, "".join("- undated line %d of %d\n" % (j, i) for j in range(20)))
+    for i in range(40))
+for label, make in (
+        ("superset", lambda cur: _insert_newest(cur, "## note -- foreign\n\n- x\n\n")),
+        ("damaged", lambda cur: FRONT + "## entry 0\n\n- mangled\n")):
+    d, p = _mklog(UNDATED)
+    try:
+        original = open(p, encoding="utf-8").read()
+        forced = make(original)
+
+        def _write_forced(log, forced=forced):
+            with open(log, "w", encoding="utf-8") as f:
+                f.write(forced)
+        real = _wrap_write(_write_forced)
+        try:
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+        finally:
+            rollover.write_live_log = real
+        s = _state(d, p)
+        check("4d[%s] main() reports failure" % label, rc == 1, "(got %r)" % rc)
+        check("4d[%s] log left untouched" % label, s["log"] == forced)
+        check("4d[%s] backup retained" % label, s["backup"] == original)
+        check("4d[%s] archive retained" % label, len(s["archive"]) == 1, "(got %r)" % s["archive"])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+print("4e. dated-header regex is the one append-event-log uses")
+_append = _load("append_event_log_for_rollover_test", "append-event-log.py")
+check("4e ENTRY_HEADER_RE pattern matches append-event-log's",
+      getattr(rollover, "ENTRY_HEADER_RE", None) is not None
+      and rollover.ENTRY_HEADER_RE.pattern == _append.ENTRY_HEADER_RE.pattern)
+
+
+def _inplace_fault(write_after_truncate):
+    """_atomic_swap blocked; _inplace_write truncates, lets `write_after_truncate`
+    put bytes in the log, then fails like ENOSPC."""
+    real_atomic, real_inplace = rollover._atomic_swap, rollover._inplace_write
+
+    def _blocked(log, new_live, mtime_before):
+        raise OSError("simulated app handle lock -- os.replace blocked")
+
+    def _fault(log, new_live, mtime_before):
+        _mark_own(log)  # the real _inplace_write marks ownership right before open("w")
+        with open(log, "wb") as f:
+            f.write(write_after_truncate(new_live))
+        raise OSError(28, "simulated ENOSPC mid-write")
+    rollover._atomic_swap, rollover._inplace_write = _blocked, _fault
+    return real_atomic, real_inplace
+
+
+def _as_written(s):
+    """Bytes text-mode open(..., 'w', encoding='utf-8') would put on disk."""
+    return s.replace("\n", os.linesep).encode("utf-8")
+
+
+print("4f. partial write cut inside a multi-byte UTF-8 char is restored")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+
+    def _cut_mid_char(new_live):
+        b = _as_written(new_live)
+        i = b.index("“".encode("utf-8"))   # the pointer note's opening quote
+        return b[:i + 1]                          # one byte of a three-byte char
+    saved = _inplace_fault(_cut_mid_char)
+    try:
+        try:
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+        except Exception as e:
+            rc = "raised %s" % type(e).__name__
+    finally:
+        rollover._atomic_swap, rollover._inplace_write = saved
+    s = _state(d, p)
+    check("4f main() reports failure (no crash)", rc == 1, "(got %r)" % (rc,))
+    check("4f live log restored to the original", s["log"] == original)
+    check("4f scratch cleared after restore", s["backup"] is None and s["archive"] == [],
+          "(backup:%s archive:%r)" % (s["backup"] is not None, s["archive"]))
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+print("4g. foreign append landing after OUR truncation: keep everything")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    holder = {}
+
+    def _partial_plus_foreign(new_live):
+        partial = new_live[:len(new_live) // 3]
+        mixed = _insert_newest(partial, FOREIGN)
+        holder["mixed"] = mixed
+        return _as_written(mixed)
+    saved = _inplace_fault(_partial_plus_foreign)
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover._atomic_swap, rollover._inplace_write = saved
+    s = _state(d, p)
+    check("4g main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4g log left untouched (foreign entry not overwritten)", s["log"] == holder.get("mixed"))
+    check("4g backup retained with the original", s["backup"] == original)
+    check("4g archive retained", len(s["archive"]) == 1, "(got %r)" % s["archive"])
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+# --- 4h-4j. ownership comes from what THIS run did, not from the log's content --
+# REFUTE pass on PR #400 (P4, P9): "unreadable" or "a prefix of new_live" is not
+# proof the damage is ours. Only a run that actually truncated the log may restore.
+
+print("4h. foreign append + transient unreadable read: keep everything (P4)")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+
+    def _foreign_4h(log):
+        with open(log, encoding="utf-8") as f:
+            cur = f.read()
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(_insert_newest(cur, FOREIGN))
+    real = _wrap_write(_foreign_4h)
+    real_read = rollover._read_log_text
+    calls = {"n": 0}
+
+    def _flaky_read(log):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real_read(log)
+    rollover._read_log_text = _flaky_read
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover.write_live_log = real
+        rollover._read_log_text = real_read
+    s = _state(d, p)
+    check("4h main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4h foreign entry survived", s["log"] is not None and "concurrent append" in s["log"])
+    check("4h backup retained with the original", s["backup"] == original)
+    check("4h archive retained", len(s["archive"]) == 1, "(got %r)" % s["archive"])
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+print("4i. foreign in-place insert mid-write (short prefix of new_live): no restore (P9)")
+for cut in (0, 20):
+    d, p = _mklog(_seed())
+    try:
+        original = open(p, encoding="utf-8").read()
+        foreign_full = _insert_newest(original, FOREIGN)
+
+        def _foreign_truncating(log, cut=cut, foreign_full=foreign_full):
+            with open(log, "w", encoding="utf-8") as f:   # another writer's in-place insert
+                f.write(foreign_full[:cut])
+        real = _wrap_write(_foreign_truncating)
+        try:
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+        finally:
+            rollover.write_live_log = real
+        s = _state(d, p)
+        check("4i[cut=%d] main() reports failure" % cut, rc == 1, "(got %r)" % rc)
+        check("4i[cut=%d] log NOT overwritten by a restore" % cut,
+              s["log"] == foreign_full[:cut], "(len %r)" % (len(s["log"] or ""),))
+        check("4i[cut=%d] backup retained with the original" % cut, s["backup"] == original)
+        check("4i[cut=%d] archive retained" % cut, len(s["archive"]) == 1, "(got %r)" % s["archive"])
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+print("4j. keep-everything message warns the backup lacks foreign entries (P5)")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    ambiguous_4j = _insert_newest(original, FOREIGN).replace(
+        "- detail line 3 for entry 5\n", "- detail line 3 for entry 5 (edited)\n")
+
+    def _edit_4j(log):
+        with open(log, "w", encoding="utf-8") as f:
+            f.write(ambiguous_4j)
+    real = _wrap_write(_edit_4j)
+    import io as _io
+    import contextlib as _ctx
+    err = _io.StringIO()
+    try:
+        with _ctx.redirect_stderr(err):
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover.write_live_log = real
+    msg = err.getvalue()
+    check("4j message says the backup lacks foreign entries",
+          "does NOT contain" in msg and "foreign" in msg.lower(), "(stderr: %r)" % msg[-300:])
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
+
+# --- 4k-4n. the REAL _inplace_write sets the ownership flag, and only when it
+# truncated (REFUTE round 2, C1/C2/C3/C7). Every earlier truncation test replaces
+# _inplace_write with a fake that sets the flag itself, so deleting the real flag
+# line, or setting it before open() can fail, went unnoticed. These drive the real
+# function through a module-level `open` shim instead.
+import builtins as _builtins
+
+
+class _FailMidWrite:
+    """File stand-in: writes the first third of what it is given, then fails like
+    ENOSPC -- a truncating in-place write that dies part-way."""
+
+    def __init__(self, f):
+        self.f = f
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.f.close()
+
+    def write(self, s):
+        self.f.write(s[:len(s) // 3])
+        self.f.flush()
+        raise OSError(28, "simulated ENOSPC mid-write (real _inplace_write path)")
+
+
+def _open_shim(target, on_write_open):
+    """Install a module-level `open` in rollover that hands the Nth write-mode open
+    of `target` to on_write_open(n, real_open_args) -- everything else is real."""
+    n = {"w": 0}
+
+    def shim(path, mode="r", *a, **k):
+        if (isinstance(path, str) and os.path.abspath(path) == os.path.abspath(target)
+                and "w" in mode):
+            n["w"] += 1
+            return on_write_open(n["w"], lambda: _builtins.open(path, mode, *a, **k))
+        return _builtins.open(path, mode, *a, **k)
+    rollover.open = shim
+
+
+def _drop_open_shim():
+    try:
+        del rollover.open
+    except AttributeError:
+        pass
+
+
+def _first_w_fails_midway(nth, real_open):
+    return _FailMidWrite(real_open()) if nth == 1 else real_open()
+
+
+print("4k. REAL _inplace_write: truncate, then ENOSPC mid-write -> restored (C2-i)")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    _open_shim(p, _first_w_fails_midway)
+    try:
+        with _HoldWithoutDeleteShare(p):          # Claude.exe pattern: os.replace blocked
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        _drop_open_shim()
+    s = _state(d, p)
+    check("4k main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4k live log restored to the original", s["log"] == original,
+          "(len %d vs %d)" % (len(s["log"] or ""), len(original)))
+    check("4k scratch cleared after restore", s["backup"] is None and s["archive"] == [],
+          "(backup:%s archive:%r)" % (s["backup"] is not None, s["archive"]))
+finally:
+    _drop_open_shim()
+    shutil.rmtree(d, ignore_errors=True)
+
+print("4l. REAL _inplace_write under a deny-write handle: no flag, no restore over foreign (C1/C2-ii)")
+for cut in (0, 20):
+    d, p = _mklog(_seed())
+    try:
+        original = open(p, encoding="utf-8").read()
+        foreign_full = _insert_newest(original, FOREIGN)
+        real = rollover.write_live_log
+        seen = {}
+
+        def _deny_write_then_foreign(log, new_live, mtime_before, *a, **k):
+            with _HoldWithoutDeleteShare(log, share=FILE_SHARE_READ):
+                ok = real(log, new_live, mtime_before, *a, **k)   # every attempt fails
+            seen["flag"] = rollover._own_truncation(log)
+            seen["untouched"] = open(log, encoding="utf-8").read() == original
+            fh = open(log, "w", encoding="utf-8")   # a foreign in-place insert, mid-write
+            fh.write(foreign_full[:cut])
+            fh.flush()
+            seen["fh"] = fh
+            return ok
+        rollover.write_live_log = _deny_write_then_foreign
+        try:
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+        finally:
+            rollover.write_live_log = real
+        mid = _state(d, p)
+        seen["fh"].write(foreign_full[cut:])
+        seen["fh"].close()
+        final = open(p, encoding="utf-8").read()
+        check("4l[cut=%d] main() reports failure" % cut, rc == 1, "(got %r)" % rc)
+        check("4l[cut=%d] log untouched by the failed attempts" % cut, seen.get("untouched"))
+        check("4l[cut=%d] no ownership flag when open('w') never truncated" % cut,
+              seen.get("flag") is False, "(flag=%r)" % seen.get("flag"))
+        check("4l[cut=%d] _unwind did not restore over the foreign writer" % cut,
+              mid["log"] == foreign_full[:cut], "(log==original: %s)" % (mid["log"] == original))
+        check("4l[cut=%d] foreign writer's content intact" % cut, final == foreign_full)
+        check("4l[cut=%d] backup and archive retained" % cut,
+              mid["backup"] == original and len(mid["archive"]) == 1,
+              "(backup:%s archive:%r)" % (mid["backup"] == original, mid["archive"]))
+    finally:
+        if "fh" in seen and not seen["fh"].closed:
+            seen["fh"].close()
+        shutil.rmtree(d, ignore_errors=True)
+
+print("4m. own truncation + unreadable read-back: honest message, keep everything (C3)")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    real_read = rollover._read_log_text
+    calls = {"n": 0}
+
+    def _first_read_fails(log):
+        calls["n"] += 1
+        return None if calls["n"] == 1 else real_read(log)
+    _open_shim(p, _first_w_fails_midway)
+    rollover._read_log_text = _first_read_fails
+    import io as _io
+    import contextlib as _ctx
+    err = _io.StringIO()
+    try:
+        with _HoldWithoutDeleteShare(p), _ctx.redirect_stderr(err):
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        _drop_open_shim()
+        rollover._read_log_text = real_read
+    msg = err.getvalue()
+    s = _state(d, p)
+    check("4m main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4m message does not blame another writer",
+          "did not write" not in msg, "(stderr: %r)" % msg[-400:])
+    check("4m message says the log could not be read back and this run truncated it",
+          "could not be read back" in msg and "truncated" in msg, "(stderr: %r)" % msg[-400:])
+    check("4m backup retained with the original", s["backup"] == original)
+    check("4m archive retained", len(s["archive"]) == 1, "(got %r)" % s["archive"])
+finally:
+    _drop_open_shim()
+    rollover._read_log_text = real_read
+    shutil.rmtree(d, ignore_errors=True)
+
+print("4n. own truncation, restore itself fails: keep everything AND warn (C7)")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+
+    def _restore_fails(nth, real_open):
+        if nth == 1:
+            return _FailMidWrite(real_open())
+        raise PermissionError(13, "simulated sharing violation on the restore write")
+    _open_shim(p, _restore_fails)
+    err = _io.StringIO()
+    try:
+        with _HoldWithoutDeleteShare(p), _ctx.redirect_stderr(err):
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        _drop_open_shim()
+    msg = err.getvalue()
+    s = _state(d, p)
+    check("4n main() reports failure", rc == 1, "(got %r)" % rc)
+    check("4n message says the restore failed", "could not be restored" in msg,
+          "(stderr: %r)" % msg[-400:])
+    check("4n foreign-entry warning printed on the restore-failed path",
+          "does NOT contain" in msg, "(stderr: %r)" % msg[-400:])
+    check("4n backup retained with the original", s["backup"] == original)
+    check("4n archive retained", len(s["archive"]) == 1, "(got %r)" % s["archive"])
+finally:
+    _drop_open_shim()
+    shutil.rmtree(d, ignore_errors=True)
+
+
+# --- 7. rollover holds append-event-log's own _log_lock (P2, P3, P8) -------------
+# The mtime guard has a gap between its stat and os.replace / open("w"); an append
+# landing there is silently lost with rc=0. The cure is the lock appenders already
+# take: hold it from the snapshot read through the swap and _unwind.
+import subprocess
+import time as _time
+
+_APPEND = os.path.join(HERE, "append-event-log.py")
+_HOLDER = r'''
+import importlib.util, sys
+s = importlib.util.spec_from_file_location("ap", sys.argv[1]); m = importlib.util.module_from_spec(s)
+s.loader.exec_module(m)
+with m._log_lock(sys.argv[2], timeout=10) as got:
+    print("locked=%s" % got, flush=True)
+    sys.stdin.read()
+'''
+# An append-event-log CLI run whose _log_lock announces itself just before it starts
+# polling: the ready signal 7b waits on instead of a fixed sleep (REFUTE C11).
+_ANNOUNCING_APPENDER = r'''
+import importlib.util, sys
+s = importlib.util.spec_from_file_location("ap", sys.argv[1]); m = importlib.util.module_from_spec(s)
+s.loader.exec_module(m)
+_real_lock = m._log_lock
+def _announcing(log, *a, **k):
+    print("contending", flush=True)
+    return _real_lock(log, *a, **k)
+m._log_lock = _announcing
+sys.exit(m.main(["--log", sys.argv[2], "--entry-file", sys.argv[3]]))
+'''
+
+print("7a. rollover refuses (writes nothing) while an appender holds the lock")
+d, p = _mklog(_seed())
+holder = subprocess.Popen([sys.executable, "-c", _HOLDER, _APPEND, p],
+                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+try:
+    got = holder.stdout.readline().strip()
+    check("7a holder really holds the lock (yielded True)", got == "locked=True", "(got %r)" % got)
+    original = open(p, encoding="utf-8").read()
+    saved_t = getattr(rollover, "ROLLOVER_LOCK_TIMEOUT_S", None)
+    if saved_t is not None:
+        rollover.ROLLOVER_LOCK_TIMEOUT_S = 0.5
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        if saved_t is not None:
+            rollover.ROLLOVER_LOCK_TIMEOUT_S = saved_t
+    s = _state(d, p)
+    check("7a main() refuses", rc == 1, "(got %r)" % rc)
+    check("7a log untouched", s["log"] == original)
+    check("7a no archive, no backup written", s["archive"] == [] and s["backup"] is None,
+          "(archive %r backup %s)" % (s["archive"], s["backup"] is not None))
+finally:
+    try:
+        holder.stdin.close()
+        holder.wait(timeout=20)
+    except Exception:
+        holder.kill()
+    shutil.rmtree(d, ignore_errors=True)
+
+print("7b. an append started mid-rollover waits for the lock and lands afterwards")
+d, p = _mklog(_seed())
+entry_file = os.path.join(d, "entry.md")
+with open(entry_file, "w", encoding="utf-8") as f:
+    f.write("## 2026-11-05 -- appended during rollover\n\n- waited for the lock\n")
+procs = {}
+try:
+    real = rollover.write_live_log
+
+    def _spawn_append_then_write(log, new_live, mtime_before, *a, **k):
+        procs["p"] = subprocess.Popen(
+            [sys.executable, "-c", _ANNOUNCING_APPENDER, _APPEND, log, entry_file],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Ready signal, not a sleep: wait until the appender is at its _log_lock.
+        procs["ready"] = False
+        for _ in range(50):
+            line = procs["p"].stdout.readline()
+            if not line:
+                break                         # appender exited before contending
+            if line.strip() == "contending":
+                procs["ready"] = True
+                break
+        procs["waiting"] = procs["p"].poll() is None
+        procs["mtime_still"] = os.stat(log).st_mtime_ns == mtime_before
+        return real(log, new_live, mtime_before, *a, **k)
+    rollover.write_live_log = _spawn_append_then_write
+    try:
+        rc = rollover.main(["--log", p, "--keep-min", "100"])
+    finally:
+        rollover.write_live_log = real
+    out, errs = procs["p"].communicate(timeout=60)
+    final = open(p, encoding="utf-8").read()
+    check("7b appender signalled it was contending for the lock", procs.get("ready"))
+    check("7b appender was blocked while rollover held the lock",
+          procs.get("waiting") and procs.get("mtime_still"),
+          "(waiting=%r mtime_unchanged=%r)" % (procs.get("waiting"), procs.get("mtime_still")))
+    check("7b rollover completed", rc == 0, "(got %r)" % rc)
+    check("7b appender exited 0", procs["p"].returncode == 0,
+          "(rc %r, stderr %r)" % (procs["p"].returncode, errs[-300:]))
+    check("7b appended entry landed in the rolled-over log",
+          "appended during rollover" in final and "rolled over" in final)
+    adir = os.path.join(d, "_archive")
+    check("7b archive written once", os.path.isdir(adir) and len(os.listdir(adir)) == 1)
+finally:
+    if "p" in procs and procs["p"].poll() is None:
+        procs["p"].kill()
+    shutil.rmtree(d, ignore_errors=True)
+
+print("7c. an unopenable .lock sidecar is a friendly refusal, not a traceback (C5)")
+d, p = _mklog(_seed())
+try:
+    original = open(p, encoding="utf-8").read()
+    os.makedirs(p + ".lock")                  # open(<dir>, "a+b") -> PermissionError
+    err = _io.StringIO()
+    try:
+        with _ctx.redirect_stderr(err):
+            rc = rollover.main(["--log", p, "--keep-min", "100"])
+    except Exception as e:
+        rc = "raised %s" % type(e).__name__
+    s = _state(d, p)
+    check("7c main() refuses with rc=1 (no traceback)", rc == 1, "(got %r)" % (rc,))
+    check("7c log untouched", s["log"] == original)
+    check("7c no archive, no backup written", s["archive"] == [] and s["backup"] is None,
+          "(archive %r backup %s)" % (s["archive"], s["backup"] is not None))
+    check("7c refusal names the lock", "lock" in err.getvalue().lower(),
+          "(stderr: %r)" % err.getvalue()[-300:])
+finally:
+    shutil.rmtree(d, ignore_errors=True)
+
 # --- 5. total write failure must not wedge the next run ------------------------
 # If the live log could not be replaced, the archive it already wrote duplicates
 # still-live content AND trips the archive-exists guard on re-run. Both must go.
@@ -221,6 +834,7 @@ try:
         raise OSError("simulated app handle lock -- os.replace blocked")
 
     def _truncate_then_fail(log, new_live, mtime_before):
+        _mark_own(log)  # the real _inplace_write marks ownership right before open("w")
         with open(log, "w", encoding="utf-8"):
             pass                      # truncated; zero bytes written
         raise OSError(28, "simulated ENOSPC after truncation")
