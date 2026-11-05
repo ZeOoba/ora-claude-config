@@ -10,6 +10,8 @@ Run the ora-pm cron pinger (weekly, Mondays; the "daily" in the task id is histo
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\ora-pm-cron\ping-crons.ps1"
 
+Run it with the longest timeout your shell tool allows, or in the background and wait for it to exit: each POST may legitimately take up to 480 s. A run the tool kills is a FAILED run (step 3).
+
 What this script does (for context only — you are invoking it, not reproducing it):
 - POSTs to the deployed ora-pm Cloudflare Pages Worker's /api/cron/critical-dates-alerts and /api/cron/delinquency-check endpoints, authenticated with a Bearer token read from C:\Users\Owner\ora-pm-cron\cron-secret.txt.
 - Logs every call (counters only, PII-redacted) to C:\Users\Owner\ora-pm-cron\cron.log.
