@@ -1,0 +1,221 @@
+{
+  "_doc": "Recorded intent for scheduled tasks that are disabled ON PURPOSE. Read by maintenance/pause-resume-guard.py's stranded-task check: a disabled recurring task is stranded unless it is retire-pending, held by a pending resume, or covered here by a hold whose reviewBy has not passed. An expired hold re-alarms, so a deferral comes back for a decision instead of rotting. id '*' holds a whole fleet. Add an entry when you DISABLE a task deliberately; remove it when you re-enable or retire the task. Seeded 2026-11-05 from Gabriel's 2026-10-30 rulings (memory/event_log.md, 2026-10-30 'Stalled-resume triage') and his 2026-11-05 answer for the 22 deferred tasks (keep off, review 2026-12-01).",
+  "holds": [
+    {
+      "fleet": "lams",
+      "id": "*",
+      "reason": "LAMS/Cowork fleet is deliberately dark (Gabriel ruling 2026-10-30): do not re-ask or queue a resume; producers migrate to CC or retire one by one.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-10-30",
+      "reviewBy": "2027-10-30"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-audit-log-sweep",
+      "reason": "Held off deliberately until OI-360 is fixed: the sweep overwrites earlier archives and writes gzipped session logs into a git-tracked folder the pre-push scanner cannot read.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-10-30",
+      "reviewBy": "2026-12-31"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-sofr-direct-prefetch",
+      "reason": "Held off deliberately: redundant with ora-am-brief Block A's direct SOFR pull (2026-09-22 ruling); retirement candidate, not yet ratified.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-10-30",
+      "reviewBy": "2026-12-31"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-acquisition-underwriting-eval-harness",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-ar-feed-sweep",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-calibration-snapshot",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-cc-schematic-refresh",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-claude-setup-audit",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-deal-aging-sla",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-deal-command-board",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-excess-usage-sweep",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-forward-calendar-digest",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-hubspot-renewal-closeout-tasks",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-incentive-registry-refresh",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-lease-snapshot-refresh",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-loan-balance-check",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-monthly-portfolio-briefing",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-noi-opportunity-digest",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-open-sessions-board",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-pm-ledger",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-psa-drift-watch",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-recovery-structure-audit-annual",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-renewal-hubspot-reconcile",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-tenant-hubspot-reconciliation",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-vacancy-aging-report",
+      "reason": "Off since the stalled 2026-09-28 resume; deferred by Gabriel 2026-10-30 and re-confirmed 2026-11-05 (keep off, review 12-01). At review: re-enable through register-scheduled-task, or retire.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-aaos-expire-leases",
+      "reason": "AAOS frozen by ADR-0007 (Gabriel-approved maintenance-reduction bundle 1, 2026-11-05); retirement ratified and filed in the live retire-pending.json, registry delete still to execute. Remove this hold once the delete lands.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    },
+    {
+      "fleet": "cc",
+      "id": "ora-aaos-publish-contracts",
+      "reason": "AAOS frozen by ADR-0007 (Gabriel-approved maintenance-reduction bundle 1, 2026-11-05); retirement ratified and filed in the live retire-pending.json, registry delete still to execute. Remove this hold once the delete lands.",
+      "ruledBy": "Gabriel",
+      "ruledOn": "2026-11-05",
+      "reviewBy": "2026-12-01"
+    }
+  ]
+}
