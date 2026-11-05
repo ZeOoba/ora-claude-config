@@ -315,6 +315,68 @@ def test_fail_modes_and_log():
               and "user_confirmed" not in json.dumps(r) for r in rows))
 
 
+_COLD_HOOK = r'''
+import runpy, sys, time
+sys.path.insert(0, %(lib)r)
+import session_kind as sk
+_real_open = open
+
+
+def _cold_open(path, *a, **kw):
+    time.sleep(%(delay)r)  # stands in for a cold on-access AV scan of one record file
+    return _real_open(path, *a, **kw)
+
+
+sk.open = _cold_open
+sys.argv = [%(hook)r]
+runpy.run_path(%(hook)r, run_name="__main__")
+'''
+
+
+def test_cold_store():
+    # OI-396: on 2026-11-05 three attended deletes failed closed because the record scan
+    # ran past session_kind's 20 s hard wall (live: 1482 records, ~20 ms per cold open). The
+    # real hook with the REAL budgets, against 402 records whose every open costs 60 ms
+    # (24 s if read one at a time): an attended delete with a valid token must pass inside
+    # the soft budget; a scheduled session and a record-less Desktop session must not.
+    root, env = make_env()
+    store = env["ORA_SESSION_STORE_DIRS"]
+    old = time.time() - 3600
+    for i in range(400):
+        p = os.path.join(store, "local_o%03d.json" % i)
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump({"cliSessionId": "eeeeeeee-0000-0000-0000-%012d" % i}, fh)
+        os.utime(p, (old - i, old - i))
+    hook = os.path.join(root, "cold_hook.py")
+    with open(hook, "w", encoding="ascii") as fh:
+        fh.write(_COLD_HOOK % {"lib": os.path.join(HOOKS_DIR, "lib"), "hook": HOOK,
+                               "delay": 0.06})
+    tok = mint(env, SESSION_A, [label(SCHED_DEL, TI_SCHED)])
+    t0 = time.time()
+    rc, out, err = run(env, SCHED_DEL, TI_SCHED, hook=hook)
+    dt = time.time() - t0
+    check("GC1 cold store (402 records x 60 ms per open): attended delete with a token is "
+          "allowed", rc == 0, "rc=%d %s" % (rc, err[-300:]))
+    check("GC1b and the token is consumed", not os.path.exists(tok))
+    with open(env["ORA_MCP_DELETE_LOG"], "r", encoding="ascii") as fh:
+        rows = [json.loads(x) for x in fh.read().splitlines()]
+    last = rows[-1] if rows else {}
+    check("GC2 the decision row records an interactive classification inside the 12 s soft "
+          "budget", last.get("kind") == "interactive"
+          and last.get("classify_ms", "").isdigit() and int(last["classify_ms"]) < 12000,
+          repr(last))
+    check("GC2b the hook call finishes well inside the 30 s hook timeout (%.1fs)" % dt,
+          dt < 20.0)
+    tok = mint(env, SESSION_S, [label(SCHED_DEL, TI_SCHED)])
+    rc, _, err = run(env, SCHED_DEL, TI_SCHED, sid=SESSION_S, hook=hook)
+    check("GC3 cold store: a scheduled session's token is still refused (fail closed)",
+          rc == 2 and "scheduled" in err, "rc=%d %s" % (rc, err[-200:]))
+    check("GC3b and that token is left in place (never spent)", os.path.exists(tok))
+    rc, _, err = run(env, SCHED_DEL, TI_SCHED, sid=SESSION_C, hook=hook)
+    check("GC4 cold store: a Desktop session with no record is refused (fail closed)",
+          rc == 2 and "scheduled" in err, "rc=%d %s" % (rc, err[-200:]))
+
+
 def _tree(patch_name, patch_src):
     """A temp copy of hooks/ (guard + lib) with one lib module replaced by patch_src."""
     tmp = tempfile.mkdtemp(prefix="mdg-tree-")
@@ -417,6 +479,7 @@ if __name__ == "__main__":
     test_plain_cli()
     test_fail_modes_and_log()
     test_hardening()
+    test_cold_store()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures[:12])))
         sys.exit(1)
