@@ -3,7 +3,17 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.13, 2026-11-03).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.14, 2026-11-05).
+
+v2.14 — WRITE-ONCE FIRST-SIGHTING PREDICTION (2026-11-05, Gabriel in-turn: "Write-once
+first-sighting fields"). NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE OR GOVERNOR CHANGED. STEP 5
+also writes `Verdict at First Sighting` and `Score at First Sighting` (Notion properties
+created 2026-11-05) on row CREATION only, copying the Verdict and Buy Box Score (100) this run
+writes on the new row; see the OVERWRITE RULE in STEP 5B. Origin: the 2026-11-05 live
+back-test found three of the four 2026-10-27 T1 PURSUE rows no longer reading T1, because the
+10-30 review overwrote their Verdict, so the prediction the v2.9 back-test must grade was gone.
+Existing rows are NOT backfilled by this version; a backfill from the decision ledger is a
+separate supervised pass.
 
 v2.13 — TWO FLOORS DOCUMENTED (2026-11-03, Gabriel in-turn). The $1M floor in the buy-box
 block and the §7d sub-scale list is this scan's SOURCING filter; the SCREEN floor is $500K
@@ -1224,7 +1234,11 @@ update); Asking Price;
 run that verifies the ask; see STEP 1B-B)**; Total SF; Price / SF
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
 T2 WATCH / PASS / KILLED — v2.9: T1-PENDING-PRICE and T1-PENDING-VERIFY rows are written
-'T2 WATCH' with their literal tag, never 'T1 PURSUE'; only a full T1 PURSUE gets that value); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
+'T2 WATCH' with their literal tag, never 'T1 PURSUE'; only a full T1 PURSUE gets that value);
+**Verdict at First Sighting + Score at First Sighting** (v2.14 — WRITE-ONCE, on creation only:
+the same Verdict and Buy Box Score (100) this run writes on the new row; never written on an
+update, a re-sighting, a re-tier or a PROVISIONAL resolution, and never cleared; see the
+OVERWRITE RULE in STEP 5B); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
 FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type;
 **`Construction Type`** (v2.8 — select; EXACT options: 'Masonry / Brick' · 'Block / CMU' ·
 'Tilt-Up / Precast Concrete' · 'Hybrid (masonry + metal)' · 'Pre-Engineered Metal (PEMB)' ·
@@ -1405,6 +1419,13 @@ another task exists to watch. This mirrors that task's own standing guardrail.
 OVERWRITE RULE (deliberately the OPPOSITE of `Ask at First Sighting`):
   - `Ask at First Sighting` in the Deal Sourcing Log is WRITE-ONCE — it is a historical
     baseline and overwriting it destroys the price-cut signal.
+  - `Verdict at First Sighting` and `Score at First Sighting` (v2.14) are WRITE-ONCE for the
+    same reason, on EVERY row, including rows this run only updates: they are the scan's
+    original prediction, which `ora-passed-deal-tracker`'s monthly back-test
+    (`maintenance/funnel-backtest.py`) grades against the row's later outcome. A review that
+    passes a T1 changes `Verdict`, `Status` or `Go / No-Go`, never these. Leave them blank on a
+    row that lacks them (rows created before 2026-11-05); never infer them from the current
+    Verdict.
   - `Listing Ask (Verified)` is a CURRENT-STATE field — overwrite it freely whenever a
     newer run verifies a different published ask, and re-stamp `Listing Ask Verified On`.
     The stamp is what makes the figure trustworthy; a value without a fresh date is a
