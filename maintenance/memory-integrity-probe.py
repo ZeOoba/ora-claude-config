@@ -12,6 +12,8 @@ Checks the consolidated memory set for:
      oxford-cc-repo-health.md -> session-context.md dead-pointer incident):
        4a. dead pointers — any "open-items-tracker.md#OI-NNN" reference elsewhere in
            memory/*.md whose ID has no matching row in the tracker           [fail]
+           (in an append-only file — APPEND_ONLY_FILES, i.e. event_log.md — the same
+           finding is a warning: it can never be corrected in place, 2026-11-05)
        4b. auto-check drift (warnings) — any tracker item marked OPEN that carries an
            Auto-check line gets evaluated against live fleet-status.py --json output
            (registry_* kinds) or one scalar field of a JSON state file
@@ -123,6 +125,19 @@ OI_AUTOCHECK_RE = re.compile(r"\*\*Auto-check:\*\*\s*(.+)")
 # using the pre-split filename for an item that has since closed (and moved to
 # the history file) is a genuinely dead link, not a stylistic nit.
 OI_REF_RE = re.compile(r"(open-items-tracker(?:-history)?)\.md#(OI-\d{3,})")
+# Append-only memory files. Their own rule forbids editing any entry in place, so check 4a
+# can only REPORT a dead open-items link in one, never get it repaired: it lists it as a
+# WARNING there, not a failure. That covers a link that went stale after it was written (its
+# item closed and moved to the history file) AND one that was dead when written (quoted or
+# mistyped in a new entry), so in this file a fresh typo also only warns. The live case was
+# of the second kind: the 2026-09-30 entry and the R33 entry of 2026-10-28 quote
+# open-items-tracker.md#OI-288 after the item had moved (the once-correct link is in
+# _archive/event_log_2026-10-08.md, which this probe does not scan), and that failed the
+# probe on every run -- a probe that always fails hides the next real failure. Gabriel's
+# ruling 2026-11-05 (the OI-288 case). Kept to the one exact name that ruling covers; tests
+# pin the set and check near-miss names (other logs, dated copies, other casings), so any
+# widening is deliberate.
+APPEND_ONLY_FILES = frozenset({"event_log.md"})
 KV_RE = re.compile(r'(\w+)=("[^"]*"|\S+)')
 
 
@@ -146,6 +161,36 @@ def parse_open_items(text):
             "autocheck": am.group(1).strip() if am else None,
         }
     return items
+
+
+def oi_pointer_findings(name, text, where):
+    """Check 4a for one memory file: (issues, warnings) for its open-items links.
+
+    `where` maps an OI id to the tracker file whose `### OI-NNN` anchor it lives in. A link
+    is dead when its id resolves in neither file, or when it names the wrong file (a markdown
+    reader opens the named file and jumps to `#OI-NNN` there). Dead links in an append-only
+    file (APPEND_ONLY_FILES) go to warnings, everywhere else to issues; the message text is
+    the same, plus the reason in the warning case."""
+    issues, warnings = [], []
+    append_only = name in APPEND_ONLY_FILES
+    for stem, oid in sorted(set(OI_REF_RE.findall(text))):
+        referenced_file = stem + ".md"
+        actual_file = where.get(oid)
+        if actual_file is None:
+            msg = ("%s references %s#%s, which has no matching row in "
+                   "either open-items-tracker.md or open-items-tracker-history.md "
+                   "(dead pointer)" % (name, referenced_file, oid))
+        elif actual_file != referenced_file:
+            msg = ("%s references %s#%s, but that id's anchor is actually in "
+                   "%s (dead pointer -- wrong file named, likely stale from "
+                   "before the item closed/split)" % (name, referenced_file, oid, actual_file))
+        else:
+            continue
+        if append_only:
+            warnings.append(msg + " -- append-only file, left as written")
+        else:
+            issues.append(msg)
+    return issues, warnings
 
 
 def parse_kv(raw):
@@ -676,7 +721,7 @@ def main():
                 "%s is OVERDUE for review (review_by: %s, %d day(s) ago) -- resolve it or "
                 "archive it; do not let it rot" % (name, due, (today - due).days))
 
-    # --- 4. open-items tracker: dead pointers [fail] + auto-check drift [warn] ---
+    # --- 4. open-items tracker: dead pointers [fail; warn in append-only files] + auto-check drift [warn] ---
     # Optional companion files -- absent means no items exist to check yet on that
     # side. Parsed SEPARATELY (not concatenated) so `where[oid]` can record which
     # actual file each id's `### OI-NNN` header lives in -- check 4a needs that to
@@ -707,7 +752,8 @@ def main():
 
     # 4a. dead pointers -- any #OI-NNN reference elsewhere that doesn't resolve, OR
     # that names the WRONG file for where the id's anchor actually lives (a link a
-    # markdown reader would literally fail to jump to).
+    # markdown reader would literally fail to jump to). In an append-only file the same
+    # finding is a warning (see APPEND_ONLY_FILES and oi_pointer_findings).
     for path in glob.glob(os.path.join(MEM, "*.md")):
         name = os.path.basename(path)
         if name in ("open-items-tracker.md", "open-items-tracker-history.md"):
@@ -716,17 +762,9 @@ def main():
             txt = open(path, encoding="utf-8").read()
         except Exception:
             continue
-        for stem, oid in sorted(set(OI_REF_RE.findall(txt))):
-            referenced_file = stem + ".md"
-            actual_file = where.get(oid)
-            if actual_file is None:
-                issues.append("%s references %s#%s, which has no matching row in "
-                              "either open-items-tracker.md or open-items-tracker-history.md "
-                              "(dead pointer)" % (name, referenced_file, oid))
-            elif actual_file != referenced_file:
-                issues.append("%s references %s#%s, but that id's anchor is actually in "
-                              "%s (dead pointer -- wrong file named, likely stale from "
-                              "before the item closed/split)" % (name, referenced_file, oid, actual_file))
+        file_issues, file_warnings = oi_pointer_findings(name, txt, where)
+        issues.extend(file_issues)
+        warnings.extend(file_warnings)
 
     # 4b. auto-check drift -- OPEN items whose stated condition now mechanically matches.
     # Only text that looks like a real kind=... attempt is evaluated -- the convention's
