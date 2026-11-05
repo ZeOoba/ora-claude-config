@@ -821,6 +821,31 @@ with tempfile.TemporaryDirectory() as td:
     expect("history lookup failure during carve-out: stale + error (fails closed)",
            r.get("snapshot_stale") is True and "history" in (r.get("snapshot_error") or ""), repr(r))
 
+# REFUTE round 3: a blob that only ever existed as a MERGE result (two consecutive
+# merges each writing a same-stamp snapshot) must still be recognised as committed.
+def _merge_writing(origin, branch, doc):
+    run(["git", "checkout", "-q", "-b", branch], origin)
+    run(["git", "commit", "--allow-empty", "-q", "-m", "side " + branch], origin)
+    run(["git", "checkout", "-q", "main"], origin)
+    run(["git", "merge", "-q", "--no-ff", "--no-commit", branch], origin)
+    _write_snap(origin, doc)
+    run(["git", "add", SNAP], origin)
+    run(["git", "commit", "-q", "-m", "merge " + branch], origin)
+
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    stamp = "2026-10-26T14:52:49.296Z"
+    x_doc = _snap_doc(stamp, "merge-only-X")
+    _merge_writing(origin, "s1", x_doc)
+    _merge_writing(origin, "s2", _snap_doc(stamp, "merge-only-Y"))
+    run(["git", "fetch", "-q", "origin"], local)
+    run(["git", "merge", "-q", "--ff-only", "origin/main"], local)
+    _write_snap(local, x_doc)
+    r = _scan_snap(local)
+    expect("merge-only older blob at same stamp: stale (reverted_to_older)",
+           r.get("snapshot_stale") is True and r.get("snapshot_reverted_to_older") is True, repr(r))
+
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
