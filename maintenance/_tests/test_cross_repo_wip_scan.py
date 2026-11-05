@@ -786,6 +786,41 @@ with tempfile.TemporaryDirectory() as td:
     finally:
         wipscan._git_status_short = real_status
 
+# REFUTE round 2: a working tree holding an OLDER committed version at the same stamp
+# (stash/checkout of the old file, a dev server persisting a stale copy) is stale even
+# though HEAD's copy equals origin's -- it must not pass as a "local patch".
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)                 # commit A: stamp S, unredacted
+    old_doc = _snap_doc("2026-10-26T14:52:49.296Z")
+    _commit_snap(origin, _snap_doc("2026-10-26T14:52:49.296Z", "redacted"), "redact")  # B
+    run(["git", "fetch", "-q", "origin"], local)
+    run(["git", "merge", "-q", "--ff-only", "origin/main"], local)
+    _write_snap(local, old_doc)                   # working tree reverted to A's bytes
+    r = _scan_snap(local)
+    expect("reverted-to-older copy at same stamp: stale",
+           r.get("snapshot_stale") is True and r.get("snapshot_reverted_to_older") is True
+           and not r.get("snapshot_locally_modified"), repr(r))
+    expect("reverted-to-older: report says OLDER committed version",
+           "OLDER committed version" in wipscan.format_report([r]), wipscan.format_report([r]))
+    expect("reverted-to-older: freshness-only exit 1",
+           _main_with(["--freshness-only"], [local]) == 1)
+
+    real_git = wipscan._git
+
+    def _git_log_fails(args, repo_path):
+        if "log" in args:
+            return 128, ""
+        return real_git(args, repo_path)
+
+    _write_snap(local, _snap_doc("2026-10-26T14:52:49.296Z", "ar-patched"))
+    wipscan._git = _git_log_fails
+    try:
+        r = _scan_snap(local)
+    finally:
+        wipscan._git = real_git
+    expect("history lookup failure during carve-out: stale + error (fails closed)",
+           r.get("snapshot_stale") is True and "history" in (r.get("snapshot_error") or ""), repr(r))
+
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
