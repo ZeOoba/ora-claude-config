@@ -83,10 +83,12 @@ def _append_log_lock(log, timeout):
         of sleeps, ~4.5 s held) is a deny-write handle, where every attempt fails
         and the live log is never written.
       - An appender that does fail open and lands in the guard->replace gap: its
-        own CLI entry is re-verified under the lock and retried, but entries it
-        drains from the `.pending` spool (drain_spool) have no post-write verify
-        and their spool file is deleted -- that is the silent-loss case
-        (follow-up, not fixed here).
+        own CLI entry is re-verified and retried, but that re-verify itself runs
+        under a lock that fails open and matches on the header alone, so it is
+        not proof against this window (open residual). Entries it drains from
+        the `.pending` spool are safe since 2026-11-05: drain_spool refuses to
+        write without the lock and deletes a spool file only after re-reading
+        the entry under the same hold.
       - Writers that never take this lock at all -- the Edit/Write tools, and a
         git merge (e.g. checkout-merge-forward) touching the file -- are covered
         only by the mtime guard and _unwind's classification."""
