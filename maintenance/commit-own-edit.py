@@ -25,20 +25,27 @@ THE LANDING COMMITS ONLY WHEN ALL OF THESE HOLD:
   - HEAD is on a branch, no merge/rebase/cherry-pick/revert is in progress, nothing of P is
     staged, and the baseline (if any) was clean;
   - P has been untouched for QUIET_SECONDS, so every Edit-tool write before the check has its
-    touch record on disk (recorder lag measured live 2026-11-05: p50 0.3 s, p99 4.7 s);
+    touch record on disk (recorder lag measured live 2026-11-05: p50 0.3 s, p99 4.7 s), and P's
+    (mtime, size) stays exactly as it was when judged quiet until the commit -- a write after
+    the judgement would otherwise slip in with its touch record still pending;
   - preflight-shared-checkout.py says CLEAR with P in dirty_overlap_mine and provenance fully
     readable: this session is P's only LIVE recorded owner and no other session's claim covers
     it. STALE owners (sessions that touched P before its last commit -- the live tracker always
     has some) contest P, because a partial commit can leave their hunk dirty. They are excused
     (--accept-stale) only by a clean baseline with P not committed since: P then held no
     uncommitted content when this run began, so whatever they wrote was already committed;
-  - the bytes `git add` would store for P are the same before the check, after it, and right
-    before the commit, and HEAD's blob of P has not moved.
+  - right before the commit: the bytes `git add` would store for P are still the checked ones,
+    HEAD's blob of P has not moved, nothing of P has been staged, and HEAD is still on the
+    checked branch (compared as a full refs/heads/ name: a tag can share a branch's short name).
 Then: `git commit --only -- P` (P's working-tree content, ignoring everything else in the shared
 index -- other staged paths stay staged), and verification of the commit found by its per-run
 trailer: one parent, parent's P unchanged, only P, the checked blob, on the checked branch. A
-commit that fails verification is taken back (branch moved back if it still points at it, P's
-index entry restored): UNDONE. If taking it back fails too: COMMITTED_UNVERIFIED.
+commit that fails verification is taken back (branch moved back only if it still points at it,
+P's index entry restored): UNDONE. If taking it back fails too: COMMITTED_UNVERIFIED. If git
+exits non-zero after creating the commit (it can fail to write the new index), P's index entry
+is repaired when it still holds the old blob, which would otherwise stage a revert of the
+commit. A commit that landed without this run's trailer (a commit-msg hook) cannot be verified
+as this run's: COMMITTED_UNVERIFIED.
 
 WHY A SCRIPT, NOT GIT COMMANDS IN THE TASK SPEC: the sequence has documented traps in this
 checkout (a pathspec commit re-reads the working tree, a bare commit takes the whole shared
@@ -50,9 +57,11 @@ RESIDUAL EXPOSURE. Provenance comes only from the Edit/Write tool hook. So a for
 with Bash or a script DURING the run's window (after --begin, before the landing) is invisible,
 and would be committed with the run's rows; without --begin, that window reaches back to P's
 last commit. The same holds for a foreign Edit-tool touch recorded under a spelling the
-preflight's owner lookup cannot match (a since-removed junction, an NTFS stream suffix). This
-helper refuses anything with a recorded foreign owner; the weekly sweep it replaces for this
-case commits any settled content without looking at owners.
+preflight's owner lookup cannot match (a since-removed junction, an NTFS stream suffix, a
+an extended-length or UNC-share spelling), and for touches in a session directory the preflight cannot list
+(it reads such a directory as empty, not as unreadable). This helper refuses anything with a
+recorded foreign owner; the weekly sweep it replaces for this case commits any settled content
+without looking at owners.
 
 Never pushes; never stages any path but P; never stashes or checks out; never touches a lock it
 did not take; moves a ref only to take back its own just-made commit. Landing on main stays
@@ -94,7 +103,9 @@ GIT_TIMEOUT = 60
 COMMIT_TIMEOUT = 120  # generous: a killed `git commit` can strand .git/index.lock
 PREFLIGHT_TIMEOUT = 300  # ~1 s on the live checkout (2026-11-05)
 QUIET_SECONDS = 15
-QUIET_MAX_WAIT = 180
+# Capped so the worst case (quiet wait + lock retries + git and preflight time) stays inside the
+# Bash tool's default 120 s timeout; a call that outlives it prints no RESULT_JSON to the run.
+QUIET_MAX_WAIT = 60
 IN_PROGRESS = ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply")
 _LOCK_RE = re.compile(r"\.lock\b|cannot lock ref", re.I)  # index.lock, <ref>.lock contention
 BASELINE_DIR = "commit-own-edit"
@@ -173,9 +184,16 @@ def _locate(path):
     return {"full": full, "repo": repo, "rel": rel}, None
 
 
-def _branch(repo):
-    rc, out, _ = _git(repo, "symbolic-ref", "-q", "--short", "HEAD")
-    return out.strip() if rc == 0 and out.strip() else None
+def _branch_ref(repo):
+    """HEAD's full branch ref (refs/heads/<name>), or None when detached. Never --short: that
+    turns into heads/<name> when a tag shares the branch's name."""
+    rc, out, _ = _git(repo, "symbolic-ref", "-q", "HEAD")
+    ref = out.strip() if rc == 0 else ""
+    return ref if ref.startswith("refs/heads/") else None
+
+
+def _short(ref):
+    return ref[len("refs/heads/"):] if ref and ref.startswith("refs/heads/") else ref
 
 
 def _head(repo):
@@ -221,20 +239,32 @@ def _staged_blob(repo, rel, head):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def _sig(full):
+    """(mtime_ns, size) of the file, or None."""
+    try:
+        st = os.stat(full)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 def _wait_quiet(full, quiet, max_wait):
-    """True once `full` has gone `quiet` seconds without a write; False if that has not
-    happened within `max_wait` seconds (or the file vanished)."""
+    """The file's (mtime_ns, size) at the moment it was judged `quiet` seconds untouched, or
+    None if that did not happen within `max_wait` seconds (or the file vanished). Every later
+    check must still see exactly this state: a write after the judgement would otherwise slip
+    in with its touch record still pending."""
     deadline = time.time() + max_wait
     while True:
         try:
-            age = time.time() - os.stat(full).st_mtime
+            st = os.stat(full)
         except OSError:
-            return False
+            return None
+        age = time.time() - st.st_mtime
         if age >= quiet:
-            return True
+            return (st.st_mtime_ns, st.st_size)
         pause = quiet - age
         if time.time() + pause > deadline:
-            return False
+            return None
         time.sleep(pause)
 
 
@@ -318,8 +348,45 @@ def _find_commit(repo, nonce):
     return shas[0] if len(shas) == 1 else None
 
 
+def _tree_entry(repo, rev, rel):
+    """(mode, blob) of rel in rev's tree, or None."""
+    rc, out, _ = _git(repo, "ls-tree", "-z", rev, "--", rel)
+    meta = out.split("\0")[0].split("\t", 1)[0].split() if rc == 0 else []
+    return (meta[0], meta[2]) if len(meta) == 3 else None
+
+
+def _index_blob(repo, rel):
+    rc, out, _ = _git(repo, "ls-files", "-s", "--", rel)
+    meta = out.split("\t", 1)[0].split() if rc == 0 else []
+    return meta[1] if len(meta) == 3 else None
+
+
+def _set_index_entry(repo, rel, entry):
+    """Point rel's index entry at entry=(mode, blob), touching no other entry. None on
+    success, else git's complaint (retried briefly: the shared index is often locked)."""
+    err = ""
+    for attempt in range(3):
+        if attempt:
+            time.sleep(1)
+        rc, _, err = _git(repo, "update-index", "--cacheinfo", "%s,%s,%s" % (entry[0], entry[1], rel))
+        if rc == 0:
+            return None
+    return err.strip() or "update-index failed"
+
+
+def _looks_like_ours(repo, sha, parent, rel, blob):
+    """True when `sha` is a single-parent commit on `parent` that changed only rel, to blob --
+    this run's commit with its trailer stripped (a commit-msg hook), as far as git can tell."""
+    rc, out, _ = _git(repo, "rev-list", "--parents", "-n", "1", sha)
+    if rc != 0 or out.split()[1:] != [parent]:
+        return False
+    rc, out, _ = _git(repo, "diff-tree", "-z", "--no-commit-id", "--name-only", "-r", sha)
+    return rc == 0 and [p for p in out.split("\0") if p] == [rel] and _blob_at(repo, sha, rel) == blob
+
+
 def verify_commit(repo, sha, rel, expected_blob, branch=None, parent_blob=None):
-    """Problems with `sha` as the landing of `rel` at `expected_blob` ([] == verified)."""
+    """Problems with `sha` as the landing of `rel` at `expected_blob` ([] == verified).
+    `branch` is a full ref (refs/heads/x) or a bare branch name."""
     problems = []
     rc, out, err = _git(repo, "rev-list", "--parents", "-n", "1", sha)
     if rc != 0:
@@ -340,36 +407,30 @@ def verify_commit(repo, sha, rel, expected_blob, branch=None, parent_blob=None):
         problems.append("commit %s stored blob %s for %s, expected %s"
                         % (sha, blob, rel, expected_blob))
     if branch:
-        rc, _, _ = _git(repo, "merge-base", "--is-ancestor", sha, "refs/heads/" + branch)
+        ref = branch if branch.startswith("refs/") else "refs/heads/" + branch
+        rc, _, _ = _git(repo, "merge-base", "--is-ancestor", sha, ref)
         if rc != 0:
-            problems.append("commit %s is not on branch %s" % (sha, branch))
+            problems.append("commit %s is not on branch %s" % (sha, _short(ref)))
     return problems
 
 
-def _undo(repo, branch, sha, rel):
-    """Take back this run's own just-made commit: move `branch` back to the commit's parent only
-    if it still points at the commit, then restore rel's index entry. None on success."""
+def _undo(repo, ref, sha, rel):
+    """Take back this run's own just-made commit: move `ref` back to the commit's parent only
+    if it still points at the commit (compare-and-swap, so a commit someone made on top is never
+    discarded), then restore rel's index entry. None on success."""
     parent = (_git(repo, "rev-parse", "--verify", "-q", sha + "^1")[1] or "").strip()
     if not parent:
         return "cannot read the parent of %s" % sha
     rc, _, err = _git(repo, "update-ref", "-m", "commit-own-edit: take back an unverified commit",
-                      "refs/heads/" + branch, parent, sha)
+                      ref, parent, sha)
     if rc != 0:
-        return "could not move %s back to %s: %s" % (branch, parent[:10], err.strip())
-    rc, out, _ = _git(repo, "ls-tree", "-z", parent, "--", rel)
-    meta = out.split("\0")[0].split("\t", 1)[0].split() if rc == 0 else []
-    if len(meta) != 3:
-        return ("%s is back at %s, but %s's old index entry could not be read; run: "
-                "git reset -q -- %s" % (branch, parent[:10], rel, rel))
-    err = ""
-    for attempt in range(3):
-        if attempt:
-            time.sleep(1)
-        rc, _, err = _git(repo, "update-index", "--cacheinfo", "%s,%s,%s" % (meta[0], meta[2], rel))
-        if rc == 0:
-            return None
-    return ("%s is back at %s, but restoring %s's index entry failed (%s); run: "
-            "git reset -q -- %s" % (branch, parent[:10], rel, err.strip(), rel))
+        return "could not move %s back to %s: %s" % (_short(ref), parent[:10], err.strip())
+    entry = _tree_entry(repo, parent, rel)
+    err = _set_index_entry(repo, rel, entry) if entry else "its entry could not be read"
+    if err:
+        return ("%s is back at %s, but restoring %s's index entry failed (%s); run: "
+                "git reset -q -- %s" % (_short(ref), parent[:10], rel, err, rel))
+    return None
 
 
 def _result(mode, session):
@@ -395,10 +456,10 @@ def begin(path, session=None, sessions_dir=None):
         return done("ERROR", err)
     repo, rel = loc["repo"], loc["rel"]
     res.update(repo=repo, path=rel)
-    branch = _branch(repo)
-    if not branch:
+    ref = _branch_ref(repo)
+    if not ref:
         return done("ERROR", "HEAD is detached; the landing would refuse anyway")
-    res["branch"] = branch
+    branch = res["branch"] = _short(ref)
     head_blob = _blob_at(repo, "HEAD", rel)
     target = _baseline_path(sessions_dir or _default_sessions_dir(), session, repo, rel)
     res["baseline_file"] = target
@@ -449,16 +510,18 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
                              "ownership cannot be proven without one")
     if not message:
         return done("ERROR", "empty commit message")
+    if not (isinstance(quiet_seconds, (int, float)) and 0 <= quiet_seconds < float("inf")):
+        return done("ERROR", "quiet_seconds must be a finite number >= 0")
     loc, err = _locate(path)
     if err:
         return done("ERROR", err)
     full, repo, rel = loc["full"], loc["repo"], loc["rel"]
     res.update(repo=repo, path=rel)
 
-    branch = _branch(repo)
-    if not branch:
+    ref = _branch_ref(repo)
+    if not ref:
         return done("LEFT_FOR_SWEEP", "HEAD is detached; a commit here would sit on no branch")
-    res["branch"] = branch
+    branch = res["branch"] = _short(ref)
     rc, out, err = _git(repo, "rev-parse", "--absolute-git-dir")
     if rc != 0 or not out.strip():
         return done("ERROR", "cannot locate the git dir: %s" % err.strip())
@@ -484,7 +547,8 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
     if rec is not None and not rec.get("clean") and rec.get("rel") == rel:
         return done("LEFT_FOR_SWEEP", "the file already had uncommitted content before this run "
                                       "touched it (--begin found it dirty)")
-    if not _wait_quiet(full, quiet_seconds, quiet_max_wait):
+    quiet_sig = _wait_quiet(full, quiet_seconds, quiet_max_wait)
+    if quiet_sig is None:
         return done("LEFT_FOR_SWEEP", "the file is still being written (no %gs quiet period "
                                       "within %gs)" % (quiet_seconds, quiet_max_wait))
 
@@ -518,14 +582,14 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
     nonce = uuid.uuid4().hex
     trailers = "Commit-Own-Edit-Session: %s\nCommit-Own-Edit-Run: %s" % (session, nonce)
     attempts = max(1, lock_attempts)
-    sha, last = None, ""
+    sha, last, commit_rc = None, "", None
     for attempt in range(attempts):
         if attempt:
             time.sleep(lock_wait)
-        now_branch = _branch(repo)
-        if now_branch != branch:
+        now_ref = _branch_ref(repo)
+        if now_ref != ref:
             return done("LEFT_FOR_SWEEP", "the branch changed during the landing (now %s)"
-                        % (now_branch or "detached HEAD"))
+                        % (_short(now_ref) or "detached HEAD"))
         busy = _busy(git_dir)
         if busy:
             return done("LEFT_FOR_SWEEP", "repository is mid-operation (%s)" % ", ".join(busy))
@@ -533,14 +597,28 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
         if not head_now or _blob_at(repo, head_now, rel) != head_blob0:
             return done("LEFT_FOR_SWEEP", "the file was committed by someone else during the "
                                           "landing")
-        if _staged_blob(repo, rel, head_now) != checked:
+        rc, _, err = _git(repo, "diff", "--cached", "--quiet", "--", rel)
+        if rc == 1:
+            return done("LEFT_FOR_SWEEP", "a version of the file was staged in the shared index "
+                                          "during the landing; it is not this run's to replace")
+        if rc != 0:
+            return done("ERROR", "git diff --cached failed: %s" % err.strip())
+        if _sig(full) != quiet_sig or _staged_blob(repo, rel, head_now) != checked:
             return done("LEFT_FOR_SWEEP", "the file changed while it was being checked")
         rc, out, err = _git(repo, "commit", "--only", "--quiet", "-m", message,
                             "-m", COMMIT_BODY, "-m", trailers, "--", rel,
                             timeout=COMMIT_TIMEOUT)
         sha = _find_commit(repo, nonce)  # also settles a timed-out commit either way
         if sha:
+            commit_rc = rc
             break
+        now = _head(repo)
+        if now and now != head_now and _looks_like_ours(repo, now, head_now, rel, checked):
+            res["commit"] = now
+            return done("COMMITTED_UNVERIFIED", "HEAD moved to %s, a commit of exactly this file "
+                                                "and content, but it lacks this run's trailer (a "
+                                                "commit-msg hook?), so it is not provably this "
+                                                "run's; check it by hand" % now[:10])
         last = (err or out).strip()
         if _LOCK_RE.search(last):
             continue
@@ -553,16 +631,36 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
                                       "(%d attempts): %s" % (attempts, last[:300]))
 
     res["commit"] = sha
-    problems = verify_commit(repo, sha, rel, checked, branch=branch, parent_blob=head_blob0)
+    problems = verify_commit(repo, sha, rel, checked, branch=ref, parent_blob=head_blob0)
     if problems:
-        undo_error = _undo(repo, branch, sha, rel)
+        undo_error = _undo(repo, ref, sha, rel)
         if undo_error is None:
             return done("UNDONE", "commit %s failed verification and was taken back: %s"
                         % (sha[:10], "; ".join(problems)))
         return done("COMMITTED_UNVERIFIED", "%s; taking it back failed: %s"
                     % ("; ".join(problems), undo_error))
+    note = ""
+    if commit_rc != 0:
+        # git can create the commit and still fail to write the new index (exit 128), leaving
+        # the path staged as a revert of the commit -- which the next bare commit would land.
+        # Repair only that exact shape; a third version there is someone else's to keep.
+        ix = _index_blob(repo, rel)
+        if ix == head_blob0:
+            repair_error = _set_index_entry(repo, rel, _tree_entry(repo, sha, rel))
+            if repair_error:
+                return done("COMMITTED_UNVERIFIED", "commit %s landed, but the index still "
+                                                    "stages %s's old version (%s); run: git reset "
+                                                    "-q -- %s" % (sha[:10], rel, repair_error, rel))
+            res["index_repaired"] = True
+            note = "; git exited %s after creating it, index entry repaired" % commit_rc
+        elif ix != checked:
+            return done("COMMITTED_UNVERIFIED", "commit %s landed, but git exited %s and the index "
+                                                "now holds another version of %s; check it by hand"
+                        % (sha[:10], commit_rc, rel))
+        else:
+            note = "; git exited %s after creating it" % commit_rc
     res["worktree_matches_commit"] = _git(repo, "diff", "--quiet", sha, "--", rel)[0] == 0
-    return done("COMMITTED", "committed %s as %s on %s" % (rel, sha[:10], branch))
+    return done("COMMITTED", "committed %s as %s on %s%s" % (rel, sha[:10], branch, note))
 
 
 class _Parser(argparse.ArgumentParser):
@@ -596,7 +694,7 @@ def _parse_args(argv):
     ap.add_argument("--claims-dir", default=None, help="preflight pass-through (tests)")
     ap.add_argument("--transcripts-dir", default=None, help="preflight pass-through (tests)")
     ap.add_argument("--quiet-seconds", type=float, default=QUIET_SECONDS,
-                    help="quiet period before the check (default %(default)s; tests use 0)")
+                    help="quiet period before the check, >= 0 (default %(default)s; tests use 0)")
     args = ap.parse_args(argv)
     if not args.begin and not (args.message or "").strip():
         ap.error("--message is required unless --begin is given")
