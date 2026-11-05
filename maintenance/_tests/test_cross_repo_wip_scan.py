@@ -731,6 +731,61 @@ with tempfile.TemporaryDirectory() as td:
     expect("--fetch failure: freshness-only exit 1 (unverified is not clean)",
            _main_with(["--freshness-only", "--fetch"], [local]) == 1)
 
+# --- REFUTE follow-ups (2026-11-05) -------------------------------------------------
+# L1: an in-place local patch that keeps generatedAt (ar-import-headless.ts patchSnapshot)
+# is a LOCAL modification, not "main replaced these bytes" -- unless main ALSO moved.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    _write_snap(local, _snap_doc("2026-10-26T14:52:49.296Z", "ar-patched"))
+    r = _scan_snap(local)
+    expect("local patch, same stamp, HEAD==origin: NOT stale", r.get("snapshot_stale") is False, repr(r))
+    expect("local patch: flagged snapshot_locally_modified",
+           r.get("snapshot_locally_modified") is True, repr(r))
+    expect("local patch: freshness-only exit 0", _main_with(["--freshness-only"], [local]) == 0)
+
+    _commit_snap(origin, _snap_doc("2026-10-26T14:52:49.296Z", "redacted"), "redact")
+    run(["git", "fetch", "-q", "origin"], local)
+    r = _scan_snap(local)
+    expect("local patch AND main moved bytes at same stamp: stale",
+           r.get("snapshot_stale") is True and not r.get("snapshot_locally_modified"), repr(r))
+
+# C2: a hash failure at equal stamps is unmeasurable -> stale with error
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    real_git = wipscan._git
+
+    def _git_hash_fails(args, repo_path):
+        if "hash-object" in args:
+            return 128, ""
+        return real_git(args, repo_path)
+
+    wipscan._git = _git_hash_fails
+    try:
+        r = _scan_snap(local)
+    finally:
+        wipscan._git = real_git
+    expect("hash-object failure at equal stamps: stale + error",
+           r.get("snapshot_stale") is True and "hash" in (r.get("snapshot_error") or ""), repr(r))
+
+# C3: --freshness-only never runs `git status` on the inspected checkout
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    real_status = wipscan._git_status_short
+    calls = []
+
+    def _status_spy(repo_path):
+        calls.append(repo_path)
+        return real_status(repo_path)
+
+    wipscan._git_status_short = _status_spy
+    try:
+        rc = _main_with(["--freshness-only"], [local])
+        expect("freshness-only: git status not run", calls == [] and rc == 0, repr((calls, rc)))
+        rc = _main_with([], [local])
+        expect("full scan: git status still runs", calls == [local], repr(calls))
+    finally:
+        wipscan._git_status_short = real_status
+
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)

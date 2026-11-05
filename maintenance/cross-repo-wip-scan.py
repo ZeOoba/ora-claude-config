@@ -453,7 +453,21 @@ def _snapshot_freshness(repo_path, rel_path, canonical):
         out["snapshot_error"] = "cannot hash local %s" % rel_path
         return out
     out["snapshot_lag_hours"] = 0.0
-    out["snapshot_stale"] = not matches               # same stamp, different bytes
+    if matches:
+        out["snapshot_stale"] = False
+        return out
+    # Same stamp, different bytes. If the checkout's own HEAD copy already equals
+    # origin's, the difference is a LOCAL in-place edit (e.g. ar-import-headless.ts
+    # patchSnapshot, which rewrites the file without touching generatedAt) -- readers
+    # see main's data plus that patch, not data main has replaced. Report, don't flag.
+    # Otherwise main's committed bytes moved past this checkout: stale.
+    rc, head_blob = _git(["--no-optional-locks", "rev-parse", "--verify", "--quiet",
+                          "HEAD:%s" % rel_path], repo_path)
+    if rc == 0 and head_blob and head_blob == origin_blob:
+        out["snapshot_locally_modified"] = True
+        out["snapshot_stale"] = False
+        return out
+    out["snapshot_stale"] = True
     return out
 
 
@@ -463,7 +477,8 @@ def _git_status_short(repo_path):
     all, which is checked before this is ever called)."""
     try:
         proc = subprocess.run(
-            ["git", "status", "--short"], cwd=repo_path,
+            # --no-optional-locks: no index.lock / stat-cache rewrite on a shared checkout.
+            ["git", "--no-optional-locks", "status", "--short"], cwd=repo_path,
             capture_output=True, text=True, timeout=30,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -484,7 +499,7 @@ def _git_status_short(repo_path):
     return out
 
 
-def scan_repo(repo_path, now=None, fetch=False):
+def scan_repo(repo_path, now=None, fetch=False, wip=True):
     """One repo's finding dict. `now` is injectable for deterministic tests.
 
     An unmeasurable oldest-age (e.g. every uncommitted entry is a deletion, so
@@ -514,6 +529,14 @@ def scan_repo(repo_path, now=None, fetch=False):
     if corrector_path:
         branch_info.update(_corrector_streak(corrector_path))
 
+    if not wip:
+        # --freshness-only: WIP aging is not consulted, so do not run `git status`
+        # on the shared checkout at all (daily probe; REFUTE finding C3).
+        out = {"path": repo_path, "git_repo": True, "uncommitted_count": None,
+               "oldest_age_hours": None, "stale": False, "missing": False,
+               "wip_skipped": True}
+        out.update(branch_info)
+        return out
     entries = _git_status_short(repo_path)
     if entries is None:
         out = {
@@ -545,8 +568,8 @@ def scan_repo(repo_path, now=None, fetch=False):
     return out
 
 
-def scan_all(repos=None, fetch=False):
-    return [scan_repo(r, fetch=fetch) for r in (repos if repos is not None else known_repos())]
+def scan_all(repos=None, fetch=False, wip=True):
+    return [scan_repo(r, fetch=fetch, wip=wip) for r in (repos if repos is not None else known_repos())]
 
 
 def any_snapshot_stale(results):
@@ -586,7 +609,9 @@ def format_report(results, freshness_only=False):
                 if r.get("snapshot_path"):
                     parts.append("%s generatedAt %s %s %s" % (
                         r["snapshot_path"], r.get("snapshot_local_generated_at"),
-                        "newer than" if r.get("snapshot_local_newer") else "matches",
+                        "newer than" if r.get("snapshot_local_newer") else
+                        "locally modified, HEAD copy matches" if r.get("snapshot_locally_modified")
+                        else "matches",
                         r.get("snapshot_ref")))
                 lines.append("fresh    %s -- %s" % (r["path"], "; ".join(parts) or "nothing declared"))
         elif r.get("missing"):
@@ -693,7 +718,7 @@ def main(argv=None):
             print("RESULT_JSON=%s" % json.dumps({"error": "nothing to check", "repos": bare}))
             return 2
 
-    results = scan_all(repos, fetch=args.fetch)
+    results = scan_all(repos, fetch=args.fetch, wip=not args.freshness_only)
     print(format_report(results, freshness_only=args.freshness_only))
     print("RESULT_JSON=%s" % json.dumps(results))
     fresh_fail = (any_missing(results) or any_branch_drift(results)
