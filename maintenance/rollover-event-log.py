@@ -22,6 +22,7 @@ Usage:
   python rollover-event-log.py --keep-min 800
 """
 import argparse
+import contextlib
 import datetime
 import importlib.util
 import os
@@ -72,10 +73,23 @@ def _append_log_lock(log, timeout):
     `log + ".lock"` sidecar) -- imported, never reimplemented, so rollover and
     every appender queue on the SAME lock. Closes the gap between the mtime guard
     and os.replace / open("w") (REFUTE P2/P3/P8): an appender that honours the lock
-    cannot land inside rollover's read-modify-write. Residual: the appender's lock
-    is fail-open after its own LOCK_ACQUIRE_TIMEOUT_S, so an appender that waits
-    longer than that proceeds unlocked; the mtime guard and _unwind's
-    classification remain the net for that case."""
+    cannot land inside rollover's read-modify-write.
+
+    Residual, stated plainly (REFUTE round 2, C9/C10):
+      - append-event-log's lock is fail-open after its LOCK_ACQUIRE_TIMEOUT_S.
+        Rollover's own hold is short when it succeeds (measured 0.66-0.84 s on a
+        ~1.4 MB synthetic log under the Claude.exe read+write-share handle, which
+        blocks only os.replace); the path that sleeps through all retries (~4.2 s
+        of sleeps, ~4.5 s held) is a deny-write handle, where every attempt fails
+        and the live log is never written.
+      - An appender that does fail open and lands in the guard->replace gap: its
+        own CLI entry is re-verified under the lock and retried, but entries it
+        drains from the `.pending` spool (drain_spool) have no post-write verify
+        and their spool file is deleted -- that is the silent-loss case
+        (follow-up, not fixed here).
+      - Writers that never take this lock at all -- the Edit/Write tools, and a
+        git merge (e.g. checkout-merge-forward) touching the file -- are covered
+        only by the mtime guard and _unwind's classification."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "append-event-log.py")
     spec = importlib.util.spec_from_file_location("_append_event_log_for_rollover", path)
     mod = importlib.util.module_from_spec(spec)
@@ -137,8 +151,13 @@ def _inplace_write(log, new_live, mtime_before):
     """Write through a handle that blocks rename but permits direct writes.
     Carries the same mtime guard plus a post-write read-back verify."""
     _guard_mtime(log, mtime_before)
-    _note_own_truncation(log)       # from here on, damage to `log` may be ours
-    with open(log, "w", encoding="utf-8") as f:
+    # Flag ownership only AFTER open() succeeds: open(log, "w") is what truncates.
+    # If it raises (sharing violation from a deny-write handle) nothing was
+    # truncated, and a flag set before it would let _unwind restore over a foreign
+    # writer later in the run (REFUTE round 2, C1).
+    f = open(log, "w", encoding="utf-8")
+    _note_own_truncation(log)       # `log` is now truncated: damage from here is ours
+    with f:
         f.write(new_live)
     with open(log, encoding="utf-8") as f:
         if f.read() != new_live:
@@ -263,13 +282,17 @@ def main(argv=None):
     # _unwind, so a lock-honouring append can neither land between the mtime guard
     # and the write nor between _unwind's read and its restore.
     _OWN_TRUNCATION.discard(_log_key(a.log))
-    try:
-        lock = _append_log_lock(a.log, ROLLOVER_LOCK_TIMEOUT_S)
-    except Exception as e:
-        sys.stderr.write("could not load append-event-log's _log_lock (%s) -- refusing to "
-                         "roll over without it\n" % e)
-        return 1
-    with lock as locked:
+    with contextlib.ExitStack() as stack:
+        # Loading the module AND entering the lock both sit inside the try: the
+        # lock opens the `.lock` sidecar on entry, and an OSError there (a
+        # directory or an ACL in the way) escaped as a traceback (REFUTE round 2,
+        # C5). Nothing has been written yet at this point, so refusing is clean.
+        try:
+            locked = stack.enter_context(_append_log_lock(a.log, ROLLOVER_LOCK_TIMEOUT_S))
+        except Exception as e:
+            sys.stderr.write("could not take append-event-log's _log_lock on %s.lock (%s) -- "
+                             "refusing to roll over without it; nothing written\n" % (a.log, e))
+            return 1
         if locked is False:
             sys.stderr.write("event_log.md is locked by an appender (%s.lock) -- refusing to "
                              "roll over; nothing written. Re-run once it's quiet.\n" % a.log)
@@ -421,8 +444,10 @@ def _rollover(a):
             except OSError:
                 restored = False
             if not restored:
+                # foreign_possible stays True: a restore that fails part-way can
+                # interleave with another writer as easily as any other path (C7).
                 _keep_everything(reason, "the live log could not be restored to its "
-                                         "original content", foreign_possible=False)
+                                         "original content")
                 return
             _remove((archive_path, backup, a.log + ".tmp-rollover"))
             sys.stderr.write("%s -- live log restored and verified intact; archive and "
@@ -442,8 +467,19 @@ def _rollover(a):
                 "at %s.\n" % (reason, backup))
             return
 
-        _keep_everything(reason, "the live log holds content this run did not write "
-                                 "(not overwritten)")
+        # Say what is actually known (REFUTE round 2, C3): an unreadable or
+        # undecodable read-back is NOT evidence of another writer, and when this
+        # run truncated the log the damage may well be ours.
+        if current is None:
+            what = "the live log could not be read back to classify it (not overwritten)"
+        elif current is _UNDECODABLE:
+            what = "the live log is not valid UTF-8, so it cannot be classified (not overwritten)"
+        else:
+            what = "the live log holds content this run did not write (not overwritten)"
+        if _own_truncation(a.log):
+            what += ("; this run truncated it in place, so the damage may be ours -- "
+                     "the backup holds the pre-rollover content")
+        _keep_everything(reason, what)
 
     try:
         wrote = write_live_log(a.log, new_live, mtime_before)
