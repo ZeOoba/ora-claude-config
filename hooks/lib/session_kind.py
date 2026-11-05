@@ -13,7 +13,9 @@ SIGNALS, strongest first (verified on this machine 2026-10-19 / 2026-10-23):
      `scheduledTaskId` (maintenance/ground-truth-run-index.py joins on the same key). A hit
      in either store counts the same. Live layout: <root>/<store>/<g>/<g>/local_*.json,
      `cliSessionId` within the first 120 bytes, `scheduledTaskId` anywhere (up to ~1.2 MB
-     in), ~1290 records / ~690 MB across both stores.
+     in), ~1290 records / ~690 MB across both stores (2026-10-23); 1482 / 818 MB on
+     2026-11-05, growing about +25 records a day (by creation time, 1207 of today's
+     records existed at the first scan timeout, 2026-10-27 17:31Z).
   2. CLAUDE_CODE_ENTRYPOINT starting with "sdk" (headless `claude -p` / SDK launches).
 
 ENTRYPOINT CLASSES (C4). CLAUDE_CODE_ENTRYPOINT is lower-cased and stripped.
@@ -75,25 +77,55 @@ is not this session's id); such a file is skipped, so one large record of anothe
 cannot make every session SCHEDULED. A large record whose prefix names THIS session, or
 is ambiguous (duplicate key, escape, list-wrapped, empty value), stays incomplete. The
 soft budget is checked between files and between steps inside the judge.
-Files are inspected NEWEST mtime first; the scan stops at the first scheduled evidence
-(nothing can undo it). An interactive verdict needs a complete pass, now cheap: one open
-and one 16 KB read per file, a full read + parse normally only for this session's own
-record(s). BUDGET_SECONDS stays 12 s as the inner SOFT budget (the dispatcher's per-guard
-timeout is 60 s; classify runs only on delete-shaped MCP calls and on override/
-session-store path hits).
+An interactive verdict needs a complete pass: one open and one 16 KB read per file, a
+full read + parse normally only for this session's own record(s). BUDGET_SECONDS stays
+12 s as the inner SOFT budget (the dispatcher's per-guard timeout is 60 s; classify runs
+only on delete-shaped MCP calls and on override/session-store path hits).
+
+PARALLEL READ (OI-396, 2026-11-05). The cost of that pass is the open() itself, not the
+bytes: Microsoft Defender's on-access scan runs inside CreateFile whenever a record is
+opened while it is not in Defender's clean-file cache (the cache goes cold, for example,
+after a security-intelligence update, 1-3 a day here, and for one file whenever it is
+rewritten). Measured read-only on the live store (1482 records, 818 MB): a cold serial
+pass took 31.1 s, 29.7 s of it in open() (~20 ms per record), and an immediate second
+pass took 1.0 s. Serial, a cold pass ran past the 12 s budget AND the 20 s hard wall, so
+attended Desktop deletes failed closed (2026-10-27, three times on 2026-11-05); the store
+crossed that size around 2026-10-27.
+OneDrive placeholders, directory junctions, locked records and disk I/O were ruled out by
+the same measurement. The cold cost parallelizes (fresh files, this machine: 27.5 ms per
+file serial, 3.0 ms per file of wall time with 8 readers, 2.6 ms with 16), so records are
+now read by SCAN_WORKERS daemon threads (_inspect_all), dispatched newest mtime first.
+Dispatch stops at the first scheduled evidence; readers already in flight finish their
+current record. The outcomes are then folded newest first: the first scheduled evidence
+decides, so evidence in ANY inspected record wins even when an earlier record was never
+inspected; anything uninspected, unreadable or budget-cut leaves the scan incomplete. The
+readers are DAEMON threads (a pool the interpreter joins at exit would hold a hook process
+open past its timeout on one blocked read, and a hook timeout lets the delete through);
+the coordinator joins them only until the soft-budget deadline and folds a snapshot, so a
+reader that finishes later cannot change the verdict.
 
 HARD WALL LIMIT AND RETRY (C5, round 3). The soft budget is only checked between
-operations, so one blocking open()/read() (suspected: AV first-open scan of a recently
-rewritten record) could stall classify past the hook timeout. classify() therefore runs
-each attempt (store enumeration + scan) in a daemon thread and joins it with the remaining
-time of a HARD_JOIN_SECONDS (20 s) wall. A thread still running at the wall is an
-INCOMPLETE scan (same verdict rule 4: CLOSED -> SCHEDULED, OPEN -> UNKNOWN); the abandoned
-thread publishes only into a per-attempt box that is never read again. Retry-once: when an
-attempt found NO scheduled evidence, ended incomplete (budget, read error, internal error)
-and wall time remains, one more full attempt runs with budget min(BUDGET_SECONDS,
-remaining); only that last attempt's result decides, so a retry never turns a partial scan
-into INTERACTIVE. Scheduled evidence still stops the scan at once (no retry). scan() and
-the scan_records/find_record(s) helpers stay synchronous single attempts.
+operations, so one blocking open()/read() could stall classify past the hook timeout.
+classify() therefore runs each attempt (store enumeration + scan) in a daemon thread and
+joins it with the remaining time of a HARD_JOIN_SECONDS (20 s) wall. A thread still
+running at the wall is an INCOMPLETE scan (same verdict rule 4: CLOSED -> SCHEDULED,
+OPEN -> UNKNOWN); the abandoned thread publishes only into a per-attempt box that is never
+read again. Record reads run in the reader threads, which the attempt waits for only
+until its soft budget, so the wall is now reached only when the attempt's own thread
+blocks (store enumeration, a directory listing, or the inline read used when no reader
+thread could be started): the evidence says "hard wall" then, and "time budget" when the
+readers were merely slow. Once scheduled evidence is found, a reader still blocked on
+another record holds classify until the soft budget; the verdict is unaffected (SCHEDULED
+either way). Retry-once: when an attempt found NO
+scheduled evidence, ended incomplete (budget, read error, internal error) and more than
+JOIN_SLACK_SECONDS of wall time remains, one more full attempt runs with budget
+min(BUDGET_SECONDS, remaining - JOIN_SLACK_SECONDS), so its budget ends before the join
+gives up (before 2026-11-05 the two were equal, and a merely slow second attempt raced
+the wall and was mislabelled a blocking read). Only that last attempt's result decides,
+so a retry never turns a partial scan into INTERACTIVE. A retry re-reads records the first
+attempt already opened at warm-cache cost. Scheduled evidence still stops the scan at once
+(no retry). scan() and the scan_records/find_record(s) helpers stay synchronous single
+attempts (their reads still use the reader threads).
 RESIDUAL OF THE PREFIX SCAN. A record is attributed to a session by what its first 16 KB
 say. A session that rewrites its OWN real record (pushes cliSessionId past 16 KB behind a
 decoy '"cliSessionId"' of another session, renames keys, adds a later duplicate
@@ -109,8 +141,12 @@ dot-prefixed names, under the BUDGET_SECONDS wall clock.
 KNOWN RESIDUALS. (a) A session with unrestricted shell can rewrite its own record so it
 no longer names itself (rename the scheduledTaskId key, change or duplicate-key the
 cliSessionId value, push it past the prefix), or move/hide/delete it (beyond depth 3,
-outside the standard roots; ACL-deny is caught as incomplete only while the file stays
-listed). The defense is the Task 5 mint-guard (hooks/override-mint-guard.py), which
+outside the standard roots, or renamed so it no longer matches local_*.json). While the
+entry stays listed, ACL-deny and a path over MAX_PATH are caught as incomplete
+(_still_listed), a record directory whose name ends in a dot is always unreadable (Win32
+strips the dot, so a listing would read a same-named sibling or nothing), and store_dirs()
+keeps every enumerated directory, case-sensitive siblings ('x', 'X') included (REFUTE
+pass 2026-11-05). The defense is the Task 5 mint-guard (hooks/override-mint-guard.py), which
 refuses shell/file ops naming the session store from scheduled sessions. Its
 _SESSION_STORE_MARKERS currently lists ONLY "claude-code-sessions"; adding
 "local-agent-mode-sessions" there is a separate follow-up (Cowork/LAMS sessions appear
@@ -152,6 +188,10 @@ MAX_DEPTH = 3
 BUDGET_SECONDS = 12.0
 HARD_JOIN_SECONDS = 20.0
 MAX_ATTEMPTS = 2
+SCAN_WORKERS = 8
+JOIN_SLACK_SECONDS = 0.1
+_GONE = "_gone"    # outcome tag: the record vanished mid-scan (not an error)
+_ERROR = "_error"  # outcome tag: the record exists but could not be read (incomplete)
 _TASK_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 _SCHED_KEY = b"scheduledTaskId"
 _CLI_KEY = b'"cliSessionId"'
@@ -288,7 +328,12 @@ def store_dirs(budget=None):
         pass
     seen, uniq = set(), []
     for d in out:
-        key = os.path.normcase(os.path.abspath(d))
+        # Exact-string key. _enum_dirs already yields each real directory once (bases are
+        # realpath-deduplicated, links are never followed). abspath() would apply Win32 name
+        # normalization, folding a trailing-dot dir ('g.') into a same-named sibling ('g'),
+        # and normcase() would fold case-sensitive siblings ('x', 'X'); either drops a real
+        # record directory (REFUTE pass 2026-11-05).
+        key = d
         if key not in seen:
             seen.add(key)
             uniq.append(d)
@@ -455,12 +500,41 @@ def _inspect(p, mtime, now, session_id, needle, budget=None):
     return _judge(buf, fresh, session_id, needle, budget)
 
 
+def _still_listed(path):
+    """True when `path`'s own name is still in its parent directory's listing although
+    opening it by that name just failed as not-found: the entry exists but this path cannot
+    reach it (a Win32 path over MAX_PATH, or a name ending in a dot, which Win32 strips), so
+    it is UNREADABLE, not gone. False when the parent no longer lists the name
+    or is itself gone (a record removed mid-scan is merely gone). Any other failure to
+    list the parent counts as listed (fail closed). Never raises."""
+    try:
+        parent, name = os.path.split(path)
+        if not name:
+            return False
+        want = os.path.normcase(name)
+        with os.scandir(parent or ".") as it:
+            for e in it:
+                if os.path.normcase(e.name) == want:
+                    return True
+        return False
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except Exception:
+        return True
+
+
 def _record_paths(d):
     """(entries, errors): (mtime, path) for local_*.json regular files directly in d
     (scandir; links skipped; mtime from the listing's cached metadata on Windows).
-    errors counts a d that exists but could not be listed, and entries whose metadata
-    could not be read (a missing d or a file gone mid-scan is not an error)."""
+    errors counts a d that exists but could not be listed -- including a d whose own
+    parent still lists it although listing d by this path says not-found (_still_listed),
+    and a d whose name ends in a dot, which Win32 strips, so listing it reads a different
+    directory (a same-named sibling, silently) or none -- and entries whose metadata could
+    not be read (a missing d or a file gone mid-scan is not an error)."""
     out, errors = [], 0
+    name = os.path.basename(d.rstrip(chr(92) + "/"))
+    if name.endswith(".") and name not in (".", ".."):
+        return out, 1
     try:
         with os.scandir(d) as it:
             for e in it:
@@ -475,7 +549,7 @@ def _record_paths(d):
                 except OSError:
                     errors += 1
     except (FileNotFoundError, NotADirectoryError):
-        return out, errors
+        return out, errors + (1 if _still_listed(d) else 0)
     except OSError:
         return out, errors + 1
     return out, errors
@@ -499,8 +573,83 @@ class ScanResult(object):
         self.timed_out = False   # set by classify: the HARD_JOIN wall limit was reached
 
 
+def _inspect_all(entries, now, session_id, needle, budget):
+    """(outcomes, settled) for entries [(mtime, path), ...], sorted newest first.
+
+    Up to SCAN_WORKERS daemon reader threads take the entries IN ORDER and _inspect() each.
+    outcomes[i] is _inspect's (verdict, extra), (_GONE, None) or (_ERROR, None) -- a
+    not-found entry its directory still lists, and any other failure to read entry i
+    (BaseException included), is _ERROR -- or None when entry i was
+    never inspected (budget spent, dispatch stopped at scheduled evidence, or its reader
+    still busy). A "sched" outcome stops dispatch; readers already in flight finish their
+    current record. The join waits for the readers until budget.deadline only: settled is
+    False when a reader was still running then, and budget.hit is set. The returned list is a
+    snapshot taken under the lock, so a reader that finishes later writes only into the
+    original list, which nothing reads again. Never raises."""
+    n = len(entries)
+    outcomes = [None] * n
+    if not n:
+        return outcomes, True
+    lock = threading.Lock()
+    state = {"next": 0, "stop": False}
+
+    def take():
+        with lock:
+            if state["stop"] or state["next"] >= n:
+                return -1
+            i = state["next"]
+            state["next"] = i + 1
+            return i
+
+    def work():
+        try:
+            while True:
+                i = take()
+                if i < 0 or budget.expired():
+                    return
+                mtime, p = entries[i]
+                try:
+                    out = _inspect(p, mtime, now, session_id, needle, budget)
+                except FileNotFoundError:
+                    # Gone mid-scan, unless the directory still lists it (unreadable).
+                    out = (_ERROR if _still_listed(p) else _GONE, None)
+                except BaseException:
+                    out = (_ERROR, None)
+                with lock:
+                    outcomes[i] = out
+                    if out[0] == "sched":
+                        state["stop"] = True
+        except BaseException:
+            return
+
+    threads = []
+    for _ in range(min(n, SCAN_WORKERS)):
+        try:
+            t = threading.Thread(target=work, name="session-kind-read")
+            t.daemon = True
+            t.start()
+        except Exception:
+            break
+        threads.append(t)
+    if not threads:
+        work()  # no reader thread could start: read inline (classify's hard wall still applies)
+    settled = True
+    for t in threads:
+        t.join(max(0.0, budget.deadline - time.monotonic()))
+        if t.is_alive():
+            settled = False
+            break
+    with lock:
+        state["stop"] = True
+        snap = list(outcomes)
+    if not settled:
+        budget.hit = True
+    return snap, settled
+
+
 def scan(session_id, dirs=None, budget=None):
-    """Scan the stores for session_id, newest mtime first; stop at scheduled evidence."""
+    """Scan the stores for session_id: records are read in parallel (see _inspect_all), and
+    the outcomes are folded newest mtime first; the first scheduled evidence decides."""
     res = ScanResult()
     if not isinstance(session_id, str) or not session_id:
         res.complete = True
@@ -518,18 +667,20 @@ def scan(session_id, dirs=None, budget=None):
     entries.sort(reverse=True)
     res.files = len(entries)
     now = time.time()
-    for mtime, p in entries:
-        if budget.expired():
-            break
-        try:
-            verdict, extra = _inspect(p, mtime, now, session_id, needle, budget)
-        except FileNotFoundError:
+    outcomes, covered = _inspect_all(entries, now, session_id, needle, budget)
+    for (mtime, _p), out in zip(entries, outcomes):
+        if out is None:
+            covered = False  # never inspected; scheduled evidence elsewhere still decides
             continue
-        except Exception:
+        verdict, extra = out
+        if verdict == _GONE:
+            continue
+        if verdict == _ERROR:
             res.unreadable += 1
             continue
         if verdict == "budget":
-            break
+            covered = False
+            continue
         res.inspected += 1
         if verdict == "sched":
             res.scheduled, res.task_id = True, extra
@@ -538,7 +689,7 @@ def scan(session_id, dirs=None, budget=None):
             (res.fresh if now - mtime <= RECENT_SECONDS else res.stale).append(extra)
         elif verdict == "undecodable_sched":
             res.undecodable_sched = True
-    res.complete = not budget.hit and res.unreadable == 0
+    res.complete = covered and not budget.hit and res.unreadable == 0
     return res
 
 
@@ -624,10 +775,13 @@ def _scan_with_retry(session_id, dirs):
     res, attempts, undec = None, 0, False
     while attempts < MAX_ATTEMPTS:
         remaining = deadline - time.monotonic()
-        if attempts and remaining <= 0:
+        if attempts and remaining <= JOIN_SLACK_SECONDS:
             break
         attempts += 1
-        r = _bounded_attempt(session_id, dirs, min(BUDGET_SECONDS, remaining), remaining)
+        # The soft budget ends JOIN_SLACK_SECONDS before the join gives up, so an attempt
+        # that is merely slow returns its own (budget) result instead of racing the wall.
+        soft = min(BUDGET_SECONDS, remaining - JOIN_SLACK_SECONDS)
+        r = _bounded_attempt(session_id, dirs, soft, remaining)
         if r is None:
             r = ScanResult()
             r.timed_out = True
@@ -663,11 +817,11 @@ def classify(session_id, env=None, dirs=None):
     if not res.complete:
         if res.timed_out:
             why = ("store scan incomplete: still running at the %.0f s hard wall limit "
-                   "(blocking read)" % HARD_JOIN_SECONDS)
-        elif res.budget_hit:
-            why = "store scan hit the time budget"
+                   "(blocked store I/O)" % HARD_JOIN_SECONDS)
         else:
-            why = "store scan incomplete (unreadable record files or internal error)"
+            why = ("store scan hit the time budget" if res.budget_hit else
+                   "store scan incomplete (unreadable record files or internal error)")
+            why += "; %d of %d record files inspected" % (res.inspected, res.files)
         why += " after %d attempt%s" % (attempts, "" if attempts == 1 else "s")
         if closed:
             return SCHEDULED, None, "%s session, %s: fail closed" % (label, why)
