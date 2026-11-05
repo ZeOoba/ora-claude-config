@@ -34,6 +34,15 @@ LOG = os.path.join(os.path.expanduser("~"), ".claude", "projects",
 ARCHIVE_DIR = os.path.join(os.path.dirname(LOG), "_archive")
 
 HEADER_RE = re.compile(r"^## ", re.MULTILINE)
+# A DATED entry header -- the same pattern append-event-log.py uses (its
+# ENTRY_HEADER_RE; test 4e pins the two together). A bare '## ' also matches
+# body-text markdown headings, so it cannot prove an entry exists.
+ENTRY_HEADER_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}\b")
+
+# _read_log_text() result for a log that is readable but not decodable as UTF-8
+# anywhere except a truncated trailing character -- never something this script
+# wrote, so it is treated as foreign/ambiguous and never overwritten.
+_UNDECODABLE = object()
 
 # Attempts at swapping the live log before giving up, and the attempt at which we
 # also start trying the in-place path. Same shape and rationale as
@@ -125,6 +134,35 @@ def write_live_log(log, new_live, mtime_before, attempts=REPLACE_ATTEMPTS):
                     pass
             time.sleep(0.2 * (attempt + 1))
     return False
+
+
+def _read_log_text(log):
+    """Read `log` the way text-mode open(..., encoding='utf-8') would, but
+    tolerate a write cut off inside a multi-byte character.
+
+    Returns the text (universal-newline normalised, same as the original read),
+    None if the file cannot be read at all, or _UNDECODABLE if it holds invalid
+    UTF-8 anywhere but an incomplete final character. A text-mode read raises
+    UnicodeDecodeError on such a tail -- not OSError -- so the old _unwind crashed
+    out of main() with the backup and archive on disk and a traceback instead of
+    restoring the log this run had just truncated."""
+    try:
+        with open(log, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return None
+    try:
+        s = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        # Only an incomplete sequence at the very end is a plausible cut-short
+        # write of ours (we only ever write valid UTF-8).
+        if e.reason != "unexpected end of data" or len(raw) - e.start > 3:
+            return _UNDECODABLE
+        try:
+            s = raw[:e.start].decode("utf-8")
+        except UnicodeDecodeError:
+            return _UNDECODABLE
+    return s.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def find_cut_index(lines, keep_min):
@@ -263,38 +301,75 @@ def main(argv=None):
     # Restore first, verify, and only then discard. If the log cannot be put
     # back, keep EVERYTHING and say so loudly -- a wedged rollover is a nuisance,
     # a destroyed event_log.md is not recoverable from anywhere else on disk.
-    def _unwind(reason):
-        try:
-            with open(a.log, encoding="utf-8") as fh:
-                current = fh.read()
-        except OSError:
-            current = None
-
-        restored = (current == text)
-        if not restored:
-            try:
-                with open(a.log, "w", encoding="utf-8") as fh:
-                    fh.write(text)
-                with open(a.log, encoding="utf-8") as fh:
-                    restored = (fh.read() == text)
-            except OSError:
-                restored = False
-
-        if not restored:
-            sys.stderr.write(
-                "%s -- AND the live log could not be restored to its original "
-                "content. The original is preserved at %s and the archived tail at "
-                "%s; BOTH LEFT IN PLACE DELIBERATELY. Restore by hand before "
-                "running rollover again.\n" % (reason, backup, archive_path))
-            return
-
-        for scratch in (archive_path, backup, a.log + ".tmp-rollover"):
+    #
+    # And restoring is only right when the damage is OURS. A BlockingIOError also
+    # means another session appended meanwhile; writing `text` back then deletes
+    # their entry from an append-only log -- the exact clobber write_live_log's
+    # mtime guard exists to prevent (finding rollover-unwind-clobbers-concurrent-
+    # append, 2026-11-05). So classify what is on disk before touching it:
+    #   1. identical to `text`            -> intact; clear scratch.
+    #   2. unreadable, or a prefix of our `new_live` (empty / cut short)
+    #                                     -> damage this run did; restore `text`.
+    #   3. `text` has >= 1 dated entry and its whole entry body survives verbatim
+    #      in the log                     -> a foreign write that kept every
+    #      original entry; never overwrite. Clear archive + tmp (no wedge), KEEP
+    #      the backup (headers alone never prove bodies; the next run's backup
+    #      write replaces it).
+    #   4. anything else                  -> ambiguous; never overwrite, keep all.
+    def _remove(paths):
+        for scratch in paths:
             try:
                 os.remove(scratch)
             except OSError:
                 pass
-        sys.stderr.write("%s -- live log verified intact; archive and backup removed "
-                          "so a re-run is not blocked by the archive-exists guard\n" % reason)
+
+    def _keep_everything(reason, what):
+        sys.stderr.write(
+            "%s -- AND %s. The original is preserved at %s and the archived tail at "
+            "%s; BOTH LEFT IN PLACE DELIBERATELY. Restore by hand before "
+            "running rollover again.\n" % (reason, what, backup, archive_path))
+
+    def _unwind(reason):
+        current = _read_log_text(a.log)
+
+        if current == text:
+            _remove((archive_path, backup, a.log + ".tmp-rollover"))
+            sys.stderr.write("%s -- live log verified intact; archive and backup removed "
+                              "so a re-run is not blocked by the archive-exists guard\n" % reason)
+            return
+
+        ours = current is None or (current is not _UNDECODABLE
+                                   and new_live.startswith(current))
+        if ours:
+            try:
+                with open(a.log, "w", encoding="utf-8") as fh:
+                    fh.write(text)
+                restored = (_read_log_text(a.log) == text)
+            except OSError:
+                restored = False
+            if not restored:
+                _keep_everything(reason, "the live log could not be restored to its "
+                                         "original content")
+                return
+            _remove((archive_path, backup, a.log + ".tmp-rollover"))
+            sys.stderr.write("%s -- live log restored and verified intact; archive and "
+                              "backup removed so a re-run is not blocked by the "
+                              "archive-exists guard\n" % reason)
+            return
+
+        original_body = text[len(intro):]
+        has_dated = any(ENTRY_HEADER_RE.match(ln) for ln in original_body.splitlines())
+        if current is not _UNDECODABLE and has_dated and original_body in current:
+            _remove((archive_path, a.log + ".tmp-rollover"))
+            sys.stderr.write(
+                "%s -- concurrent append preserved; rollover aborted. The live log "
+                "still holds every original entry verbatim, so it was NOT overwritten; "
+                "archive removed so a re-run is not blocked; pre-rollover backup kept "
+                "at %s.\n" % (reason, backup))
+            return
+
+        _keep_everything(reason, "the live log holds content this run did not write "
+                                 "(not overwritten)")
 
     try:
         wrote = write_live_log(a.log, new_live, mtime_before)
