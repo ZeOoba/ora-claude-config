@@ -332,7 +332,8 @@ def test_baseline_is_void_once_the_path_is_committed_after_begin(f):
     _status(f.begin(), "BEGUN", 0)
     _own_edit(f, text="| OI-002 | own, then committed by someone else |\n")
     git(f.repo, "add", "--", TRACKER)
-    git(f.repo, "commit", "-q", "-m", "someone lands the tracker")
+    # Dated in the past, so only the blob comparison (not the commit-time one) can void it.
+    git(f.repo, "commit", "-q", "-m", "someone lands the tracker", dated=True)
     _own_edit(f, text="| OI-003 | own |\n")
     s = f.snap()
     r = f.land()
@@ -721,6 +722,238 @@ def test_bracketed_file_name_is_matched_literally(f):
     assert twin in changed(f.repo)
 
 
+# --- REFUTE pass 2 reproductions -------------------------------------------------------------
+
+@_fixture_test
+def test_write_right_after_the_quiet_window_is_caught(f):
+    # Repro A: a foreign Edit-tool write lands just after the quiet window was judged, and its
+    # touch record arrives after the preflight scan. The file must still read as unquiet.
+    _own_edit(f)
+    time.sleep(1.1)
+    s = f.snap()
+    real_wait = coe._wait_quiet
+    # The touch record "arrives" only after the landing is over (the timer is cancelled), so the
+    # preflight cannot catch this write: only the quiet-state check can.
+    timer = threading.Timer(600, f.touch, args=(OTHER, TRACKER))
+
+    def gap(*args, **kwargs):
+        out = real_wait(*args, **kwargs)
+        f.append(TRACKER, "| OI-321 | foreign write in the gap |\n")
+        timer.start()
+        return out
+
+    coe._wait_quiet = gap
+    try:
+        r = f.land(quiet_seconds=1)
+    finally:
+        coe._wait_quiet = real_wait
+        timer.cancel()
+    _assert_left(f, r, s, "changed while", body_unchanged=False)
+
+
+@_fixture_test
+def test_index_write_failure_after_the_commit_is_repaired(f):
+    # Repro B: git creates the commit but fails to write the new index (exit 128), leaving the
+    # path's index entry at the old blob -- a staged revert of the run's rows.
+    _own_edit(f)
+    old = git(f.repo, "ls-files", "-s", "--", TRACKER).split("\t", 1)[0].split()
+    real_git = coe._git
+
+    def failing_index_git(repo, *args, **kwargs):
+        if "commit" in args:
+            real_git(repo, *args, **kwargs)
+            real_git(repo, "update-index", "--cacheinfo", "%s,%s,%s" % (old[0], old[1], TRACKER))
+            return 128, "", "fatal: unable to write new index file"
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = failing_index_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "COMMITTED", 0)
+    assert changed(f.repo, staged=True) == [], "the index still stages a revert of the commit"
+    assert "OI-002" in git(f.repo, "show", "HEAD:" + TRACKER)
+
+
+@_fixture_test
+def test_commit_without_the_run_trailer_is_unverified_not_nothing(f):
+    # Repro C: a commit-msg hook strips the trailer, so the commit cannot be found by it.
+    hook = os.path.join(f.repo, ".git", "hooks", "commit-msg")
+    with open(hook, "w", newline="\n") as fh:
+        fh.write("#!/bin/sh\nsed -i '/^Commit-Own-Edit-/d' \"$1\"\n")
+    os.chmod(hook, 0o755)
+    before = f.head()
+    _own_edit(f)
+    r = f.land()
+    assert f.head() != before, "fixture: the hook should not block the commit"
+    _status(r, "COMMITTED_UNVERIFIED", 3)
+
+
+@_fixture_test
+def test_version_staged_after_the_check_is_not_overwritten(f):
+    # Repro D: another session stages its own version of the path after the preflight.
+    _own_edit(f)
+    staged = {}
+
+    def staging_preflight(*args, **kwargs):
+        out = coe.run_preflight(*args, **kwargs)
+        body = git(f.repo, "show", "HEAD:" + TRACKER) + "| OI-654 | staged by someone |\n"
+        blob = subprocess.run(["git", "hash-object", "-w", "--stdin"], input=body.encode(),
+                              cwd=f.repo, capture_output=True, env=_env()).stdout.decode().strip()
+        git(f.repo, "update-index", "--cacheinfo", "100644,%s,%s" % (blob, TRACKER))
+        staged["blob"] = blob
+        return out
+
+    before = f.head()
+    r = f.land(preflight=staging_preflight)
+    _status(r, "LEFT_FOR_SWEEP", 1)
+    assert "staged" in r["reason"], r
+    assert f.head() == before
+    assert git(f.repo, "rev-parse", ":" + TRACKER).strip() == staged["blob"], "their staged blob was replaced"
+
+
+@_fixture_test
+def test_undo_never_discards_a_commit_someone_made_on_top(f):
+    # Repro E: verification fails AND another session commits on top before the take-back.
+    # The take-back must refuse (compare-and-swap) rather than move the branch over theirs.
+    _own_edit(f)
+    real_git = coe._git
+    theirs = {}
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args and not theirs:
+            f.append(TRACKER, "| OI-777 | foreign write in the commit window |\n")
+            out = real_git(repo, *args, **kwargs)
+            git(f.repo, "commit", "-q", "--allow-empty", "-m", "theirs, on top")
+            theirs["sha"] = f.head()
+            return out
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "COMMITTED_UNVERIFIED", 3)
+    assert f.head() == theirs["sha"], "their commit was discarded"
+
+
+@_fixture_test
+def test_commit_found_even_when_someone_commits_on_top_at_once(f):
+    # Another session commits right after ours: HEAD's message lacks our trailer, so the commit
+    # must be found by searching for it, and it is still a verified landing.
+    _own_edit(f)
+    real_git = coe._git
+    done = {}
+
+    def racing_git(repo, *args, **kwargs):
+        if "commit" in args and not done:
+            out = real_git(repo, *args, **kwargs)
+            git(f.repo, "commit", "-q", "--allow-empty", "-m", "theirs, on top")
+            done["x"] = True
+            return out
+        return real_git(repo, *args, **kwargs)
+
+    coe._git = racing_git
+    try:
+        r = f.land()
+    finally:
+        coe._git = real_git
+    _status(r, "COMMITTED", 0)
+    assert r["commit"] == git(f.repo, "rev-parse", "HEAD^").strip(), r
+
+
+@_fixture_test
+def test_a_tag_named_like_the_branch_does_not_break_verification(f):
+    git(f.repo, "tag", "main")
+    _own_edit(f)
+    r = f.land()
+    _status(r, "COMMITTED", 0)
+    assert r["branch"] == "main", r
+
+
+@_fixture_test
+def test_unparseable_preflight_output_is_an_error(f):
+    _own_edit(f)
+    bogus = os.path.join(f.root, "bogus-preflight.py")
+    with open(bogus, "w", encoding="utf-8") as fh:
+        fh.write("print('this is not json')\n")
+    real = coe.PREFLIGHT
+    coe.PREFLIGHT = bogus
+    try:
+        r = f.land()
+    finally:
+        coe.PREFLIGHT = real
+    _status(r, "ERROR", 2)
+    assert "no verdict" in r["reason"], r
+
+
+@_fixture_test
+def test_main_turns_an_unexpected_exception_into_result_json(f):
+    import contextlib, io
+    real = coe.land
+
+    def boom(*a, **k):
+        raise RuntimeError("unexpected boom")
+
+    coe.land = boom
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            code = coe.main(["--path", f.p(TRACKER), "--message", "m", "--session", MINE])
+    finally:
+        coe.land = real
+    last = out.getvalue().strip().splitlines()[-1]
+    assert code == 2 and last.startswith("RESULT_JSON="), (code, out.getvalue())
+    assert json.loads(last[len("RESULT_JSON="):])["status"] == "ERROR"
+
+
+@_fixture_test
+def test_content_change_that_keeps_mtime_and_size_is_caught(f):
+    # The (mtime, size) signature misses a same-length rewrite whose mtime is put back; the
+    # blob comparison right before the commit must not.
+    _own_edit(f, text="| OI-002 | own |\n")
+    s = f.snap()
+
+    def sneaky_preflight(*args, **kwargs):
+        out = coe.run_preflight(*args, **kwargs)
+        p = f.p(TRACKER)
+        st = os.stat(p)
+        with open(p, "rb") as fh:
+            body = fh.read()
+        with open(p, "wb") as fh:
+            fh.write(body.replace(b"OI-002", b"OI-009"))
+        os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+        return out
+
+    _assert_left(f, f.land(preflight=sneaky_preflight), s, "changed while", body_unchanged=False)
+
+
+@_fixture_test
+def test_land_rejects_a_negative_or_nan_quiet_period(f):
+    _own_edit(f)
+    for bad in (-1, float("nan")):
+        _status(f.land(quiet_seconds=bad), "ERROR", 2)
+
+
+def test_worst_case_runtime_fits_the_default_bash_timeout():
+    # The scheduled run's Bash tool times out after 120 s by default; a landing still running
+    # then would print no RESULT_JSON while possibly committing later.
+    worst = coe.QUIET_MAX_WAIT + 2 * 3.0 + 30  # quiet cap + lock retries + git/preflight time
+    assert worst < 120, worst
+    print("PASS test_worst_case_runtime_fits_the_default_bash_timeout")
+
+
+@_fixture_test
+def test_cli_rejects_a_negative_or_nan_quiet_period(f):
+    for bad in ("-1", "nan"):
+        p = f.cli("--path", f.p(TRACKER), "--message", "m", "--session", MINE,
+                  "--quiet-seconds", bad)
+        assert p.returncode == 2, (bad, p.returncode, p.stdout, p.stderr)
+        assert _result_json(p)["status"] == "ERROR"
+
+
 # --- refusals: nothing it should ever commit ---------------------------------------------
 
 @_fixture_test
@@ -948,6 +1181,19 @@ TESTS = [
     test_failing_commit_hook_is_an_error_not_a_lock,
     test_ignores_an_inherited_git_environment,
     test_bracketed_file_name_is_matched_literally,
+    test_write_right_after_the_quiet_window_is_caught,
+    test_index_write_failure_after_the_commit_is_repaired,
+    test_commit_without_the_run_trailer_is_unverified_not_nothing,
+    test_version_staged_after_the_check_is_not_overwritten,
+    test_undo_never_discards_a_commit_someone_made_on_top,
+    test_commit_found_even_when_someone_commits_on_top_at_once,
+    test_a_tag_named_like_the_branch_does_not_break_verification,
+    test_unparseable_preflight_output_is_an_error,
+    test_main_turns_an_unexpected_exception_into_result_json,
+    test_content_change_that_keeps_mtime_and_size_is_caught,
+    test_land_rejects_a_negative_or_nan_quiet_period,
+    test_worst_case_runtime_fits_the_default_bash_timeout,
+    test_cli_rejects_a_negative_or_nan_quiet_period,
     test_refuses_path_outside_memory,
     test_refuses_untracked_file,
     test_refuses_a_directory_or_a_deleted_file,
