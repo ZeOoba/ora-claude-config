@@ -461,6 +461,276 @@ with tempfile.TemporaryDirectory() as td:
     expect("corrector: BLOCKED_STAGED (no path list) omits the '?' path count",
            "?" not in rep and "CORRECTOR_STUCK" in rep, rep)
 
+# --- OCC shared-checkout freshness (2026-11-05, business-loops review F-9) ----------
+# The shared oxford-command-center checkout sat on data/snapshot-2026-10-06 for ~4
+# weeks, 103 commits behind origin/main; every reader of its portfolio.json read
+# 2026-10-06 data while main held three newer snapshots. Nothing alarmed.
+SNAP = "data/snapshots/portfolio.json"
+OCC = r"C:\Users\Owner\oxford-command-center"
+
+
+def _snap_doc(generated_at, extra="x"):
+    return _json.dumps({"meta": {"asOf": "2026-10-23", "generatedAt": generated_at},
+                        "leases": [extra]}, indent=1) + "\n"
+
+
+def _write_snap(repo, doc):
+    os.makedirs(os.path.join(repo, "data", "snapshots"), exist_ok=True)
+    with open(os.path.join(repo, *SNAP.split("/")), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(doc)
+
+
+def _commit_snap(repo, doc, msg="snapshot"):
+    _write_snap(repo, doc)
+    run(["git", "add", SNAP], repo)
+    run(["git", "commit", "-q", "-m", msg], repo)
+
+
+def snap_pair(td, generated_at="2026-10-26T14:52:49.296Z"):
+    local, origin = make_origin_pair(td)
+    _commit_snap(origin, _snap_doc(generated_at))
+    run(["git", "fetch", "-q", "origin"], local)
+    run(["git", "merge", "-q", "--ff-only", "origin/main"], local)
+    return local, origin
+
+
+def _scan_snap(local, **kw):
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {local: "main"}
+    wipscan.SNAPSHOT_FRESHNESS_OVERRIDE = {local: SNAP}
+    try:
+        return wipscan.scan_repo(local, **kw)
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+        wipscan.SNAPSHOT_FRESHNESS_OVERRIDE = None
+
+
+def _main_with(argv, repos, snap=True, canon=True):
+    wipscan.KNOWN_REPOS_OVERRIDE = list(repos)
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {r: "main" for r in repos} if canon else {}
+    wipscan.SNAPSHOT_FRESHNESS_OVERRIDE = {r: SNAP for r in repos} if snap else {}
+    try:
+        return wipscan.main(argv)
+    finally:
+        wipscan.KNOWN_REPOS_OVERRIDE = None
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+        wipscan.SNAPSHOT_FRESHNESS_OVERRIDE = None
+
+
+def _head(repo):
+    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                          text=True).stdout.strip()
+
+
+# config: OCC is declared, with a justified per-repo threshold and its snapshot path
+expect("occ: canonical branch main", wipscan.DEFAULT_CANONICAL_BRANCH.get(OCC) == "main",
+       repr(wipscan.DEFAULT_CANONICAL_BRANCH))
+expect("occ: snapshot path declared",
+       getattr(wipscan, "DEFAULT_SNAPSHOT_FRESHNESS", {}).get(OCC) == SNAP,
+       repr(getattr(wipscan, "DEFAULT_SNAPSHOT_FRESHNESS", None)))
+expect("occ: per-repo behind threshold 25 (~1 week of OCC main traffic)",
+       wipscan.behind_threshold_for(OCC) == 25, repr(wipscan.behind_threshold_for(OCC)))
+expect("~/.claude keeps the global threshold",
+       wipscan.behind_threshold_for(r"C:\Users\Owner\.claude") == wipscan.BRANCH_BEHIND_THRESHOLD)
+expect("map lookups are path-spelling insensitive (forward slashes, case, trailing sep)",
+       wipscan.canonical_branch_for("c:/users/owner/oxford-command-center") == "main"
+       and wipscan.snapshot_path_for("C:/Users/Owner/oxford-command-center/") == SNAP)
+
+# in sync: same generatedAt, same content -> not stale
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    r = _scan_snap(local)
+    expect("snap in-sync: snapshot_stale False", r.get("snapshot_stale") is False, repr(r))
+    expect("snap in-sync: content matches origin",
+           r.get("snapshot_content_matches_origin") is True, repr(r))
+    expect("snap in-sync: no SNAPSHOT_STALE line",
+           "SNAPSHOT_STALE" not in wipscan.format_report([r]), wipscan.format_report([r]))
+    expect("snap in-sync: freshness-only main exits 0",
+           _main_with(["--freshness-only"], [local]) == 0)
+
+# the incident shape: origin/main has a newer snapshot, the checkout was never advanced
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td, "2026-10-06T12:00:00.000Z")
+    _commit_snap(origin, _snap_doc("2026-11-02T12:00:00.000Z", "y"), "newer snapshot")
+    run(["git", "fetch", "-q", "origin"], local)
+    r = _scan_snap(local)
+    expect("snap trailing: snapshot_stale True", r.get("snapshot_stale") is True, repr(r))
+    expect("snap trailing: both generatedAt surfaced",
+           str(r.get("snapshot_local_generated_at")).startswith("2026-10-06")
+           and str(r.get("snapshot_origin_generated_at")).startswith("2026-11-02"), repr(r))
+    expect("snap trailing: lag 27 days in hours", r.get("snapshot_lag_hours") == 648.0, repr(r))
+    rep = wipscan.format_report([r])
+    expect("snap trailing: [ACTION] SNAPSHOT_STALE line names both stamps",
+           "[ACTION] SNAPSHOT_STALE" in rep and "2026-10-06" in rep and "2026-11-02" in rep, rep)
+    expect("any_snapshot_stale True", wipscan.any_snapshot_stale([r]) is True)
+    expect("snap trailing: main exits 1", _main_with([], [local]) == 1)
+    expect("snap trailing: freshness-only main exits 1",
+           _main_with(["--freshness-only"], [local]) == 1)
+
+# same generatedAt but different content (e.g. a redaction commit that kept the stamp)
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    _commit_snap(origin, _snap_doc("2026-10-26T14:52:49.296Z", "redacted"), "redact")
+    run(["git", "fetch", "-q", "origin"], local)
+    r = _scan_snap(local)
+    expect("snap same-stamp diff content: stale", r.get("snapshot_stale") is True, repr(r))
+    expect("snap same-stamp diff content: content_matches False",
+           r.get("snapshot_content_matches_origin") is False, repr(r))
+    expect("snap same-stamp diff content: report says content differs",
+           "content differs" in wipscan.format_report([r]), wipscan.format_report([r]))
+
+# CRLF working tree (core.autocrlf=true, as on the live OCC checkout) is NOT a content diff
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    run(["git", "config", "core.autocrlf", "true"], local)
+    with open(os.path.join(local, *SNAP.split("/")), "w", encoding="utf-8", newline="\r\n") as fh:
+        fh.write(_snap_doc("2026-10-26T14:52:49.296Z"))
+    r = _scan_snap(local)
+    expect("snap CRLF checkout: content matches (filters applied)",
+           r.get("snapshot_content_matches_origin") is True
+           and r.get("snapshot_stale") is False, repr(r))
+
+# local working tree NEWER than origin (an uncommitted local extract) -> not stale
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    _write_snap(local, _snap_doc("2026-11-04T09:00:00.000Z", "local"))
+    r = _scan_snap(local)
+    expect("snap local newer: not stale", r.get("snapshot_stale") is False, repr(r))
+    expect("snap local newer: flagged local_newer", r.get("snapshot_local_newer") is True, repr(r))
+
+# unmeasurable -> stale with an error, never a silent clean
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    os.remove(os.path.join(local, *SNAP.split("/")))
+    r = _scan_snap(local)
+    expect("snap missing locally: stale + error", r.get("snapshot_stale") is True
+           and "local" in (r.get("snapshot_error") or ""), repr(r))
+    expect("snap missing: report says cannot determine",
+           "cannot determine" in wipscan.format_report([r]), wipscan.format_report([r]))
+
+    _write_snap(local, "not json{")
+    r = _scan_snap(local)
+    expect("snap unparseable locally: stale + error", r.get("snapshot_stale") is True
+           and r.get("snapshot_error"), repr(r))
+
+    _write_snap(local, _json.dumps({"meta": {"asOf": "2026-10-23"}}))
+    r = _scan_snap(local)
+    expect("snap no generatedAt: stale + error", r.get("snapshot_stale") is True
+           and "generatedAt" in (r.get("snapshot_error") or ""), repr(r))
+
+    _write_snap(local, _snap_doc("yesterday-ish"))
+    r = _scan_snap(local)
+    expect("snap unparseable generatedAt: stale + error", r.get("snapshot_stale") is True
+           and "generatedAt" in (r.get("snapshot_error") or ""), repr(r))
+
+    _write_snap(local, _snap_doc("2026-10-26T14:52:49"))   # naive vs aware: no crash
+    r = _scan_snap(local)
+    expect("snap naive generatedAt: stale + error, no crash", r.get("snapshot_stale") is True
+           and r.get("snapshot_error"), repr(r))
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_origin_pair(td)       # origin has no snapshot at all
+    _write_snap(local, _snap_doc("2026-10-26T14:52:49.296Z"))
+    r = _scan_snap(local)
+    expect("snap absent on origin/main: stale + error", r.get("snapshot_stale") is True
+           and "origin/main" in (r.get("snapshot_error") or ""), repr(r))
+
+with tempfile.TemporaryDirectory() as td:
+    lone = init_repo(os.path.join(td, "lone"))
+    _commit_snap(lone, _snap_doc("2026-10-26T14:52:49.296Z"))
+    r = _scan_snap(lone)
+    expect("snap with no origin ref: stale + error", r.get("snapshot_stale") is True
+           and r.get("snapshot_error"), repr(r))
+
+# repos without a snapshot declaration carry no snapshot keys
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    r = wipscan.scan_repo(local)
+    expect("no snapshot declared: no snapshot keys", "snapshot_stale" not in r, repr(r))
+
+# per-repo behind threshold: below it on main is not drift, at it is
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    for i in range(3):
+        run(["git", "commit", "--allow-empty", "-q", "-m", "o%d" % i], origin)
+    run(["git", "fetch", "-q", "origin"], local)
+    wipscan.BEHIND_THRESHOLD_OVERRIDE = {local: 4}
+    try:
+        r = _scan_snap(local)
+        expect("per-repo threshold: 3 behind < 4 -> no drift",
+               r.get("branch_drift") is False and r.get("behind_threshold") == 4, repr(r))
+        run(["git", "commit", "--allow-empty", "-q", "-m", "o3"], origin)
+        run(["git", "fetch", "-q", "origin"], local)
+        r = _scan_snap(local)
+        expect("per-repo threshold: 4 behind -> drift", r.get("branch_drift") is True, repr(r))
+        expect("per-repo threshold: report quotes the repo's own threshold",
+               "(>= 4 threshold)" in wipscan.format_report([r]), wipscan.format_report([r]))
+    finally:
+        wipscan.BEHIND_THRESHOLD_OVERRIDE = None
+
+# --freshness-only: WIP aging alone does not fail the probe; branch drift does
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    junk = os.path.join(local, "old-wip.txt")
+    with open(junk, "w") as fh:
+        fh.write("wip\n")
+    old_ts = time.time() - 100 * 3600
+    os.utime(junk, (old_ts, old_ts))
+    expect("freshness-only: WIP-stale alone -> exit 0",
+           _main_with(["--freshness-only"], [local]) == 0)
+    expect("full scan: same repo -> exit 1 (WIP stale)", _main_with([], [local]) == 1)
+    run(["git", "checkout", "-q", "-b", "data/snapshot-2026-10-06"], local)
+    expect("freshness-only: off main -> exit 1",
+           _main_with(["--freshness-only"], [local]) == 1)
+
+# --repo: selects configured repos only; an unknown path fails closed (exit 2)
+with tempfile.TemporaryDirectory() as td:
+    a_td, b_td = tempfile.mkdtemp(dir=td), tempfile.mkdtemp(dir=td)
+    a, _ = snap_pair(a_td)
+    b, _ = snap_pair(b_td)
+    run(["git", "checkout", "-q", "-b", "feature-z"], b)
+    expect("--repo selects only the named repo (b drifts, a scanned alone -> 0)",
+           _main_with(["--repo", a, "--freshness-only"], [a, b]) == 0)
+    expect("--repo forward-slash spelling resolves to the configured key",
+           _main_with(["--repo", b.replace("\\", "/"), "--freshness-only"], [a, b]) == 1)
+    expect("--repo unknown path -> exit 2 (never a silent pass)",
+           _main_with(["--repo", os.path.join(td, "nope"), "--freshness-only"], [a, b]) == 2)
+    expect("--freshness-only on a repo with neither check declared -> exit 2",
+           _main_with(["--repo", a, "--freshness-only"], [a], snap=False, canon=False) == 2)
+
+# --fetch: refreshes origin/<canonical> first, so a newer snapshot the checkout never
+# fetched is still caught; HEAD, branch and working tree are never touched
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td, "2026-10-06T12:00:00.000Z")
+    _commit_snap(origin, _snap_doc("2026-11-02T12:00:00.000Z", "y"), "newer snapshot")
+    head_before = _head(local)
+    expect("no --fetch: unfetched newer snapshot is not visible (documented limit)",
+           _main_with(["--freshness-only"], [local]) == 0)
+    expect("--fetch: newer snapshot caught -> exit 1",
+           _main_with(["--freshness-only", "--fetch"], [local]) == 1)
+    branch_after = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=local,
+                                  capture_output=True, text=True).stdout.strip()
+    expect("--fetch never moves HEAD or the branch (no pull/merge/reset)",
+           _head(local) == head_before and branch_after == "main")
+    expect("--fetch leaves the working-tree snapshot untouched",
+           "2026-10-06" in open(os.path.join(local, *SNAP.split("/")), encoding="utf-8").read())
+
+# a failing fetch is surfaced, never treated as clean
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    run(["git", "remote", "set-url", "origin", os.path.join(td, "gone")], local)
+    wipscan.CANONICAL_BRANCH_OVERRIDE = {local: "main"}
+    wipscan.SNAPSHOT_FRESHNESS_OVERRIDE = {local: SNAP}
+    try:
+        r = wipscan.scan_repo(local, fetch=True)
+    finally:
+        wipscan.CANONICAL_BRANCH_OVERRIDE = None
+        wipscan.SNAPSHOT_FRESHNESS_OVERRIDE = None
+    expect("--fetch failure: fetch_error recorded", bool(r.get("fetch_error")), repr(r))
+    expect("--fetch failure: report has [ACTION] FETCH_FAILED",
+           "[ACTION] FETCH_FAILED" in wipscan.format_report([r]), wipscan.format_report([r]))
+    expect("--fetch failure: freshness-only exit 1 (unverified is not clean)",
+           _main_with(["--freshness-only", "--fetch"], [local]) == 1)
+
 passed = sum(1 for ok, _ in results if ok)
 print("cross-repo-wip-scan tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
