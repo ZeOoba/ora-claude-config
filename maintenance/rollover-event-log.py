@@ -23,6 +23,7 @@ Usage:
 """
 import argparse
 import datetime
+import importlib.util
 import os
 import re
 import sys
@@ -43,6 +44,43 @@ ENTRY_HEADER_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}\b")
 # anywhere except a truncated trailing character -- never something this script
 # wrote, so it is treated as foreign/ambiguous and never overwritten.
 _UNDECODABLE = object()
+
+# How long main() waits for append-event-log's _log_lock before refusing to run.
+ROLLOVER_LOCK_TIMEOUT_S = 5.0
+
+# Logs whose content THIS process has truncated during the current run (set by
+# _inplace_write immediately before open(log, "w")). _unwind restores only when
+# this is set: the log's content alone ("unreadable", "a prefix of new_live")
+# cannot tell our damage from another writer's (REFUTE P4/P9 on PR #400).
+_OWN_TRUNCATION = set()
+
+
+def _log_key(log):
+    return os.path.normcase(os.path.abspath(log))
+
+
+def _note_own_truncation(log):
+    _OWN_TRUNCATION.add(_log_key(log))
+
+
+def _own_truncation(log):
+    return _log_key(log) in _OWN_TRUNCATION
+
+
+def _append_log_lock(log, timeout):
+    """append-event-log.py's own _log_lock (msvcrt byte-range lock on the
+    `log + ".lock"` sidecar) -- imported, never reimplemented, so rollover and
+    every appender queue on the SAME lock. Closes the gap between the mtime guard
+    and os.replace / open("w") (REFUTE P2/P3/P8): an appender that honours the lock
+    cannot land inside rollover's read-modify-write. Residual: the appender's lock
+    is fail-open after its own LOCK_ACQUIRE_TIMEOUT_S, so an appender that waits
+    longer than that proceeds unlocked; the mtime guard and _unwind's
+    classification remain the net for that case."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "append-event-log.py")
+    spec = importlib.util.spec_from_file_location("_append_event_log_for_rollover", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod._log_lock(log, timeout=timeout)
 
 # Attempts at swapping the live log before giving up, and the attempt at which we
 # also start trying the in-place path. Same shape and rationale as
@@ -99,6 +137,7 @@ def _inplace_write(log, new_live, mtime_before):
     """Write through a handle that blocks rename but permits direct writes.
     Carries the same mtime guard plus a post-write read-back verify."""
     _guard_mtime(log, mtime_before)
+    _note_own_truncation(log)       # from here on, damage to `log` may be ours
     with open(log, "w", encoding="utf-8") as f:
         f.write(new_live)
     with open(log, encoding="utf-8") as f:
@@ -217,6 +256,31 @@ def main(argv=None):
         sys.stderr.write("no such file: %s\n" % a.log)
         return 1
 
+    if a.dry_run:
+        return _rollover(a)
+
+    # Hold append-event-log's lock from the snapshot read through the swap and any
+    # _unwind, so a lock-honouring append can neither land between the mtime guard
+    # and the write nor between _unwind's read and its restore.
+    _OWN_TRUNCATION.discard(_log_key(a.log))
+    try:
+        lock = _append_log_lock(a.log, ROLLOVER_LOCK_TIMEOUT_S)
+    except Exception as e:
+        sys.stderr.write("could not load append-event-log's _log_lock (%s) -- refusing to "
+                         "roll over without it\n" % e)
+        return 1
+    with lock as locked:
+        if locked is False:
+            sys.stderr.write("event_log.md is locked by an appender (%s.lock) -- refusing to "
+                             "roll over; nothing written. Re-run once it's quiet.\n" % a.log)
+            return 1
+        try:
+            return _rollover(a)
+        finally:
+            _OWN_TRUNCATION.discard(_log_key(a.log))
+
+
+def _rollover(a):
     mtime_before = os.stat(a.log).st_mtime_ns
     with open(a.log, encoding="utf-8") as f:
         text = f.read()
@@ -308,8 +372,11 @@ def main(argv=None):
     # mtime guard exists to prevent (finding rollover-unwind-clobbers-concurrent-
     # append, 2026-11-05). So classify what is on disk before touching it:
     #   1. identical to `text`            -> intact; clear scratch.
-    #   2. unreadable, or a prefix of our `new_live` (empty / cut short)
+    #   2. THIS run truncated the log (_inplace_write set the ownership flag) AND
+    #      it reads back as a prefix of our `new_live` (empty / cut short)
     #                                     -> damage this run did; restore `text`.
+    #      Content alone is never ownership proof (REFUTE P4/P9): an unreadable
+    #      log, or another writer's own half-done in-place insert, is case 4.
     #   3. `text` has >= 1 dated entry and its whole entry body survives verbatim
     #      in the log                     -> a foreign write that kept every
     #      original entry; never overwrite. Clear archive + tmp (no wedge), KEEP
@@ -323,11 +390,17 @@ def main(argv=None):
             except OSError:
                 pass
 
-    def _keep_everything(reason, what):
+    def _keep_everything(reason, what, foreign_possible=True):
         sys.stderr.write(
             "%s -- AND %s. The original is preserved at %s and the archived tail at "
             "%s; BOTH LEFT IN PLACE DELIBERATELY. Restore by hand before "
             "running rollover again.\n" % (reason, what, backup, archive_path))
+        if foreign_possible:
+            sys.stderr.write(
+                "WARNING: %s is the PRE-ROLLOVER snapshot. It does NOT contain any "
+                "foreign entry another session wrote after this run read the log -- "
+                "diff the live log against it and carry those entries over before "
+                "restoring; never just copy the backup back.\n" % backup)
 
     def _unwind(reason):
         current = _read_log_text(a.log)
@@ -338,8 +411,8 @@ def main(argv=None):
                               "so a re-run is not blocked by the archive-exists guard\n" % reason)
             return
 
-        ours = current is None or (current is not _UNDECODABLE
-                                   and new_live.startswith(current))
+        ours = (_own_truncation(a.log) and current is not None
+                and current is not _UNDECODABLE and new_live.startswith(current))
         if ours:
             try:
                 with open(a.log, "w", encoding="utf-8") as fh:
@@ -349,7 +422,7 @@ def main(argv=None):
                 restored = False
             if not restored:
                 _keep_everything(reason, "the live log could not be restored to its "
-                                         "original content")
+                                         "original content", foreign_possible=False)
                 return
             _remove((archive_path, backup, a.log + ".tmp-rollover"))
             sys.stderr.write("%s -- live log restored and verified intact; archive and "
@@ -359,7 +432,8 @@ def main(argv=None):
 
         original_body = text[len(intro):]
         has_dated = any(ENTRY_HEADER_RE.match(ln) for ln in original_body.splitlines())
-        if current is not _UNDECODABLE and has_dated and original_body in current:
+        if (current is not None and current is not _UNDECODABLE
+                and has_dated and original_body in current):
             _remove((archive_path, a.log + ".tmp-rollover"))
             sys.stderr.write(
                 "%s -- concurrent append preserved; rollover aborted. The live log "
