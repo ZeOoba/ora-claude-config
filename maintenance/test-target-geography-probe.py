@@ -565,6 +565,15 @@ class CountClaimTests(unittest.TestCase):
                      ELEVEN_LIST.replace('Kansas City MO/KS', 'Kansas City MO/KS incl. St. Charles')):
             self.assertEqual(self.found(text), [], text)
 
+    def test_sentence_ending_words_end_the_list(self):
+        """REFUTE N1: "etc." / "Co." must end the list, else the next sentence fills the gap."""
+        short = ELEVEN_LIST.replace(', Chicago–Greater Cook County IL', '')
+        for ending, follow in ((', etc.', 'Chicago is out of scope for this task.'),
+                               (', Shelby Co.', 'Chicago is pending.')):
+            text = short.rstrip('\n').rstrip('.') + ending + '\n' + follow + '\n'
+            msgs = [m for _, m in self.found(text)]
+            self.assertTrue(any('names 10 of 11' in m for m in msgs), (text, msgs))
+
     def test_abbreviation_list_still_ends_at_state_code(self):
         text = SCAN_FALLBACK.replace('TEN', 'ELEVEN')
         msgs = [m for _, m in self.found(text)]
