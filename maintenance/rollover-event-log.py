@@ -127,9 +127,12 @@ def _stat_stamp(log):
     every 15.6 ms, so an append landing in the same tick as rollover's read leaves
     st_mtime_ns unchanged and the guard waved the stale write through, deleting the
     append -- maintenance/test-rollover-event-log.py section 4 flaked ~3/6 on main
-    for exactly this reason. An append always grows the file, so the size half
-    catches the same-tick case. Residual: a same-size rewrite within one tick still
-    matches -- appenders never do that (they only add), and neither does rollover."""
+    for exactly this reason. An append changes the size in every realistic layout,
+    so the size half catches the same-tick case. Residual: a write that leaves the
+    size unchanged within one tick still matches -- e.g. a same-length Edit-tool
+    replace, or an append whose entry exactly offsets the blank lines insert_newest
+    trims before the first entry (only possible with a padded intro; the live log
+    has one blank line there). Rollover never writes that way."""
     st = os.stat(log)
     return (st.st_mtime_ns, st.st_size)
 
