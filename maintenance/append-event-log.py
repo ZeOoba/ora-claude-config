@@ -475,7 +475,7 @@ def _insert_or_inplace(log, entry, try_inplace, allow_duplicate=False, lock_held
             raise atomic_exc
 
 
-def _entry_present(log, entry):
+def _entry_present(log, entry, anchor=None):
     """True iff `entry`'s full normalized text is in `log` as whole lines. Never
     raises (an unreadable log is "not present" -- the caller then KEEPS the spool
     file, which is the safe direction).
@@ -494,22 +494,64 @@ def _entry_present(log, entry):
     present. Residual: a verbatim quote that sits at the very END of another entry's
     body still matches. Only a writer that ignores the lock can erase the entry
     between insert and this check, so that narrow case needs two coincidences.
+
+    '---' counts only as rollover's pointer rule, i.e. when the next non-blank line
+    starts '*Entries at and before' -- a plain horizontal rule inside a longer entry
+    is not an entry boundary (merge-gate review of #420, probe I).
+
+    `anchor`: the line insert_newest anchored on for the insert being verified (see
+    _insert_anchor). insert_newest goes above the FIRST '## ' line whether or not it
+    is dated, so when a log's first '## ' is undated or malformed ('## Conventions',
+    '## 2026-11-1') the freshly inserted entry is followed by that line, not a dated
+    header; without accepting it, verify failed and the retry wrote a second copy
+    (merge-gate C3 on #420). Only passed for the post-insert verify, where it is the
+    exact line read under the same lock hold; the pre-insert "already there" check
+    stays strict, because a false "present" there deletes a spool file that was
+    never written.
     """
     try:
         with open(log, encoding="utf-8") as f:
             content = f.read()
         hay = "\n" + normalize_entry(content) + "\n"
         needle = "\n" + normalize_entry(entry) + "\n"
+        anchor = anchor.rstrip() if anchor else None
         i = hay.find(needle)
         while i != -1:
             rest = hay[i + len(needle):].lstrip("\n")
-            first = rest.split("\n", 1)[0]
-            if not rest or ENTRY_HEADER_RE.match(first) or first.strip() == "---":
+            first, _, after = rest.partition("\n")
+            if (not rest or ENTRY_HEADER_RE.match(first)
+                    or (anchor is not None and first.rstrip() == anchor)
+                    or (first.strip() == "---"
+                        and after.lstrip("\n").startswith("*Entries at and before"))):
                 return True
             i = hay.find(needle, i + 1)
         return False
     except Exception:
         return False
+
+
+def _insert_anchor(log):
+    """The line insert_newest(content, ...) would insert above right now: the first
+    '## ' line after any frontmatter (same rule as insert_newest), or None (no '## '
+    line: the entry goes at the end, where EOF is already a boundary). Never raises."""
+    try:
+        with open(log, encoding="utf-8") as f:
+            content = f.read()
+        body_start = 0
+        if content.startswith("---\n"):
+            end = content.find("\n---\n", 4)
+            if end != -1:
+                body_start = end + len("\n---\n")
+        if content.startswith("## ", body_start):
+            idx = body_start
+        else:
+            found = content.find("\n## ", body_start)
+            if found == -1:
+                return None
+            idx = found + 1
+        return content[idx:].split("\n", 1)[0]
+    except Exception:
+        return None
 
 
 def drain_spool(log, attempts=3, lock_timeout=None):
@@ -598,12 +640,15 @@ def drain_spool(log, attempts=3, lock_timeout=None):
                     except OSError:
                         pass
                 else:
+                    # Read under this same hold, so it is the line the insert below
+                    # anchors on (no lock-honouring writer can move it in between).
+                    anchor = _insert_anchor(log)
                     try:
                         _insert_or_inplace(log, entry, try_inplace, lock_held=True)
                     except Exception:
                         pass  # retry below; the entry is still safe in its spool file
                     else:
-                        if _entry_present(log, entry):
+                        if _entry_present(log, entry, anchor):
                             verified = True
                             try:
                                 os.remove(p)
