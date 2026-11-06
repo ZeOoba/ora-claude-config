@@ -541,6 +541,43 @@ class CountClaimTests(unittest.TestCase):
                 'For each of the ten clusters, web-search.\n')
         self.assertEqual([ln for ln, _ in self.found(text)], [5])
 
+    def test_mid_paragraph_date_or_version_does_not_hide_live_lines(self):
+        """REFUTE 2026-11-06 C5: the first cut flipped to history at any version/date-led line and hid 81 live
+        lines of the scan spec (a wrapped "2026-10-05: Columbus 49, ..." opened STEP 1B-A)."""
+        layouts = [
+            ('STEP 1B-A — discovery. Prior counts were\n'
+             '2026-10-05: Columbus 49, Cincinnati 12.\n'
+             '        · Repeat for each of the ten clusters.\n', 3),
+            ('- 2026-11-01: Chicago ratified.\n- For each of the ten clusters, scan.\n', 2),
+            ('v2.15 note: see below\nFor each of the ten clusters, scan.\n', 2),
+            ('  v2.8 — RESOLUTION\n  R4 text scouts, all ten clusters.\n', 2),
+            ('Gate text:\n  v2.11 OPEN QUESTION — x\n- Market: outside the 10 clusters = 0.\n', 3),
+        ]
+        for text, line_no in layouts:
+            self.assertEqual([ln for ln, _ in self.found(text)], [line_no], text)
+
+    def test_ops_decision_log_is_scanned(self):
+        self.assertNotIn('ops_decision_log.md', P.SKIP_NAMES)
+
+    def test_abbreviations_do_not_end_the_list(self):
+        """REFUTE C6: complete lists written with "D.C." or "incl. St." read as 5 / 6 of 11."""
+        for text in (ELEVEN_LIST.replace('Maryland Baltimore/DC', 'Washington D.C. / Baltimore'),
+                     ELEVEN_LIST.replace('Kansas City MO/KS', 'Kansas City MO/KS incl. St. Charles')):
+            self.assertEqual(self.found(text), [], text)
+
+    def test_abbreviation_list_still_ends_at_state_code(self):
+        text = SCAN_FALLBACK.replace('TEN', 'ELEVEN')
+        msgs = [m for _, m in self.found(text)]
+        self.assertEqual(len(msgs), 1, msgs)
+        self.assertIn('names 10 of 11', msgs[0])
+
+    def test_unbalanced_paren_does_not_swallow_next_sentence(self):
+        text = ('ELEVEN clusters: Columbus OH (core, Kansas City MO/KS, Indianapolis IN, Madison WI,\n'
+                '  Maryland Baltimore/DC, Grand Rapids MI, Richmond VA, Des Moines IA, Louisville KY.\n'
+                '  Cincinnati and Chicago are covered elsewhere.\n')
+        msgs = [m for _, m in self.found(text)]
+        self.assertTrue(any('names 9 of 11' in m for m in msgs), msgs)
+
     def test_heading_ends_a_history_paragraph(self):
         text = '- v1.2 (2026-08-21): old note\n## Procedure\nR4 text scouts, all ten clusters.\n'
         self.assertEqual([ln for ln, _ in self.found(text)], [3])
@@ -662,7 +699,6 @@ class EndToEndTests(unittest.TestCase):
     def test_append_only_logs_are_skipped(self):
         for name in ('event_log.md', 'event_log_2026-07-09.md', 'open-items-tracker.md',
                      'open-items-tracker-history.md', 'deal-decision-ledger.md', 'disposition-ledger.md',
-                     'ops_decision_log.md',
                      'CHANGELOG.md'):
             self.t.write(os.path.join(MEM, name), DRIFT)
         self.assert_rc(self.t.run(), 0)
