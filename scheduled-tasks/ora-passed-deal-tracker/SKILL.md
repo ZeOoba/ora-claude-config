@@ -104,10 +104,33 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    `deal-retirement`. A row that is plainly ORA's acquisition but is not yet `WON` is
    reported under QUESTIONS FOR GABRIEL (see the Step 4 ORA-grantee rule), never classified.
 
-   **Address-level, not row-level.** Matching on normalized address (the Step 2 duplicate rule), also drop every
-   row whose normalized address matches ANY row carrying `WON` — an older sighting, a
-   later re-listing or an unflagged duplicate of a property ORA owns is not a passed deal.
-   Name each address dropped this way in the run summary so the drop stays visible.
+   **Address-level drop: exact suite or building match only (revised 2026-11-06, Gabriel
+   in-turn "Require a suite match, and report drops").** Also drop a row that carries no
+   `WON` when it is the same unit as a row carrying `WON`: an older sighting, a later
+   re-listing or an unflagged duplicate of a unit ORA owns is not a passed deal. Same unit
+   means ALL of:
+   - **Same normalized street address.** Normalized = street number + street name +
+     city, casefolded, punctuation dropped, with the directional (`N`/`North`) and the
+     street type (`Ave`/`Avenue`, `Rd`/`Road`) folded to one form. Nothing else is folded.
+   - **Same suite, unit or building designator, compared after the same folding**
+     (`Ste 200` = `Suite 200`, `Bldg B` = `Building B`), or neither row carries one.
+   - **Same parcel id** wherever both rows carry one.
+
+   Anything short of that is NOT a match, and the row stays on every arm above, including
+   the 3b re-marketing and 4d RE-CHECK passes: different suites or buildings at one
+   address, one row with a designator and the other without, a different building in the
+   same multi-building park or on the same parcel, address ranges or variants
+   (`1200-1250` vs `1220`), and differing parcel ids. Step 3a's ambiguity rule applies
+   here too: an ambiguous match is a null, not a guess, so it never drops a row. List each
+   such near-miss under QUESTIONS FOR GABRIEL as a possible duplicate of the named `WON`
+   row, so Gabriel can flag it through `Exclude from Calibration` or `deal-retirement`.
+
+   **Report every address-level drop on the Ops Hub note this sweep posts** (Step 6 or
+   Step 7, and in the Step 7 email too when that path runs). Use one `WON ADDRESS DROP:`
+   line per dropped row, giving the dropped row's page id and address, the `WON` row's
+   page id, and the matched address, designator and parcel id. Give the drop count in
+   the Step 10 run summary as well. The run summary alone is not enough, because nobody
+   reviews it.
 3. For each (batch by market): check for a sale/trade since last run via
    (a) the **County Sales Comps** Notion database FIRST — see below — then
    (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
@@ -372,7 +395,12 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
    - RCT: implied $/SF vs RCT v02 point ± band for that market (flag if outside band);
    - P(exec) bands: did deals in each seller-signal band trade near ORA's walk?
-   Tabulate cumulative evidence; recommendations go to the back-test (Step 5b below).
+   Tabulate cumulative evidence ONLY over rows that pass 2b and 2d, including 2d's
+   address-level drop (`Exclude from Calibration` unchecked, `LOI Outcome` not `WON`, not
+   the same unit as a `WON` row). A clearing or winning price already logged on a row
+   that is now `WON` or address-dropped is ORA's own purchase, or a duplicate of it, not
+   market evidence. Leave it out of the cumulative RCT and P(exec) evidence and do not
+   clear the field from this task. Recommendations go to the back-test (Step 5b below).
    Weights and bands move ONLY with Gabriel's explicit sign-off, never from this task.
    Never write to any governor constant or Buy Box weight/band file directly from this
    task.
@@ -426,7 +454,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    note** (added 2026-09-19) — it is the only surface this branch writes, and a due
    re-check that lands nowhere is the same silent-loss failure 4d was added to close.
    **Carry any Step 4e DILIGENCE-EXIT block on that same Ops Hub note** (added
-   2026-09-19), one line per row, same rule.
+   2026-09-19), one line per row, same rule. **Carry every 2d `WON ADDRESS DROP:` line on
+   that same note too** (added 2026-11-06), so a dropped row is never visible only in the
+   run summary.
 
    **The send gate is NOT widened by 4e. Stated explicitly so a later reader does not
    "fix" it:** a diligence exit is a post-mortem on a decision ORA already made and
@@ -438,7 +468,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    Before taking this branch, check for Sourcing Log rows where
    `Re-Engagement Flag` is ticked, `Re-Engagement Tickler Date` has passed, and
    the row passes 2b and 2d (`Exclude from Calibration` unchecked, `LOI Outcome` not
-   `WON`, address not carrying a `WON` row — a deal ORA bought, or a duplicate of one,
+   `WON`, not the same unit as a `WON` row per 2d's address-level drop — a deal ORA bought, or a duplicate of one,
    has no re-engagement to chase). A
    bust-and-re-engage window is time-sensitive and does not depend on a new trade
    being detected, so if any such row exists, take the Step 7 path instead and
@@ -511,7 +541,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
    **MANDATORY sample-size banner.** While the count of rows with a `Loss Class`
    other than UNCLASSIFIED — counting only rows that pass 2b and 2d (`Exclude from
-   Calibration` unchecked, `LOI Outcome` not `WON`) — is **under 10**, every LOI POST-MORTEMS section must
+   Calibration` unchecked, `LOI Outcome` not `WON`, not the same unit as a `WON` row per
+   2d's address-level drop) — is **under 10**, every LOI POST-MORTEMS section must
    open with, verbatim:
 
    ```
