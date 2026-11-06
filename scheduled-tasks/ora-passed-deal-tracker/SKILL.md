@@ -37,7 +37,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 2. Build the watch list from Notion Deal Sourcing Log
    (collection://9a6ae219-85a3-4621-899c-c757fd062f8b): Status in
    {Passed, Dead, Screened} OR Verdict in {PASS, KILLED} OR notes contain
-   GATE-FLAGGED / FLOOR-FLAGGED — i.e., everything ORA saw and did not buy.
+   GATE-FLAGGED / FLOOR-FLAGGED — i.e., everything ORA saw and did not buy
+   (a deal ORA bought is removed by 2d below, whatever its Status, Verdict or notes say).
 
    **2a — LOST-AT-LOI arm (added 2026-08-16, P3 lost-deal ledger).** Additionally
    include every row where `LOI Outcome` in {LOST, PENDING, WINNER-BUSTED}. These
@@ -90,6 +91,23 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    field and the value it should hold, and hold it out of 4b for that sweep (4b's own
    exclusion clause covers this). 2b's `Exclude from Calibration` filter applies to
    this arm exactly as to the others.
+
+   **2d — WON EXCLUSION (added 2026-11-05, Gabriel in-turn).** Apply
+   `AND LOI Outcome is not WON` to EVERY arm above (Status/Verdict arm, flag-notes
+   arm, 2a and 2c). SQL form: `coalesce("LOI Outcome",'') <> 'WON'`. `WON` marks a
+   deal ORA bought: `deal-retirement` v1.7 step 2b stamps it at closing, including a
+   deal closed without an LOI. Before that, no skill wrote `WON`, so a closed deal
+   that still carried a screen-time GATE-FLAGGED / FLOOR-FLAGGED note, a stale
+   `Status` or a `PENDING` outcome stayed on this list, and once its deed recorded,
+   ORA's own purchase could be logged here as a clearing or winning price. Do not set
+   or clear `LOI Outcome` from this task; that is a lifecycle write owned by
+   `deal-retirement`. A row that is plainly ORA's acquisition but is not yet `WON` is
+   reported under QUESTIONS FOR GABRIEL (see the Step 4 ORA-grantee rule), never classified.
+
+   **Address-level, not row-level.** Matching on normalized address (the Step 2 duplicate rule), also drop every
+   row whose normalized address matches ANY row carrying `WON` — an older sighting, a
+   later re-listing or an unflagged duplicate of a property ORA owns is not a passed deal.
+   Name each address dropped this way in the run summary so the drop stays visible.
 3. For each (batch by market): check for a sale/trade since last run via
    (a) the **County Sales Comps** Notion database FIRST — see below — then
    (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
@@ -115,6 +133,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
      non-arms-length/nominal transfers. A seller re-titling their own LLC looks
      identical to a sale to a new buyer from the outside. Inherit the flag and
      route the row to QUESTIONS FOR GABRIEL.
+   - **ORA's own purchase** — see the Step 4 ORA-grantee rule; it applies to a
+     County Sales Comps match exactly as to every other channel.
    - **Ambiguity is a null, not a guess.** Two candidate parcels, address variants,
      suite splits → `Winning Price Confidence = UNCONFIRMED` and surface it. Never
      silently pick the closer match.
@@ -161,6 +181,21 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    exception, else "Notes / Flags"): clearing price, date, buyer if public, and
    CLEARING PRICE vs ORA WALK delta ($ and %). Also append one line to the
    Exception Register tab logic if the deal was an exception.
+
+   **ORA-grantee rule — runs BEFORE any trade is logged, on every channel (County
+   Sales Comps, CoStar export, web search, broker-relayed; added 2026-11-05, moved here
+   from 3a the same day).** If the buyer/grantee is an ORA entity, the trade is ORA's
+   own acquisition, not a competitor's price. ORA entities are exactly those in
+   `Claude_Workspace\00_Governance\References\Voice\ORA_Property-LLC-Signature-Roster_v01.md`:
+   both the "Property signing LLCs" table and the "Holding / family / management
+   entities" list. Read that file; never name an entity from memory, a Notion select
+   option or this spec. A grantee that resembles an ORA name but is not on the roster
+   is UNCONFIRMED and goes to QUESTIONS FOR GABRIEL. On a roster match: record
+   nothing on the row (no clearing or winning price, no `Loss Class`, no 4b fields),
+   and route the row to QUESTIONS FOR GABRIEL so it can be stamped `WON` through
+   `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped. An
+   ORA-grantee match is not a trade: on the zero-trades branch (Step 6) it rides the
+   Ops Hub note as a one-line "stamp WON" question, so it is never silently lost.
 
    **4b — LOST-AT-LOI rows: write STRUCTURED fields, not prose (added 2026-08-16).**
    For any watch-list row that arrived via the Step 2a arm, the free-text log above
@@ -401,7 +436,10 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
    **Exception (added 2026-08-16): an overdue re-engagement tickler still emails.**
    Before taking this branch, check for Sourcing Log rows where
-   `Re-Engagement Flag` is ticked and `Re-Engagement Tickler Date` has passed. A
+   `Re-Engagement Flag` is ticked, `Re-Engagement Tickler Date` has passed, and
+   the row passes 2b and 2d (`Exclude from Calibration` unchecked, `LOI Outcome` not
+   `WON`, address not carrying a `WON` row — a deal ORA bought, or a duplicate of one,
+   has no re-engagement to chase). A
    bust-and-re-engage window is time-sensitive and does not depend on a new trade
    being detected, so if any such row exists, take the Step 7 path instead and
    report it — otherwise the one output with a live clock is the one output that
@@ -436,7 +474,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    this sweep, add a section with ONE line per newly-resolved outcome:
    deal · ORA offer · winning price (confidence) · winner type · Loss Class ·
    evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
-   passed with `Re-Engagement Flag` still ticked. **If nothing resolved, print
+   passed with `Re-Engagement Flag` still ticked (same 2b/2d filter as the Step 6 exception). **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
 
    **"SOURCING BACK-TEST" section (added 2026-11-05).** Step 5b's `backtest.md` verbatim,
@@ -472,7 +510,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    count with its own label.
 
    **MANDATORY sample-size banner.** While the count of rows with a `Loss Class`
-   other than UNCLASSIFIED is **under 10**, every LOI POST-MORTEMS section must
+   other than UNCLASSIFIED — counting only rows that pass 2b and 2d (`Exclude from
+   Calibration` unchecked, `LOI Outcome` not `WON`) — is **under 10**, every LOI POST-MORTEMS section must
    open with, verbatim:
 
    ```
