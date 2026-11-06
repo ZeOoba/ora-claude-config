@@ -57,7 +57,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **Watch for duplicate rows.** The Sourcing Log carries more than one row for
    at least one deal (`511 Industrial Mile Road` — `3446ecd8…` Status=Reviewing
    and `37c6ecd8…` Status=Dead, differing broker names, same address and SF).
-   Match on normalized address, not on row identity, and never count two rows as
+   Match on the same-unit test defined under 2d below (normalized address plus the
+   same suite or building, revised 2026-11-06), not on row identity, so two suites at
+   one street address are two deals, never one. Never count two rows as
    two losses. Surface any newly-detected duplicate in the QUESTIONS FOR GABRIEL
    block rather than silently merging.
 
@@ -69,7 +71,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    how the three `3849 N Richardt Ave` rows all entered the 2026-09-19 read-back. SQL
    form: `coalesce("Exclude from Calibration",'__NO__') <> '__YES__'` (verified
    2026-09-19: 146 rows without the clause, 123 with it, the 23 flagged rows
-   dropped). Canonical rows stay unflagged and stay on the list. The address-match
+   dropped). Canonical rows stay unflagged and stay on the list. The same-unit match
    and QUESTIONS-FOR-GABRIEL instruction above remains the backstop for any duplicate
    not yet flagged — never count two rows as two losses. Do not clear or set the
    checkbox from this task; flagging is Gabriel-directed or `deal-retirement` step 3a.
@@ -104,10 +106,45 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    `deal-retirement`. A row that is plainly ORA's acquisition but is not yet `WON` is
    reported under QUESTIONS FOR GABRIEL (see the Step 4 ORA-grantee rule), never classified.
 
-   **Address-level, not row-level.** Matching on normalized address (the Step 2 duplicate rule), also drop every
-   row whose normalized address matches ANY row carrying `WON` — an older sighting, a
-   later re-listing or an unflagged duplicate of a property ORA owns is not a passed deal.
-   Name each address dropped this way in the run summary so the drop stays visible.
+   **Address-level drop: exact suite or building match only (revised 2026-11-06, Gabriel
+   in-turn "Require a suite match, and report drops").** Also drop a row that carries no
+   `WON` when it is the same unit as a row carrying `WON`: an older sighting, a later
+   re-listing or an unflagged duplicate of a unit ORA owns is not a passed deal. Same unit
+   means ALL of:
+   - **Same normalized street address.** Normalized = street number + street name +
+     city + state, casefolded, punctuation dropped, with the directional (`N`/`North`)
+     and the street type (`Ave`/`Avenue`, `Rd`/`Road`) folded to one form.
+   - **Same suite, unit or building designator.** Fold labels only within a class:
+     `Suite`/`Ste`/`Unit`/`#` are one class (`Ste 200` = `Suite 200` = `Unit 200` =
+     `#200`), and `Bldg`/`Building` are another (`Bldg B` = `Building B`). Never fold
+     across classes: `Suite B` is not `Building B`. No other folding applies to the
+     address or designator.
+   - **Same parcel id** wherever both rows carry one.
+   - **If neither row carries a designator, the same parcel id on both rows is
+     required, and it is the only corroboration accepted.** A pair that matches only on
+     building SF, or that lacks a parcel id on either row, is a near-miss (below), never
+     a match: the rows may be different buildings in a park that shares one street
+     address. (Step 2's duplicate merge may still use building SF; this 2d drop may not.)
+
+   Anything short of that is NOT a match, and the row stays on every arm above, including
+   the 3b re-marketing and 4d RE-CHECK passes: different suites or buildings at one
+   address, one row with a designator and the other without, a different building in the
+   same multi-building park or on the same parcel, address ranges or variants
+   (`1200-1250` vs `1220`), and differing parcel ids. Step 3a's ambiguity rule applies
+   here too: an ambiguous match is a null, not a guess, so it never drops a row. List each
+   such near-miss under QUESTIONS FOR GABRIEL as a possible duplicate of the named `WON`
+   row, so Gabriel can flag it through `Exclude from Calibration` or `deal-retirement`.
+   A near-miss row stays live, so a trade search on the shared street address can hit
+   ORA's own deed on the sister unit. When it does, the Step 4 ORA-grantee rule still
+   records nothing. Its question names the `WON` sister row and asks whether this row is
+   the same unit; it never asks to stamp this row `WON` on that evidence alone.
+
+   **Report every address-level drop on the Ops Hub note this sweep posts** (Step 6 or
+   Step 7, and in the Step 7 email too when that path runs). Use one `WON ADDRESS DROP:`
+   line per dropped row, giving the dropped row's page id and address, the `WON` row's
+   page id, and the matched address, designator and parcel id. Give the drop count in
+   the Step 10 run summary as well. The run summary alone is not enough, because nobody
+   reviews it.
 3. For each (batch by market): check for a sale/trade since last run via
    (a) the **County Sales Comps** Notion database FIRST — see below — then
    (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
@@ -151,7 +188,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    own documented next phase.
 
    **3b — RE-MARKETED PASSES (added 2026-09-22).** For every watch-list row (after the
-   duplicate-address merge), search the Outlook inbox with `outlook_email_search`
+   same-unit duplicate merge, Step 2), search the Outlook inbox with `outlook_email_search`
    over the trailing 35 days, once for the street address (street number + street
    name) and once for the property name if the row has one. Never open links.
    - Ignore ORA's own mail: any @oxfordra.net sender AND the Exchange
@@ -193,7 +230,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    is UNCONFIRMED and goes to QUESTIONS FOR GABRIEL. On a roster match: record
    nothing on the row (no clearing or winning price, no `Loss Class`, no 4b fields),
    and route the row to QUESTIONS FOR GABRIEL so it can be stamped `WON` through
-   `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped. An
+   `deal-retirement` step 2b, except a 2d near-miss row (see 2d). This backs up 2d for a closing not yet stamped. An
    ORA-grantee match is not a trade: on the zero-trades branch (Step 6) it rides the
    Ops Hub note as a one-line "stamp WON" question, so it is never silently lost.
 
@@ -372,7 +409,12 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
    - RCT: implied $/SF vs RCT v02 point ± band for that market (flag if outside band);
    - P(exec) bands: did deals in each seller-signal band trade near ORA's walk?
-   Tabulate cumulative evidence; recommendations go to the back-test (Step 5b below).
+   Tabulate cumulative evidence ONLY over rows that pass 2b and 2d, including 2d's
+   address-level drop (`Exclude from Calibration` unchecked, `LOI Outcome` not `WON`, not
+   the same unit as a `WON` row). A clearing or winning price already logged on a row
+   that is now `WON` or address-dropped is ORA's own purchase, or a duplicate of it, not
+   market evidence. Leave it out of the cumulative RCT and P(exec) evidence and do not
+   clear the field from this task. Recommendations go to the back-test (Step 5b below).
    Weights and bands move ONLY with Gabriel's explicit sign-off, never from this task.
    Never write to any governor constant or Buy Box weight/band file directly from this
    task.
@@ -426,7 +468,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    note** (added 2026-09-19) — it is the only surface this branch writes, and a due
    re-check that lands nowhere is the same silent-loss failure 4d was added to close.
    **Carry any Step 4e DILIGENCE-EXIT block on that same Ops Hub note** (added
-   2026-09-19), one line per row, same rule.
+   2026-09-19), one line per row, same rule. **Carry every 2d `WON ADDRESS DROP:` line on
+   that same note too** (added 2026-11-06), so a dropped row is never visible only in the
+   run summary.
 
    **The send gate is NOT widened by 4e. Stated explicitly so a later reader does not
    "fix" it:** a diligence exit is a post-mortem on a decision ORA already made and
@@ -438,7 +482,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    Before taking this branch, check for Sourcing Log rows where
    `Re-Engagement Flag` is ticked, `Re-Engagement Tickler Date` has passed, and
    the row passes 2b and 2d (`Exclude from Calibration` unchecked, `LOI Outcome` not
-   `WON`, address not carrying a `WON` row — a deal ORA bought, or a duplicate of one,
+   `WON`, not the same unit as a `WON` row per 2d's address-level drop — a deal ORA bought, or a duplicate of one,
    has no re-engagement to chase). A
    bust-and-re-engage window is time-sensitive and does not depend on a new trade
    being detected, so if any such row exists, take the Step 7 path instead and
@@ -511,7 +555,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
    **MANDATORY sample-size banner.** While the count of rows with a `Loss Class`
    other than UNCLASSIFIED — counting only rows that pass 2b and 2d (`Exclude from
-   Calibration` unchecked, `LOI Outcome` not `WON`) — is **under 10**, every LOI POST-MORTEMS section must
+   Calibration` unchecked, `LOI Outcome` not `WON`, not the same unit as a `WON` row per
+   2d's address-level drop) — is **under 10**, every LOI POST-MORTEMS section must
    open with, verbatim:
 
    ```
