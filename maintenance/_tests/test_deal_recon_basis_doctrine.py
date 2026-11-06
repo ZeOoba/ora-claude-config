@@ -47,7 +47,42 @@ LANE6_FLOOR = re.compile(
     r"down\s+to\s+60%\s+\(2005\s+or\s+later\)\s+discount\s+below\*\*\s+the\s+"
     r"construction-type-adjusted\s+replacement\s+LOW")
 
+# The agent's Basis-read bullet stays digit-free; lane 6 and the workflow carry the
+# canonical numerator with its number ("price + 2% closing + CapEx + lease-up carry").
 ALL_IN = "all-in basis (price plus closing, CapEx and lease-up carry; [est] where unknown)"
+ALL_IN_LANE6 = "all-in basis (price + 2% closing + CapEx + lease-up carry)"
+ALL_IN_WF = "all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown)"
+
+# Negative scans (merge-gate review of #401): a test that only searches for the right
+# clause passes a line that ALSO states a wrong one. On every basis/recommendation line
+# and workflow floor site, strip the bound clauses that may carry numbers, then forbid
+# any remaining percentage and every known wrong-numerator / wrong-denominator /
+# wrong-verdict phrasing.
+ALLOWED_NUMERIC = [
+    re.compile(r"\*\*65% \(1995 or earlier\) down to 60% \(2005 or later\) discount below\*\*"),
+    re.compile(r"65% at/below 1995 " + "(?:->|→)" + r" 60% at/above 2005"),
+    re.compile(r">8% stabilized yield-on-cost"),
+    re.compile(r"\+ 2% closing \+"),
+]
+FORBIDDEN = {
+    "stray percentage": re.compile(r"\d+(?:\.\d+)?\s*(?:%|percent\b)", re.I),
+    "entry basis": re.compile(r"entry basis", re.I),
+    "asking price only": re.compile(r"asking price only", re.I),
+    "RCT POINT denominator": re.compile(r"RCT POINT", re.I),
+    "floor miss -> PASS": re.compile(r"floor miss\s*(?:->|→)\s*PASS", re.I),
+    "under replacement": re.compile(r"under replacement", re.I),
+    "quarter": re.compile(r"\bquarter\b", re.I),
+}
+
+# Governor pin (not doctrine, but the agent restates it): Invariant 4 constants.
+GOVERNOR = "DSCR >= 1.25x; LTV <= 40% portfolio aggregate and a 65% per-property refi ceiling"
+
+
+def forbidden_hits(line):
+    stripped = line
+    for rx in ALLOWED_NUMERIC:
+        stripped = rx.sub(" ", stripped)
+    return [(name, m.group(0)) for name, rx in FORBIDDEN.items() for m in [rx.search(stripped)] if m]
 
 # Recommendation (agent): the verdict mapping, bound phrase by phrase.
 REC_MAPPING = {
@@ -81,7 +116,7 @@ WF_SYNTH_MAPPING = {
         r"merely-fair basis \(below replacement but short of the vintage-ramp floor\) WITH a "
         r"credible value-add path -> NEEDS_MORE"),
     "all-in basis clears floor or clear upside -> PURSUE": re.compile(
-        re.escape(ALL_IN) + r" that clears the " + WF_FLOOR.pattern +
+        re.escape(ALL_IN_WF) + r" that clears the " + WF_FLOOR.pattern +
         r" OR clear value-add upside -> PURSUE\."),
 }
 
@@ -137,6 +172,11 @@ def main():
     lane6 = lane6[0] if lane6 else ""
     check("agent: lane 6 binds the full vintage-ramp floor clause",
           LANE6_FLOOR.search(lane6) is not None, ascii(lane6[:400]))
+    check("agent: lane 6 states the canonical all-in numerator (price + 2% closing + ...)",
+          ALL_IN_LANE6 in lane6, ascii(lane6[:400]))
+
+    # 4b. Governor constants restated in the agent intro are unchanged (Invariant 4).
+    check("agent: governor constants unchanged %s" % GOVERNOR, GOVERNOR in text)
 
     # 5. Recommendation: the verdict mapping, bound.
     rec = bullet(lines, "Recommendation") or ""
@@ -144,6 +184,12 @@ def main():
         check("agent: Recommendation maps %s" % name, rx.search(rec) is not None, ascii(rec))
     check("agent: Recommendation drops bare below-replacement PURSUE trigger",
           "below-replacement or clear value-add upside" not in rec, ascii(rec))
+
+    # 5b. Negative scans: nothing on the basis / recommendation lines may state a second,
+    #     wrong threshold, numerator, denominator or verdict next to the bound clauses.
+    for name, ln in (("lane 6", lane6), ("Basis read", basis), ("Recommendation", rec)):
+        hits = forbidden_hits(ln)
+        check("agent[%s]: no stray threshold or wrong-doctrine phrasing" % name, not hits, ascii(hits))
 
     # 6. The default pre-screen workflow carries the same doctrine.
     check("workflow: verified-deal-recon.js exists", os.path.isfile(WORKFLOW), WORKFLOW)
@@ -157,7 +203,10 @@ def main():
     for name, marker in WF_SITES.items():
         ln = site_line(wf_lines, marker) or ""
         check("workflow[%s]: exactly one prompt line" % name, bool(ln), marker)
-        check("workflow[%s]: tests all-in basis" % name, ALL_IN in ln, ascii(ln[:300]))
+        check("workflow[%s]: tests canonical all-in basis (price + 2%% closing + ...)" % name,
+              ALL_IN_WF in ln, ascii(ln[:300]))
+        hits = forbidden_hits(ln)
+        check("workflow[%s]: no stray threshold or wrong-doctrine phrasing" % name, not hits, ascii(hits))
         check("workflow[%s]: binds the full vintage-ramp floor clause" % name,
               WF_FLOOR.search(ln) is not None, ascii(ln[:400]))
         check("workflow[%s]: a floor miss is a flag, not a kill" % name,
