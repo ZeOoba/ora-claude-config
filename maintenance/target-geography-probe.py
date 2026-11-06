@@ -69,7 +69,8 @@ N clusters", "N target|canonical|acquisition markets", "N clusters:" or "N clust
 number of clusters in the canon, and a list a "N clusters:" claim introduces (read across up to
 LIST_MAX_LINES lines to its sentence end or a blank line) must name every cluster once it names four.
 Not claims: "five of ten", "the other nine", "six established clusters", "the 10th cluster", "nine market
-agents". Lines in a paragraph that opens with a version or date lead are history for this rule.
+agents". Lines of a changelog paragraph (its first line opens at column 0 with "vX.Y — ") are history
+for this rule; nothing else is.
 Known gaps: a count and its noun split across a line break ("outside the ten\\n clusters"); bare "N markets"
 (left out because the live tree used it only for non-target sets: "the 55 markets", "each of the 5 markets").
 
@@ -102,10 +103,10 @@ CLAUDE_GLOBS = (
     # holdings states as the box geography, and it is the live 06:00 broker filter.
     os.path.join("scheduled-tasks", "*", "SKILL.md"),
 )
-# ops_decision_log.md joined 2026-11-06: a dated ratification log ("### 2026-08-16 — ...: all 10 canonical
-# clusters" is what was ratified that day, not a live count), the operational twin of deal-decision-ledger.md.
+# ops_decision_log.md is NOT skipped: it holds standing answers updated in place (REFUTE 2026-11-06), so its
+# "Targeting: all 10 canonical clusters" owner-outreach line is a live answer the count rule should surface.
 SKIP_NAMES = {"event_log.md", "open-items-tracker.md", "open-items-tracker-history.md",
-              "deal-decision-ledger.md", "disposition-ledger.md", "ops_decision_log.md"}
+              "deal-decision-ledger.md", "disposition-ledger.md"}
 SKIP_NAME_RE = re.compile(r"^(?:event_log_\d{4}-\d{2}-\d{2}|CHANGELOG.*)\.md$", re.I)
 # Retired and in-progress folders hold no live doctrine (same rule as buybox-drift-probe.py).
 _PRUNE_EXACT = ("_archive", "_staging")
@@ -195,23 +196,37 @@ _WHOLE_SET_LEAD = re.compile(
 LIST_MAX_LINES = 8
 
 
-def _list_after(lines, index, col):
+# A '.' after one of these is an abbreviation, not a sentence end ("Washington D.C. / Baltimore",
+# "incl. St. Charles"). Two-letter state codes are NOT here: "... LOUISVILLE KY." ends the list.
+_ABBREVIATIONS = {'st', 'mt', 'ft', 'inc', 'co', 'corp', 'ltd', 'llc', 'incl', 'approx', 'vs', 'no', 'jr',
+                  'sr', 'dr', 'ave', 'blvd', 'rd', 'e.g', 'i.e', 'd.c', 'u.s', 'n', 's', 'e', 'w', 'etc'}
+
+
+def _list_after(lines, index, col, parens=True):
     """Text of the list that starts at lines[index][col:], continued across following lines until a sentence
-    end ('.' before whitespace or end of line, outside parentheses), a blank line or LIST_MAX_LINES."""
+    end ('.' before whitespace or end of line, outside parentheses, not after an abbreviation), a blank line
+    or LIST_MAX_LINES. If a '(' never closes before the stop, the read is redone ignoring parentheses, so an
+    unbalanced paren cannot swallow the next sentence (REFUTE 2026-11-06, C6)."""
     parts, depth = [], 0
     for i in range(index, min(len(lines), index + LIST_MAX_LINES)):
         seg = lines[i][col:] if i == index else lines[i]
         if i > index and not seg.strip():
             break
         for j, ch in enumerate(seg):
-            if ch == '(':
+            if parens and ch == '(':
                 depth += 1
-            elif ch == ')':
+            elif parens and ch == ')':
                 depth = max(0, depth - 1)
             elif ch == '.' and depth == 0 and (j + 1 == len(seg) or seg[j + 1].isspace()):
+                words = seg[:j].split()
+                token = words[-1].lstrip('(["\'').lower() if words else ''
+                if token in _ABBREVIATIONS:
+                    continue
                 parts.append(seg[:j])
                 return ' '.join(parts)
         parts.append(seg)
+    if parens and depth > 0:
+        return _list_after(lines, index, col, parens=False)
     return ' '.join(parts)
 
 
@@ -415,19 +430,27 @@ def scan_text(text, clusters):
     return out
 
 
+# A task-spec changelog paragraph opens, at column 0, with "vX.Y — " (em/en dash or " - ").
+_CHANGELOG_PARA = re.compile(r"^v\d+\.\d+\s+(?:[—–]|-)\s")
+
+
 def history_paragraph_lines(lines):
-    """Line numbers (1-based) of every line in a paragraph whose first line is version- or date-led
-    ("v2.15 — ... (2026-11-06, ...)" followed by wrapped prose, as task specs write their changelogs). Used by
-    the count rule only: a changelog quoting the old count ("... was disqualified as 'outside the ten
-    clusters'") is history, and wrapping put the quote on a continuation line live_lines() keeps. A paragraph
-    ends at a blank line or a heading."""
-    out, in_history = set(), False
+    """Line numbers (1-based) of every line in a task-spec changelog paragraph: one whose FIRST line (previous
+    line blank, a heading, or the file start) opens at column 0 with "vX.Y — ", running to the next blank line
+    or heading. Used by the count rule only: a changelog quoting the old count ("... was disqualified as
+    'outside the ten clusters'") is history, and wrapping put the quote on a continuation line live_lines()
+    keeps. Deliberately narrow (REFUTE 2026-11-06, C5): the first cut flipped to history at ANY version- or
+    date-led line, so a wrapped "2026-10-05: ..." mid-paragraph hid 81 live lines of the scan spec (all of
+    STEP 1B-A/1B-B). Indented "  v2.8 RESOLUTION:" notes, "vX.Y note:" lines and date-led bullets do not open
+    a history paragraph (date-led bullets are already skipped line by line in live_lines())."""
+    out, in_history, para_start = set(), False, True
     for number, line in enumerate(lines, 1):
         if not line.strip() or _HEADING.match(line):
-            in_history = False
+            in_history, para_start = False, True
             continue
-        if _VERSION_LINE.match(line) or _DATE_LEAD.match(line):
-            in_history = True
+        if para_start:
+            in_history = bool(_CHANGELOG_PARA.match(line))
+            para_start = False
         if in_history:
             out.add(number)
     return out
