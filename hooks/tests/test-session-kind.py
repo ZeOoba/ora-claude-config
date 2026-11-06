@@ -7,6 +7,7 @@ result. Stdlib only. ASCII-only. Windows (`python`).
 import atexit
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -167,6 +168,10 @@ def test_staleness_and_damage():
           sk.classify(SID, env=CLI, dirs=["Z:/no/such/dir"])[0] == sk.UNKNOWN)
     check("K15d empty dirs list, no entrypoint -> UNKNOWN",
           sk.classify(SID, env={}, dirs=[])[0] == sk.UNKNOWN)
+    good = store([{"cliSessionId": SID}])
+    check("K15e a missing extra dir next to a fresh plain record, cli -> INTERACTIVE "
+          "(missing is not unreadable)", sk.classify(
+              SID, env=CLI, dirs=[good, os.path.join(good, "no-such-dir")])[0] == sk.INTERACTIVE)
 
 
 def test_duplicates():
@@ -415,7 +420,8 @@ class _CountingFile(object):
 
     def read(self, *a):
         b = self._fh.read(*a)
-        self._owner.total += len(b)
+        with self._owner.lock:
+            self._owner.total += len(b)
         return b
 
     def fileno(self):
@@ -426,14 +432,17 @@ class _CountingFile(object):
 
 
 class _CountingOpen(object):
-    """Stands in for builtins.open inside session_kind: counts opens and bytes read."""
+    """Stands in for builtins.open inside session_kind: counts opens and bytes read.
+    Thread-safe: records may be inspected by several worker threads at once."""
 
     def __init__(self):
         self.total = 0
         self.opens = 0
+        self.lock = threading.Lock()
 
     def __call__(self, path, *a, **kw):
-        self.opens += 1
+        with self.lock:
+            self.opens += 1
         return _CountingFile(open(path, *a, **kw), self)
 
 
@@ -999,6 +1008,21 @@ class _SlowOpen(object):
         return open(path, *a, **kw)
 
 
+class _SlowOthers(object):
+    """Like _SlowOpen, but opens the `fast` path with no delay."""
+
+    def __init__(self, delay, fast):
+        self.delay = delay
+        self.fast = os.path.normcase(fast)
+        self.paths = []
+
+    def __call__(self, path, *a, **kw):
+        self.paths.append(path)
+        if os.path.normcase(path) != self.fast:
+            time.sleep(self.delay)
+        return open(path, *a, **kw)
+
+
 def test_c3_slow_store():
     # Reviewer finding C3: on a slow (cold) store the 3 s budget ran out and a session was
     # misclassified. Monkeypatched slow reader; the budget is shrunk to keep the test fast.
@@ -1015,17 +1039,38 @@ def test_c3_slow_store():
         k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
         check("S1 slow store: newest scheduled record found before the budget, task id kept",
               k == sk.SCHEDULED and tid == "ora-slow", "%s %r %s" % (k, tid, ev))
-        check("S2 slow store: scan stops at the scheduled record (1 file opened)",
-              len(slow.paths) == 1, repr(len(slow.paths)))
-        # Our plain record is newest; the rest cannot all be read inside the budget.
+        # Records are inspected by up to SCAN_WORKERS threads, so the records already in
+        # flight when the evidence lands (at most one more each) are still opened; dispatch
+        # stops there instead of reading the rest of the store.
+        workers = getattr(sk, "SCAN_WORKERS", 1)
+        check("S2 slow store: scan stops at the scheduled record (opens <= 2 x SCAN_WORKERS, "
+              "< 30)", len(slow.paths) <= 2 * workers and len(slow.paths) < 30,
+              repr(len(slow.paths)))
+        # A partial scan that HAS judged a fresh plain match: our own (newest) record opens
+        # at once, every other record takes 0.3 s, longer than the whole 0.2 s budget, so no
+        # attempt can complete however many readers run.
         recs = [{"cliSessionId": SID}] + [
             {"cliSessionId": "cccccccc-0000-0000-0000-%012d" % i, "pad": SID} for i in range(29)]
         ages = [1] + [1000 + i for i in range(29)]
         d = store(recs, ages)
-        slow.paths[:] = []
-        k, tid, ev = sk.classify(SID, env=CLI, dirs=[d])
+        slow = _SlowOthers(0.3, os.path.join(d, "local_00.json"))
+        sk.open = slow
+        judged = []
+        real_judge = sk._judge
+
+        def spy_judge(*a, **kw):
+            r = real_judge(*a, **kw)
+            judged.append(r[0])
+            return r
+        sk._judge = spy_judge
+        try:
+            k, tid, ev = sk.classify(SID, env=CLI, dirs=[d])
+        finally:
+            sk._judge = real_judge
         check("S3 partial scan with a plain match, cli -> UNKNOWN, never INTERACTIVE",
               k == sk.UNKNOWN, "%s %s" % (k, ev))
+        check("S3b the partial scan did judge our own fresh plain record", "plain" in judged,
+              repr(judged))
         k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
         check("S4 partial scan with a plain match, Desktop -> SCHEDULED (budget)",
               k == sk.SCHEDULED and "budget" in ev, "%s %s" % (k, ev))
@@ -1064,8 +1109,10 @@ def test_unreadable_file():
 class _Script(object):
     """open() stand-in for session_kind driven by a per-path script: path -> list of
     actions, one per open of that path (last action repeats). An action is "ok", "error"
-    (PermissionError), "gone" (FileNotFoundError), "block" (Event.wait, bounded by `cap`),
-    or ("sleep_error", seconds). `on_error` is called when an "error" action fires."""
+    (PermissionError), "gone" (the file is removed, then FileNotFoundError: a record that
+    really vanished mid-scan; a not-found file its directory still lists is unreadable,
+    not gone), "block" (Event.wait, bounded by `cap`), or ("sleep_error", seconds).
+    `on_error` is called when an "error" action fires."""
 
     def __init__(self, scripts, cap=8.0, on_error=None):
         self.scripts = dict((os.path.normcase(k), v) for k, v in scripts.items())
@@ -1086,6 +1133,12 @@ class _Script(object):
                     self.on_error()
                 raise PermissionError("scripted")
             if act == "gone":
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+                raise FileNotFoundError("scripted")
+            if act == "notfound":  # not-found by this path, yet still listed (unreadable)
                 raise FileNotFoundError("scripted")
             if act == "block":
                 self.release.wait(self.cap)
@@ -1181,6 +1234,365 @@ def test_undecodable_or_across_attempts():
     check("UO2 two attempts ran", sc.counts.get(os.path.normcase(flaky)) == 2, repr(sc.counts))
 
 
+class _ColdOpen(object):
+    """open() stand-in for session_kind that simulates a cold on-access antivirus scan: every
+    open sleeps `delay` before opening. OI-396, measured on the live store 2026-11-05 (1482
+    records, 818 MB): a cold pass spent 29.7 s of 31.1 s inside open() (Defender scans each
+    whole record inside CreateFile, ~16-20 ms per record); a warm pass took 1.0 s. Thread-
+    safe; records the peak number of opens in flight."""
+
+    def __init__(self, delay):
+        self.delay = delay
+        self.lock = threading.Lock()
+        self.inflight = 0
+        self.peak = 0
+        self.opens = 0
+
+    def __call__(self, path, *a, **kw):
+        with self.lock:
+            self.opens += 1
+            self.inflight += 1
+            self.peak = max(self.peak, self.inflight)
+        try:
+            time.sleep(self.delay)
+            return open(path, *a, **kw)
+        finally:
+            with self.lock:
+                self.inflight -= 1
+
+
+def _cold_store(n_other, mine, mine_age):
+    """A store of n_other other-session records (ages 1000 s and up) plus `mine` at
+    mine_age seconds old."""
+    recs = [{"cliSessionId": "cccccccc-0000-0000-0000-%012d" % i} for i in range(n_other)]
+    ages = [1000 + i for i in range(n_other)]
+    return store(recs + [mine], ages + [mine_age])
+
+
+def test_cold_store_parallel():
+    # OI-396: an attended Desktop session must classify INTERACTIVE inside the soft budget
+    # on a cold store whose serial scan cost (records x per-open latency) exceeds the hard
+    # wall. Scaled down: 201 records x 25 ms = 5.0 s serial against a 3.0 s budget and a
+    # 4.5 s wall (live: 1482 x ~20 ms = ~30 s against 12 s / 20 s); 8 readers need ~0.65 s.
+    saved = (sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS)
+    n = 200
+    workers = getattr(sk, "SCAN_WORKERS", 1)
+    try:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = 3.0, 4.5
+        d = _cold_store(n, {"cliSessionId": SID}, 1)
+        cold = _ColdOpen(0.025)
+        sk.open = cold
+        t0 = time.monotonic()
+        k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
+        dt = time.monotonic() - t0
+        check("CP1 cold store (serial cost > hard wall), attended Desktop session -> INTERACTIVE",
+              k == sk.INTERACTIVE, "%s %s" % (k, ev))
+        check("CP2 cold store: classified inside the soft budget (%.2fs < %.1fs)"
+              % (dt, sk.BUDGET_SECONDS), dt < sk.BUDGET_SECONDS)
+        check("CP3 cold store: record opens overlap, never more than SCAN_WORKERS at once "
+              "(peak %d, workers %d)" % (cold.peak, workers), 1 < cold.peak <= workers)
+        check("CP3b cold store: every record opened exactly once (one complete attempt)",
+              cold.opens == n + 1, repr(cold.opens))
+        # The scheduled record is the OLDEST: only a complete pass finds it.
+        d = _cold_store(n, {"cliSessionId": SID, "scheduledTaskId": "ora-cold"}, 30 * 86400)
+        for label, env in (("cli", CLI), ("Desktop", DESKTOP)):
+            sk.open = _ColdOpen(0.025)
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            check("CP4 cold store, backdated scheduled record behind %d others, %s -> "
+                  "SCHEDULED with its task id" % (n, label),
+                  k == sk.SCHEDULED and tid == "ora-cold", "%s %r %s" % (k, tid, ev))
+        # Too cold even for the parallel readers (41 x 0.4 s / 8 ~ 2 s > a 1.6 s wall):
+        # never INTERACTIVE, bounded by the wall.
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = 1.0, 1.6
+        d = _cold_store(40, {"cliSessionId": SID}, 1)
+        for label, env, want in (("Desktop", DESKTOP, sk.SCHEDULED), ("cli", CLI, sk.UNKNOWN)):
+            sk.open = _ColdOpen(0.4)
+            t0 = time.monotonic()
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            dt = time.monotonic() - t0
+            check("CP5 store too cold even in parallel, %s -> %s (never INTERACTIVE)"
+                  % (label, want), k == want, "%s %s" % (k, ev))
+            check("CP5b store too cold, %s: returns within HARD_JOIN + 1 s (%.2fs)"
+                  % (label, dt), dt < sk.HARD_JOIN_SECONDS + 1.0)
+    finally:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = saved
+        try:
+            del sk.open
+        except AttributeError:
+            pass
+
+
+def test_budget_label_and_counts():
+    # Two of the three 2026-11-05 denials read "still running at the 20 s hard wall limit
+    # (blocking read)": attempt 2's soft budget equalled its join wait, so a scan that was
+    # merely slow raced the wall and was labelled a blocked read. A budget-limited attempt
+    # must report the budget, and the evidence must say how much of the store it covered.
+    saved = (sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS)
+    d = _cold_store(40, {"cliSessionId": SID}, 1)
+    try:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = 0.5, 0.8
+        for label, env, want in (("Desktop", DESKTOP, sk.SCHEDULED), ("cli", CLI, sk.UNKNOWN)):
+            sk.open = _ColdOpen(0.45)
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            check("BL1 slow (not blocked) store, %s -> %s" % (label, want), k == want,
+                  "%s %s" % (k, ev))
+            check("BL2 slow store, %s: evidence names the time budget, not the hard wall"
+                  % label, "time budget" in ev and "hard wall" not in ev, ev)
+            check("BL3 slow store, %s: evidence counts the record files inspected" % label,
+                  re.search(r"\b\d+ of 41 record files inspected\b", ev) is not None, ev)
+    finally:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = saved
+        try:
+            del sk.open
+        except AttributeError:
+            pass
+
+
+def test_blocked_listing_hits_hard_wall():
+    # The hard wall still bounds a scan whose coordinating thread itself blocks (a record
+    # directory listing that never returns), not only a blocked record open.
+    d = store([{"cliSessionId": SID}])
+    real = sk.os.scandir
+    release = threading.Event()
+    target = os.path.normcase(os.path.abspath(d))
+
+    def stuck(path, *a, **kw):
+        if os.path.normcase(os.path.abspath(path)) == target:
+            release.wait(8.0)
+        return real(path, *a, **kw)
+    saved = (sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS)
+    sk.os.scandir = stuck
+    try:
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = 0.3, 0.6
+        for label, env, want in (("Desktop", DESKTOP, sk.SCHEDULED), ("cli", CLI, sk.UNKNOWN)):
+            t0 = time.monotonic()
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            dt = time.monotonic() - t0
+            check("HW1 blocked record-dir listing, %s -> %s within HARD_JOIN + 1 s (%.2fs)"
+                  % (label, want, dt), k == want and dt < sk.HARD_JOIN_SECONDS + 1.0,
+                  "%s %s" % (k, ev))
+            check("HW2 blocked listing, %s: evidence names the hard wall" % label,
+                  "hard wall" in ev, ev)
+    finally:
+        sk.os.scandir = real
+        release.set()
+        sk.BUDGET_SECONDS, sk.HARD_JOIN_SECONDS = saved
+
+
+_XP = chr(92) * 2 + "?" + chr(92)  # Win32 extended-length prefix (no MAX_PATH, no name munging)
+
+
+def _xp_remove(paths_files, paths_dirs):
+    """Best-effort cleanup of fixtures plain Win32 paths cannot address."""
+    for p in paths_files:
+        try:
+            os.remove(_XP + p)
+        except OSError:
+            pass
+    for p in paths_dirs:
+        try:
+            os.rmdir(_XP + p)
+        except OSError:
+            pass
+
+
+def test_listed_but_unopenable():
+    # REFUTE finding (2026-11-05, also on the pre-OI-396 code): a record the scan LISTS but
+    # cannot open by that name must leave the scan incomplete. open() reports it as
+    # FileNotFoundError, which the scan treated as "vanished mid-scan" and skipped. Two live
+    # shapes on Windows: a record path over MAX_PATH (LongPathsEnabled=0 on this machine) and
+    # a record directory whose name ends in a dot (Win32 strips it). Here the session's REAL
+    # scheduled record hides that way next to a forged fresh plain record.
+    if os.name != "nt":
+        check("LP0 Windows-only path shapes (skipped off Windows)", True)
+        return
+    sched = {"cliSessionId": SID, "scheduledTaskId": "ora-hidden"}
+    base = _mkdtemp("sk-lp-")
+    d = os.path.join(base, "g" * max(1, 200 - len(base) - 1))
+    os.makedirs(_XP + d)
+    with open(os.path.join(d, "local_plain.json"), "w", encoding="utf-8") as fh:
+        json.dump({"cliSessionId": SID}, fh)
+    longp = os.path.join(d, "local_" + "y" * 80 + ".json")
+    with open(_XP + longp, "w", encoding="utf-8") as fh:
+        json.dump(sched, fh)
+    try:
+        for label, env in (("Desktop", DESKTOP), ("cli", CLI)):
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            check("LP1 real scheduled record at a %d-char path (listed, unopenable), %s -> never "
+                  "INTERACTIVE" % (len(longp), label), k != sk.INTERACTIVE, "%s %s" % (k, ev))
+            if label == "Desktop":
+                check("LP2 same, Desktop -> SCHEDULED", k == sk.SCHEDULED, "%s %s" % (k, ev))
+    finally:
+        _xp_remove([longp], [])
+    root = _mkdtemp("sk-td-")
+    g1 = os.path.join(root, "Claude", "claude-code-sessions", "g1")
+    os.makedirs(os.path.join(g1, "h"))
+    with open(os.path.join(g1, "h", "local_plain.json"), "w", encoding="utf-8") as fh:
+        json.dump({"cliSessionId": SID}, fh)
+    gdot = os.path.join(g1, "g.")
+    os.makedirs(_XP + gdot)
+    hidden = os.path.join(gdot, "local_sched.json")
+    with open(_XP + hidden, "w", encoding="utf-8") as fh:
+        json.dump(sched, fh)
+    try:
+        for label, env in (("Desktop", DESKTOP), ("cli", CLI)):
+            k, tid, ev = _with_appdata(root, lambda: sk.classify(SID, env=env))
+            check("TD1 real scheduled record inside a trailing-dot record dir, %s -> never "
+                  "INTERACTIVE" % label, k != sk.INTERACTIVE, "%s %s" % (k, ev))
+            if label == "Desktop":
+                check("TD2 same, Desktop -> SCHEDULED", k == sk.SCHEDULED, "%s %s" % (k, ev))
+        # Decoy sibling: with a plain 'g' next to 'g.', a Win32 listing of 'g.' silently
+        # lists 'g' instead (no error at all), so 'g.' must count as unreadable by name.
+        os.makedirs(os.path.join(g1, "g"))
+        with open(os.path.join(g1, "g", "local_decoy.json"), "w", encoding="utf-8") as fh:
+            json.dump({"cliSessionId": OTHER}, fh)
+        for label, env in (("Desktop", DESKTOP), ("cli", CLI)):
+            k, tid, ev = _with_appdata(root, lambda: sk.classify(SID, env=env))
+            check("TD3 trailing-dot record dir with a same-named decoy sibling, %s -> never "
+                  "INTERACTIVE" % label, k != sk.INTERACTIVE, "%s %s" % (k, ev))
+    finally:
+        _xp_remove([hidden], [gdot])
+    # Control: a record that really vanishes between listing and open is still just gone,
+    # in ONE pass (no retry needed to recover from it).
+    d = store([{"cliSessionId": SID}, {"cliSessionId": OTHER}], ages=[5, 10])
+    gone = os.path.normcase(os.path.join(d, "local_01.json"))
+    real_inspect = sk._inspect
+
+    def vanish(p, *a, **kw):
+        if os.path.normcase(p) == gone and os.path.exists(p):
+            os.remove(p)
+        return real_inspect(p, *a, **kw)
+    sk._inspect = vanish
+    try:
+        res = sk.scan(SID, [d], sk._Budget(5.0))
+    finally:
+        sk._inspect = real_inspect
+    check("LP3 a record deleted between listing and open is skipped in one pass: complete, "
+          "0 unreadable, our plain record found",
+          res.complete and res.unreadable == 0 and len(res.fresh) == 1,
+          "complete=%s unreadable=%d fresh=%d" % (res.complete, res.unreadable, len(res.fresh)))
+
+
+def test_case_sensitive_siblings():
+    # REFUTE round 3 (also on the pre-OI-396 code): with per-directory case sensitivity on
+    # (fsutil, no elevation needed), record dirs 'x' and 'X' are distinct. store_dirs()
+    # deduped on normcase(), which lowercases, so one of them was dropped and the real
+    # scheduled record in it was never read.
+    if os.name != "nt":
+        check("CC0 Windows-only (skipped off Windows)", True)
+        return
+    for real, decoy in (("x", "X"), ("X", "x")):
+        root = _mkdtemp("sk-cs-")
+        g1 = os.path.join(root, "Claude", "claude-code-sessions", "g1")
+        os.makedirs(g1)
+        r = subprocess.run(["fsutil.exe", "file", "setCaseSensitiveInfo", g1, "enable"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            check("CC0 per-directory case sensitivity unavailable here (CC1 not exercised)",
+                  True, (r.stdout + r.stderr).strip()[:120])
+            return
+        for name, rec in (("h", {"cliSessionId": SID}),
+                          (real, {"cliSessionId": SID, "scheduledTaskId": "ora-cs"}),
+                          (decoy, {"cliSessionId": OTHER})):
+            os.makedirs(os.path.join(g1, name))
+            with open(os.path.join(g1, name, "local_%s.json" % ("rec" if name != "h" else "p")),
+                      "w", encoding="utf-8") as fh:
+                json.dump(rec, fh)
+        for label, env in (("Desktop", DESKTOP), ("cli", CLI)):
+            k, tid, ev = _with_appdata(root, lambda: sk.classify(SID, env=env))
+            check("CC1 case-sensitive sibling record dirs real=%r decoy=%r, %s -> SCHEDULED "
+                  "with the task id" % (real, decoy, label),
+                  k == sk.SCHEDULED and tid == "ora-cs", "%s %r %s" % (k, tid, ev))
+
+
+def test_still_listed_unit():
+    # _still_listed decides "unreadable" vs "gone" for a not-found entry.
+    d = store([{"cliSessionId": SID}])
+    present = os.path.join(d, "local_00.json")
+    check("SL1 name still in its parent listing -> True", sk._still_listed(present) is True)
+    check("SL2 name absent from an existing parent -> False",
+          sk._still_listed(os.path.join(d, "local_99.json")) is False)
+    check("SL3 parent itself missing -> False",
+          sk._still_listed(os.path.join(d, "nope", "local_00.json")) is False)
+    real = sk.os.scandir
+    target = os.path.normcase(os.path.abspath(d))
+
+    def deny(path, *a, **kw):
+        if os.path.normcase(os.path.abspath(path)) == target:
+            raise PermissionError("denied")
+        return real(path, *a, **kw)
+    sk.os.scandir = deny
+    try:
+        check("SL4 parent listing denied -> True (cannot tell: fail closed)",
+              sk._still_listed(present) is True)
+    finally:
+        sk.os.scandir = real
+
+
+def test_notfound_but_listed():
+    # The rule behind LP1/TD1, independent of Windows path shapes: open() saying not-found
+    # for a record its directory still lists is UNREADABLE (incomplete), never "gone".
+    d = store([{"cliSessionId": SID}, {"cliSessionId": OTHER}], ages=[5, 10])
+    sc = _Script({os.path.join(d, "local_01.json"): ["notfound"]})
+    sk.open = sc
+    try:
+        for label, env, want in (("Desktop", DESKTOP, sk.SCHEDULED), ("cli", CLI, sk.UNKNOWN)):
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            check("NF1 open() not-found for a record still listed, %s -> %s (incomplete)"
+                  % (label, want), k == want and "unreadable" in ev, "%s %s" % (k, ev))
+    finally:
+        del sk.open
+
+
+def test_reader_dies_without_outcome():
+    # REFUTE finding P3c: a reader that takes a record and dies before writing its outcome
+    # must leave the scan incomplete. Here it is the reader holding the session's REAL
+    # (backdated) scheduled record, next to a forged fresh plain record.
+    recs = [{"cliSessionId": SID}] + [
+        {"cliSessionId": "cccccccc-0000-0000-0000-%012d" % i} for i in range(20)]
+    recs.append({"cliSessionId": SID, "scheduledTaskId": "ora-real"})
+    d = store(recs, [5] + [1000 + i for i in range(20)] + [200 * 86400])
+    victim = os.path.normcase(os.path.join(d, "local_21.json"))
+    real_inspect = sk._inspect
+
+    def dies(p, *a, **kw):
+        if os.path.normcase(p) == victim:
+            return None  # no (verdict, extra) outcome: the reader cannot record one and dies
+        return real_inspect(p, *a, **kw)
+    sk._inspect = dies
+    try:
+        for label, env, want in (("Desktop", DESKTOP, sk.SCHEDULED), ("cli", CLI, sk.UNKNOWN)):
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            check("RD1 reader holding the real scheduled record dies without an outcome, %s -> "
+                  "%s" % (label, want), k == want, "%s %s" % (k, ev))
+    finally:
+        sk._inspect = real_inspect
+    k, tid, ev = sk.classify(SID, env=DESKTOP, dirs=[d])
+    check("RD2 control without the fault -> SCHEDULED with the task id",
+          k == sk.SCHEDULED and tid == "ora-real", "%s %r" % (k, tid))
+
+
+def test_worker_base_exception():
+    # A BaseException escaping one record's inspection (SystemExit raised inside open) leaves
+    # that record uninspected: the scan is incomplete, never INTERACTIVE, and classify still
+    # answers.
+    d = _cold_store(12, {"cliSessionId": SID}, 1)
+    victim = os.path.normcase(os.path.join(d, "local_05.json"))
+
+    def boom(path, *a, **kw):
+        if os.path.normcase(path) == victim:
+            raise SystemExit("scripted")
+        return open(path, *a, **kw)
+    sk.open = boom
+    try:
+        for label, env, want in (("Desktop", DESKTOP, sk.SCHEDULED), ("cli", CLI, sk.UNKNOWN)):
+            k, tid, ev = sk.classify(SID, env=env, dirs=[d])
+            check("BX1 SystemExit inside one record's open, %s -> %s" % (label, want),
+                  k == want, "%s %s" % (k, ev))
+    finally:
+        del sk.open
+
+
 _CHILD = r"""
 import sys, threading
 sys.path.insert(0, sys.argv[1])
@@ -1217,6 +1629,24 @@ def test_process_exit_with_blocked_worker():
     check("PX1 child exits on its own within HARD_JOIN + 3 s despite a forever-blocked read "
           "(%.2fs)" % dt, not timed_out)
     check("PX2 child classified the blocked store as SCHEDULED", out == sk.SCHEDULED, repr(out))
+    # Same with more records than SCAN_WORKERS: every reader thread blocks forever, and the
+    # process must still exit (the readers must be daemon threads, never a pool that the
+    # interpreter joins at exit).
+    d = _cold_store(19, {"cliSessionId": SID}, 5)
+    t0 = time.monotonic()
+    timed_out, out = False, ""
+    try:
+        r = subprocess.run([sys.executable, "-I", "-c", _CHILD % SID, lib, str(hard), d],
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=hard + 3.0)
+        out = r.stdout.decode("ascii", "replace").strip()
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    dt = time.monotonic() - t0
+    check("PX3 child with 20 records, every read blocked forever, exits within HARD_JOIN + 3 s "
+          "(%.2fs)" % dt, not timed_out)
+    check("PX4 child classified the 20-record blocked store as SCHEDULED", out == sk.SCHEDULED,
+          repr(out))
 
 
 def _run_all():
@@ -1248,6 +1678,15 @@ def _run_all():
     test_undecodable_or_across_attempts()
     test_process_exit_with_blocked_worker()
     test_c6_other_session_oversized()
+    test_cold_store_parallel()
+    test_budget_label_and_counts()
+    test_blocked_listing_hits_hard_wall()
+    test_worker_base_exception()
+    test_listed_but_unopenable()
+    test_case_sensitive_siblings()
+    test_still_listed_unit()
+    test_notfound_but_listed()
+    test_reader_dies_without_outcome()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,9 @@ import os
 import re
 import sys
 
+# PASS/FAIL lines carry non-ASCII; a cp1252 pipe (Windows default) would crash the run.
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 HOOKS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(HOOKS_DIR, "lib"))
 import mcp_delete_tiers as t  # noqa: E402
