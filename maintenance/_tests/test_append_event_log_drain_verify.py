@@ -290,6 +290,39 @@ def main():
     expect("a whole entry at end of file IS present", m._entry_present(log4, short))
     shutil.rmtree(tmp, ignore_errors=True)
 
+    # --- 4e. The log's FIRST '## ' line is undated or malformed. insert_newest anchors
+    # above it, so the drained entry is followed by that line, not a dated header.
+    # Verify must accept it, or attempt 2 writes a second copy (merge-gate C3 on #420).
+    for first in ("## Conventions", "## 2026-11-1 — hand-typed"):
+        tmp = tempfile.mkdtemp(prefix="ael-drainv-")
+        p = os.path.join(tmp, "event_log.md")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write("---\nname: event-log\n---\n\n# ORA Event Log\n\nIntro.\n\n"
+                    + first + "\n\n- rule\n\n" + OLD + "\n")
+        m.spool_entry(p, SPOOLED, time.time_ns())
+        n = m.drain_spool(p)
+        expect("undated first '## ' (%s): exactly one copy written" % first,
+               read(p).count("SPOOLMARK") == 1, read(p).count("SPOOLMARK"))
+        expect("undated first '## ' (%s): drained and spool file removed" % first,
+               n == 1 and spool_files(p) == [], (n, spool_files(p)))
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 4f. '---' counts as an entry boundary only when it is rollover's pointer rule
+    # (the '*Entries at and before' line follows), not any horizontal rule mid-entry.
+    tmp = tempfile.mkdtemp(prefix="ael-drainv-")
+    p = os.path.join(tmp, "event_log.md")
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("---\nname: x\n---\n\n" + SPOOLED + "\n\n---\n\n- more of a longer entry\n\n"
+                + OLD + "\n")
+    expect("prefix followed by a plain '---' rule is NOT present",
+           not m._entry_present(p, SPOOLED))
+    with open(p, "w", encoding="utf-8") as f:
+        f.write("---\nname: x\n---\n\n" + SPOOLED + "\n\n---\n\n*Entries at and before "
+                "\"x\" rolled over 2026-11-05 to [_archive/event_log_2026-11-05.md]"
+                "(_archive/event_log_2026-11-05.md) per memory-policy.md's rollover rule.*\n")
+    expect("entry followed by rollover's pointer IS present", m._entry_present(p, SPOOLED))
+    shutil.rmtree(tmp, ignore_errors=True)
+
     # --- 4d. spool_entry stages under a non-.md name (drain never sees a half file).
     tmp = tempfile.mkdtemp(prefix="ael-drainv-")
     log = make_log(tmp, [OLD])
