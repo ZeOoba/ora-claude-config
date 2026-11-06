@@ -1274,6 +1274,190 @@ with tempfile.TemporaryDirectory() as td:
     # gate that discovers zero tests (code review finding, 2026-07-25).
     gt.run_suite = real_run_suite
 
+# --- TWO TIERS (2026-11-06): choose_tier / changed_paths_for_refs / main wiring ---------
+# Real throwaway git repo; "origin" is simulated with refs/remotes/origin/* update-refs, so
+# no network and no real remote are involved.
+import subprocess as _sp
+
+
+def _g(repo, *a):
+    env = {k: v for k, v in os.environ.items() if k not in gt.GIT_ENV_LEAK_VARS}
+    return _sp.run(["git", "-C", repo] + list(a), capture_output=True, text=True,
+                   env=env, check=True).stdout.strip()
+
+
+def _w(repo, rel, text):
+    path = os.path.join(repo, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+tier_repo = tempfile.mkdtemp(prefix="gt-tier-")
+_g(tier_repo, "init", "-q", "-b", "main")
+_g(tier_repo, "config", "user.email", "t@example.invalid")
+_g(tier_repo, "config", "user.name", "tier test")
+_g(tier_repo, "config", "commit.gpgsign", "false")
+for _a in gt.selection.ALWAYS_RUN:
+    _w(tier_repo, _a, "print('always')\n")
+_w(tier_repo, "hooks/foo-guard.py", "x = 1\n")
+_w(tier_repo, "hooks/tests/test-foo-guard.py", "# loads foo-guard.py\nprint('ok')\n")
+_w(tier_repo, "hooks/tests/test-slow-unrelated.py", "print('slow')\n")
+_w(tier_repo, "maintenance/_tests/test_placeholder.py", "print('ok')\n")
+_g(tier_repo, "add", "-A")
+_g(tier_repo, "commit", "-q", "-m", "base")
+base_sha = _g(tier_repo, "rev-parse", "HEAD")
+_g(tier_repo, "update-ref", "refs/remotes/origin/main", base_sha)
+_g(tier_repo, "checkout", "-q", "-b", "feat")
+_w(tier_repo, "hooks/foo-guard.py", "x = 2\n")
+_g(tier_repo, "commit", "-q", "-am", "change guard")
+feat_sha = _g(tier_repo, "rev-parse", "HEAD")
+
+real_claude_dir, real_repo_override = gt.CLAUDE_DIR, gt.REPO_ROOT_OVERRIDE
+gt.REPO_ROOT_OVERRIDE = tier_repo
+try:
+    Z = gt.ZERO_SHA
+    ch, why = gt.changed_paths_for_refs(
+        "origin", [("refs/heads/feat", feat_sha, "refs/heads/feat", Z)])
+    expect("tier: new branch diff = merge-base with origin/main",
+           ch == ["hooks/foo-guard.py"] and why is None, "%r %r" % (ch, why))
+    _g(tier_repo, "update-ref", "refs/remotes/origin/feat", feat_sha)
+    _w(tier_repo, "docs/note.md", "n\n")
+    _g(tier_repo, "add", "-A")
+    _g(tier_repo, "commit", "-q", "-m", "doc")
+    feat2 = _g(tier_repo, "rev-parse", "HEAD")
+    ch, why = gt.changed_paths_for_refs(
+        "origin", [("refs/heads/feat", feat2, "refs/heads/feat", feat_sha)])
+    expect("tier: update push diffs only the new commits", ch == ["docs/note.md"], repr(ch))
+    ch, why = gt.changed_paths_for_refs(
+        "origin", [("refs/heads/feat", feat2, "refs/heads/main", base_sha)])
+    expect("tier: a push updating refs/heads/main demands FULL",
+           ch is None and "refs/heads/main" in (why or ""), repr(why))
+    ch, why = gt.changed_paths_for_refs("origin", [("(delete)", Z, "refs/heads/old", feat_sha)])
+    expect("tier: branch deletion contributes no paths", ch == [] and why is None, repr(ch))
+    ch, why = gt.changed_paths_for_refs("origin", [None])
+    expect("tier: malformed ref line -> undeterminable", ch is None and why is None)
+    ch, why = gt.changed_paths_for_refs(
+        "nosuchremote", [("refs/heads/x", feat2, "refs/heads/x", Z)])
+    expect("tier: no merge-base (unknown remote) -> undeterminable", ch is None, repr(ch))
+    expect("tier: parse_ref_lines flags malformed lines as None",
+           gt.parse_ref_lines("a b c\n\nr1 s1 r2 s2\n") == [None, ("r1", "s1", "r2", "s2")])
+
+    # Shim v1 (stdin /dev/null): the destination is unknowable, so FULL -- even on a
+    # feature branch, because `git push origin HEAD:main` from here looks identical
+    # (independent review 2026-11-06 reproduced a LIGHT verdict for exactly that).
+    t = gt.choose_tier(["gate", "origin", "u"], "")
+    expect("tier: no ref lines on stdin (shim v1) -> FULL even on a feature branch",
+           t["mode"] == "full" and "shim v1" in (t["why_full"] or ""), repr(t))
+    expect("tier: no-stdin FULL holds for a HEAD:main-shaped push too",
+           gt.choose_tier(["gate", "origin", "u"], "\n\n")["mode"] == "full")
+    expect("tier: single-dash flags are not taken as a remote",
+           gt.choose_tier(["gate", "-v"], "refs/heads/feat %s refs/heads/feat %s\n"
+                          % (feat2, feat_sha))["why_full"].startswith("not invoked"))
+
+    expect("tier: no remote argument -> FULL",
+           gt.choose_tier(["gate"], "")["mode"] == "full")
+    expect("tier: --full forces FULL",
+           gt.choose_tier(["gate", "origin", "u", "--full"], "")["mode"] == "full")
+    os.environ["ORA_PREPUSH_TIER"] = "full"
+    expect("tier: ORA_PREPUSH_TIER=full forces FULL",
+           gt.choose_tier(["gate", "origin", "u"], "")["mode"] == "full")
+    os.environ["ORA_PREPUSH_TIER"] = "light"
+    t_l = gt.choose_tier(["gate", "origin", "u"],
+                         "refs/heads/feat %s refs/heads/main %s\n" % (feat2, base_sha))
+    expect("tier: ORA_PREPUSH_TIER=light is NOT a force-light knob (main push stays FULL)",
+           t_l["mode"] == "full", repr(t_l))
+    os.environ.pop("ORA_PREPUSH_TIER", None)
+
+    # End-to-end LIGHT: discovery + display names rooted at the fixture repo.
+    gt.CLAUDE_DIR = tier_repo
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (feat_sha, Z))
+    expect("tier e2e: feature push -> LIGHT", t["mode"] == "light", repr(t.get("why_full")))
+    expect("tier e2e: selects the changed guard's test",
+           "hooks/tests/test-foo-guard.py" in (t["selected"] or []), repr(t["selected"]))
+    expect("tier e2e: does NOT select the unrelated slow test",
+           "hooks/tests/test-slow-unrelated.py" not in (t["selected"] or []))
+    expect("tier e2e: always-run set included",
+           all(a in (t["selected"] or []) for a in gt.selection.ALWAYS_RUN))
+    # Non-ASCII lib path: git C-quotes it unless -z/quotePath=false, which would dodge the
+    # hooks/lib/ prefix trigger (independent review 2026-11-06).
+    _w(tier_repo, "hooks/lib/café_helpers.py", "z = 1\n")
+    _g(tier_repo, "add", "-A")
+    _g(tier_repo, "commit", "-q", "-m", "nonascii lib")
+    na_sha = _g(tier_repo, "rev-parse", "HEAD")
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (na_sha, Z))
+    expect("tier e2e: non-ASCII hooks/lib path still escalates to FULL",
+           t["mode"] == "full" and "hooks/lib/" in (t["why_full"] or ""), repr(t))
+    _w(tier_repo, ".github/workflows/full-test-suite.yml", "on: push\n")
+    _g(tier_repo, "add", "-A")
+    _g(tier_repo, "commit", "-q", "-m", "ci")
+    ci_sha = _g(tier_repo, "rev-parse", "HEAD")
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (ci_sha, na_sha))
+    expect("tier e2e: editing the CI workflow escalates to FULL", t["mode"] == "full", repr(t))
+    saved_cf = gt._closure_files
+    gt._closure_files = lambda: 1 / 0
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (feat_sha, Z))
+    gt._closure_files = saved_cf
+    expect("tier e2e: a crash OUTSIDE the selector also degrades to FULL (no exit 1)",
+           t["mode"] == "full" and "raised" in (t["why_full"] or ""), repr(t))
+    _w(tier_repo, "hooks/lib/shared.py", "y = 1\n")
+    _g(tier_repo, "add", "-A")
+    _g(tier_repo, "commit", "-q", "-m", "lib")
+    lib_sha = _g(tier_repo, "rev-parse", "HEAD")
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (lib_sha, Z))
+    expect("tier e2e: hooks/lib change escalates to FULL",
+           t["mode"] == "full" and "hooks/lib/shared.py" in (t["why_full"] or ""), repr(t))
+    real_sel = gt.selection
+    gt.selection = None
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (feat_sha, Z))
+    gt.selection = real_sel
+    expect("tier e2e: selector import failure -> FULL, never 'run nothing'",
+           t["mode"] == "full")
+    saved_select = real_sel.select_tests
+    real_sel.select_tests = lambda *a, **k: 1 / 0
+    t = gt.choose_tier(["gate", "origin", "u"],
+                       "refs/heads/feat %s refs/heads/feat %s\n" % (feat_sha, Z))
+    real_sel.select_tests = saved_select
+    expect("tier e2e: selector crash -> FULL", t["mode"] == "full", repr(t))
+
+    # main() wiring: LIGHT passes only= to run_suite; FULL keeps the legacy call shape.
+    calls = []
+    saved_run_suite = gt.run_suite
+
+    def _rec(root=None, only=None):
+        calls.append(only)
+        return [{"file": "x", "status": "pass", "rc": 0, "output": ""}]
+    gt.run_suite = _rec
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = gt.main(["gate", "origin", "u"],
+                     "refs/heads/feat %s refs/heads/feat %s\n" % (feat_sha, Z))
+    expect("main: LIGHT run passes the selected subset to run_suite",
+           rc == 0 and calls and calls[-1] and "hooks/tests/test-foo-guard.py" in calls[-1],
+           repr(calls))
+    expect("main: LIGHT banner names CI as the full-suite gate",
+           "LIGHT tier" in buf.getvalue() and "full-test-suite.yml" in buf.getvalue())
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        gt.main(["gate", "origin", "u"],
+                "refs/heads/feat %s refs/heads/main %s\n" % (feat_sha, base_sha))
+    expect("main: main-target push runs FULL (run_suite called without only=)",
+           calls[-1] is None and "FULL tier" in buf.getvalue(), repr(calls[-1:]))
+    gt.run_suite = saved_run_suite
+    expect("build_override_entry: LIGHT tier note is recorded",
+           "LIGHT-tier subset" in gt.build_override_entry(
+               session_id=SESSION, tier_note="LIGHT-tier subset (3 files)"))
+finally:
+    gt.CLAUDE_DIR, gt.REPO_ROOT_OVERRIDE = real_claude_dir, real_repo_override
+    os.environ.pop("ORA_PREPUSH_TIER", None)
+    gt._force_rmtree(tier_repo)
+
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-hook-tests-gate tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
