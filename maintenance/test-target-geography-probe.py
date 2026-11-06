@@ -218,6 +218,20 @@ FIXED_AM_BRIEF_L270 = AM_BRIEF_L270.replace(
     "County IL; a town within 30 min of an ESTABLISHED cluster counts as a satellite (acquisition-underwriting "
     "STAGE 0 Gate 3; an entry cluster has none before ORA's first close there), WATCH if you cannot tell; "
     "anything else fails geo, even in a state where ORA already holds property.")
+# The same line after the owned-submarket exception (Gabriel in-turn 2026-11-06): its geography tail no longer
+# ends on the holdings-state clause, and it must stay clean.
+OWNED_SUBMARKET_AM_BRIEF_L270 = FIXED_AM_BRIEF_L270.replace(
+    "WATCH if you cannot tell; anything else fails geo, even in a state where ORA already holds property.",
+    "WATCH if you cannot tell; owned-submarket exception (Gabriel in-turn 2026-11-06; matches "
+    "acquisition-underwriting Market & Location, which scores an ORA-owned submarket max): a listing in the "
+    "same submarket as a property ORA currently owns (any Oxford share; the same town always qualifies) fits "
+    "geo even outside every cluster and satellite, WATCH if you cannot tell whether it is the same submarket "
+    "— read holdings once per run, before C.3 scoring: `portfolio.json` `properties[].address` (Master "
+    "Workbook lineage) when its `meta.asOf` is ≤7 days old, otherwise the Master Workbook's property rows at "
+    "the Block D path (locate the tab via `EXPORT_Index`), and only if the workbook is unreadable the older "
+    "snapshot tagged `[holdings STALE as of {asOf}]`; nothing readable → WATCH with `[holdings unreadable]`, "
+    "never a PASS verdict on geo; never a holdings list from memory; anything else fails geo, and holding "
+    "property elsewhere in the same state is not enough.")
 FIXED_DD_PACKAGE_SWEEP_L8 = (
     "You are the due-diligence document reader for Oxford Realty Advisors (ORA), a family-office industrial "
     "buyer working sub-$10M (2–5-building portfolios up to $15M, acquisition-underwriting Amendment H), "
@@ -262,6 +276,10 @@ class DefectLineTests(unittest.TestCase):
     def test_fixed_am_brief_box_line_is_clean(self):
         self.assertNotEqual(FIXED_AM_BRIEF_L270, AM_BRIEF_L270)
         self.assertEqual(self.check(FIXED_AM_BRIEF_L270), [])
+
+    def test_owned_submarket_am_brief_box_line_is_clean(self):
+        self.assertNotEqual(OWNED_SUBMARKET_AM_BRIEF_L270, FIXED_AM_BRIEF_L270)
+        self.assertEqual(self.check(OWNED_SUBMARKET_AM_BRIEF_L270), [])
 
 
 class AnchorTests(unittest.TestCase):
