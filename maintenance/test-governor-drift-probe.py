@@ -104,6 +104,15 @@ def run_probe(argv=None, home=None, live=False):
 # it is empty would prove nothing).
 _FIXTURE_CANON_LINE = "Acquisition governor (non-negotiable): DSCR >= 1.25x, LTV <= 40%.\n"
 _MEM_REL = (".claude", "projects", "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
+_BRAIN_GOV_REL = ("src", "contracts", "governor-constants.ts")
+_BRAIN_GOV_TS = ("export const RATIFIED_GOVERNORS = {\n"
+                 "  version: 1,\n"
+                 "  dscrFloor: 1.25,\n"
+                 "  ltvCeiling: 0.40,\n"
+                 "} as const;\n")
+# Payloads that flag when scanned as prose (asserted flaggable where they prove an exclusion).
+_FLAG_LTV = "LTV governor ceiling raised to 65% per the review notes."
+_FLAG_DSCR = "DSCR governor floor 1.60x per the audit note."
 
 
 def _write(path, text):
@@ -120,7 +129,25 @@ def _seed_fixture_home(home):
     _write(os.path.join(home, ".claude", "scheduled-tasks", "ora-fixture-task", "SKILL.md"),
            "---\nname: ora-fixture-task\n---\n\n" + _FIXTURE_CANON_LINE)
     os.makedirs(os.path.join(home, ".claude", "hooks"), exist_ok=True)
-    os.makedirs(os.path.join(home, ".claude", "maintenance"), exist_ok=True)
+    _write(os.path.join(home, ".claude", "maintenance", "fixture-tool.py"),
+           "# " + _FIXTURE_CANON_LINE)
+    _write(os.path.join(home, ".claude", "agents", "fixture-agent.md"),
+           "---\nname: fixture-agent\n---\n\n" + _FIXTURE_CANON_LINE)
+    # oxford-command-center ("brain") tree, shaped like the real repo (2026-11-06 REFUTE C2):
+    # the ONE governor constants file, a NON-governor .ts reusing the overloaded identifiers in
+    # lone `> 0` sanity checks (acq-governor-proxy.ts:92 shape) -- clean ONLY because main()
+    # routes scan_code to GOVERNOR_CODE_FILES alone -- and a data/*.json snapshot whose per-DEAL
+    # values would flag if the /data/ JSON skip were lost.
+    brain = os.path.join(home, "oxford-command-center")
+    _write(os.path.join(brain, *_BRAIN_GOV_REL), _BRAIN_GOV_TS)
+    _write(os.path.join(brain, "server", "warehouse", "acq-governor-proxy.ts"),
+           "export function governorsValid(governors: { dscrFloor: number; ltvCeiling: number }) {\n"
+           "  return Number.isFinite(governors.ltvCeiling) && governors.ltvCeiling > 0 &&\n"
+           "    Number.isFinite(governors.dscrFloor) && governors.dscrFloor > 0;\n"
+           "}\n")
+    _write(os.path.join(brain, "data", "deal-snapshot.json"),
+           '{"deal": "fixture", "dscr": 1.75, "ltv": 54.3,\n'
+           ' "note": "%s"}\n' % _FLAG_DSCR)
     _commit_fixture_skills(home)
 
 
@@ -717,12 +744,15 @@ def test_scan_code_seed_literal_drift_flags_unit():
     `dscrFloor: 1.25,` / `ltvCeiling: 0.40,` -- IS the live governor value (a one-char edit there
     weakens the governor). The comparison-only check missed it; the seed (colon) check must flag it.
     Leading-dot form too. NOTE: scan_code flags conditions.ts's legit `dscrFloor: 1.1,` BY DESIGN --
-    the FP is avoided by main() ROUTING scan_code ONLY to the governor file, verified by the E2E."""
+    the FP is avoided by main() ROUTING scan_code ONLY to the governor files (GOVERNOR_CODE_FILES),
+    verified by test_brain_governor_code_routing_e2e (a non-governor .ts carrying lone `> 0` checks
+    must not flag; the governor file's drift and deletion must)."""
     m = _load_probe_module()
     assert any("DSCR" in r for _, r, _ in m.scan_code("  dscrFloor: 1.00,")), "seed DSCR 1.00 must flag"
     assert any("LTV" in r for _, r, _ in m.scan_code("  ltvCeiling: 0.75,")), "seed LTV 0.75 must flag"
     assert any("LTV" in r for _, r, _ in m.scan_code("  ltvCeiling: .65,")), "leading-dot seed .65 must flag"
-    # proof the check is LIVE (so the E2E green => routing, not a dead check, protects conditions.ts):
+    # proof the check is LIVE (so the routing E2E green => routing, not a dead check, protects
+    # conditions.ts):
     assert m.scan_code("  dscrFloor: 1.1,"), "scan_code must flag a non-canonical seed (live check)"
     print("  PASS test_scan_code_seed_literal_drift_flags_unit")
 
@@ -1611,10 +1641,6 @@ def test_run_probe_survives_child_utf8_smartquote_e2e():
     print("  PASS test_run_probe_survives_child_utf8_smartquote_e2e")
 
 
-_FLAG_LTV = "LTV governor ceiling raised to 65% per the review notes."
-_FLAG_DSCR = "DSCR governor floor 1.60x per the audit note."
-
-
 def _assert_flaggable(m, line):
     """A payload used to prove an EXCLUSION must itself flag when scanned, or the e2e that
     uses it proves nothing (see the round-1 review note on the active-work test)."""
@@ -1647,7 +1673,7 @@ def test_event_log_excluded_e2e():
 def test_fixture_roots_drift_detected_e2e():
     """Detection is intact INSIDE the fixture: a drift planted in each in-scope fixture root
     (CLAUDE.md, memory, the ora-skills checkout -- committed on main, which is what the probe
-    reads there -- the CC fleet) fails the probe and is cited by
+    reads there -- the CC fleet, agents/*.md, maintenance/*.py) fails the probe and is cited by
     a path under the fixture home -- proving run_probe() really points the probe's scan roots
     at the fixture, and that a clean fixture run is not vacuous."""
     m = _load_probe_module()
@@ -1661,6 +1687,8 @@ def test_fixture_roots_drift_detected_e2e():
             os.path.join(home, *(_MEM_REL + ("rules.md",))),
             os.path.join(home, "ora-skills", "portfolio-growth", "SKILL.md"),
             os.path.join(home, ".claude", "scheduled-tasks", "ora-fixture-task", "SKILL.md"),
+            os.path.join(home, ".claude", "agents", "fixture-agent.md"),
+            os.path.join(home, ".claude", "maintenance", "fixture-tool.py"),
         ]
         for path in targets:
             before = None
@@ -1694,6 +1722,50 @@ def test_fixture_roots_drift_detected_e2e():
     print("  PASS test_fixture_roots_drift_detected_e2e")
 
 
+def test_brain_governor_code_routing_e2e():
+    """main()'s governor-CODE routing, end to end over the fixture brain tree (REFUTE C2,
+    2026-11-06 -- the default suite had lost this when the live E2E became opt-in):
+      * the seeded tree is clean: the canonical governor-constants.ts passes scan_code, the
+        non-governor server/warehouse/*.ts with lone `> 0` checks is NOT routed to scan_code, and
+        data/*.json per-deal values are skipped;
+      * `dscrFloor: 1.10` planted in governor-constants.ts flags (cited by that file);
+      * deleting either declaration reports ABSENT (the deletion guard).
+    Each sub-case restores the file before the next, so they are independent."""
+    m = _load_probe_module()
+    _assert_flaggable(m, _FLAG_DSCR)
+    with _fixture_home() as home:
+        gov = os.path.join(home, "oxford-command-center", *_BRAIN_GOV_REL)
+        r = run_probe(home=home)
+        assert r.returncode == 0, (
+            "seeded brain tree must be clean (canonical constants; `> 0` checks outside the "
+            "governor file not routed to scan_code; data/*.json skipped); got %d\n%s"
+            % (r.returncode, r.stdout))
+        cases = [
+            ("drifted seed", _BRAIN_GOV_TS.replace("dscrFloor: 1.25", "dscrFloor: 1.10"),
+             "DSCR floor seed constant 1.10"),
+            ("deleted DSCR declaration", _BRAIN_GOV_TS.replace("  dscrFloor: 1.25,\n", ""),
+             "DSCR floor governor declaration ABSENT"),
+            ("deleted LTV declaration", _BRAIN_GOV_TS.replace("  ltvCeiling: 0.40,\n", ""),
+             "LTV ceiling governor declaration ABSENT"),
+        ]
+        for label, text, expect in cases:
+            assert text != _BRAIN_GOV_TS, label
+            _write(gov, text)
+            try:
+                r = run_probe(home=home)
+                assert r.returncode == 1 and expect in r.stdout \
+                    and "governor-constants.ts" in r.stdout, (
+                        "%s in governor-constants.ts must report %r; got %d\n%s"
+                        % (label, expect, r.returncode, r.stdout))
+                assert "acq-governor-proxy.ts" not in r.stdout, (
+                    "non-governor .ts must never be routed to scan_code:\n%s" % r.stdout)
+                assert "deal-snapshot.json" not in r.stdout, (
+                    "brain data/*.json must stay skipped:\n%s" % r.stdout)
+            finally:
+                _write(gov, _BRAIN_GOV_TS)
+    print("  PASS test_brain_governor_code_routing_e2e")
+
+
 # Shape of the real 2026-11-06 blocker: drift inside ANOTHER session's ora-skills worktree.
 _SIBLING_WORKTREE_REL = ("ora-skills", ".claude", "worktrees",
                          "ora-skills-diffs-review-441806", "portfolio-growth", "SKILL.md")
@@ -1702,6 +1774,7 @@ _SIBLING_WORKTREE_REL = ("ora-skills", ".claude", "worktrees",
 _HERMETIC_E2E_TESTS = (
     "test_event_log_excluded_e2e",
     "test_fixture_roots_drift_detected_e2e",
+    "test_brain_governor_code_routing_e2e",
     "test_active_work_claims_excluded_e2e",
     "test_sessions_reviews_excluded_e2e",
     "test_fleet_roots_are_scanned_unit",
@@ -1720,7 +1793,11 @@ def test_e2e_outcome_independent_of_ambient_home_e2e():
     in a child process whose OWN home is the poisoned one. They must all still pass (or SKIP,
     for the opt-in live tests): the outcome depends only on fixtures. Any regression back to
     live reads -- run_probe() inheriting the ambient home, a fixture path built from the real
-    HOME, a live test losing its opt-in gate -- makes the child see the planted drift and fail."""
+    HOME, a live test losing its opt-in gate -- makes the child see the planted drift and fail.
+
+    SCOPE PIN: the positive control asserts the probe DOES scan ~/ora-skills/.claude/worktrees/
+    today. If the probe is later narrowed to skip session worktrees (the follow-up proposed in
+    PR #410), plant the poison in a still-scanned root instead and update this control."""
     m = _load_probe_module()
     _assert_flaggable(m, _FLAG_LTV)
     poisoned = tempfile.mkdtemp(prefix="gdp-poisoned-home-")
@@ -1964,11 +2041,14 @@ def test_fleet_skill_drift_would_flag_e2e():
         with open(os.path.join(d, "SKILL.md"), "w", encoding="utf-8") as fh:
             fh.write("---\nname: t\ndescription: d\n---\n\n" + drift)
     seen = []
-    for path in m.iter_files(root, (".md",)):
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for raw in fh:
-                if m.scan_line(raw):
-                    seen.append(path)
+    try:
+        for path in m.iter_files(root, (".md",)):
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for raw in fh:
+                    if m.scan_line(raw):
+                        seen.append(path)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
     assert any("ora-fake-task" in p for p in seen), "live fleet drift missed: %s" % seen
     assert not any("_archive_2026-04-28" in p for p in seen), "archived copy must be pruned"
     print("  PASS test_fleet_skill_drift_would_flag_e2e")
@@ -3696,6 +3776,7 @@ def main():
     test_interim_checklist_refute_round2_unit()
     test_event_log_excluded_e2e()
     test_fixture_roots_drift_detected_e2e()
+    test_brain_governor_code_routing_e2e()
     test_e2e_outcome_independent_of_ambient_home_e2e()
     test_live_tree_clean_optin()
     test_active_work_claims_pruned_unit()
