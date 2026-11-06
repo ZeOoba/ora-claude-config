@@ -423,7 +423,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    EVERY `Status`:
 
    ```sql
-   SELECT lower(trim("Deal Name / Address")) AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1 UNION ALL SELECT "Listing URL" AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce("Listing URL",'') <> '' AND coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1
+   SELECT lower(trim("Deal Name / Address")) AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce(trim("Deal Name / Address"),'') <> '' AND coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1 UNION ALL SELECT "Listing URL" AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce("Listing URL",'') <> '' AND coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1
    ```
 
    Each result is a POSSIBLE duplicate set: same exact name, or same `Listing URL`, with no
