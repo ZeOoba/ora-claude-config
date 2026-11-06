@@ -345,7 +345,9 @@ RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
   BUDGET — HARD CAPS, NOT JUDGMENT (the 2026-09-23 run died on "if running long"):
     STEP 1B-A discovery: ≤ 30 page loads TOTAL across all eleven clusters (≈1 Crexi + ≤2
       broker-direct per market; LoopNet only for markets where Crexi was blocked or
-      returned 0). STEP 1B-B provisional resolution: ≤ 12 loads. STEP 3C: ≤ 4 loads per
+      returned 0; v2.15: eleven clusters × 3 can exceed 30 — spend the FIRST pass at ≥1
+      load per cluster, Chicago–Cook included, before any cluster's 2nd or 3rd, so the cap
+      can never zero out a cluster; any cluster left short is named in §7c). STEP 1B-B provisional resolution: ≤ 12 loads. STEP 3C: ≤ 4 loads per
       T1 row. STEP 3D (v2.9): ≤ 4 loads + 2 GIS queries per T1-PENDING-VERIFY row. Count loads; stop the sub-step at its cap and name what was not loaded.
     EXTRACTION DISCIPLINE: read pages with `javascript_tool` returning COMPACT JSON (address,
       price, SF, DOM/listed date, href — nothing else), or `get_page_text` with
