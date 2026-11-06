@@ -114,14 +114,17 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    - **Same normalized street address.** Normalized = street number + street name +
      city + state, casefolded, punctuation dropped, with the directional (`N`/`North`)
      and the street type (`Ave`/`Avenue`, `Rd`/`Road`) folded to one form.
-   - **Same suite, unit or building designator.** Compare the designator's value only,
-     with the label folded away (`Ste 200` = `Suite 200` = `Unit 200` = `#200`;
-     `Bldg B` = `Building B`). No other folding applies to the address or designator.
+   - **Same suite, unit or building designator.** Fold labels only within a class:
+     `Suite`/`Ste`/`Unit`/`#` are one class (`Ste 200` = `Suite 200` = `Unit 200` =
+     `#200`), and `Bldg`/`Building` are another (`Bldg B` = `Building B`). Never fold
+     across classes: `Suite B` is not `Building B`. No other folding applies to the
+     address or designator.
    - **Same parcel id** wherever both rows carry one.
-   - **If neither row carries a designator, a corroborating identifier is required:**
-     the same parcel id on both rows, or the same building SF on both rows. Without
-     one, the rows may be different buildings in a park that shares one street
-     address, so treat the pair as a near-miss (below), never as a match.
+   - **If neither row carries a designator, the same parcel id on both rows is
+     required, and it is the only corroboration accepted.** A pair that matches only on
+     building SF, or that lacks a parcel id on either row, is a near-miss (below), never
+     a match: the rows may be different buildings in a park that shares one street
+     address. (Step 2's duplicate merge may still use building SF; this 2d drop may not.)
 
    Anything short of that is NOT a match, and the row stays on every arm above, including
    the 3b re-marketing and 4d RE-CHECK passes: different suites or buildings at one
@@ -227,7 +230,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    is UNCONFIRMED and goes to QUESTIONS FOR GABRIEL. On a roster match: record
    nothing on the row (no clearing or winning price, no `Loss Class`, no 4b fields),
    and route the row to QUESTIONS FOR GABRIEL so it can be stamped `WON` through
-   `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped. An
+   `deal-retirement` step 2b, except a 2d near-miss row (see 2d). This backs up 2d for a closing not yet stamped. An
    ORA-grantee match is not a trade: on the zero-trades branch (Step 6) it rides the
    Ops Hub note as a one-line "stamp WON" question, so it is never silently lost.
 
