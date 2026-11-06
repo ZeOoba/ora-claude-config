@@ -223,13 +223,15 @@ FIXED_AM_BRIEF_L270 = AM_BRIEF_L270.replace(
 OWNED_SUBMARKET_AM_BRIEF_L270 = FIXED_AM_BRIEF_L270.replace(
     "WATCH if you cannot tell; anything else fails geo, even in a state where ORA already holds property.",
     "WATCH if you cannot tell; owned-submarket exception (Gabriel in-turn 2026-11-06; matches "
-    "acquisition-underwriting Market & Location, which scores an ORA-owned submarket max): a listing in a town "
-    "where ORA currently owns property (any Oxford share) passes geo even outside every cluster and satellite, "
-    "WATCH if you cannot tell it is the same submarket — read holdings once per run from `portfolio.json` "
-    "`properties[].address` (Master Workbook lineage; cite `meta.asOf`; older than 7 days → tag "
-    "`[holdings STALE as of {asOf}]`), else the Master Workbook at the Block D path; neither readable → WATCH "
-    "with `[holdings unreadable]`, never a geo PASS; never a holdings list from memory; anything else fails geo, "
-    "and holding property elsewhere in the same state is not enough.")
+    "acquisition-underwriting Market & Location, which scores an ORA-owned submarket max): a listing in the "
+    "same submarket as a property ORA currently owns (any Oxford share; the same town always qualifies) fits "
+    "geo even outside every cluster and satellite, WATCH if you cannot tell whether it is the same submarket "
+    "— read holdings once per run, before C.3 scoring: `portfolio.json` `properties[].address` (Master "
+    "Workbook lineage) when its `meta.asOf` is ≤7 days old, otherwise the Master Workbook's property rows at "
+    "the Block D path (locate the tab via `EXPORT_Index`), and only if the workbook is unreadable the older "
+    "snapshot tagged `[holdings STALE as of {asOf}]`; nothing readable → WATCH with `[holdings unreadable]`, "
+    "never a PASS verdict on geo; never a holdings list from memory; anything else fails geo, and holding "
+    "property elsewhere in the same state is not enough.")
 FIXED_DD_PACKAGE_SWEEP_L8 = (
     "You are the due-diligence document reader for Oxford Realty Advisors (ORA), a family-office industrial "
     "buyer working sub-$10M (2–5-building portfolios up to $15M, acquisition-underwriting Amendment H), "
