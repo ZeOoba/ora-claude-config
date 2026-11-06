@@ -384,12 +384,12 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    recommendation routed there had no destination.
 
 5b. **SOURCING BACK-TEST (monthly; added 2026-11-05, Gabriel in-turn "Monthly back-test
-   block").** Report-only: it reads eight read-only exports and computes calibration
+   block").** Report-only: it reads nine read-only exports and computes calibration
    evidence. It never writes Notion, a weight, a band, a gate or a doctrine file, and never
    sets a Verdict or Loss Class. Run it on every sweep, after Step 4 and before Step 6/7. The
    engine is `C:/Users/Owner/.claude/maintenance/funnel-backtest.py`; its docstring holds the
-   eight queries verbatim (`QUERY_A` once per partition value, `QUERY_B`, `QUERY_P`,
-   `QUERY_N`). Copy them from there, never from memory.
+   nine queries verbatim (`QUERY_A` once per partition value, `QUERY_B`, `QUERY_P`,
+   `QUERY_N`, `QUERY_D`). Copy them from there, never from memory.
    (i) Make the folder `C:/Users/Owner/AppData/Local/Temp/ora-backtest-YYYY-MM-DD/`, where
    YYYY-MM-DD is the run date's date part only (the same date the Step 7 subject uses; never
    the weekday). Run each query with `notion-query-data-sources` against
@@ -397,15 +397,19 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    verbatim (Write tool, UTF-8, keeping its `has_more` key) into that folder:
    `a_t1.json`, `a_t2.json`, `a_pass.json`, `a_killed.json`, `a_none.json` (QUERY_A with
    params `["T1 PURSUE"]`, `["T2 WATCH"]`, `["PASS"]`, `["KILLED"]`, `["(none)"]`),
-   `b_t1rows.json` (QUERY_B), `p_pexec.json` (QUERY_P) and `n_count.json` (QUERY_N, the
-   log's total row count, which the engine reconciles against the five partitions). Do not
+   `b_t1rows.json` (QUERY_B), `p_pexec.json` (QUERY_P), `n_count.json` (QUERY_N, the
+   log's total row count, which the engine reconciles against the five partitions) and
+   `d_dups.json` (QUERY_D, every row in a duplicate set: the engine excludes each row whose
+   `Duplicate Of` is set and gives the kept row its set's earliest first-sighting
+   prediction, because the writers never move those write-once fields; added 2026-11-06,
+   Gabriel in-turn "Redesign"). Do not
    edit, merge, drop or reorder anything. If a query errors (quota, schema), stop 5b and
    record one WARN line naming the query and the error; never re-run a query to get it right.
    (ii) Run, from that folder:
 
    ```bash
    cd C:/Users/Owner/AppData/Local/Temp/ora-backtest-YYYY-MM-DD
-   python C:/Users/Owner/.claude/maintenance/funnel-backtest.py --rows a_t1.json --rows a_t2.json --rows a_pass.json --rows a_killed.json --rows a_none.json --t1-rows b_t1rows.json --pexec-rows p_pexec.json --expect-rows n_count.json --out-md backtest.md
+   python C:/Users/Owner/.claude/maintenance/funnel-backtest.py --rows a_t1.json --rows a_t2.json --rows a_pass.json --rows a_killed.json --rows a_none.json --t1-rows b_t1rows.json --pexec-rows p_pexec.json --expect-rows n_count.json --dup-rows d_dups.json --out-md backtest.md
    ```
 
    Exit 0: `backtest.md` goes verbatim into the Step 7 email as its SOURCING BACK-TEST
@@ -413,6 +417,21 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    verbatim; never hand-fix an input file and re-run.
    (iii) Any change the block prompts (a gate, a weight, a band, a doctrine edit) is a
    proposal for Gabriel, listed under QUESTIONS FOR GABRIEL, never an action.
+   (iv) **Unflagged-duplicate sweep (report-only; added 2026-11-06).** A scan and a Code
+   session can each create a row for the same parcel, and the scan's own dedupe skips rows
+   that are `Dead` or `Passed`, so nobody notices. Run this one read-only query across
+   EVERY `Status`:
+
+   ```sql
+   SELECT lower(trim("Deal Name / Address")) AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1 UNION ALL SELECT "Listing URL" AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce("Listing URL",'') <> '' AND coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1
+   ```
+
+   Each result is a POSSIBLE duplicate set: same exact name, or same `Listing URL`, with no
+   row flagged. List every set (key, count, urls) in the Step 7 email under QUESTIONS FOR
+   GABRIEL as "possible unflagged duplicates: resolve with deal-retirement step 3a". This
+   step never flags, excludes, merges or edits a row. It catches exact-text duplicates
+   only; a spelling variant ("S 6th St" vs "South 6th Street") still needs a human eye. If
+   the query errors, record one WARN line and continue.
 
    **Repo path, not a skill name (2026-08-05):** `annual-cycle` was unpublished
    from the skill store (audit-driven fleet cleanup — usageCount 1 lifetime), so
