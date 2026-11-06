@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-10-31T19:30:00.000Z
+  modified: 2026-11-06T20:00:00.000Z
 ---
 
 # ORA Tech Stack & Reference
@@ -140,6 +140,22 @@ Four runners on LAPTOP-CSHSCBE6, all label `ora-ci`; none is a Windows service (
 - Stale duplicates `ORA-CI-Runner-ora-skills` and `ORA-CI-Runner-oxford-command-center` (same dirs, last result 0xC000013A) were deleted 2026-10-28; do not recreate.
 - True service alternative: re-run `config.cmd --runasservice` per dir (registration + removal token and logon password supplied by Gabriel; a runner package has no `svc.cmd` on Windows). Then `sc.exe failure <svc> reset= 86400 actions= restart/60000/restart/60000/restart/60000`. Modern Standby (S0) pauses services on lid close regardless.
 - Restarting a listener kills a running job: check `busy` first. Never handle runner tokens in-session.
+
+## 3j. `~/.claude` pre-push test tiers (added 2026-11-06, Gabriel-approved)
+
+The hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`, gate #2 of the pre-push shim) has two tiers. Rules and limits: that file's docstring "TWO TIERS" + `hooks/lib/prepush_test_selection.py`.
+
+| Tier | When | Runs |
+|---|---|---|
+| LIGHT | real pre-push via **shim v2** (git's ref lines on stdin), no ref targets main, diff mappable | tests the diff touches (changed test files, `test-<name>[-*]` naming, any test that names a changed file, one-hop importer closure) + always-run set (selector test, governor-drift-probe test — kept cheap; confidential terms stay guarded on every push by gate #3, the fail-closed history scan) |
+| FULL (local) | push updates `refs/heads/main`; no ref lines on stdin (shim v1: target unknown); no remote arg (weekly `ora-prepush-gate-sweep`, hand runs); `--full` / `ORA_PREPUSH_TIER=full`; diff undeterminable; diff touches the gates, `hooks/lib/`, `hooks/tests/lib/`, `.github/workflows/` or any path containing `confidential`; an always-run file vanished; any exception in tier selection | every discovered test file, same as before the split |
+| FULL (CI, authoritative) | every PR + every push to main (`.github/workflows/full-test-suite.yml`, `windows-latest`) | `python hooks/git-prepush-hook-tests-gate.py --full`; no session id, so no override token can pass it |
+
+- **Merge rule:** a PR merges only with the `full-test-suite` check green. This is a merge-procedure rule (read the PR's checks before merging), NOT GitHub-enforced: `main` has no required status check, because direct pushes to main (the auto-reconcile corrector) would be rejected by one. That is also why main-target pushes keep the FULL local tier.
+- **Light-tier blind spot:** dependencies not named in text (directory globbing, computed paths) and transitive importers beyond one hop. CI's full run is the backstop; do not treat a green LIGHT push as a green suite.
+- **CI is no backstop for ENV-SKIP tests:** suites needing gitignored live files skip in CI (notably `test-confidentiality-guard.py`, no `confidential-terms.json`). They truly run only in FULL runs in the main checkout, hence the `confidential` FULL trigger. Gate #3 (fail-closed confidential scan of the pushed history) runs on every push regardless of tier.
+- **Shim v2** (required for LIGHT): passes git's ref lines to the gate (text in the gate's Install section). Under shim v1 every push runs FULL, i.e. today's behavior; a HEAD-based guess was rejected because it scored `git push origin HEAD:main` from a feature branch as LIGHT.
+- Overrides: unchanged (`allow-hook-test-failure`), now apply to whichever tier ran; the event_log entry records LIGHT when it applies.
 
 ## 4. MCP connectors
 

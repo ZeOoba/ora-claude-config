@@ -1,0 +1,66 @@
+# FULL TEST SUITE -- the authoritative test gate for ora-claude-config (added 2026-11-06,
+# Gabriel-approved).
+#
+# WHY: the local pre-push hook-tests gate (hooks/git-prepush-hook-tests-gate.py) now runs
+# a LIGHT tier on feature-branch pushes -- only the test files the pushed diff touches,
+# plus a small always-run set -- because under multi-session load the full ~170-file
+# suite blew its timeouts and blocked unrelated one-file pushes (two
+# allow-hook-test-failure overrides on 2026-11-06 alone). The FULL suite moved here so it
+# still runs on every change before merge. A PR merges only when this job is green -- a
+# merge-procedure rule, NOT GitHub-enforced (main has no required status check; see
+# tech.md 3j). Selection rules and their limits: hooks/lib/prepush_test_selection.py.
+#
+# NOT A BACKSTOP for tests that ENV-SKIP without gitignored live files (notably
+# test-confidentiality-guard.py): they skip here. Their coverage is FULL runs in the main
+# checkout; any pushed path containing "confidential" forces the local FULL tier.
+#
+# NO OVERRIDE PATH: this job sets no CLAUDE_CODE_SESSION_ID, so the gate's
+# allow-hook-test-failure token can never be honored here -- a red run stays red.
+#
+# windows-latest, not ubuntu: the suite is written for and validated on Windows
+# (PowerShell suites, Windows path handling); a Linux run would fail on environment, not
+# on regressions. Gitignored live files (e.g. hooks/confidential-terms.json) are absent
+# in a fresh checkout by design; tests that need them declare ENV-SKIP ("CANNOT RUN:"),
+# exactly as they do in any linked worktree.
+name: Full test suite
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-test-suite-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-test-suite:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 (= v4.4.0)
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0 (resolved via git ls-remote 2026-11-06)
+        with:
+          python-version: "3.13"
+
+      # Test fixtures create throwaway git repos and commit into them.
+      - name: Git identity for fixture repos
+        shell: bash
+        run: |
+          git config --global user.name "ora-ci"
+          git config --global user.email "ora-ci@users.noreply.github.com"
+          git config --global init.defaultBranch main
+
+      - name: Run the FULL tracked test suite
+        shell: bash
+        env:
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: utf-8
+        run: python hooks/git-prepush-hook-tests-gate.py --full

@@ -2,6 +2,53 @@
 """Native git pre-push gate #2 for ~/.claude — HOOK-TEST-SUITE gate (runs between the
 doctrine-drift gate and the confidentiality scan).
 
+TWO TIERS (2026-11-06, Gabriel-approved; selection logic + rationale in
+hooks/lib/prepush_test_selection.py, tests in hooks/tests/test-prepush-test-selection.py):
+
+  LIGHT — a real pre-push (shim v2: ref lines on stdin) of NON-main refs only. Runs only the test files the pushed
+          diff touches (path/name/content mapping + one-hop importer closure) plus a
+          small always-run set (the selector's tests and the governor-drift-probe
+          test; why the slower guard tests are NOT in it is measured in
+          prepush_test_selection.ALWAYS_RUN). Same block/override/retry semantics as
+          before, on that subset. The confidential-terms hard guard is untouched: gate
+          #3 (git-prepush-confidential-scan.py) still scans every push, both tiers.
+  FULL  — every discovered file, exactly as before this split. Chosen whenever:
+            * the push updates refs/heads/main (no later merge gate exists for a direct
+              push to main, so the local gate stays whole there);
+            * the gate is not running as a real pre-push (no remote argument): the
+              weekly ora-prepush-gate-sweep task and any hand run get FULL;
+            * `--full` is passed or ORA_PREPUSH_TIER=full is set;
+            * no ref lines on stdin (shim v1): the push target is unknown;
+            * the selector cannot prove a light pick is sound: diff undeterminable, the
+              push touches the gates / hooks/lib/ / hooks/tests/lib/ / .github/workflows/
+              / any path containing "confidential", or an always-run file has vanished;
+            * tier selection raises anything at all.
+          And ALWAYS in CI: .github/workflows/full-test-suite.yml runs
+          `python hooks/git-prepush-hook-tests-gate.py --full` on every PR and every push
+          to main. THAT run is the authoritative gate: a PR merges only when it is green
+          (a merge-procedure rule; see MERGE ENFORCEMENT below). CI carries no
+          CLAUDE_CODE_SESSION_ID, so no override token can ever pass a red CI run.
+
+WHAT THE LIGHT TIER GIVES UP, stated so nobody mistakes it for the full gate: a test
+whose dependency on the changed file is not visible in text (directory globbing, a
+computed path) is not run locally; CI's full run catches it before merge. There is no
+"force light" knob — only FULL can be forced.
+
+PUSHED-DIFF SOURCE: ONLY git's ref lines on stdin, which shim v2 passes (see Install
+below). With no ref lines (shim v1, which feeds </dev/null) the gate runs FULL: it cannot
+see the destination, and a HEAD-based guess scored `git push origin HEAD:main` from a
+feature branch as LIGHT (independent review, 2026-11-06). Per ref line, the diff is
+merge-base(remote sha, local sha)..local sha, or merge-base with <remote>/main for a new
+branch; undeterminable -> FULL.
+
+CI CAVEAT (stated so the backstop is not overclaimed): tests that need gitignored live
+files ENV-SKIP in CI exactly as in any worktree — notably test-confidentiality-guard.py
+(no hooks/confidential-terms.json). Their real coverage is a FULL run in the main
+checkout (main-target pushes, the weekly sweep) plus FULL-tier escalation: any pushed
+path containing "confidential" forces FULL locally (prepush_test_selection.py).
+MERGE ENFORCEMENT: "green CI before merge" is enforced by the merge procedure, not by
+GitHub — main carries no required status check (tech.md §3j).
+
 WHY (found 2026-07-24): commit 7d01eff rewrote shared-checkout-guard.py's WIP
 attribution logic (evidence-based naming, replacing an arbitrary others[0] guess) but
 left hooks/tests/test-shared-checkout-guard.py asserting the PRE-fix contract — the
@@ -127,6 +174,18 @@ unchanged):
                            python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?
                            python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" </dev/null || exit $?
                            exec python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"
+The v1 shim above stays SAFE with the tiered gate (stdin is /dev/null, so every push
+runs FULL, exactly as before), but the LIGHT tier needs shim v2 (2026-11-06), which
+saves git's ref lines once and hands them to BOTH this gate and the confidentiality
+scan. Older copies of this gate never read stdin, so v2 is harmless for them too:
+  #!/bin/sh
+  ROOT="$(git rev-parse --show-toplevel)"
+  REFS="$(mktemp)" || exit 1
+  trap 'rm -f "$REFS"' EXIT
+  cat > "$REFS"
+  python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?
+  python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" <"$REFS" || exit $?
+  python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"
 
 Exit 0 = allow push (all tests pass, or failures with a valid logged override).
 Exit 1 = block (a real test failure, no valid override) — git pre-push convention.
@@ -152,6 +211,12 @@ sys.path.insert(0, LIB_DIR)
 # NO fallback on this import, same reasoning as the doctrine gate: a missing
 # override_tokens module must not degrade to a looser local check — it blocks instead.
 from override_tokens import Tier, token_grants, describe_token  # noqa: E402
+# The selector failing to import degrades to the FULL tier (never to "run nothing"):
+# a broken light tier must cost time, not coverage.
+try:
+    import prepush_test_selection as selection  # noqa: E402
+except Exception:  # pragma: no cover - defensive
+    selection = None
 
 HOOK_TEST_FAILURE = Tier("allow-hook-test-failure", "hook-test-failure", 3600, single_use=False)
 APPEND_LOG_SCRIPT = os.path.join(CLAUDE_DIR, "maintenance", "append-event-log.py")
@@ -461,7 +526,7 @@ def _run_one(path):
     }
 
 
-def run_suite(root=None):
+def run_suite(root=None, only=None):
     """[{"file", "rc", "status", "output", "timeout_retried", "fail_retried",
     "first_output"}] for every discovered test file, in DISCOVERY (sorted) order.
 
@@ -497,6 +562,10 @@ def run_suite(root=None):
     worker finishes first, so reports stay deterministic/diffable run to run."""
     sweep_stale_scratch()
     paths = discover_test_files(root)
+    if only is not None:
+        # LIGHT tier: keep discovery order, run only the selected display names.
+        wanted = set(only)
+        paths = [p for p in paths if display_name(p) in wanted]
     if not paths:
         return []
     results_by_path = {}
@@ -634,13 +703,15 @@ def decide(any_fail, override_is_active):
     return 1, False
 
 
-def build_override_entry(now=None, session_id=None, reason=None):
+def build_override_entry(now=None, session_id=None, reason=None, tier_note=None):
     now = now or datetime.now()
+    scope = tier_note or ("full test suite (`hooks/tests/`, `maintenance/`, "
+                          "`maintenance/_tests/`)")
     reason = (reason or "").strip() or "<none given in the token>"
     return (
         "## %s — Pre-push proceeded DESPITE a hook test failure (allow-hook-test-failure override used)\n\n"
         "- The `~/.claude` git pre-push hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`) ran the "
-        "full test suite (`hooks/tests/`, `maintenance/`, `maintenance/_tests/`) and found a real "
+        "%s and found a real "
         "failure, but session `%s` held a valid "
         "`allow-hook-test-failure` token (session-scoped, `scope: hook-test-failure`, < 60 min from "
         "mtime), so the push was ALLOWED rather than blocked.\n"
@@ -648,13 +719,13 @@ def build_override_entry(now=None, session_id=None, reason=None):
         "- Mechanical record only, per the rules.md override protocol (token created only after "
         "Gabriel's explicit in-turn confirmation; headless sessions never self-create one). Override "
         "used at %s local.\n"
-        % (now.strftime("%Y-%m-%d"), session_id or "<unknown>", reason,
+        % (now.strftime("%Y-%m-%d"), scope, session_id or "<unknown>", reason,
            now.strftime("%Y-%m-%d %H:%M:%S"))
     )
 
 
-def log_override_use(session_id=None, reason=None):
-    entry = build_override_entry(session_id=session_id, reason=reason)
+def log_override_use(session_id=None, reason=None, tier_note=None):
+    entry = build_override_entry(session_id=session_id, reason=reason, tier_note=tier_note)
     cmd = [sys.executable, APPEND_LOG_SCRIPT]
     if EVENT_LOG_OVERRIDE:
         cmd += ["--log", EVENT_LOG_OVERRIDE]
@@ -838,13 +909,194 @@ def multi_session_claim_hint(sessions, own_session_id):
     )
 
 
-def main():
+# --- tier selection (LIGHT vs FULL) -- see the module docstring "TWO TIERS" ---------
+ZERO_SHA = "0" * 40
+# A push that updates any of these runs FULL locally: there is no later merge gate.
+FULL_TIER_TARGET_REFS = ("refs/heads/main",)
+REMOTE_DEFAULT_BRANCH = "main"
+# Test seam only: git operations run against THIS checkout instead of CLAUDE_DIR.
+REPO_ROOT_OVERRIDE = None
+CODE_EXTS = (".py", ".ps1", ".sh", ".psm1")
+
+
+def _repo_root():
+    return REPO_ROOT_OVERRIDE or CLAUDE_DIR
+
+
+def _git(*args):
+    """stdout (stripped) of `git -C <repo> <args>`, or None on any failure. GIT_* leak
+    vars are stripped so -C alone decides the repo (inside a hook they point at the same
+    repo anyway; in a test they would point at the wrong one)."""
+    env = {k: v for k, v in os.environ.items() if k not in GIT_ENV_LEAK_VARS}
+    try:
+        proc = subprocess.run(["git", "-C", _repo_root()] + list(args),
+                              capture_output=True, text=True, env=env,
+                              encoding="utf-8", errors="replace", timeout=60)
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout.strip()
+
+
+def parse_ref_lines(text):
+    """git pre-push stdin: `<local ref> <local sha> <remote ref> <remote sha>` per line.
+    Malformed lines are returned as None entries so the caller can fail toward FULL."""
+    out = []
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        parts = line.split()
+        out.append(tuple(parts) if len(parts) == 4 else None)
+    return out
+
+
+def _commit_exists(sha):
+    return _git("cat-file", "-e", sha + "^{commit}") is not None
+
+
+def changed_paths_for_refs(remote, ref_lines):
+    """(changed_paths | None, full_reason | None). None paths = undeterminable -> FULL.
+    A full_reason means the push itself demands FULL (e.g. it updates main)."""
+    changed = set()
+    remote_main = "refs/remotes/%s/%s" % (remote, REMOTE_DEFAULT_BRANCH)
+    for entry in ref_lines:
+        if entry is None:
+            return None, None
+        local_ref, local_sha, remote_ref, remote_sha = entry
+        if remote_ref in FULL_TIER_TARGET_REFS:
+            return None, "push updates %s" % remote_ref
+        if local_sha == ZERO_SHA:
+            continue  # branch deletion: no content to test
+        base = None
+        if remote_sha != ZERO_SHA and _commit_exists(remote_sha):
+            base = _git("merge-base", remote_sha, local_sha)
+        if not base:
+            base = _git("merge-base", local_sha, remote_main)
+        if not base:
+            return None, None
+        # -z + core.quotePath=false: without them git C-quotes non-ASCII paths
+        # ("hooks/lib/caf\303\251.py" in quotes), which slips past the FULL-trigger
+        # prefix match (independent review, 2026-11-06).
+        diff = _git("-c", "core.quotePath=false", "diff", "--name-only", "--no-renames",
+                    "-z", base, local_sha)
+        if diff is None:
+            return None, None
+        changed.update(p for p in diff.split("\0") if p.strip())
+    return sorted(changed), None
+
+
+def _closure_files():
+    root = _repo_root()
+    out = []
+    for sub in ("hooks", "maintenance"):
+        d = os.path.join(root, sub)
+        try:
+            names = os.listdir(d)
+        except OSError:
+            continue
+        for n in names:
+            if n.endswith(CODE_EXTS) and not n.startswith(("test-", "test_")):
+                out.append("%s/%s" % (sub, n))
+    return sorted(out)
+
+
+def _read_repo_text(rel):
+    with open(os.path.join(_repo_root(), *rel.split("/")), "r",
+              encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def _full_tier(why):
+    return {"mode": "full", "selected": None, "reasons": {}, "why_full": why,
+            "changed": None}
+
+
+def positional_args(argv):
+    """git passes `<remote> <url>`; anything dash-prefixed is a flag, never a remote."""
+    return [a for a in argv[1:] if not a.startswith("-")]
+
+
+def choose_tier(argv, stdin_text):
+    """-> dict(mode, selected (display names, LIGHT only), reasons, why_full, changed).
+
+    FULL unless this is a real pre-push (remote name in argv[1]) WITH git's ref lines on
+    stdin (shim v2), none of which updates main, and whose diff the selector can map.
+    Any exception anywhere in tier selection degrades to FULL. See "TWO TIERS"."""
+    try:
+        return _choose_tier(argv, stdin_text)
+    except Exception as e:  # tier logic must cost time, never coverage or a crash
+        return _full_tier("tier selection raised %s: %s" % (type(e).__name__, e))
+
+
+def _choose_tier(argv, stdin_text):
+    full = _full_tier
+    if "--full" in argv[1:] or os.environ.get("ORA_PREPUSH_TIER", "").lower() == "full":
+        return full("full tier requested (--full / ORA_PREPUSH_TIER=full)")
+    positional = positional_args(argv)
+    if not positional:
+        return full("not invoked as a git pre-push hook (no remote argument)")
+    if selection is None:
+        return full("test-selection module failed to import")
+    remote = positional[0]
+    lines = parse_ref_lines(stdin_text)
+    if not lines:
+        # NO HEAD-based fallback (independent review, 2026-11-06): under shim v1 the gate
+        # cannot see the destination ref, so `git push origin HEAD:main` from a feature
+        # branch would have been scored LIGHT. Without git's ref lines the target is
+        # unknown, and an unknown target may be main.
+        return full("no ref lines on stdin (shim v1) -- push target unknown; install "
+                    "shim v2 (see this file's Install section) to enable the LIGHT tier")
+    changed, why = changed_paths_for_refs(remote, lines)
+    if why:
+        return full(why)
+    if changed is None:
+        return full("could not determine which files the push changes")
+    tests = [display_name(p) for p in discover_test_files()]
+    pick = selection.select_tests(changed, tests, _read_repo_text, _closure_files())
+    if pick.mode != selection.LIGHT:
+        return full(pick.why_full)
+    return {"mode": "light", "selected": pick.selected, "reasons": pick.reasons,
+            "why_full": None, "changed": changed}
+
+
+def format_tier_banner(tier, total):
+    if tier["mode"] == "full":
+        return "hook-tests-gate: FULL tier (%s)" % tier["why_full"]
+    lines = ["hook-tests-gate: LIGHT tier -- %d of %d test files, selected from %d changed "
+             "path(s). The FULL suite runs in CI (.github/workflows/full-test-suite.yml) "
+             "and must be green before merge."
+             % (len(tier["selected"]), total, len(tier["changed"] or []))]
+    for t in tier["selected"]:
+        lines.append("  + %s  <- %s" % (t, "; ".join(tier["reasons"].get(t, [])[:2])))
+    return "\n".join(lines)
+
+
+def _read_stdin_if_piped():
+    try:
+        if sys.stdin is None or sys.stdin.isatty():
+            return ""
+        return sys.stdin.read()
+    except Exception:
+        return ""
+
+
+def main(argv=None, stdin_text=None):
+    argv = sys.argv if argv is None else argv
     for _stream in (sys.stdout, sys.stderr):
         try:
             _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except Exception:
             pass
-    results = run_suite()
+    # Only a real pre-push (remote in argv) consumes stdin; a hand run never blocks on it.
+    has_remote = bool(positional_args(argv))
+    if stdin_text is None:
+        stdin_text = _read_stdin_if_piped() if has_remote else ""
+    tier = choose_tier(argv, stdin_text)
+    sys.stdout.write(format_tier_banner(tier, len(discover_test_files())) + "\n")
+    # FULL calls run_suite() exactly as before the tier split (existing test stubs and
+    # the weekly sweep depend on that call shape).
+    results = run_suite() if tier["mode"] == "full" else run_suite(only=tier["selected"])
     # Fail-closed floor (code review finding, 2026-07-25): discovery now sweeps three
     # independently-vanishable roots instead of one. glob.glob() on a missing directory
     # returns [] rather than raising, so a miscomputed CLAUDE_DIR or an accidentally
@@ -892,7 +1144,10 @@ def main():
     fields = override_token(session_id) if any_fail else None
     exit_code, log_override = decide(any_fail, fields is not None)
     if log_override:
-        log_override_use(session_id, (fields or {}).get("reason"))
+        log_override_use(session_id, (fields or {}).get("reason"),
+                         tier_note=None if tier["mode"] == "full" else
+                         "LIGHT-tier subset (%d diff-selected test files; full suite runs in CI)"
+                         % len(tier["selected"]))
         sys.stderr.write(
             "pre-push: hook test failure present but OVERRIDDEN - session %s holds a valid "
             "allow-hook-test-failure token. Push ALLOWED; the override was logged to "
