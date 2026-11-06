@@ -197,9 +197,10 @@ LIST_MAX_LINES = 8
 
 
 # A '.' after one of these is an abbreviation, not a sentence end ("Washington D.C. / Baltimore",
-# "incl. St. Charles"). Two-letter state codes are NOT here: "... LOUISVILLE KY." ends the list.
-_ABBREVIATIONS = {'st', 'mt', 'ft', 'inc', 'co', 'corp', 'ltd', 'llc', 'incl', 'approx', 'vs', 'no', 'jr',
-                  'sr', 'dr', 'ave', 'blvd', 'rd', 'e.g', 'i.e', 'd.c', 'u.s', 'n', 's', 'e', 'w', 'etc'}
+# "incl. St. Charles"). Two-letter state codes are NOT here: "... LOUISVILLE KY." ends the list. Nor are
+# words that commonly END a sentence ("etc.", "Cook Co.", "Inc.", "no."): reading past them let the next
+# sentence supply a cluster the list omitted (REFUTE 2026-11-06, N1) -- fail-open, so they stay out.
+_ABBREVIATIONS = {'st', 'mt', 'ft', 'incl', 'approx', 'vs', 'e.g', 'i.e', 'd.c', 'u.s', 'n', 's', 'e', 'w'}
 
 
 def _list_after(lines, index, col, parens=True):
