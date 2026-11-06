@@ -40,11 +40,14 @@ What presents target geography (an anchor):
   claims the whole set and is checked like one. Date and version digits ("2026-10-01", "v1.14") are not
   counts. Date-led history bullets ("- 2026-11-05: ...") are skipped like version-led ones.
 
-Scope: agents/*.md and projects/*/memory/*.md under --claude-root, non-recursive, so _archive/ folders
-are out. Skipped as append-only records of past wording: event_log*.md, open-items trackers, the deal
-decision and disposition ledgers, CHANGELOG*. MEMORY.md and INDEX_*.md ARE scanned (buybox-drift-probe
+Scope: agents/*.md, projects/*/memory/*.md and scheduled-tasks/*/SKILL.md under --claude-root,
+non-recursive; folders named _archive*/_staging* are pruned. scheduled-tasks joined 2026-11-06 (Gabriel)
+after review found ora-am-brief's inline C.5.5 box screen, the live 06:00 broker filter, restating the
+holdings states. Skipped as append-only records of past wording: event_log*.md, open-items trackers, the
+deal decision and disposition ledgers, CHANGELOG*. MEMORY.md and INDEX_*.md ARE scanned (buybox-drift-probe
 skips them): they are live context loaded into sessions, the widest-reach place a stale geography could
-sit. Inside a file, changelog sections and version- or date-led history lines are skipped.
+sit. Inside a file, changelog sections and version- or date-led history lines are skipped. A task spec here
+is the git-tracked copy; the scheduler reads the fleet store, so a clean probe run is not a live check.
 
 LIMITS, stated plainly: pattern checks, one line at a time. They catch the phrasings above and the
 variants pinned in test-target-geography-probe.py, not every wording. Known gaps:
@@ -82,10 +85,16 @@ CANON_NAME = "target-markets.json"
 CLAUDE_GLOBS = (
     os.path.join("agents", "*.md"),
     os.path.join("projects", "*", "memory", "*.md"),
+    # Added 2026-11-06 (Gabriel, REFUTE round 1 C9): ora-am-brief's inline C.5.5 box screen restated the
+    # holdings states as the box geography, and it is the live 06:00 broker filter.
+    os.path.join("scheduled-tasks", "*", "SKILL.md"),
 )
 SKIP_NAMES = {"event_log.md", "open-items-tracker.md", "open-items-tracker-history.md",
               "deal-decision-ledger.md", "disposition-ledger.md"}
 SKIP_NAME_RE = re.compile(r"^(?:event_log_\d{4}-\d{2}-\d{2}|CHANGELOG.*)\.md$", re.I)
+# Retired and in-progress folders hold no live doctrine (same rule as buybox-drift-probe.py).
+_PRUNE_EXACT = ("_archive", "_staging")
+_PRUNE_PREFIX = ("_archive_", "_staging_")
 
 # --------------------------------------------------------------------------- ported verbatim
 # From ora-skills tools/doctrine_consistency.py (target-geography check), 2026-11-05.
@@ -316,11 +325,16 @@ def scan_text(text, clusters):
     return out
 
 
+def _is_pruned(path, root):
+    return any(part in _PRUNE_EXACT or part.startswith(_PRUNE_PREFIX)
+               for part in os.path.relpath(path, root).split(os.sep)[:-1])
+
+
 def iter_targets(claude_root):
     for pat in CLAUDE_GLOBS:
         for path in sorted(glob.glob(os.path.join(claude_root, pat))):
             name = os.path.basename(path)
-            if name in SKIP_NAMES or SKIP_NAME_RE.match(name):
+            if name in SKIP_NAMES or SKIP_NAME_RE.match(name) or _is_pruned(path, claude_root):
                 continue
             yield os.path.normpath(path)
 
@@ -382,7 +396,7 @@ def main(argv=None):
     targets = list(iter_targets(claude_root))
     # An existing but empty/wrong root would scan nothing and read as clean.
     if not targets:
-        print("[ACTION] target-geography-probe: no agents/ or memory files under %s -- wrong root?"
+        print("[ACTION] target-geography-probe: no agents/, memory or scheduled-task files under %s -- wrong root?"
               % claude_root, file=sys.stderr)
         sys.exit(2)
     findings = []

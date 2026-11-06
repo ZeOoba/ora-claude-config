@@ -201,6 +201,23 @@ FIXED_TRIAGE_L17 = (
     "STAGE 0 Gate 3; an entry cluster has no satellites until ORA's first close there); if you cannot tell "
     "whether it is that close, WATCH. Anything else fails geography, even in a state where ORA already holds "
     "property.")
+# scheduled-tasks/ora-am-brief/SKILL.md:270, origin/main 2026-11-06: the 06:00 broker-mail box screen (C.5.5).
+AM_BRIEF_L270 = (
+    "- ORA box: Class B/C shallow-bay industrial/flex · $1-10M sourcing filter (the screen floor is $500K, "
+    "acquisition-underwriting Gate 2; two floors, Gabriel in-turn 2026-11-03: a $500K–$1M deal is PASS with the "
+    "reason \"below $1M sourcing filter (screen floor $500K)\" for Gabriel's hand override) (portfolio sold "
+    "together: up to $15M total, Amendment H; >5 buildings, >$15M, or a building failing the type or sub-50,000 "
+    "SF rule (the per-building gates visible in a broker email; SCREEN tests the rest per acquisition-underwriting "
+    "Amendment H (i)) = WATCH with a \"PORTFOLIO-FLAG: <cause>\" note naming the building and rule, never PASS on "
+    "that alone) · sub-50,000 SF/building · OH/MD/IN/WI/MO/KS/TN. Replacement-cost reference ~$85-$120/SF.")
+FIXED_AM_BRIEF_L270 = AM_BRIEF_L270.replace(
+    "· OH/MD/IN/WI/MO/KS/TN.",
+    "· geography = ORA's eleven target-market clusters (ora-skills target-markets.json is authoritative): "
+    "established Columbus and Cincinnati OH, Kansas City MO/KS, Indianapolis IN, Maryland (Baltimore/DC), "
+    "Madison WI; entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, Louisville KY, Chicago–Greater Cook "
+    "County IL; a town within 30 min of an ESTABLISHED cluster counts as a satellite (acquisition-underwriting "
+    "STAGE 0 Gate 3; an entry cluster has none before ORA's first close there), WATCH if you cannot tell; "
+    "anything else fails geo, even in a state where ORA already holds property.")
 FIXED_DD_PACKAGE_SWEEP_L8 = (
     "You are the due-diligence document reader for Oxford Realty Advisors (ORA), a family-office industrial "
     "buyer working sub-$10M (2–5-building portfolios up to $15M, acquisition-underwriting Amendment H), "
@@ -238,6 +255,13 @@ class DefectLineTests(unittest.TestCase):
 
     def test_fixed_dd_package_sweep_line_is_clean(self):
         self.assertEqual(self.check(FIXED_DD_PACKAGE_SWEEP_L8), [])
+
+    def test_am_brief_box_line_is_caught(self):
+        self.assert_holdings_states_flagged(AM_BRIEF_L270)
+
+    def test_fixed_am_brief_box_line_is_clean(self):
+        self.assertNotEqual(FIXED_AM_BRIEF_L270, AM_BRIEF_L270)
+        self.assertEqual(self.check(FIXED_AM_BRIEF_L270), [])
 
 
 class AnchorTests(unittest.TestCase):
@@ -502,9 +526,10 @@ class EndToEndTests(unittest.TestCase):
         self.assert_rc(r, 0)
         self.assertEqual(r.stdout.strip(), '')
 
-    def test_agent_and_memory_drift_exit_1_with_path_and_line(self):
+    def test_in_scope_drift_exits_1_with_path_and_line(self):
         for rel in (os.path.join('agents', 'deal-flow-triage.md'), os.path.join(MEM, 'firm.md'),
-                    os.path.join(MEM, 'MEMORY.md'), os.path.join(MEM, 'INDEX_markets.md')):
+                    os.path.join(MEM, 'MEMORY.md'), os.path.join(MEM, 'INDEX_markets.md'),
+                    os.path.join('scheduled-tasks', 'ora-am-brief', 'SKILL.md')):
             p = self.t.write(rel, '# Heading\n' + DRIFT)
             r = self.t.run()
             self.assert_rc(r, 1)
@@ -518,10 +543,16 @@ class EndToEndTests(unittest.TestCase):
             self.t.write(os.path.join(MEM, name), DRIFT)
         self.assert_rc(self.t.run(), 0)
 
-    def test_scope_is_agents_and_memory_only(self):
-        for rel in ('CLAUDE.md', os.path.join('scheduled-tasks', 'ora-am-brief', 'SKILL.md'),
-                    os.path.join('skills', 'some-skill', 'SKILL.md'), os.path.join('agents', '_archive', 'old.md'),
-                    os.path.join('agents', 'nested', 'deeper.md'), os.path.join(MEM, '_archive', 'old.md')):
+    def test_scope_is_agents_memory_and_task_specs_only(self):
+        st = 'scheduled-tasks'
+        for rel in ('CLAUDE.md', os.path.join('skills', 'some-skill', 'SKILL.md'),
+                    os.path.join('agents', '_archive', 'old.md'), os.path.join('agents', 'nested', 'deeper.md'),
+                    os.path.join(MEM, '_archive', 'old.md'),
+                    os.path.join(st, '_archive_2026-08-09_retired', 'SKILL.md'),
+                    os.path.join(st, '_archive_2026-08-09_retired', 'old-task', 'SKILL.md'),
+                    os.path.join(st, '_staging', 'SKILL.md'),
+                    os.path.join(st, 'ora-am-brief', 'notes.md'),
+                    os.path.join(st, 'ora-am-brief', 'SKILL.md.bak-2026-11-06-geography')):
             self.t.write(rel, DRIFT)
         self.assert_rc(self.t.run(), 0)
 
