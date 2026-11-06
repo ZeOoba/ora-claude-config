@@ -61,6 +61,18 @@ variants pinned in test-target-geography-probe.py, not every wording. Known gaps
   * old wording quoted in a non-history memory note reads as live: reword it or date-lead the bullet.
 A new phrasing that drifts needs a new anchor and a test.
 
+COUNT RULE (added 2026-11-06; count_claims()). ora-deal-sourcing-scan v2.14 ran every week off "For each of
+the ten clusters, web-search ..." and a three-line "TEN clusters: Columbus OH, ... LOUISVILLE KY." fallback
+list while the canon held eleven; neither line names five states, so the rule above passed it and Chicago-
+Greater Cook County IL was never scanned. A whole-set count -- "the / all / each of the / ORA's / our / its
+N clusters", "N target|canonical|acquisition markets", "N clusters:" or "N clusters × ..." -- must equal the
+number of clusters in the canon, and a list a "N clusters:" claim introduces (read across up to
+LIST_MAX_LINES lines to its sentence end or a blank line) must name every cluster once it names four.
+Not claims: "five of ten", "the other nine", "six established clusters", "the 10th cluster", "nine market
+agents". Lines in a paragraph that opens with a version or date lead are history for this rule.
+Known gaps: a count and its noun split across a line break ("outside the ten\\n clusters"); bare "N markets"
+(left out because the live tree used it only for non-target sets: "the 55 markets", "each of the 5 markets").
+
 Exit 0 = clean; 1 = drift found; 2 = probe error (missing root or canon, a canon it cannot trust, an
 unreadable target, an unexpected, malformed or repeated argument, or a root with no agents/memory files).
 
@@ -90,8 +102,10 @@ CLAUDE_GLOBS = (
     # holdings states as the box geography, and it is the live 06:00 broker filter.
     os.path.join("scheduled-tasks", "*", "SKILL.md"),
 )
+# ops_decision_log.md joined 2026-11-06: a dated ratification log ("### 2026-08-16 — ...: all 10 canonical
+# clusters" is what was ratified that day, not a live count), the operational twin of deal-decision-ledger.md.
 SKIP_NAMES = {"event_log.md", "open-items-tracker.md", "open-items-tracker-history.md",
-              "deal-decision-ledger.md", "disposition-ledger.md"}
+              "deal-decision-ledger.md", "disposition-ledger.md", "ops_decision_log.md"}
 SKIP_NAME_RE = re.compile(r"^(?:event_log_\d{4}-\d{2}-\d{2}|CHANGELOG.*)\.md$", re.I)
 # Retired and in-progress folders hold no live doctrine (same rule as buybox-drift-probe.py).
 _PRUNE_EXACT = ("_archive", "_staging")
@@ -159,6 +173,74 @@ _LABEL = re.compile(
 _SUBSET_WORD = re.compile(
     r"\b(?:of|established|entry(?:[- ]phase)?|beachhead|priority|core|tier|satellites?|new|other|remaining)\b",
     re.I)
+
+# --------------------------------------------------------------------------- added 2026-11-06
+# COUNT CLAIMS. ora-deal-sourcing-scan v2.14's STEP 1 read "For each of the ten clusters, web-search ..." and
+# its fallback block "TEN clusters: Columbus OH, ... LOUISVILLE KY." spanned three lines, while the canon held
+# eleven. Neither line names five states, so the geography rule passed the file and Chicago-Greater Cook
+# County IL went unscanned. A count is a whole-set claim when it is "<N> [target|canonical|acquisition]
+# clusters|markets|metros" AND it is marked as the whole set: a determiner just before it ("the", "all",
+# "each of the", "ORA's", "our", "its"), a colon right after ("TEN clusters:"), or a matrix sign right after
+# ("ten markets × F1"). "five OF ten target clusters", "the other nine clusters", "six established clusters",
+# "the 10th cluster" and "nine market agents" are not claims. A bare "markets"/"metros" (no target/canonical/
+# acquisition word) is NOT counted: on the 2026-11-06 live tree it read "the 55 markets" (oxford-edge), "each of
+# the 5 markets" (ora-entry-market-scan's entry subset) and two dated facts as drift, and caught nothing real.
+# Known gap, so: "all ten markets" and "ten markets × F1" pass; write "clusters" or "target markets".
+_COUNT_CLAIM = re.compile(
+    r"(?<![\d/.\-])\b(?P<n>\d{1,2}|%s)\b(?![\d/\-])\s+(?P<mod>(?:target|canonical|acquisition)[- ])?"
+    r"(?P<noun>clusters|markets|metros)\b(?P<tail>\s*:|\s+[×x]\s)?" % '|'.join(NUMBER_WORDS), re.I)
+_WHOLE_SET_LEAD = re.compile(
+    r"(?:\b(?:the|all|each\s+of\s+the|every\s+one\s+of\s+the|our|its)|\bORA['’]s)\s+$", re.I)
+# A list introduced by a count claim may run this many physical lines past the claim (the scan's ran three).
+LIST_MAX_LINES = 8
+
+
+def _list_after(lines, index, col):
+    """Text of the list that starts at lines[index][col:], continued across following lines until a sentence
+    end ('.' before whitespace or end of line, outside parentheses), a blank line or LIST_MAX_LINES."""
+    parts, depth = [], 0
+    for i in range(index, min(len(lines), index + LIST_MAX_LINES)):
+        seg = lines[i][col:] if i == index else lines[i]
+        if i > index and not seg.strip():
+            break
+        for j, ch in enumerate(seg):
+            if ch == '(':
+                depth += 1
+            elif ch == ')':
+                depth = max(0, depth - 1)
+            elif ch == '.' and depth == 0 and (j + 1 == len(seg) or seg[j + 1].isspace()):
+                parts.append(seg[:j])
+                return ' '.join(parts)
+        parts.append(seg)
+    return ' '.join(parts)
+
+
+def count_claims(lines, index, clusters):
+    """[message] for every whole-set cluster count on lines[index] that disagrees with the canon, and for
+    every list such a claim introduces ("N clusters: ...", read across lines) that omits a cluster."""
+    line = lines[index]
+    problems = []
+    for m in _COUNT_CLAIM.finditer(line):
+        n = _as_int(m.group('n'))
+        lead = _WHOLE_SET_LEAD.search(line[:m.start()])
+        tail = m.group('tail')
+        if not (lead or tail):
+            continue
+        if not m.group('mod') and m.group('noun').lower() != 'clusters':
+            continue
+        if n != clusters.count:
+            problems.append('states %d clusters as the whole target set; target-markets.json has %d'
+                            % (n, clusters.count))
+        if tail and tail.strip() == ':':
+            listed = _list_after(lines, index, m.end())
+            named = [name for name, tokens in clusters.names
+                     if any(re.search(r'\b%s\b' % re.escape(t), listed, re.I) for t in tokens)]
+            if 4 <= len(named) < len(clusters.names):
+                absent = [name for name, _ in clusters.names if name not in named]
+                problems.append('cluster list after "%s" names %d of %d clusters; missing %s'
+                                % (m.group(0).strip(), len(named), len(clusters.names), ', '.join(absent)))
+    return problems
+
 
 Clusters = namedtuple('Clusters', 'count states established allowed_states names')
 
@@ -321,9 +403,33 @@ def load_clusters(skills_root):
 def scan_text(text, clusters):
     """[(lineno, message, line), ...], one per problem, for every drifting target-geography line."""
     out = []
+    lines = text.splitlines()
+    history = history_paragraph_lines(lines)
     for number, line in live_lines(text):
         for message, _phrase_key in target_geography(line, clusters):
             out.append((number, message, line))
+        if number in history:
+            continue
+        for message in count_claims(lines, number - 1, clusters):
+            out.append((number, message, line))
+    return out
+
+
+def history_paragraph_lines(lines):
+    """Line numbers (1-based) of every line in a paragraph whose first line is version- or date-led
+    ("v2.15 — ... (2026-11-06, ...)" followed by wrapped prose, as task specs write their changelogs). Used by
+    the count rule only: a changelog quoting the old count ("... was disqualified as 'outside the ten
+    clusters'") is history, and wrapping put the quote on a continuation line live_lines() keeps. A paragraph
+    ends at a blank line or a heading."""
+    out, in_history = set(), False
+    for number, line in enumerate(lines, 1):
+        if not line.strip() or _HEADING.match(line):
+            in_history = False
+            continue
+        if _VERSION_LINE.match(line) or _DATE_LEAD.match(line):
+            in_history = True
+        if in_history:
+            out.add(number)
     return out
 
 
