@@ -50,16 +50,38 @@ jobs:
         with:
           python-version: "3.13"
 
-      # Test fixtures create throwaway git repos and commit into them.
+      # Third-party modules the suite imports (first CI run, 2026-11-06: three files died
+      # on ModuleNotFoundError). Pinned to the versions on the dev box.
+      - name: Test dependencies
+        shell: bash
+        run: python -m pip install --disable-pip-version-check pytest==9.1.1 openpyxl==3.1.5 PyYAML==6.0.3
+
+      # Reproduce the dev-box layout the suite is written against: the repo IS
+      # %USERPROFILE%\.claude (tests and probes resolve ~/.claude, and several guards key
+      # on C:/Users/Owner), and local time is America/New_York (DST-boundary tests). The
+      # first CI run failed ~14 files on exactly these assumptions, none on a regression.
+      - name: Emulate the ~/.claude dev-box layout
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\Users\Owner | Out-Null
+          New-Item -ItemType Junction -Path C:\Users\Owner\.claude -Target $env:GITHUB_WORKSPACE | Out-Null
+          "USERPROFILE=C:\Users\Owner" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          "HOME=C:\Users\Owner" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          tzutil /s "Eastern Standard Time"
+
+      # Test fixtures create throwaway git repos and commit into them. Runs after the
+      # HOME switch so the identity lands in the emulated home's .gitconfig.
       - name: Git identity for fixture repos
         shell: bash
         run: |
           git config --global user.name "ora-ci"
           git config --global user.email "ora-ci@users.noreply.github.com"
           git config --global init.defaultBranch main
+          git config --global --add safe.directory '*'
 
       - name: Run the FULL tracked test suite
         shell: bash
+        working-directory: C:\Users\Owner\.claude
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
