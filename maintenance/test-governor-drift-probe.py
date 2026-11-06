@@ -121,6 +121,22 @@ def _seed_fixture_home(home):
            "---\nname: ora-fixture-task\n---\n\n" + _FIXTURE_CANON_LINE)
     os.makedirs(os.path.join(home, ".claude", "hooks"), exist_ok=True)
     os.makedirs(os.path.join(home, ".claude", "maintenance"), exist_ok=True)
+    _commit_fixture_skills(home)
+
+
+def _commit_fixture_skills(home, msg="fixture"):
+    """The probe reads ~/ora-skills from COMMITTED refs (refs/remotes/origin/main +
+    refs/heads/main), never its working tree -- so fixture ora-skills content only counts once
+    it is committed on main. Initialises the repo on first use; commits everything (adds,
+    edits, deletions) and points origin/main at the result."""
+    repo = os.path.join(home, "ora-skills")
+    os.makedirs(repo, exist_ok=True)
+    if not os.path.isdir(os.path.join(repo, ".git")):
+        _git(repo, "init", "-q", "-b", "main")
+        _write(os.path.join(repo, ".gitignore"), ".claude/worktrees/\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "--allow-empty", "-m", msg)
+    _git(repo, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
 
 
 @contextlib.contextmanager
@@ -1630,7 +1646,8 @@ def test_event_log_excluded_e2e():
 
 def test_fixture_roots_drift_detected_e2e():
     """Detection is intact INSIDE the fixture: a drift planted in each in-scope fixture root
-    (CLAUDE.md, memory, the ora-skills checkout, the CC fleet) fails the probe and is cited by
+    (CLAUDE.md, memory, the ora-skills checkout -- committed on main, which is what the probe
+    reads there -- the CC fleet) fails the probe and is cited by
     a path under the fixture home -- proving run_probe() really points the probe's scan roots
     at the fixture, and that a clean fixture run is not vacuous."""
     m = _load_probe_module()
@@ -1651,6 +1668,9 @@ def test_fixture_roots_drift_detected_e2e():
                 with open(path, encoding="utf-8") as fh:
                     before = fh.read()
             _write(path, (before or "") + _FLAG_LTV + "\n")
+            in_skills = os.path.join(home, "ora-skills") + os.sep in path
+            if in_skills:
+                _commit_fixture_skills(home, "plant drift")
             try:
                 r = run_probe(home=home)
                 rel = os.path.relpath(path, home)
@@ -1661,12 +1681,16 @@ def test_fixture_roots_drift_detected_e2e():
                 assert cited and all(ln.startswith(home) for ln in cited), (
                     "every finding must cite a path under the fixture home %s; got\n%s"
                     % (home, r.stdout))
-                assert os.path.basename(path) in r.stdout, r.stdout
+                # full relative path, not basename: three roots plant into a SKILL.md, so a
+                # basename match could be satisfied by another root's leftover drift
+                assert rel.replace(os.sep, "/") in r.stdout.replace("\\", "/"), r.stdout
             finally:
                 if before is None:
                     os.remove(path)
                 else:
                     _write(path, before)
+                if in_skills:
+                    _commit_fixture_skills(home, "restore")
     print("  PASS test_fixture_roots_drift_detected_e2e")
 
 
@@ -1690,8 +1714,9 @@ _HERMETIC_E2E_TESTS = (
 def test_e2e_outcome_independent_of_ambient_home_e2e():
     """ISOLATION REGRESSION GUARD (2026-11-06). Builds a POISONED home whose ora-skills checkout
     holds a sibling session worktree with real drift (LTV 65%, DSCR 1.75 -- the exact class that
-    blocked every push), proves that drift is live (the probe run against the poisoned home
-    exits 1 citing the worktree), then re-runs every end-to-end and live-gated test of this file
+    blocked every push) -- proven INVISIBLE to the probe since it reads ora-skills from committed
+    main only -- plus the same drift committed on the poisoned checkout's main, proven live (the
+    probe run against the poisoned home exits 1 citing it), then re-runs every end-to-end and live-gated test of this file
     in a child process whose OWN home is the poisoned one. They must all still pass (or SKIP,
     for the opt-in live tests): the outcome depends only on fixtures. Any regression back to
     live reads -- run_probe() inheriting the ambient home, a fixture path built from the real
@@ -1700,13 +1725,24 @@ def test_e2e_outcome_independent_of_ambient_home_e2e():
     _assert_flaggable(m, _FLAG_LTV)
     poisoned = tempfile.mkdtemp(prefix="gdp-poisoned-home-")
     try:
-        _write(os.path.join(poisoned, *_SIBLING_WORKTREE_REL),
-               "---\nname: portfolio-growth\n---\n\n" + _FLAG_LTV + "\n"
-               "Acquisition governor: DSCR floor 1.75x.\n")
+        poison = "---\nname: portfolio-growth\n---\n\n" + _FLAG_LTV + "\nAcquisition governor: DSCR floor 1.75x.\n"
+        # The real blocker's shape: drift in a sibling session worktree. Since the probe reads
+        # ora-skills from committed main only, that copy alone is INVISIBLE (asserted below) --
+        # so the poison that a leaked ambient-home read would actually see is the same drift
+        # COMMITTED on the poisoned checkout's main.
+        _write(os.path.join(poisoned, *_SIBLING_WORKTREE_REL), poison)
+        _commit_fixture_skills(poisoned, "init")
         r = run_probe(home=poisoned)
-        assert r.returncode == 1 and "worktrees" in r.stdout, (
-            "control: the planted sibling-worktree drift must be visible to a probe that scans "
-            "the poisoned home; got %d\n%s" % (r.returncode, r.stdout))
+        assert r.returncode == 0 and "worktrees" not in r.stdout, (
+            "uncommitted sibling-worktree drift must be invisible to the probe; got %d\n%s"
+            % (r.returncode, r.stdout))
+        _write(os.path.join(poisoned, "ora-skills", "portfolio-growth", "SKILL.md"), poison)
+        _commit_fixture_skills(poisoned, "poison main")
+        r = run_probe(home=poisoned)
+        assert (r.returncode == 1 and "portfolio-growth" in r.stdout
+                and "SKILL.md@refs/" in r.stdout and "worktrees" not in r.stdout), (
+            "control: drift committed on the poisoned ora-skills main must be visible to a "
+            "probe that scans the poisoned home; got %d\n%s" % (r.returncode, r.stdout))
         code = ("import importlib.util, sys\n"
                 "spec = importlib.util.spec_from_file_location('gdp_tests', sys.argv[1])\n"
                 "t = importlib.util.module_from_spec(spec)\n"
@@ -1720,8 +1756,8 @@ def test_e2e_outcome_independent_of_ambient_home_e2e():
             [sys.executable, "-c", code, os.path.abspath(__file__)] + list(_HERMETIC_E2E_TESTS),
             capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
         assert child.returncode == 0 and "CHILD-OK" in child.stdout, (
-            "e2e tests must not depend on the ambient home (a sibling worktree's drift leaked "
-            "into the outcome); rc=%d\nSTDOUT:\n%s\nSTDERR:\n%s"
+            "e2e tests must not depend on the ambient home (the poisoned home's committed "
+            "ora-skills drift leaked into the outcome); rc=%d\nSTDOUT:\n%s\nSTDERR:\n%s"
             % (child.returncode, child.stdout, child.stderr[-3000:]))
     finally:
         shutil.rmtree(poisoned, ignore_errors=True)
@@ -3327,7 +3363,7 @@ def _git(repo, *args):
     return r.stdout.strip()
 
 
-def _write(repo, rel, text):
+def _write_rel(repo, rel, text):
     p = os.path.join(repo, *rel.split("/"))
     os.makedirs(os.path.dirname(p), exist_ok=True)
     with open(p, "w", encoding="utf-8", newline="") as fh:
@@ -3339,8 +3375,8 @@ def _make_skills_repo(d):
     repo = os.path.join(d, "ora-skills")
     os.makedirs(repo)
     _git(repo, "init", "-q", "-b", "main")
-    _write(repo, ".gitignore", ".claude/worktrees/\n")
-    _write(repo, "debt-management/SKILL.md", _CLEAN_LINE)
+    _write_rel(repo, ".gitignore", ".claude/worktrees/\n")
+    _write_rel(repo, "debt-management/SKILL.md", _CLEAN_LINE)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -3399,10 +3435,10 @@ def test_uncommitted_worktree_drift_does_not_fail_probe_e2e():
         repo = _make_skills_repo(d)
         wt = os.path.join(repo, ".claude", "worktrees", "wt1")
         _git(repo, "worktree", "add", "-q", "-b", "claude/wt1", wt)
-        _write(wt, "debt-management/SKILL.md", _DRIFT_LINE)            # uncommitted, worktree
-        _write(wt, "portfolio-growth/SKILL.md", _DRIFT_LINE)           # untracked, worktree
-        _write(repo, "debt-management/SKILL.md", _DRIFT_LINE)          # dirty tracked, primary
-        _write(repo, "eval-harness/README.md", "DSCR governor floor 1.75x\n")  # untracked, primary
+        _write_rel(wt, "debt-management/SKILL.md", _DRIFT_LINE)            # uncommitted, worktree
+        _write_rel(wt, "portfolio-growth/SKILL.md", _DRIFT_LINE)           # untracked, worktree
+        _write_rel(repo, "debt-management/SKILL.md", _DRIFT_LINE)          # dirty tracked, primary
+        _write_rel(repo, "eval-harness/README.md", "DSCR governor floor 1.75x\n")  # untracked, primary
         code, out, err = _run_main_over(m, _skills_target(m, repo))
         assert code == 0, "uncommitted drift must not fail the probe (got %r)\n%s\n%s" % (code, out, err)
         # committed on the worktree's OWN branch only -> still not origin/main / HEAD
@@ -3428,7 +3464,7 @@ def test_committed_drift_on_main_still_fails_probe_e2e():
     m = _load_probe_module()
     with tempfile.TemporaryDirectory() as d:
         repo = _make_skills_repo(d)
-        _write(repo, "debt-management/SKILL.md", _CLEAN_LINE + _DRIFT_LINE)
+        _write_rel(repo, "debt-management/SKILL.md", _CLEAN_LINE + _DRIFT_LINE)
         _git(repo, "commit", "-q", "-am", "drift")
         # local main has the drift; origin/main does not yet (local commit, unpushed)
         code, out, err = _run_main_over(m, _skills_target(m, repo))
@@ -3468,13 +3504,13 @@ def test_committed_ref_scan_keeps_path_exemptions_e2e():
     with tempfile.TemporaryDirectory() as d:
         repo = _make_skills_repo(d)
         for rel in exempt:
-            _write(repo, rel, _DRIFT_LINE)
+            _write_rel(repo, rel, _DRIFT_LINE)
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "exempt classes")
         _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
         code, out, err = _run_main_over(m, _skills_target(m, repo))
         assert code == 0, "exempt path classes must stay exempt (got %r)\n%s\n%s" % (code, out, err)
-        _write(repo, "s/SKILL.md", "line one\r\n" + _DRIFT_LINE.replace("\n", "\r\n"))
+        _write_rel(repo, "s/SKILL.md", "line one\r\n" + _DRIFT_LINE.replace("\n", "\r\n"))
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "real drift")
         code, out, err = _run_main_over(m, _skills_target(m, repo))
@@ -3482,7 +3518,7 @@ def test_committed_ref_scan_keeps_path_exemptions_e2e():
         norm = out.replace("\\", "/")
         assert "/s/SKILL.md@refs/heads/main:2 " in norm, "CRLF line numbering / path:\n%s" % out
         # lone-CR line endings (REFUTE round 1 C6 gap): must be split like open(path, "r") does
-        _write(repo, "t/SKILL.md", "line one\r" + _DRIFT_LINE.replace("\n", "\r"))
+        _write_rel(repo, "t/SKILL.md", "line one\r" + _DRIFT_LINE.replace("\n", "\r"))
         _git(repo, "add", "-A")
         _git(repo, "commit", "-q", "-m", "lone cr")
         code, out, err = _run_main_over(m, _skills_target(m, repo))
@@ -3502,7 +3538,7 @@ def test_committed_ref_scan_fails_loud_e2e():
     with tempfile.TemporaryDirectory() as d:
         notrepo = os.path.join(d, "ora-skills")
         os.makedirs(notrepo)
-        _write(notrepo, "SKILL.md", _DRIFT_LINE)
+        _write_rel(notrepo, "SKILL.md", _DRIFT_LINE)
         code, out, err = _run_main_over(m, _skills_target(m, notrepo))
         assert code == 2, "non-repo must be a probe error (got %r)\n%s\n%s" % (code, out, err)
     with tempfile.TemporaryDirectory() as d:
@@ -3515,22 +3551,22 @@ def test_committed_ref_scan_fails_loud_e2e():
         parent = os.path.join(d, "parent")
         os.makedirs(parent)
         _git(parent, "init", "-q", "-b", "main")
-        _write(parent, "other.md", _CLEAN_LINE)
+        _write_rel(parent, "other.md", _CLEAN_LINE)
         _git(parent, "add", "-A")
         _git(parent, "commit", "-q", "-m", "p")
         nested = os.path.join(parent, "ora-skills")
-        _write(nested, "SKILL.md", _DRIFT_LINE)
+        _write_rel(nested, "SKILL.md", _DRIFT_LINE)
         code, out, err = _run_main_over(m, _skills_target(m, nested))
         assert code == 2, "nested non-repo must be a probe error, not the parent tree (got %r)\n%s\n%s" % (code, out, err)
     with tempfile.TemporaryDirectory() as d:
         drift = _make_skills_repo(d)
-        _write(drift, "s/SKILL.md", _DRIFT_LINE)
+        _write_rel(drift, "s/SKILL.md", _DRIFT_LINE)
         _git(drift, "add", "-A")
         _git(drift, "commit", "-q", "-m", "drift")
         decoy = os.path.join(d, "decoy")
         os.makedirs(decoy)
         _git(decoy, "init", "-q", "-b", "main")
-        _write(decoy, "x.md", _CLEAN_LINE)
+        _write_rel(decoy, "x.md", _CLEAN_LINE)
         _git(decoy, "add", "-A")
         _git(decoy, "commit", "-q", "-m", "decoy")
         _git(decoy, "update-ref", "refs/remotes/origin/main", "HEAD")
