@@ -3187,9 +3187,260 @@ def test_interim_checklist_refute_round2_unit():
     print("  PASS test_interim_checklist_refute_round2_unit")
 
 
+# --------------------------------------------------------------------------------------------
+# 2026-11-06: ora-skills is read from COMMITTED refs, never from working trees.
+# On 2026-11-05/06 an uncommitted draft line in one session's ora-skills worktree
+# (.claude/worktrees/*, gitignored but still os.walk'd) and a '1.75'-inside-'11.75' draft in
+# another worktree each failed this probe inside the ~/.claude pre-push hook-tests gate and
+# blocked every ~/.claude push fleet-wide. The probe now scans origin/main + local main
+# (refs/heads/main -- NOT HEAD, see the probe's ORA_SKILLS_SCAN_REFS comment) via git
+# ls-tree / cat-file. What it FLAGS is unchanged; only WHERE it reads.
+# --------------------------------------------------------------------------------------------
+
+_DRIFT_LINE = "DSCR governor floor 1.60x\n"
+_CLEAN_LINE = "Governor: DSCR >= 1.25x, LTV <= 40% aggregate.\n"
+
+
+def _git(repo, *args):
+    import tempfile
+    hooks = os.path.join(tempfile.gettempdir(), "gdp-nohooks")
+    os.makedirs(hooks, exist_ok=True)
+    cmd = ["git", "-C", repo, "-c", "user.name=gdp-test", "-c", "user.email=gdp@test.invalid",
+           "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + hooks,
+           "-c", "core.autocrlf=false"] + list(args)
+    r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    assert r.returncode == 0, "git %s failed: %s %s" % (args, r.stdout, r.stderr)
+    return r.stdout.strip()
+
+
+def _write(repo, rel, text):
+    p = os.path.join(repo, *rel.split("/"))
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8", newline="") as fh:
+        fh.write(text)
+
+
+def _make_skills_repo(d):
+    """Temp repo shaped like ~/ora-skills: clean SKILL.md committed on main, origin/main set."""
+    repo = os.path.join(d, "ora-skills")
+    os.makedirs(repo)
+    _git(repo, "init", "-q", "-b", "main")
+    _write(repo, ".gitignore", ".claude/worktrees/\n")
+    _write(repo, "debt-management/SKILL.md", _CLEAN_LINE)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return repo
+
+
+def _run_main_over(m, targets):
+    import contextlib, io
+    old = (m.build_targets, sys.argv)
+    m.build_targets = lambda: targets
+    sys.argv = ["governor-drift-probe.py"]
+    out, err = io.StringIO(), io.StringIO()
+    code = None
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                m.main()
+            except SystemExit as e:
+                code = e.code
+    finally:
+        m.build_targets, sys.argv = old
+    return code, out.getvalue(), err.getvalue()
+
+
+def _skills_target(m, repo):
+    return [(repo, m.GitRefTree((".md", ".json")))]
+
+
+def test_ora_skills_target_reads_committed_refs_unit():
+    """build_targets() must route ~/ora-skills through the committed-ref reader (origin/main +
+    refs/heads/main), not a working-tree os.walk -- and never HEAD (a session's branch)."""
+    m = _load_probe_module()
+    assert tuple(m.ORA_SKILLS_SCAN_REFS) == ("refs/remotes/origin/main", "refs/heads/main"), m.ORA_SKILLS_SCAN_REFS
+    if os.path.isdir(m.ORA_SKILLS_REPO):
+        hits = [(r, e) for r, e in m.build_targets()
+                if os.path.normcase(os.path.normpath(r))
+                == os.path.normcase(os.path.normpath(m.ORA_SKILLS_REPO))]
+        assert len(hits) == 1, "ora-skills must be targeted exactly once: %r" % hits
+        spec = hits[0][1]
+        assert isinstance(spec, m.GitRefTree), "ora-skills must be a GitRefTree target: %r" % (spec,)
+        assert tuple(spec.refs) == ("refs/remotes/origin/main", "refs/heads/main")
+        assert ".md" in spec.exts and ".json" in spec.exts
+    print("  PASS test_ora_skills_target_reads_committed_refs_unit")
+
+
+def test_uncommitted_worktree_drift_does_not_fail_probe_e2e():
+    """(a) An uncommitted drift line in a linked worktree under .claude/worktrees/, an untracked
+    drift file in the primary checkout, and an uncommitted edit to a tracked file in the primary
+    checkout must NOT fail the probe. Also: drift COMMITTED only on a session's worktree branch,
+    or WIP-committed on a side branch checked out IN THE PRIMARY checkout (HEAD != main -- REFUTE
+    round 1 case A), must not fail it either."""
+    import tempfile
+    m = _load_probe_module()
+    assert m.scan_line(_DRIFT_LINE), "payload must itself flag, or this test proves nothing"
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        wt = os.path.join(repo, ".claude", "worktrees", "wt1")
+        _git(repo, "worktree", "add", "-q", "-b", "claude/wt1", wt)
+        _write(wt, "debt-management/SKILL.md", _DRIFT_LINE)            # uncommitted, worktree
+        _write(wt, "portfolio-growth/SKILL.md", _DRIFT_LINE)           # untracked, worktree
+        _write(repo, "debt-management/SKILL.md", _DRIFT_LINE)          # dirty tracked, primary
+        _write(repo, "eval-harness/README.md", "DSCR governor floor 1.75x\n")  # untracked, primary
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 0, "uncommitted drift must not fail the probe (got %r)\n%s\n%s" % (code, out, err)
+        # committed on the worktree's OWN branch only -> still not origin/main / HEAD
+        _git(wt, "add", "-A")
+        _git(wt, "commit", "-q", "-m", "wip draft")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 0, "drift on a side branch only must not fail the probe (got %r)\n%s\n%s" % (code, out, err)
+        _git(repo, "worktree", "remove", "--force", wt)
+        # primary checkout switched to a session branch with a WIP drift commit
+        _git(repo, "checkout", "-q", "-b", "claude/session-x")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "wip on primary checkout")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 0, "WIP commit on a primary-checkout side branch must not fail (got %r)\n%s\n%s" % (code, out, err)
+    print("  PASS test_uncommitted_worktree_drift_does_not_fail_probe_e2e")
+
+
+def test_committed_drift_on_main_still_fails_probe_e2e():
+    """(b) Drift COMMITTED on main still fails the probe -- via unpushed local main, via local
+    main while the primary checkout is parked on a clean side branch (REFUTE round 1 case B),
+    via origin/main alone (local main clean), and the finding names the file, line and ref."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write(repo, "debt-management/SKILL.md", _CLEAN_LINE + _DRIFT_LINE)
+        _git(repo, "commit", "-q", "-am", "drift")
+        # local main has the drift; origin/main does not yet (local commit, unpushed)
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "committed drift on local main must flag (got %r)\n%s\n%s" % (code, out, err)
+        norm = out.replace("\\", "/")
+        assert "debt-management/SKILL.md@refs/heads/main:2 " in norm, "file@ref:line must be reported:\n%s" % out
+        # primary checkout parked on a clean side branch; origin/main still stale -> main still read
+        _git(repo, "checkout", "-q", "-b", "clean", "HEAD~1")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "local-main drift must flag while HEAD is elsewhere (got %r)\n%s" % (code, out)
+        assert "@refs/heads/main:2 " in out, out
+        # push it (origin/main = drift), then reset local main to clean
+        _git(repo, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
+        _git(repo, "branch", "-f", "main", "clean")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "drift on origin/main alone must flag (got %r)\n%s\n%s" % (code, out, err)
+        assert "debt-management/SKILL.md@refs/remotes/origin/main:2 " in out.replace("\\", "/"), out
+        # a stray LOCAL branch literally named origin/main (at the clean commit) must not shadow
+        # the real remote-tracking ref (REFUTE round 2)
+        _git(repo, "branch", "origin/main", "clean")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "local origin/main branch must not shadow the remote ref (got %r)\n%s\n%s" % (code, out, err)
+        assert "@refs/remotes/origin/main:2 " in out, out
+    print("  PASS test_committed_drift_on_main_still_fails_probe_e2e")
+
+
+def test_committed_ref_scan_keeps_path_exemptions_e2e():
+    """The git reader must apply the SAME path rules as the walk: pruned dirs (_archive/,
+    _archive_<date>/, node_modules/), versions/CHANGELOG.md, test modules, eval-harness runs/,
+    /data/ json and non-.md/.json extensions stay exempt; a neighbouring SKILL.md still flags.
+    CRLF content keeps its line numbers."""
+    import tempfile
+    m = _load_probe_module()
+    exempt = ["s/_archive/SKILL.md", "s/_archive_2026-04-01/SKILL.md", "s/node_modules/x.md",
+              "s/versions/CHANGELOG.md", "acquisition-underwriting-eval-harness/runs/r.json",
+              "s/data/deal.json", "s/notes.txt"]
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        for rel in exempt:
+            _write(repo, rel, _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "exempt classes")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 0, "exempt path classes must stay exempt (got %r)\n%s\n%s" % (code, out, err)
+        _write(repo, "s/SKILL.md", "line one\r\n" + _DRIFT_LINE.replace("\n", "\r\n"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "real drift")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "SKILL.md drift must flag (got %r)\n%s" % (code, out)
+        norm = out.replace("\\", "/")
+        assert "/s/SKILL.md@refs/heads/main:2 " in norm, "CRLF line numbering / path:\n%s" % out
+        # lone-CR line endings (REFUTE round 1 C6 gap): must be split like open(path, "r") does
+        _write(repo, "t/SKILL.md", "line one\r" + _DRIFT_LINE.replace("\n", "\r"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "lone cr")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert "/t/SKILL.md@refs/heads/main:2 " in out.replace("\\", "/"), "lone-CR line numbering:\n%s" % out
+        for rel in exempt:
+            assert rel not in norm, "exempt %s leaked into findings:\n%s" % (rel, out)
+    print("  PASS test_committed_ref_scan_keeps_path_exemptions_e2e")
+
+
+def test_committed_ref_scan_fails_loud_e2e():
+    """I5 fail-loud: a present ora-skills dir that is not a git repo (incl. one NESTED inside a
+    parent repo -- REFUTE round 1 case I), or a repo where NO scan ref resolves, is a probe error
+    (exit 2), never a silent clean pass. An inherited GIT_DIR must not redirect the read to a
+    different repo (case J)."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        notrepo = os.path.join(d, "ora-skills")
+        os.makedirs(notrepo)
+        _write(notrepo, "SKILL.md", _DRIFT_LINE)
+        code, out, err = _run_main_over(m, _skills_target(m, notrepo))
+        assert code == 2, "non-repo must be a probe error (got %r)\n%s\n%s" % (code, out, err)
+    with tempfile.TemporaryDirectory() as d:
+        repo = os.path.join(d, "ora-skills")
+        os.makedirs(repo)
+        _git(repo, "init", "-q", "-b", "main")            # no commits -> no ref resolves
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 2, "no resolvable ref must be a probe error (got %r)\n%s\n%s" % (code, out, err)
+    with tempfile.TemporaryDirectory() as d:
+        parent = os.path.join(d, "parent")
+        os.makedirs(parent)
+        _git(parent, "init", "-q", "-b", "main")
+        _write(parent, "other.md", _CLEAN_LINE)
+        _git(parent, "add", "-A")
+        _git(parent, "commit", "-q", "-m", "p")
+        nested = os.path.join(parent, "ora-skills")
+        _write(nested, "SKILL.md", _DRIFT_LINE)
+        code, out, err = _run_main_over(m, _skills_target(m, nested))
+        assert code == 2, "nested non-repo must be a probe error, not the parent tree (got %r)\n%s\n%s" % (code, out, err)
+    with tempfile.TemporaryDirectory() as d:
+        drift = _make_skills_repo(d)
+        _write(drift, "s/SKILL.md", _DRIFT_LINE)
+        _git(drift, "add", "-A")
+        _git(drift, "commit", "-q", "-m", "drift")
+        decoy = os.path.join(d, "decoy")
+        os.makedirs(decoy)
+        _git(decoy, "init", "-q", "-b", "main")
+        _write(decoy, "x.md", _CLEAN_LINE)
+        _git(decoy, "add", "-A")
+        _git(decoy, "commit", "-q", "-m", "decoy")
+        _git(decoy, "update-ref", "refs/remotes/origin/main", "HEAD")
+        old = os.environ.get("GIT_DIR")
+        os.environ["GIT_DIR"] = os.path.join(decoy, ".git")
+        try:
+            code, out, err = _run_main_over(m, _skills_target(m, drift))
+        finally:
+            if old is None:
+                os.environ.pop("GIT_DIR", None)
+            else:
+                os.environ["GIT_DIR"] = old
+        assert code == 1, "inherited GIT_DIR must not redirect the scan (got %r)\n%s\n%s" % (code, out, err)
+    print("  PASS test_committed_ref_scan_fails_loud_e2e")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
+    test_ora_skills_target_reads_committed_refs_unit()
+    test_uncommitted_worktree_drift_does_not_fail_probe_e2e()
+    test_committed_drift_on_main_still_fails_probe_e2e()
+    test_committed_ref_scan_keeps_path_exemptions_e2e()
+    test_committed_ref_scan_fails_loud_e2e()
     test_dated_archive_dirs_pruned_unit()
     test_probe_self_description_prose_suppressed_unit()
     test_sentinel_suppression_does_not_hide_real_drift_unit()

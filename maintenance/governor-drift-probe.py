@@ -17,7 +17,7 @@ Design notes (precision over recall, to avoid false positives):
 Usage: python governor-drift-probe.py            # scan default roots
        python governor-drift-probe.py --quiet     # only print on drift
 """
-import os, re, sys
+import os, re, subprocess, sys
 
 # Output may echo file content with non-cp1252 chars (≠, ≥, ×) -> force UTF-8 so the
 # probe never crashes on its own output when stdout is a Windows cp1252 pipe (I5).
@@ -37,7 +37,34 @@ MEM = os.path.join(CLAUDE, "projects",
 
 ORA_SKILLS_REPO = os.path.join(HOME, "ora-skills")
 
-# Scan roots: (path, file-extensions). Missing roots are skipped silently (logged once).
+# ora-skills is read from COMMITTED refs, never from a working tree (2026-11-06). The old
+# os.walk of ~/ora-skills also walked every session's linked worktree under .claude/worktrees/
+# (gitignored, but os.walk does not read .gitignore) plus the primary checkout's own
+# uncommitted edits -- so ONE session's in-progress draft line (2026-11-05: a portfolio-growth
+# wording draft; 2026-11-06: '1.75' inside '11.75' in an eval-harness draft) failed this probe
+# inside the ~/.claude pre-push hook-tests gate and blocked every ~/.claude push fleet-wide
+# until that session reworded its draft. A draft is not doctrine; what binds is what is
+# committed on main. origin/main = what has landed (as of the last fetch -- no network here);
+# refs/heads/main = local main, which may be ahead of the last fetch. Both are scanned;
+# identical commits/blobs are read once. Deliberately NOT "HEAD" (REFUTE round 1, 2026-11-06):
+# HEAD is whatever branch the primary checkout has checked out, so a session WIP-committing on
+# a branch in ~/ora-skills would re-create the exact fleet-wide block this fixes, and a primary
+# checkout parked on a side branch would hide unpushed drift on local main. Every detection
+# rule and path exemption below applies unchanged -- only WHERE the text is read from changed.
+# Fully-qualified (REFUTE round 2): a short "origin/main" resolves refs/heads/origin/main FIRST,
+# so one stray `git branch origin/main <sha>` would silently shadow the real remote ref.
+ORA_SKILLS_SCAN_REFS = ("refs/remotes/origin/main", "refs/heads/main")
+
+class GitRefTree:
+    """Target spec (the 2nd element of a build_targets() tuple, in place of an extension tuple):
+    scan the files committed at `refs` in the git repo at the target path, not its working tree."""
+    def __init__(self, exts, refs=ORA_SKILLS_SCAN_REFS):
+        self.exts = tuple(exts)
+        self.refs = tuple(refs)
+    def __repr__(self):
+        return "GitRefTree(exts=%r, refs=%r)" % (self.exts, self.refs)
+
+# Scan roots: (path, file-extensions | GitRefTree). Missing roots are skipped silently (logged once).
 def build_targets():
     targets = []
     targets.append((MEM, (".md",)))
@@ -53,8 +80,9 @@ def build_targets():
     # but the cache copy hadn't caught up yet (2026-07-12 EOD ledger finding). _archive/_staging
     # hold retired/in-progress content, not live governor declarations -- excluded in iter_files()
     # the same way node_modules/dist/.git already are.
+    # Read from committed refs (origin/main + local main), not the working tree -- see GitRefTree.
     if os.path.isdir(ORA_SKILLS_REPO):
-        targets.append((ORA_SKILLS_REPO, (".md", ".json")))
+        targets.append((ORA_SKILLS_REPO, GitRefTree((".md", ".json"))))
     brain = os.path.join(HOME, "oxford-command-center")
     for sub in ("src", "server", "scripts", "data"):
         targets.append((os.path.join(brain, sub), (".ts", ".tsx", ".js", ".json", ".md")))
@@ -112,6 +140,131 @@ def iter_files(root, exts):
         for fn in filenames:
             if exts is None or fn.lower().endswith(exts):
                 yield os.path.join(dirpath, fn)
+
+def _lines(text):
+    """Split on "\\n" only, keeping it -- exactly what iterating a text-mode file handle yields
+    (str.splitlines would also split on \\x0b/\\x0c/\\u2028..., shifting line numbers and
+    changing what scan_line sees)."""
+    parts = text.split("\n")
+    for i, p in enumerate(parts):
+        if i < len(parts) - 1:
+            yield p + "\n"
+        elif p:
+            yield p
+
+class ProbeError(Exception):
+    """A source the probe was told to scan could not be read -> exit 2 (I5), never a clean pass."""
+
+_GIT_TIMEOUT_S = 120
+
+# Inherited repo-location overrides would point every git call at a DIFFERENT repository than
+# `repo` (e.g. a GIT_DIR left set by a hook or a scheduled runner) -- scrubbed, so the probe
+# always reads the repo it was told to read (REFUTE round 1, 2026-11-06).
+_GIT_ENV_SCRUB = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
+                  "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+                  "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+                  # `git -c k=v push` hands these to hooks; a pushing command's config overrides
+                  # have no business steering how this probe resolves refs/objects
+                  "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_REPLACE_REF_BASE",
+                  "GIT_NO_REPLACE_OBJECTS")
+
+def _git_env():
+    env = {k: v for k, v in os.environ.items() if k.upper() not in _GIT_ENV_SCRUB}
+    env["GIT_NO_REPLACE_OBJECTS"] = "1"   # read the committed objects, never git-replace stand-ins
+    return env
+
+def _git_out(repo, args, stdin=None):
+    try:
+        r = subprocess.run(["git", "-C", repo] + list(args), input=stdin, env=_git_env(),
+                           capture_output=True, timeout=_GIT_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise ProbeError("git %s failed in %s: %s" % (" ".join(args), repo, e))
+    return r.returncode, r.stdout, r.stderr
+
+def _git_err(err):
+    return err.decode("utf-8", "replace").strip()
+
+def _resolve_ref(repo, ref):
+    rc, out, _ = _git_out(repo, ["rev-parse", "--verify", "--quiet", ref + "^{commit}"])
+    sha = out.decode("ascii", "replace").strip()
+    return sha if rc == 0 and sha else None
+
+def iter_git_ref_files(repo, spec):
+    """Yield (path, ref, text) for every blob committed at spec.refs whose path passes the SAME
+    prune + extension rules iter_files() applies. `path` is repo-joined, so every path-class
+    exemption in main() matches exactly as it did for the walk. Refs resolving to the same commit
+    are read once; a blob identical at the same path in an earlier ref is not re-read. Raises
+    ProbeError if the repo is unreadable or NO ref resolves (an individual unresolvable ref is
+    reported on stderr and skipped -- e.g. a clone with no origin remote still scans HEAD)."""
+    rc, out, err = _git_out(repo, ["rev-parse", "--show-toplevel"])
+    if rc != 0:
+        raise ProbeError("%s is not a readable git repo: %s" % (repo, _git_err(err)))
+    # A plain dir NESTED inside some other repo would otherwise resolve to the PARENT repo and
+    # scan its tree instead -- a clean pass over the wrong content (REFUTE round 1).
+    top = out.decode("utf-8", "replace").strip()
+    def _norm(p):
+        return os.path.normcase(os.path.realpath(os.path.abspath(p)))
+    if _norm(top) != _norm(repo):
+        raise ProbeError("%s is not a git repo root (git resolves it to %s)" % (repo, top))
+    resolved, seen_commits = [], set()
+    for ref in spec.refs:
+        sha = _resolve_ref(repo, ref)
+        if sha is None:
+            print("[WARN] governor-drift-probe: ref %s does not resolve in %s -- skipped"
+                  % (ref, repo), file=sys.stderr)
+        elif sha not in seen_commits:
+            seen_commits.add(sha)
+            resolved.append((ref, sha))
+    if not resolved:
+        raise ProbeError("no scan ref (%s) resolves in %s" % (", ".join(spec.refs), repo))
+    seen_blobs = set()
+    for ref, sha in resolved:
+        rc, out, err = _git_out(repo, ["ls-tree", "-r", "-z", "--full-tree", sha])
+        if rc != 0:
+            raise ProbeError("git ls-tree %s failed in %s: %s" % (ref, repo, _git_err(err)))
+        wanted = []
+        for entry in out.split(b"\0"):
+            if not entry:
+                continue
+            meta, _, rel = entry.partition(b"\t")
+            parts = meta.split()
+            # regular files only: a symlink (120000) blob is a link target string and a submodule
+            # is a commit -- neither is file text the walk would have scanned
+            if len(parts) != 3 or parts[1] != b"blob" or parts[0] == b"120000":
+                continue
+            oid = parts[2].decode("ascii")
+            segs = rel.decode("utf-8", "replace").split("/")
+            if any(_is_pruned_dir(s) for s in segs[:-1]):
+                continue
+            if not segs[-1].lower().endswith(spec.exts):
+                continue
+            key = ("/".join(segs), oid)
+            if key in seen_blobs:
+                continue
+            seen_blobs.add(key)
+            wanted.append((segs, oid))
+        if not wanted:
+            continue
+        rc, blobs, err = _git_out(repo, ["cat-file", "--batch"],
+                                  stdin=("\n".join(o for _, o in wanted) + "\n").encode("ascii"))
+        if rc != 0:
+            raise ProbeError("git cat-file --batch failed in %s: %s" % (repo, _git_err(err)))
+        pos = 0
+        for segs, oid in wanted:
+            nl = blobs.find(b"\n", pos)
+            header = blobs[pos:nl].decode("ascii", "replace").split() if nl >= 0 else []
+            if len(header) != 3 or header[0] != oid or header[1] != "blob":
+                raise ProbeError("git cat-file returned %r for %s (%s) in %s"
+                                 % (" ".join(header), "/".join(segs), oid, repo))
+            size = int(header[2])
+            data = blobs[nl + 1:nl + 1 + size]
+            if len(data) != size:
+                raise ProbeError("git cat-file truncated %s (%s) in %s" % ("/".join(segs), oid, repo))
+            pos = nl + 1 + size + 1          # each blob is followed by a single LF
+            # universal-newline translation, matching open(path, "r") on the walk path, so line
+            # numbers and per-line text are identical to what the walk would have scanned
+            text = data.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
+            yield os.path.join(repo, *segs), ref, text
 
 # DSCR threshold near 'dscr'. The trailing x/× is OPTIONAL: a drifted governor may be
 # written "DSCR floor 1.10" with no multiplier sign, and the equality check must catch it.
@@ -2187,45 +2340,72 @@ def main():
     # as event_log.md itself -- a straight cut of its older entries, not a new kind of file.
     # Exempt by pattern so every future rollover doesn't need its own skip_names entry.
     EVENT_LOG_ARCHIVE_RE = re.compile(r"^event_log_\d{4}-\d{2}-\d{2}\.md$")
+    def _exempt(path):
+        basename = os.path.basename(path)
+        low_path = path.lower().replace("\\", "/")
+        # brain data snapshots hold per-DEAL dscr/ltv VALUES, not governor declarations --
+        # skip them so a deal landing at 1.75 / 0.54 never reads as drift.
+        is_data_json = low_path.endswith(".json") and "/data/" in low_path
+        return (os.path.abspath(path) == self_path or basename in skip_names
+                or EVENT_LOG_ARCHIVE_RE.match(basename) or DATED_AUDIT_RE.match(basename)
+                or _is_test_file(path) or _is_eval_harness_run_log(path)
+                or _is_skill_version_changelog(path) or is_data_json)
+
+    def _scan_file(path, where, read):
+        """`path` drives every rule (exemptions above, code/governor-code routing); `where` is
+        what a finding cites (the path, or path@ref for a committed-ref read); read() returns the
+        file's text with universal newlines already applied."""
+        low_path = path.lower().replace("\\", "/")
+        is_code = low_path.endswith((".ts", ".tsx", ".js"))
+        is_governor_code = os.path.basename(low_path) in GOVERNOR_CODE_FILES
+        if is_governor_code:
+            # The ONE governor source file: validate enforcement CONSTANTS directly.
+            content = read()
+            for ln, reason, txt in scan_code(content):
+                findings.append((where, ln, reason, txt))
+            # deletion guard: the governor file MUST carry a numeric declaration of each.
+            if not RE_CODE_DSCR_ANY.search(content):
+                findings.append((where, 0, "DSCR floor governor declaration ABSENT (deleted?)", ""))
+            if not RE_CODE_LTV_ANY.search(content):
+                findings.append((where, 0, "LTV ceiling governor declaration ABSENT (deleted?)", ""))
+        elif is_code:
+            # other code files: dscrFloor/ltvCeiling here are NOT the governor (overloaded
+            # identifiers -- e.g. conditions.ts alert thresholds) -- never governor-checked.
+            # Still READ (and discarded): the pre-refactor loop opened every non-exempt file, so
+            # an unreadable one was an exit-2 probe error (I5) -- preserved.
+            read()
+        else:
+            for i, raw in enumerate(_lines(read()), 1):
+                for reason in scan_line(raw):
+                    findings.append((where, i, reason, raw.strip()[:120]))
+
+    def _read_fs(path):
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+
     for root, exts in build_targets():
         if not (os.path.isfile(root) or os.path.isdir(root)):
             skipped_roots.append(root)
             continue
-        for path in iter_files(root, exts):
-            basename = os.path.basename(path)
-            if (os.path.abspath(path) == self_path or basename in skip_names
-                    or EVENT_LOG_ARCHIVE_RE.match(basename) or DATED_AUDIT_RE.match(basename)
-                    or _is_test_file(path) or _is_eval_harness_run_log(path)
-                    or _is_skill_version_changelog(path)):
-                continue
-            low_path = path.lower().replace("\\", "/")
-            is_code = low_path.endswith((".ts", ".tsx", ".js"))
-            is_governor_code = os.path.basename(low_path) in GOVERNOR_CODE_FILES
-            # brain data snapshots hold per-DEAL dscr/ltv VALUES, not governor declarations --
-            # skip them so a deal landing at 1.75 / 0.54 never reads as drift.
-            is_data_json = low_path.endswith(".json") and "/data/" in low_path
+        if isinstance(exts, GitRefTree):
+            # committed content only (see GitRefTree) -- never another session's working tree
             try:
-                if is_data_json:
-                    continue
-                with open(path, "r", encoding="utf-8", errors="replace") as fh:
-                    if is_governor_code:
-                        # The ONE governor source file: validate enforcement CONSTANTS directly.
-                        content = fh.read()
-                        for ln, reason, txt in scan_code(content):
-                            findings.append((path, ln, reason, txt))
-                        # deletion guard: the governor file MUST carry a numeric declaration of each.
-                        if not RE_CODE_DSCR_ANY.search(content):
-                            findings.append((path, 0, "DSCR floor governor declaration ABSENT (deleted?)", ""))
-                        if not RE_CODE_LTV_ANY.search(content):
-                            findings.append((path, 0, "LTV ceiling governor declaration ABSENT (deleted?)", ""))
-                    elif is_code:
-                        # other code files: dscrFloor/ltvCeiling here are NOT the governor (overloaded
-                        # identifiers -- e.g. conditions.ts alert thresholds) -- never governor-checked.
-                        pass
-                    else:
-                        for i, raw in enumerate(fh, 1):
-                            for reason in scan_line(raw):
-                                findings.append((path, i, reason, raw.strip()[:120]))
+                for path, ref, text in iter_git_ref_files(root, exts):
+                    if _exempt(path):
+                        continue
+                    _scan_file(path, "%s@%s" % (path, ref), lambda t=text: t)
+                    scanned += 1
+            except Exception as e:
+                # fail loud per I5 -- an unreadable committed tree is a probe error, not a skip
+                print("[ACTION] governor-drift-probe could not read committed refs of %s: %s"
+                      % (root, e), file=sys.stderr)
+                sys.exit(2)
+            continue
+        for path in iter_files(root, exts):
+            if _exempt(path):
+                continue
+            try:
+                _scan_file(path, path, lambda p=path: _read_fs(p))
                 scanned += 1
             except Exception as e:
                 # fail loud per I5 -- a file we cannot read is a probe error, not a silent skip
