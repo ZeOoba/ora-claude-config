@@ -18,13 +18,14 @@ Constants used below:
 
 ## Step A — Base procedure: run the `automation-health-monitor` skill
 
-Run the `automation-health-monitor` skill as the base procedure (dual-fleet enumeration, Step 1.25 one-time tickler lifecycle, Step 1.5 model-currency on both fleets, Step 1.75 off-fleet substrates, Step 3.5 offline-window correlation). This file layers the task-only steps below on top of it. Where this file and the skill both speak to a point, this file governs for this run. Do not copy the skill's text into the report; cite its step numbers.
+Run the `automation-health-monitor` skill as the base procedure (dual-fleet enumeration, Step 1.25 one-time tickler lifecycle, Step 1.5 model-currency on both fleets, Step 1.75 off-fleet substrates, Step 1.8 `ora-pm-daily-crons` cron.log outcome, Step 3.5 offline-window correlation). This file layers the task-only steps below on top of it. Where this file and the skill both speak to a point, this file governs for this run. Do not copy the skill's text into the report; cite its step numbers.
 
 **Liveness assertion (run first).** In the loaded skill text, read the title `# Automation Health Monitor (vX.Y)` and check for the heading `### Step 1.75` and the string `ACTIONS-BILLING-BLOCKED`.
 - Skill ≥ v1.13 and both markers present → proceed.
 - `### Step 1.75` absent → `OFF-FLEET-STEP-NOT-LOADED` (⚠️): none of the off-fleet legs ran; never report them clean.
 - Heading present but `ACTIONS-BILLING-BLOCKED` absent → `OFF-FLEET-CAPACITY-LEG-NOT-LOADED` (⚠️): treat any zero-step failed Actions run as unclassified. Remedy is a skill-cache re-import (`ora-skills` `_staging/PENDING_REIMPORT.md`), never an edit here.
 - Skill not loadable at all → `BASE-SKILL-NOT-LOADED` (⚠️); run every step below anyway and say so in line 1 of the chat summary.
+- `### Step 1.8` or `PM-CRONS-RUN-FAILED` absent (skill < v1.17) → `PM-CRONS-CHECK-NOT-LOADED` (⚠️, in the alert), and still run the check: `C:/Users/Owner/ora-skills/automation-health-monitor/scripts/pm_crons_log_check.py --last-run-at <ora-pm-daily-crons lastRunAt>` if that file exists, judged by its JSON `verdict`; otherwise by hand, read-only, on `C:\Users\Owner\ora-pm-cron\cron.log` over [`lastRunAt` − 2 min, now] in UTC: a `ping-crons  RUN FAILED:` line, an `<endpoint>  ->  ERROR` or `->  HTTP <non-2xx>` line, or no `->` line for `critical-dates-alerts` / `delinquency-check` (once 60 min past `lastRunAt`) → `PM-CRONS-RUN-FAILED` (❌), quoting each `cf_error=` and the `failure-alert=` token verbatim. Never re-run that task or call its endpoints: `delinquency-check` posts late fees.
 
 On this surface PowerShell and `gh` run directly through Bash. An unauthenticated `gh`, a timeout or a missing binary makes that leg `[unverifiable]`, never a billing finding and never clean.
 
@@ -178,7 +179,7 @@ Create one page under `OPSHUB` titled `Automation Health — <RUN_DATE date>` co
 - Per-task status (✅/ℹ️/⚠️/❌) in two sections: **CC/MCP fleet (registry-confirmed)** with a lateness column (`lastRunAt − expectedFireTime`, minutes), a beacon-freshness column and a contract-freshness column; **LAMS/Cowork fleet (fleet-status.py, read-only)** listing only enabled LAMS tasks and Step L.4 findings.
 - Model-currency (the skill's Step 1.5, both fleets; LAMS-dark tasks excluded).
 - Dispatcher-throttle subsection (open vs PROVISIONAL counts, `log_scan` verdict).
-- Off-fleet substrates subsection (the skill's Step 1.75 results; any `[unverifiable]` leg named).
+- Off-fleet substrates subsection (the skill's Step 1.75 results; any `[unverifiable]` leg named), plus the Step 1.8 `ora-pm-daily-crons` cron.log row (verdict, `lastRunAt`, findings, `cf_error=`, `failure-alert=`).
 - BLOCKED-AWAITING-GABRIEL / HELD-NO-ASK / HOLD-CHECK-NOT-RUN.
 - Registry diff (both fleets; baseline file names and any skipped baseline with its finding; `SNAPSHOT-WRITE-INVALID` if raised).
 - QUESTIONS FOR GABRIEL (only if any) · Actions taken · audit window (UTC).
@@ -189,7 +190,7 @@ While `notion-publish-degraded.json` has `active: true`: attempt the create anyw
 
 ## Step 2 — Alert email (only when a finding survives suppression)
 
-If any ⚠️/❌ survives (including off-fleet ⚠️/❌ such as `ACTIONS-BILLING-BLOCKED`, `OFF-FLEET-DISAPPEARED`, `BACKUP-FAILED`, `OFF-FLEET-STEP-NOT-LOADED`, and `LAMS-RESUMED-AGAINST-RULING`), send via `SEND` with subject `⚠️ ORA Automation Alert — <flagged class/task list> — <RUN_DATE date>`. Body: each flagged item with its class, and the Notion page link. ℹ️-only runs (model-currency, LAMS-DARK, throttle, HISTORICAL, HOST-UNAVAILABLE, PAUSED-SLOT, PROVISIONAL, OFF-FLEET-UNTRACKED) send nothing. Pre-authorized internal send under the routing canon.
+If any ⚠️/❌ survives (including off-fleet ⚠️/❌ such as `ACTIONS-BILLING-BLOCKED`, `OFF-FLEET-DISAPPEARED`, `BACKUP-FAILED`, `OFF-FLEET-STEP-NOT-LOADED`, `PM-CRONS-RUN-FAILED`, `PM-CRONS-LOG-UNREADABLE`, `PM-CRONS-UNVERIFIABLE`, `PM-CRONS-CHECK-NOT-LOADED`, and `LAMS-RESUMED-AGAINST-RULING`), send via `SEND` with subject `⚠️ ORA Automation Alert — <flagged class/task list> — <RUN_DATE date>`. Body: each flagged item with its class, and the Notion page link. ℹ️-only runs (model-currency, LAMS-DARK, throttle, HISTORICAL, HOST-UNAVAILABLE, PAUSED-SLOT, PROVISIONAL, OFF-FLEET-UNTRACKED) send nothing. Pre-authorized internal send under the routing canon.
 **Cross-producer dedup:** before composing, one `outlook_email_search` of Sent Items for the run date against `🌙 Overnight machine-offline detected` and `[ORA Command Center] Mirror deploy`. On a same-day match add one body line naming that alert as the same root cause; still send.
 **Confirm, do not assume:** after sending, search Sent Items for the subject and state in the chat summary whether delivery was independently confirmed; also confirm the `[OK] Sent` line in `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-log.txt`.
 
