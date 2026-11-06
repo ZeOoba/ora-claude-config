@@ -75,7 +75,7 @@ FORBIDDEN = {
 }
 
 # Governor pin (not doctrine, but the agent restates it): Invariant 4 constants.
-GOVERNOR = "(DSCR >= 1.25x, LTV <= 40%)"
+GOVERNOR = "DSCR >= 1.25x; LTV <= 40% portfolio aggregate and a 65% per-property refi ceiling"
 
 
 def forbidden_hits(line):
