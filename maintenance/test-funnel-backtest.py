@@ -1633,6 +1633,14 @@ def test_t1_rows_present_canonical_moves_away_or_stays_once_unit():
             verdict_first="T1 PURSUE", status="Dead", exclude=True)), t1b)
     assert len(t1_out) == 1 and t1_out[0]["verdict_first"] == "T1 PURSUE", t1_out
     assert all(r["n"] >= 1 for r in records) and len(records) == 2, records
+    # REFUTE round 2 F1: two --rows groups with the SAME key (one partition exported under
+    # two filenames); an exhausted n == 0 group must never be taken again.
+    same = [group(verdict="PASS", status="Passed") for _ in range(3)]
+    recs3, _, _ = fb.apply_duplicates(same, dups(
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed"),
+        dup(ID_Y, "2026-11-04 10:00:00Z", dup_of=ID_X, verdict="PASS", status="Passed"),
+        dup(ID_Z, "2026-11-05 10:00:00Z", dup_of=ID_X, verdict="PASS", status="Passed")), None)
+    assert sum(r["n"] for r in recs3) == 3 and min(r["n"] for r in recs3) >= 1, recs3
     print("  PASS test_t1_rows_present_canonical_moves_away_or_stays_once_unit")
 
 
@@ -1650,6 +1658,14 @@ def test_created_ts_is_validated_and_compared_as_time_unit():
     assert res["tier_vs_decision"]["v2.9"]["T1 PURSUE"]["rejected"] == 1
     expect_input_error(lambda: dups(dup(ID_X, "Nov 3, 2026 10:00")), "created_ts")
     expect_input_error(lambda: dups(dup(ID_X, "")), "created_ts")
+    expect_input_error(lambda: dups(dup(ID_X, "2026-11-03 10:00:00+99:99")), "created_ts")
+    # REFUTE round 2 F2: a non-Z offset. 09:00-05:00 is 14:00Z, later than 12:00Z.
+    res2 = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 09:00:00-05:00", verdict="T2 WATCH", verdict_first="T2 WATCH",
+            status="Passed"),
+        dup(ID_Y, "2026-11-03 12:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)])
+    assert res2["data_quality"]["duplicate_recovery"]["replaced"] == 1
     print("  PASS test_created_ts_is_validated_and_compared_as_time_unit")
 
 
