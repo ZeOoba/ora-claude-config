@@ -147,7 +147,7 @@ def _log_lock(log, timeout=LOCK_ACQUIRE_TIMEOUT_S):
     test suite gates the same way around ctypes.WinDLL, so this matches).
     """
     if not _HAVE_MSVCRT:
-        yield
+        yield None
         return
     lock_path = log + ".lock"
     # "a+b" both creates the sidecar if absent and never truncates one another
@@ -167,7 +167,9 @@ def _log_lock(log, timeout=LOCK_ACQUIRE_TIMEOUT_S):
                 if time.monotonic() >= deadline:
                     break
                 time.sleep(LOCK_POLL_INTERVAL_S)
-        yield
+        # Yields whether the lock is actually held (None = no msvcrt). Existing
+        # callers ignore it; rollover-event-log.py refuses to run on False.
+        yield locked
     finally:
         if locked:
             try:
