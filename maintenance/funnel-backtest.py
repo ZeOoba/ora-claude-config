@@ -39,7 +39,13 @@ SELECT url, "Deal Name / Address" AS name, createdTime AS created_ts, CASE WHEN 
   - QUERY D returns every row in a duplicate set: each row whose "Duplicate Of" is set
     (deal-retirement 3a / Closed 2b write "app.notion.com/<32-hex page id> (deduped ...)")
     and each row such a value points at. Its created CASE and loi_sent bucket are QUERY A's,
-    so every QUERY D row falls in exactly one --rows group.
+    so every QUERY D row falls in exactly one --rows group; every QUERY D row is checked
+    against the --rows groups before anything moves (a misfit is fatal). When the era set
+    changes, QUERY D's CASE changes in lockstep with QUERY A's. created_ts must read
+    'YYYY-MM-DD HH:MM[:SS][.fff][Z|+hh:mm]' (space or T); rows are ordered by that instant,
+    and anything else is fatal. A page id is the 32-hex id that ENDS the url (query string
+    dropped); a Duplicate Of target is the id ending the link after notion.com/ or
+    notion.so/, so free text after the link is ignored.
 
   - The CASE boundary in Query A must match the --era boundaries (default: one boundary,
     v2.9=2026-10-30). When the era set changes (a new --era), Query A's CASE must gain the
@@ -418,13 +424,60 @@ def check_row_count(covered, expected, path):
 
 # --- duplicate recovery (--dup-rows, QUERY D) ----------------------------------------------
 
-_PAGE_ID_RE = re.compile(r"[0-9a-f]{32}", re.ASCII)
+_PAGE_ID_END_RE = re.compile(r"([0-9a-f]{32})$", re.ASCII)
+_LINK_RE = re.compile(r"notion\.(?:com|so)/(\S+)", re.ASCII | re.IGNORECASE)
+_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?"
+                    r"(Z|[+-]\d{2}:?\d{2})?", re.ASCII)
+# p_exec and floor are not in QUERY_A or QUERY_D (both read None); keeping them in the key
+# makes a --rows file that does carry them match deterministically or fail loudly.
 GROUP_KEY = ("created", "source", "verdict", "verdict_first", "status", "go", "scorecard",
-             "loi_sent", "loi_outcome", "loss_class", "exclude")
+             "loi_sent", "loi_outcome", "loss_class", "exclude", "p_exec", "floor")
 
 
-def _page_ids(text):
-    return _PAGE_ID_RE.findall(text.lower().replace("-", "")) if isinstance(text, str) else []
+def _page_id_at_end(text):
+    """The 32-hex page id that ENDS a Notion link (query and fragment dropped, dashes
+    removed): 'app.notion.com/<id>', 'notion.so/Some-Title-<id>?v=<view>' -> <id>."""
+    if not isinstance(text, str):
+        return None
+    path = text.strip().split("?", 1)[0].split("#", 1)[0].lower().replace("-", "")
+    match = _PAGE_ID_END_RE.search(path)
+    return match.group(1) if match else None
+
+
+def _url_page_id(url):
+    return _page_id_at_end(url)
+
+
+def _link_target(text):
+    """The page a Duplicate Of value points at: the link right after notion.com/ or
+    notion.so/ (free text after it is ignored), else the first whitespace-free token."""
+    if not isinstance(text, str):
+        return None
+    match = _LINK_RE.search(text)
+    token = match.group(1) if match else text.strip().split()[0] if text.strip() else ""
+    return _page_id_at_end(token.rstrip(").,;"))
+
+
+def _parse_ts(text):
+    """createdTime -> (date, hh, mm, ss, offset minutes) normalized to UTC minutes, or None."""
+    if not isinstance(text, str):
+        return None
+    match = _TS_RE.fullmatch(text.strip())
+    if not match:
+        return None
+    day = _parse_day(match.group(1))
+    if day is None:
+        return None
+    hh, mm, ss = int(match.group(2)), int(match.group(3)), int(match.group(4) or 0)
+    if hh > 23 or mm > 59 or ss > 59:
+        return None
+    zone = match.group(5)
+    offset = 0
+    if zone and zone != "Z":
+        sign = -1 if zone[0] == "-" else 1
+        digits = zone[1:].replace(":", "")
+        offset = sign * (int(digits[:2]) * 60 + int(digits[2:]))
+    return day.toordinal() * 86400 + hh * 3600 + mm * 60 + ss - offset * 60
 
 
 def normalize_dup_records(raws, source):
@@ -433,10 +486,9 @@ def normalize_dup_records(raws, source):
     out, seen = [], set()
     for index, raw in enumerate(raws):
         rec = normalize_record(raw, index, source)
-        ids = _page_ids(raw.get("url"))
-        if not ids:
-            raise _bad(index, source, "url", raw.get("url"), "carries no 32-hex page id")
-        rec["page_id"] = ids[-1]
+        rec["page_id"] = _url_page_id(raw.get("url"))
+        if rec["page_id"] is None:
+            raise _bad(index, source, "url", raw.get("url"), "does not end in a 32-hex page id")
         if rec["page_id"] in seen:
             raise _bad(index, source, "url", raw.get("url"), "appears twice in --dup-rows")
         seen.add(rec["page_id"])
@@ -444,10 +496,9 @@ def normalize_dup_records(raws, source):
         if _blank(dup_of):
             rec["dup_target"] = None
         else:
-            targets = _page_ids(dup_of)
-            if not targets:
-                raise _bad(index, source, "dup_of", dup_of, "carries no 32-hex page id")
-            rec["dup_target"] = targets[0]
+            rec["dup_target"] = _link_target(dup_of)
+            if rec["dup_target"] is None:
+                raise _bad(index, source, "dup_of", dup_of, "does not link a 32-hex page id")
             if rec["dup_target"] == rec["page_id"]:
                 raise _bad(index, source, "dup_of", dup_of, "points at its own row (a cycle)")
         day = _parse_day(raw.get("created_day")) if isinstance(raw.get("created_day"), str) else None
@@ -455,8 +506,10 @@ def normalize_dup_records(raws, source):
             raise _bad(index, source, "created_day", raw.get("created_day"),
                        "is missing or not a YYYY-MM-DD date")
         rec["created_day"] = day
-        ts = raw.get("created_ts")
-        rec["created_ts"] = ts.strip() if isinstance(ts, str) and ts.strip() else day.isoformat()
+        rec["created_ts"] = _parse_ts(raw.get("created_ts"))
+        if rec["created_ts"] is None:
+            raise _bad(index, source, "created_ts", raw.get("created_ts"),
+                       "is missing or not a 'YYYY-MM-DD HH:MM[:SS][Z|+hh:mm]' timestamp")
         out.append(rec)
     return out
 
@@ -475,18 +528,27 @@ def load_dup_records(paths):
     return records
 
 
-def _take(records, dup_rec):
-    """Remove one row of dup_rec's --rows group; return a 1-row copy of that group."""
-    key = tuple(dup_rec[f] for f in GROUP_KEY)
-    for group in records:
-        if group["n"] >= 1 and tuple(group[f] for f in GROUP_KEY) == key:
+def _key(rec):
+    return tuple(rec[f] for f in GROUP_KEY)
+
+
+def _no_group(dup_rec):
+    return InputError("--dup-rows row %d (%s): url %s matches no --rows group with a row left; "
+                      "the exports were taken at different times or with different queries"
+                      % (dup_rec["_row"], dup_rec["_file"], dup_rec["url"]))
+
+
+def _take(originals, dup_rec):
+    """Remove one row of dup_rec's ORIGINAL --rows group (never an appended copy) and return
+    a 1-row copy of that group."""
+    key = _key(dup_rec)
+    for group in originals:
+        if group["n"] >= 1 and _key(group) == key:
             group["n"] -= 1
             copy = dict(group)
             copy["n"] = 1
             return copy
-    raise InputError("--dup-rows row %d (%s): url %s matches no --rows group with a row left; "
-                     "the exports were taken at different times or with different queries"
-                     % (dup_rec["_row"], dup_rec["_file"], dup_rec["url"]))
+    raise _no_group(dup_rec)
 
 
 def apply_duplicates(records, dup_records, t1_rows):
@@ -494,7 +556,16 @@ def apply_duplicates(records, dup_records, t1_rows):
     (records, t1_rows, stats); the inputs are not mutated and the weighted total is kept."""
     if dup_records is None:
         return records, t1_rows, {"status": "not-run"}
-    records = [dict(r) for r in records]
+    originals = [dict(r) for r in records]
+    tally = {}
+    for group in originals:
+        tally[_key(group)] = tally.get(_key(group), 0) + group["n"]
+    for row in dup_records:      # every QUERY_D row is a real row of the log: it must fit
+        key = _key(row)
+        if tally.get(key, 0) < 1:
+            raise _no_group(row)
+        tally[key] -= 1
+    appended = []
     by_id = {r["page_id"]: r for r in dup_records}
     flagged = [r for r in dup_records if r["dup_target"] is not None]
 
@@ -517,9 +588,9 @@ def apply_duplicates(records, dup_records, t1_rows):
             unresolved += 1
     for row in flagged:
         if not row["exclude"]:
-            copy = _take(records, row)
+            copy = _take(originals, row)
             copy["exclude"] = True
-            records.append(copy)
+            appended.append(copy)
             moved += 1
     recovered = replaced = 0
     overrides = {}
@@ -533,22 +604,21 @@ def apply_duplicates(records, dup_records, t1_rows):
         first = min(cands, key=lambda r: (r["created_ts"], r["page_id"]))
         if first is canon or first["verdict_first"] == canon["verdict_first"]:
             continue
-        copy = _take(records, canon)
+        copy = _take(originals, canon)
         copy["verdict_first"], copy["score_first"] = first["verdict_first"], first["score_first"]
-        records.append(copy)
+        appended.append(copy)
         if canon["verdict_first"] is None:
             recovered += 1
         else:
             replaced += 1
         overrides[root] = first
-    records = [r for r in records if r["n"] >= 1]
+    records = [r for r in originals if r["n"] >= 1] + appended
     if t1_rows is not None:
         flagged_ids = {r["page_id"] for r in flagged}
         adjusted, present = [], set()
         for row in t1_rows:
             row = dict(row)
-            ids = _page_ids(row["url"])
-            pid = ids[-1] if ids else None
+            pid = _url_page_id(row["url"])
             present.add(pid)
             if pid in flagged_ids:
                 row["exclude"] = True
