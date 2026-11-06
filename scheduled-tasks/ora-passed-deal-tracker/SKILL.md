@@ -57,7 +57,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **Watch for duplicate rows.** The Sourcing Log carries more than one row for
    at least one deal (`511 Industrial Mile Road` — `3446ecd8…` Status=Reviewing
    and `37c6ecd8…` Status=Dead, differing broker names, same address and SF).
-   Match on normalized address, not on row identity, and never count two rows as
+   Match on the same-unit test defined under 2d below (normalized address plus the
+   same suite or building, revised 2026-11-06), not on row identity, so two suites at
+   one street address are two deals, never one. Never count two rows as
    two losses. Surface any newly-detected duplicate in the QUESTIONS FOR GABRIEL
    block rather than silently merging.
 
@@ -69,7 +71,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    how the three `3849 N Richardt Ave` rows all entered the 2026-09-19 read-back. SQL
    form: `coalesce("Exclude from Calibration",'__NO__') <> '__YES__'` (verified
    2026-09-19: 146 rows without the clause, 123 with it, the 23 flagged rows
-   dropped). Canonical rows stay unflagged and stay on the list. The address-match
+   dropped). Canonical rows stay unflagged and stay on the list. The same-unit match
    and QUESTIONS-FOR-GABRIEL instruction above remains the backstop for any duplicate
    not yet flagged — never count two rows as two losses. Do not clear or set the
    checkbox from this task; flagging is Gabriel-directed or `deal-retirement` step 3a.
@@ -110,11 +112,16 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    re-listing or an unflagged duplicate of a unit ORA owns is not a passed deal. Same unit
    means ALL of:
    - **Same normalized street address.** Normalized = street number + street name +
-     city, casefolded, punctuation dropped, with the directional (`N`/`North`) and the
-     street type (`Ave`/`Avenue`, `Rd`/`Road`) folded to one form. Nothing else is folded.
-   - **Same suite, unit or building designator, compared after the same folding**
-     (`Ste 200` = `Suite 200`, `Bldg B` = `Building B`), or neither row carries one.
+     city + state, casefolded, punctuation dropped, with the directional (`N`/`North`)
+     and the street type (`Ave`/`Avenue`, `Rd`/`Road`) folded to one form.
+   - **Same suite, unit or building designator.** Compare the designator's value only,
+     with the label folded away (`Ste 200` = `Suite 200` = `Unit 200` = `#200`;
+     `Bldg B` = `Building B`). No other folding applies to the address or designator.
    - **Same parcel id** wherever both rows carry one.
+   - **If neither row carries a designator, a corroborating identifier is required:**
+     the same parcel id on both rows, or the same building SF on both rows. Without
+     one, the rows may be different buildings in a park that shares one street
+     address, so treat the pair as a near-miss (below), never as a match.
 
    Anything short of that is NOT a match, and the row stays on every arm above, including
    the 3b re-marketing and 4d RE-CHECK passes: different suites or buildings at one
@@ -124,6 +131,10 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    here too: an ambiguous match is a null, not a guess, so it never drops a row. List each
    such near-miss under QUESTIONS FOR GABRIEL as a possible duplicate of the named `WON`
    row, so Gabriel can flag it through `Exclude from Calibration` or `deal-retirement`.
+   A near-miss row stays live, so a trade search on the shared street address can hit
+   ORA's own deed on the sister unit. When it does, the Step 4 ORA-grantee rule still
+   records nothing. Its question names the `WON` sister row and asks whether this row is
+   the same unit; it never asks to stamp this row `WON` on that evidence alone.
 
    **Report every address-level drop on the Ops Hub note this sweep posts** (Step 6 or
    Step 7, and in the Step 7 email too when that path runs). Use one `WON ADDRESS DROP:`
@@ -174,7 +185,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    own documented next phase.
 
    **3b — RE-MARKETED PASSES (added 2026-09-22).** For every watch-list row (after the
-   duplicate-address merge), search the Outlook inbox with `outlook_email_search`
+   same-unit duplicate merge, Step 2), search the Outlook inbox with `outlook_email_search`
    over the trailing 35 days, once for the street address (street number + street
    name) and once for the property name if the row has one. Never open links.
    - Ignore ORA's own mail: any @oxfordra.net sender AND the Exchange
