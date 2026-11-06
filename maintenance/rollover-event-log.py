@@ -119,15 +119,34 @@ def archive_dir_for(log):
     return os.path.join(os.path.dirname(os.path.abspath(log)), "_archive")
 
 
-def _guard_mtime(log, mtime_before):
-    """Raise BlockingIOError if `log` moved under us since it was read."""
-    if os.stat(log).st_mtime_ns != mtime_before:
+def _stat_stamp(log):
+    """Staleness token for `log`: (st_mtime_ns, st_size), captured at read time and
+    re-checked before every write.
+
+    mtime alone is not enough (2026-11-06): Windows' file-time clock ticks about
+    every 15.6 ms, so an append landing in the same tick as rollover's read leaves
+    st_mtime_ns unchanged and the guard waved the stale write through, deleting the
+    append -- maintenance/test-rollover-event-log.py section 4 flaked ~3/6 on main
+    for exactly this reason. An append changes the size in every realistic layout,
+    so the size half catches the same-tick case. Residual: a write that leaves the
+    size unchanged within one tick still matches -- e.g. a same-length Edit-tool
+    replace, or an append whose entry exactly offsets the blank lines insert_newest
+    trims before the first entry (only possible with a padded intro; the live log
+    has one blank line there). Rollover never writes that way."""
+    st = os.stat(log)
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _guard_mtime(log, stamp_before):
+    """Raise BlockingIOError if `log` moved under us since it was read -- by
+    mtime OR size (see _stat_stamp; the name is kept for callers and probes)."""
+    if _stat_stamp(log) != stamp_before:
         raise BlockingIOError(
             "event_log.md changed since it was read -- refusing to write stale content")
 
 
-def _atomic_swap(log, new_live, mtime_before):
-    _guard_mtime(log, mtime_before)
+def _atomic_swap(log, new_live, stamp_before):
+    _guard_mtime(log, stamp_before)
     tmp = log + ".tmp-rollover"
     try:
         with open(tmp, "w", encoding="utf-8") as f:
@@ -147,10 +166,10 @@ def _atomic_swap(log, new_live, mtime_before):
     return True
 
 
-def _inplace_write(log, new_live, mtime_before):
+def _inplace_write(log, new_live, stamp_before):
     """Write through a handle that blocks rename but permits direct writes.
-    Carries the same mtime guard plus a post-write read-back verify."""
-    _guard_mtime(log, mtime_before)
+    Carries the same (mtime, size) guard plus a post-write read-back verify."""
+    _guard_mtime(log, stamp_before)
     # Flag ownership only AFTER open() succeeds: open(log, "w") is what truncates.
     # If it raises (sharing violation from a deny-write handle) nothing was
     # truncated, and a flag set before it would let _unwind restore over a foreign
@@ -165,7 +184,7 @@ def _inplace_write(log, new_live, mtime_before):
     return True
 
 
-def write_live_log(log, new_live, mtime_before, attempts=REPLACE_ATTEMPTS):
+def write_live_log(log, new_live, stamp_before, attempts=REPLACE_ATTEMPTS):
     """Replace `log` with `new_live`. True on success, False if every attempt
     failed. Raises BlockingIOError -- WITHOUT retrying -- if a concurrent writer
     landed an append meanwhile.
@@ -173,19 +192,20 @@ def write_live_log(log, new_live, mtime_before, attempts=REPLACE_ATTEMPTS):
     That last case is the hazard the retry itself introduces. `new_live` was
     computed from a read taken before the archive was written; if another session
     appends during the retry window, writing it would silently delete their entry
-    from an append-only log. Every attempt therefore re-checks mtime and aborts
+    from an append-only log. Every attempt therefore re-checks the read-time
+    (mtime, size) stamp from _stat_stamp, passed in as `stamp_before`, and aborts
     rather than retrying, which is the same freshness guarantee append-event-log's
     _atomic_insert gets by re-reading inside its own mtime-guarded cycle."""
     for attempt in range(attempts):
         try_inplace = (attempt + 1) >= min(INPLACE_FALLBACK_AFTER, attempts)
         try:
-            return _atomic_swap(log, new_live, mtime_before)
+            return _atomic_swap(log, new_live, stamp_before)
         except BlockingIOError:
             raise
         except Exception:
             if try_inplace:
                 try:
-                    return _inplace_write(log, new_live, mtime_before)
+                    return _inplace_write(log, new_live, stamp_before)
                 except BlockingIOError:
                     raise
                 except Exception:
@@ -304,7 +324,7 @@ def main(argv=None):
 
 
 def _rollover(a):
-    mtime_before = os.stat(a.log).st_mtime_ns
+    stamp_before = _stat_stamp(a.log)
     with open(a.log, encoding="utf-8") as f:
         text = f.read()
 
@@ -356,7 +376,7 @@ def _rollover(a):
         sys.stderr.write("(a rollover already ran today -- if you need to re-run, archive it first)\n")
         return 1
 
-    if os.stat(a.log).st_mtime_ns != mtime_before:
+    if _stat_stamp(a.log) != stamp_before:
         sys.stderr.write("event_log.md changed since it was read -- aborting without writing "
                           "(another session is likely appending; re-run once it's quiet)\n")
         return 1
@@ -482,7 +502,7 @@ def _rollover(a):
         _keep_everything(reason, what)
 
     try:
-        wrote = write_live_log(a.log, new_live, mtime_before)
+        wrote = write_live_log(a.log, new_live, stamp_before)
     except BlockingIOError as e:
         _unwind("%s" % e)
         return 1
