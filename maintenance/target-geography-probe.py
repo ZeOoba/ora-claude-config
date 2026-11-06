@@ -10,10 +10,11 @@ seven holdings states (OH, MD, IN, WI, MO, KS, TN) as its target geography, whil
 (v1.14) held eleven clusters, five of them entry-phase (Grand Rapids MI, Richmond VA, Des Moines IA,
 Louisville KY, Chicago-Greater Cook County IL), and listed Nashville TN as a watch market, not a target.
 A triage reading that line PASSes entry-market listings on geography and treats TN as in-box. ora-skills
-guards its own copies with tools/doctrine_consistency.py, which does not scan ~/.claude; this probe
-covers agents/ and memory here.
+PR #215 (branch claude/ora-skills-review-0bf6a8, UNMERGED as of 2026-11-06) adds
+tools/doctrine_consistency.py to guard the ora-skills copies; it does not scan ~/.claude, so this probe
+covers agents/, memory and task specs here.
 
-Rule (target_geography(), ported from ora-skills tools/doctrine_consistency.py with its pinned tests):
+Rule (target_geography(), ported from that branch's tools/doctrine_consistency.py with its pinned tests):
 a line that presents ORA's target geography and names five or more states, at least four of them
 established-cluster states, must name every cluster state, must not name a state no cluster covers
 (unless that state is labeled a watch market: "TN watch", "Nashville TN (watch ..."), and, if it names
@@ -97,7 +98,8 @@ _PRUNE_EXACT = ("_archive", "_staging")
 _PRUNE_PREFIX = ("_archive_", "_staging_")
 
 # --------------------------------------------------------------------------- ported verbatim
-# From ora-skills tools/doctrine_consistency.py (target-geography check), 2026-11-05.
+# From ora-skills tools/doctrine_consistency.py (target-geography check) on PR #215's branch
+# claude/ora-skills-review-0bf6a8 (unmerged), 2026-11-05.
 
 US_STATES = set('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO '
                 'MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY'.split())

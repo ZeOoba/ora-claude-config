@@ -252,7 +252,7 @@ Cross-reference sender email against Notion DBs: Tenant DB 8dbbaec0; Acquisition
 
 ## C.3 — URGENCY SCORING (1–5)
 **5 — IMMEDIATE:** lender covenant question/breach; LP query touching capital call/distribution/NAV; counsel deadline ≤48h; regulatory deadline ≤48h; tenant default notice/material complaint; active deal milestone.
-**4 — HIGH:** broker submitting a new deal in a target market (a cluster or satellite in the C.5.5 box geography, entry-phase clusters included); active deal correspondence; tenant renewal-related (≤180 days); vendor scope confirmation; lender routine ask not on deadline.
+**4 — HIGH:** broker submitting a new deal in a target market (a cluster or satellite in the C.5.5 box geography, entry-phase clusters included, or a town whose distance to an established cluster is unclear); active deal correspondence; tenant renewal-related (≤180 days); vendor scope confirmation; lender routine ask not on deadline.
 **3 — STANDARD:** routine tenant comms; vendor invoices/routine updates; broker check-ins; LP routine queries.
 **2 — LOW:** vendor pitches without prior engagement; industry contacts; info-only updates.
 **1 — INFO ONLY:** CC'd on others' threads; acknowledgments/confirmations.
