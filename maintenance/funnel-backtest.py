@@ -476,6 +476,8 @@ def _parse_ts(text):
     if zone and zone != "Z":
         sign = -1 if zone[0] == "-" else 1
         digits = zone[1:].replace(":", "")
+        if int(digits[:2]) > 14 or int(digits[2:]) > 59:
+            return None
         offset = sign * (int(digits[:2]) * 60 + int(digits[2:]))
     return day.toordinal() * 86400 + hh * 3600 + mm * 60 + ss - offset * 60
 
