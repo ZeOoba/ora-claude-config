@@ -153,6 +153,14 @@ try:
 finally:
     shutil.rmtree(d, ignore_errors=True)
 
+def _stamp(path):
+    """The staleness token write_live_log expects: rollover's own _stat_stamp
+    ((st_mtime_ns, st_size)) when it has one, else the bare mtime older code used.
+    The fallback keeps this test runnable -- and red -- against pre-fix code."""
+    fn = getattr(rollover, "_stat_stamp", None)
+    return fn(path) if fn else os.stat(path).st_mtime_ns
+
+
 # --- 4. a concurrent append must NOT be clobbered by the retry loop -------------
 # The retry introduces a window the original didn't have: new_live was computed
 # from a stale read, so writing it after someone else appended destroys their
@@ -162,13 +170,20 @@ d, p = _mklog(_seed())
 try:
     original = open(p, encoding="utf-8").read()
     new_live = "REPLACEMENT CONTENT\n"
-    stale_mtime = os.stat(p).st_mtime_ns
+    st_before = os.stat(p)
+    stale_stamp = _stamp(p)
     # someone else appends between the read and the write
     with open(p, "w", encoding="utf-8") as f:
         f.write(original + "\n## 2026-08-16 -- concurrent append\n- landed\n")
+    # Deterministic same-tick case: Windows' mtime clock ticks ~every 15.6 ms, so an
+    # append landing in the same tick as the read leaves st_mtime_ns UNCHANGED. Force
+    # that on every run instead of hitting it ~half the time (flaky on main 88ac9fe4).
+    os.utime(p, ns=(st_before.st_atime_ns, st_before.st_mtime_ns))
+    check("same-tick append really left mtime unchanged",
+          os.stat(p).st_mtime_ns == st_before.st_mtime_ns)
     raised = False
     try:
-        rollover.write_live_log(p, new_live, stale_mtime)
+        rollover.write_live_log(p, new_live, stale_stamp)
     except BlockingIOError:
         raised = True
     except Exception as e:
@@ -744,7 +759,7 @@ try:
                 procs["ready"] = True
                 break
         procs["waiting"] = procs["p"].poll() is None
-        procs["mtime_still"] = os.stat(log).st_mtime_ns == mtime_before
+        procs["mtime_still"] = _stamp(log) == mtime_before
         return real(log, new_live, mtime_before, *a, **k)
     rollover.write_live_log = _spawn_append_then_write
     try:
