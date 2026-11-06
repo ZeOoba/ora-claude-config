@@ -204,21 +204,8 @@ with tempfile.TemporaryDirectory() as td:
            "BRANCH_DRIFT" not in wipscan.format_report([r]), wipscan.format_report([r]))
 
 
-def make_origin_pair(td, canonical="main"):
-    """(local, origin) -- `local` has `origin` wired as a real remote, with
-    `origin/<canonical>` fetched and resolvable. Both start on `canonical`
-    with one shared commit."""
-    origin = init_repo(os.path.join(td, "origin"))
-    run(["git", "checkout", "-q", "-b", canonical], origin)
-    with open(os.path.join(origin, "base.txt"), "w") as f:
-        f.write("base\n")
-    run(["git", "add", "base.txt"], origin)
-    run(["git", "commit", "-q", "-m", "base"], origin)
-
-    local = os.path.join(td, "local")
-    subprocess.run(["git", "clone", "-q", origin, local], check=True,
-                   capture_output=True, text=True)
-    return local, origin
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _wipscan_fixtures import make_origin_pair  # noqa: E402  (templated pair, 2026-11-05)
 
 
 # --- branch-drift: on canonical, in sync -> not drift -------------------------------
