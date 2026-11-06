@@ -448,6 +448,111 @@ class HistorySkipTests(unittest.TestCase):
         self.assertEqual(sorted({ln for ln, _, _ in P.scan_text(text, CL)}), [3])
 
 
+# --------------------------------------------------------------------------- count claims (2026-11-06)
+# ora-deal-sourcing-scan v2.14 drove every run off "For each of the ten clusters, web-search ..." and a
+# multi-line "TEN clusters: Columbus OH, ... LOUISVILLE KY." fallback list, while target-markets.json held
+# eleven (Chicago-Greater Cook County IL ratified 2026-09-29). Neither line names five states, so the
+# geography rule above passed the file. These pin the count rule that catches it.
+
+SCAN_STEP1 = 'For each of the ten clusters, web-search for newly listed industrial/flex product:'
+SCAN_FALLBACK = (
+    '  staleness in the email. TEN clusters: Columbus OH, Cincinnati OH, Kansas City\n'
+    '  MO/KS, Indianapolis IN, Madison WI, Maryland Baltimore/DC (established) +\n'
+    '  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, LOUISVILLE KY.\n'
+    '  (Louisville ratified as the 10th canonical cluster by Gabriel 2026-08-05.)\n')
+ELEVEN_LIST = (
+    'ELEVEN clusters: Columbus OH, Cincinnati OH, Kansas City MO/KS, Indianapolis IN,\n'
+    '  Madison WI, Maryland Baltimore/DC (established) + entry-phase Grand Rapids MI,\n'
+    '  Richmond VA, Des Moines IA, Louisville KY, Chicago–Greater Cook County IL.\n')
+
+
+class CountClaimTests(unittest.TestCase):
+    def found(self, text, clusters=CL):
+        return [(ln, m) for ln, m, _ in P.scan_text(text, clusters)]
+
+    def test_live_step1_line_is_caught(self):
+        found = self.found(SCAN_STEP1 + '\n')
+        self.assertEqual([ln for ln, _ in found], [1], found)
+        self.assertIn('states 10 clusters', found[0][1])
+        self.assertIn('has 11', found[0][1])
+
+    def test_whole_set_phrasings_are_caught(self):
+        for line in ("Find listings in ORA's ten target markets.",
+                     'Disqualify anything outside the ten clusters; institutional pricing.',
+                     'R4 text scouts, all ten clusters.',
+                     'The file carries the ten clusters with submarkets.',
+                     'Run across all ten canonical markets.',
+                     'TEN clusters: Columbus OH and the rest.',
+                     'Cap at 30 loads across all 10 target markets.',
+                     '7b SOURCE COVERAGE MATRIX — ten clusters × F1 Yardi / F2 Crexi'):
+            self.assertTrue(self.found(line + '\n'), line)
+
+    def test_bare_markets_is_a_known_gap(self):
+        """Bare "markets" is not counted: on the live tree it only produced false alarms ("the 55 markets",
+        "each of the 5 markets" for the entry subset). Pinned so a change here is deliberate."""
+        for line in ('Cap at 30 loads across all 10 markets.', '7b MATRIX — ten markets × F1',
+                     'markets.json = the 55 markets', 'in each of the 5 markets for listings'):
+            self.assertEqual(self.found(line + '\n'), [], line)
+
+    def test_correct_count_is_clean(self):
+        for line in ('For each of the eleven clusters, web-search.', 'outside the 11 clusters',
+                     "ORA's eleven target markets", 'MATRIX — eleven markets × F1'):
+            self.assertEqual(self.found(line + '\n'), [], line)
+
+    def test_subsets_and_non_claims_are_clean(self):
+        for line in ('Five of ten target clusters have no news source.',
+                     'the six established clusters and the five entry-phase clusters',
+                     'The other nine clusters KEEP theirs.',
+                     'on the 2026-08-04 run all nine market agents returned UNKNOWN',
+                     'the 2026-08-11 run covered nine markets while the canon said ten.',
+                     'Louisville ratified as the 10th canonical cluster.',
+                     'compare the two markets side by side',
+                     'v2.5 — THE SCAN IS NOW TEN MARKETS, NOT NINE; all ten clusters.',
+                     '- 2026-08-11: the scan covered all nine clusters.'):
+            self.assertEqual(self.found(line + '\n'), [], line)
+
+    def test_multi_line_fallback_list_is_caught_on_count_and_on_list(self):
+        found = self.found(SCAN_FALLBACK)
+        msgs = [m for _, m in found]
+        self.assertEqual({ln for ln, _ in found}, {1}, found)
+        self.assertTrue(any('states 10 clusters' in m for m in msgs), msgs)
+        self.assertTrue(any('names 10 of 11 clusters' in m and 'Chicago' in m for m in msgs), msgs)
+
+    def test_multi_line_list_with_right_count_but_missing_cluster_is_caught(self):
+        text = ELEVEN_LIST.replace(', Chicago–Greater Cook County IL', '')
+        msgs = [m for _, m in self.found(text)]
+        self.assertEqual(len(msgs), 1, msgs)
+        self.assertIn('names 10 of 11 clusters', msgs[0])
+        self.assertIn('Chicago', msgs[0])
+
+    def test_complete_multi_line_list_is_clean(self):
+        self.assertEqual(self.found(ELEVEN_LIST), [])
+
+    def test_list_stops_at_blank_line(self):
+        text = 'ELEVEN clusters: Columbus OH, Cincinnati OH, Kansas City MO/KS, Indianapolis IN\n\nChicago.\n'
+        msgs = [m for _, m in self.found(text)]
+        self.assertTrue(any('names 4 of 11' in m for m in msgs), msgs)
+
+    def test_wrapped_changelog_paragraph_is_history(self):
+        text = ('v2.15 — CHICAGO LEG ADDED (2026-11-06). STEP 1 still said\n'
+                'For each of the ten clusters, so a Cook listing was disqualified as\n'
+                '"outside the ten clusters".\n'
+                '\n'
+                'For each of the ten clusters, web-search.\n')
+        self.assertEqual([ln for ln, _ in self.found(text)], [5])
+
+    def test_heading_ends_a_history_paragraph(self):
+        text = '- v1.2 (2026-08-21): old note\n## Procedure\nR4 text scouts, all ten clusters.\n'
+        self.assertEqual([ln for ln, _ in self.found(text)], [3])
+
+    def test_count_follows_canon(self):
+        twelve = P.Clusters(12, CL.states, CL.established, CL.allowed_states,
+                            CL.names + [('Nashville TN', ['Nashville'])])
+        msgs = [m for _, m in self.found('For each of the eleven clusters, scan.\n', twelve)]
+        self.assertEqual(len(msgs), 1, msgs)
+        self.assertIn('has 12', msgs[0])
+
+
 # --------------------------------------------------------------------------- canon loading
 
 class LoadClustersTests(unittest.TestCase):
@@ -557,6 +662,7 @@ class EndToEndTests(unittest.TestCase):
     def test_append_only_logs_are_skipped(self):
         for name in ('event_log.md', 'event_log_2026-07-09.md', 'open-items-tracker.md',
                      'open-items-tracker-history.md', 'deal-decision-ledger.md', 'disposition-ledger.md',
+                     'ops_decision_log.md',
                      'CHANGELOG.md'):
             self.t.write(os.path.join(MEM, name), DRIFT)
         self.assert_rc(self.t.run(), 0)

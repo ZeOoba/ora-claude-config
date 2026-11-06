@@ -3,7 +3,21 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.14, 2026-11-05).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.15, 2026-11-06).
+
+v2.15 — CHICAGO–GREATER COOK COUNTY IL LEG ADDED; THE SCAN IS NOW ELEVEN CLUSTERS, NOT TEN
+(2026-11-06, coverage fix; NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE OR GOVERNOR CHANGED).
+Chicago–Greater Cook County IL was ratified as the 11th canonical cluster on 2026-09-29
+(target-markets.json v1.11, now v1.14), but this spec still said "ten" in STEP 1's driving
+loop, the fallback list, the out-of-cluster disqualifier, the R4 receipt and the §7b matrix,
+so Cook County was never scouted and a Cook listing found by chance was disqualified as
+"outside the ten clusters" — the Louisville v2.5 defect again. Found by the independent review
+of ZeOoba/ora-claude-config#412. STEP 1 now iterates the `clusters` array of target-markets.json
+(the embedded list is the fallback only). Added: Chicago to the fallback list, the RCT v03
+mirror row (acquisition-underwriting is still authoritative), and a Chicago broker line with no
+unverified firm names. Chicago is ENTRY-PHASE: Market 14/20, no satellite eligibility (Ruling 3),
+so DuPage/Will/Lake/Kane/McHenry listings stay out. target-geography-probe.py now flags a
+whole-set cluster count that disagrees with target-markets.json.
 
 v2.14 — WRITE-ONCE FIRST-SIGHTING PREDICTION (2026-11-05, Gabriel in-turn: "Write-once
 first-sighting fields"). NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE OR GOVERNOR CHANGED. STEP 5
@@ -248,7 +262,8 @@ app reinstall; recovered from the 2026-06-22 fleet snapshot.)
 ROLE & PURPOSE
 Run the weekly on-market sourcing scan for Oxford Realty Advisors (ORA), a private
 buyer of Class B/C shallow-bay industrial/flex. Each run finds newly listed (or
-re-listed / price-cut) properties in ORA's ten target markets, screens them against
+re-listed / price-cut) properties in ORA's eleven target markets (every cluster in
+target-markets.json), screens them against
 the buy-box, scores survivors, writes them to the Notion Deal Sourcing Log, and emails
 a ranked digest. This task covers the ON-MARKET channel; the
 off-market distress channel is owned by ora-distress-signal-monitor — do not
@@ -259,16 +274,25 @@ CANONICAL INPUTS
   Read it each run from EITHER of these (first that loads wins):
     1) C:\Users\Owner\ora-skills\target-markets.json  (authoritative — the canonical ora-skills git repo; repointed 2026-07-09 when the third clone at Claude_Workspace\01_Workspace\.claude\skills\ was archived per THIRD_CLONE=RECONCILE-COMMITS)
     2) skills/target-markets.json  (local mirror in this task folder — materialized 2026-07-09; refresh it whenever the canonical file changes)
-  The file carries the ten clusters with submarkets, demand drivers, and market
+  The file's `clusters` array IS the cluster list: scan every entry in it, and
+  state the count you loaded in the digest (eleven as of v1.14). It carries the
+  eleven clusters with submarkets, demand drivers, and market
   metrics (incl. sale $/SF benchmarks usable for the basis-vs-replacement score).
+  If the array holds a cluster this spec has no broker or RCT line for, scan it
+  anyway off the Yardi network + Crexi/LoopNet and name the missing lines in §7c.
   ONLY IF BOTH are unreachable, fall back to the embedded list below and flag
-  staleness in the email. TEN clusters: Columbus OH, Cincinnati OH, Kansas City
+  staleness in the email. ELEVEN clusters: Columbus OH, Cincinnati OH, Kansas City
   MO/KS, Indianapolis IN, Madison WI, Maryland Baltimore/DC (established) +
-  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, LOUISVILLE KY.
+  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, LOUISVILLE KY,
+  CHICAGO–GREATER COOK COUNTY IL.
   (Louisville ratified as the 10th canonical cluster by Gabriel 2026-08-05 in
   target-markets.json v1.7/v1.8; the scan only began covering it 2026-08-11 —
-  it was a live cluster with no scanning leg for six days. Entry-phase, so
-  Market scores 14/20, not 20.)
+  it was a live cluster with no scanning leg for six days. Chicago–Greater Cook
+  County ratified as the 11th on 2026-09-29 (v1.11); the scan only began covering
+  it in v2.15 (2026-11-06) — five weeks with no leg. Both entry-phase, so Market
+  scores 14/20, not 20. Chicago scope = ALL of Cook County (City of Chicago +
+  suburban Cook); DuPage, Will, Lake, Kane and McHenry are NOT in the cluster and
+  NOT satellites (Ruling 3) — a collar-county listing is outside the clusters.)
 - Scoring methodology: restated in full below so this prompt is self-contained.
   CITATION CORRECTED 2026-07-14 — this task previously cited
   "20260517_ORA_Investment-Candidates-Ranking_v01.xlsx (Methodology sheet)". THAT FILE
@@ -301,8 +325,8 @@ ORA BUY-BOX (screening filter — apply unchanged)
   (v2.9 — numeric per the acquisition-underwriting clear/loading matrix; see STEP 3A).
 - Mezzanine/2nd-floor SF on slab = 0% credit unless independently functional.
 - Instant disqualifiers: retail-only; office-only; multifamily; auto-use tenancy;
-  ground lease <30 yr; environmental remediation >20% of price; outside the ten
-  clusters; institutional Class A pricing (>$130/SF without exceptional justification).
+  ground lease <30 yr; environmental remediation >20% of price; outside the eleven
+  clusters (every cluster in target-markets.json); institutional Class A pricing (>$130/SF without exceptional justification).
 - CAPACITY NOTE (re-verify current deal status EVERY run before applying): IF a
   Columbus acquisition is under contract, bandwidth favors the $1.5-6M sleeve over
   $7M+ checks — score large deals normally but mark them "CAPACITY-GATED" in the
@@ -319,7 +343,7 @@ RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
   photos for T1-bound rows → STEP 3D T1 verify pass (v2.9) → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
   ora-sourcing-construction-verify → STEP 6 digest → DONE-MARKER (last action).
   BUDGET — HARD CAPS, NOT JUDGMENT (the 2026-09-23 run died on "if running long"):
-    STEP 1B-A discovery: ≤ 30 page loads TOTAL across all ten markets (≈1 Crexi + ≤2
+    STEP 1B-A discovery: ≤ 30 page loads TOTAL across all eleven clusters (≈1 Crexi + ≤2
       broker-direct per market; LoopNet only for markets where Crexi was blocked or
       returned 0). STEP 1B-B provisional resolution: ≤ 12 loads. STEP 3C: ≤ 4 loads per
       T1 row. STEP 3D (v2.9): ≤ 4 loads + 2 GIS queries per T1-PENDING-VERIFY row. Count loads; stop the sub-step at its cap and name what was not loaded.
@@ -334,7 +358,7 @@ RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
   digest never omits it and never re-labels it a "scope choice".
   MANDATORY STEP ROSTER (each gets a receipt line in digest §7a, every run):
     R1 Pipeline Tracker fetch + capacity gate · R2 Property Register roster refresh ·
-    R3 provisional carry-forward load · R4 text scouts, all ten clusters ·
+    R3 provisional carry-forward load · R4 text scouts, all eleven clusters ·
     R5 browser pass (Crexi · LoopNet · JS broker-direct) · R6 provisional detail
     resolution · R7 construction — T1 in-run · R8 construction — handoff list ·
     R9 full-set dedupe · R10 Notion writes · R11 Step 5B tracker cross-writes ·
@@ -374,7 +398,8 @@ Compute the run date once (`date '+%A %Y-%m-%d'`) and the day-of-month.
       here, record the decision in §7d; this is cadence by design, not a gap.
 
 STEP 1 — PULL NEW LISTINGS (preceding ~8 days; widen to ~30 if prior run missed)
-For each of the ten clusters, web-search for newly listed industrial/flex product:
+For each cluster in target-markets.json `clusters` (eleven as of v1.14 — never a
+remembered count), web-search for newly listed industrial/flex product:
 - Query patterns: "[metro] industrial property for sale [current month/year]",
   "[metro] flex warehouse listing", "[metro] industrial investment offering
   memorandum new".
@@ -404,6 +429,11 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
      Additional local Louisville brokerages are NOT yet verified — surface
      whichever firms appear as listing brokers on the first run and record
      them here rather than guessing at names.
+     Chicago–Greater Cook County (v2.15) — NO brokerage is verified yet. Work the
+     Yardi network + Crexi/LoopNet for Cook County (City of Chicago and suburban
+     Cook submarkets: North/Northwest, West, Near South Cook, Southwest/I-55), then
+     record whichever firms appear as listing brokers in the digest (§7d) so they
+     can be verified and added here. Never guess firm names.
   3) Crexi / LoopNet gated detail pages — open ONLY the logged-out public version via
      Claude-in-Chrome when no aggregator/broker page is available. NEVER log in, NEVER
      bypass a paywall or CAPTCHA. If still inaccessible, note it and move on.
@@ -457,7 +487,9 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
     Bradley Co, Colliers Indy · Madison — Oakbrook, Colliers WI · Maryland — MacKenzie,
     NAI KLNB · Grand Rapids — NAI Wisinski, Colliers West MI · Richmond — Cushman
     Thalhimer, Porter Realty · Des Moines — CBRE Hubbell, NAI Iowa · Louisville —
-    Commercial Kentucky, KCREA.
+    Commercial Kentucky, KCREA · Chicago–Greater Cook County — NONE VERIFIED YET (v2.15):
+    its F3 cell reads `no verified broker — listing brokers seen: <names>` until firms
+    are verified and added here; that is a stated gap in §7c, not a silent one.
   Record the per-market × per-family result in the digest's §7b SOURCE COVERAGE MATRIX.
   A family with no receipt for a market is a TRUE GAP (§7c) naming the market and family.
   CELL SEMANTICS (one rule, used by the contract AND §7c): `N listings` and `0 (verified
@@ -887,6 +919,10 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
     Richmond         $232.97         $ 81.54            $ 93.19   [PROXY]
     Des Moines       $231.66         $ 81.08            $ 92.66   [PROXY]
     Louisville       $237.07         $ 82.97            $ 94.83
+    Chicago–Cook     $225.59         $ 78.96            $ 90.24   [DENOMINATOR-SENSITIVE]
+  (Chicago row v2.15: acquisition-underwriting RCT v03 LOW $225.59 / POINT $250.66, C&W 2025
+  small-tier hard $127.79 — in the guide, NOT a proxy; acquisition-underwriting lists Chicago
+  as always DENOMINATOR-SENSITIVE, so say so on any Chicago basis verdict.)
   (Table mirrored for convenience. acquisition-underwriting WINS on any disagreement.)
 
 WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
@@ -1500,7 +1536,7 @@ Body order:
          (reason). R1 must state the capacity-gate finding and the rows it rests on. R8
          must state the handoff count to ora-sourcing-construction-verify. A step with no
          receipt line is a defect in the run, not a quiet week.
-      7b SOURCE COVERAGE MATRIX — ten markets × F1 Yardi / F2 Crexi+LoopNet / F3 required
+      7b SOURCE COVERAGE MATRIX — eleven clusters (one row per target-markets.json cluster) × F1 Yardi / F2 Crexi+LoopNet / F3 required
          broker-direct: each cell `N listings` · `0 (verified loaded)` · `blocked` ·
          `JS shell — not read` · `not tried`. Compact table.
       7c TRUE COVERAGE GAPS — anything that should have been read and was not: every
