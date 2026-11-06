@@ -90,11 +90,12 @@ def rec(**fields):
     return fb.normalize_record(raw, 0, "fixture")
 
 
-def agg(records, eras=None, today=TODAY, stall_days=14, min_n=5, t1_rows=None, pexec_rows=None):
+def agg(records, eras=None, today=TODAY, stall_days=14, min_n=5, t1_rows=None, pexec_rows=None,
+        dup_stats=None):
     if eras is None:
         eras = fb.build_eras([("v2.9", V29)])
     return fb.aggregate(records, eras, today, stall_days, min_n, t1_rows=t1_rows,
-                        pexec_rows=pexec_rows)
+                        pexec_rows=pexec_rows, dup_stats=dup_stats)
 
 
 def expect_input_error(fn, *needles):
@@ -720,7 +721,8 @@ def test_data_quality_counts_unit():
                   "tier_basis": {"label": BASIS_CURRENT, "first_sighting_rows": 0,
                                  "logged_rows": 10},
                   "row_count_reconciliation": {"status": "not-run", "covered_rows": 12,
-                                               "expected_rows": None}}, dq
+                                               "expected_rows": None},
+                  "duplicate_recovery": {"status": "not-run"}}, dq
     print("  PASS test_data_quality_counts_unit")
 
 
@@ -948,7 +950,8 @@ def test_row_count_reconciliation_e2e():
         rc, md, err = run_main(base + ["--expect-rows", ok])
         assert rc == 0, err
         dq_section = section(md, "### 7. Data quality")
-        assert "row-count reconciliation: OK" in dq_section and "NOT RUN" not in dq_section, dq_section
+        assert ("row-count reconciliation: OK" in dq_section
+                and "row-count reconciliation: NOT RUN" not in dq_section), dq_section
         rc, out, err = run_main(base + ["--expect-rows", ok, "--json"])
         assert rc == 0, err
         assert json.loads(out)["data_quality"]["row_count_reconciliation"] == {
@@ -1355,6 +1358,348 @@ def test_sources_are_ascii_only_unit():
     print("  PASS test_sources_are_ascii_only_unit")
 
 
+# --- duplicate recovery (--dup-rows, QUERY D) ---------------------------------------------
+# Two writers can create two rows for one parcel (a scan and a Code session racing). The scan's
+# row carries the write-once prediction; deal-retirement keeps the richer row and flags the
+# other with Exclude + Duplicate Of. The engine, not the writers, recovers the prediction:
+# the kept (canonical) row takes the EARLIEST first-sighting verdict in its duplicate set.
+
+ID_X = "3c66ecd89e598154a02be1e78b3eb7ea"   # canonical
+ID_Y = "32b6ecd89e5981d89646fec9f9b703b7"   # flagged duplicate of X
+ID_Z = "3456ecd89e598160bab5ce39184fcbba"   # flagged duplicate of Y (chain)
+
+
+def dup(page_id, ts, dup_of=None, created="2026-11-02", **fields):
+    """One QUERY D raw record (era-bucketed created, exact created_day, created_ts)."""
+    raw = {"url": "https://app.notion.com/" + page_id, "name": "Fixture Dup " + page_id[-4:],
+           "created_ts": ts, "created": "2026-10-30", "created_day": created,
+           "dup_of": None if dup_of is None else "app.notion.com/%s (deduped 2026-11-20; reversible)"
+           % dup_of}
+    raw.update(fields)
+    return raw
+
+
+def dups(*raws):
+    return fb.normalize_dup_records(list(raws), "fixture-d")
+
+
+def group(**fields):
+    """The --rows group a QUERY D row also falls in (era-bucketed created)."""
+    fields.setdefault("created", "2026-10-30")
+    return rec(**fields)
+
+
+def apply_and_agg(rows, dup_raws, t1_rows=None):
+    records, t1, stats = fb.apply_duplicates(rows, dups(*dup_raws), t1_rows)
+    return agg(records, t1_rows=t1, dup_stats=stats)
+
+
+def test_query_d_is_documented_verbatim_and_runs_in_sqlite_e2e():
+    assert fb.QUERY_D.isascii() and "\n" not in fb.QUERY_D and fb.QUERY_D.startswith("SELECT ")
+    assert fb.QUERY_D in fb.__doc__, "QUERY_D must appear verbatim in the module docstring"
+    assert fb.QUERY_D.count("?") == 0
+    # QUERY D's created CASE must equal QUERY A's so its rows match their --rows groups
+    case = fb.QUERY_A.split(" AS created")[0][len("SELECT "):]
+    assert case in fb.QUERY_D, "QUERY_D must bucket created exactly as QUERY_A"
+    cols = ("url", "createdTime", "Deal Name / Address", "Date Added", "Source", "Verdict",
+            "Verdict at First Sighting", "Score at First Sighting", "Status", "Go / No-Go",
+            "Scorecard Done", "date:LOI Sent Date:start", "LOI Outcome", "Loss Class",
+            "Exclude from Calibration", "Data Certification", "Duplicate Of")
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE %s (%s)" % (NOTION_TABLE, ", ".join('"%s"' % c for c in cols)))
+
+    def row(pid, ts, vf, status, dup_of, exclude):
+        return ("https://app.notion.com/" + pid, ts, "Fixture " + pid[-4:], ts[:10], "Crexi",
+                "PASS", vf, None, status, None, NO, None, None, None, exclude, None, dup_of)
+    other = "0" * 31 + "1"
+    con.executemany("INSERT INTO %s VALUES (%s)" % (NOTION_TABLE, ", ".join("?" * len(cols))), [
+        row(ID_X, "2026-11-03 10:00:00Z", None, "Passed", None, NO),
+        row(ID_Y, "2026-11-02 09:00:00Z", "T1 PURSUE", "Dead",
+            "app.notion.com/%s (deduped 2026-11-20; reversible)" % ID_X, YES),
+        row(other, "2026-11-04 09:00:00Z", None, "New Lead", None, NO),   # not in any set
+    ])
+    out = _sql_records(con, fb.QUERY_D)
+    assert sorted(r["url"][-32:] for r in out) == sorted([ID_X, ID_Y]), out
+    recs = fb.normalize_dup_records(out, "sqlite-d")
+    by = {r["page_id"]: r for r in recs}
+    assert by[ID_Y]["dup_target"] == ID_X and by[ID_X]["dup_target"] is None
+    assert by[ID_X]["created"] == V29 and by[ID_X]["created_day"] == date(2026, 11, 3)
+    print("  PASS test_query_d_is_documented_verbatim_and_runs_in_sqlite_e2e")
+
+
+def test_canonical_row_recovers_the_duplicates_first_sighting_unit():
+    """The round-1 race: the scan's row X' (T1 first sighting) was flagged; the Code row X
+    (blank first sighting, Passed) was kept. Without recovery the T1 prediction is lost and a
+    phantom PASS-tier rejection is counted."""
+    rows = [group(verdict="PASS", status="Passed"),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    before = agg(rows)["tier_vs_decision"]["v2.9"]
+    assert before["T1 PURSUE"]["logged"] == 0 and before["PASS"]["rejected"] == 1
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed"),
+        dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)])
+    v29 = res["tier_vs_decision"]["v2.9"]
+    assert (v29["T1 PURSUE"]["logged"], v29["T1 PURSUE"]["rejected"]) == (1, 1), v29["T1 PURSUE"]
+    assert v29["PASS"]["logged"] == 0
+    assert (res["totals"]["rows"], res["totals"]["excluded_rows"]) == (2, 1)
+    dq = res["data_quality"]["duplicate_recovery"]
+    assert (dq["status"], dq["sets"], dq["recovered"], dq["replaced"]) == ("run", 1, 1, 0), dq
+    print("  PASS test_canonical_row_recovers_the_duplicates_first_sighting_unit")
+
+
+def test_flagged_duplicate_without_exclude_is_moved_to_excluded_unit():
+    """Live data: 20 of 45 rows with Duplicate Of had Exclude unticked, so each duplicate set
+    was counted twice. A row with Duplicate Of is a duplicate whatever the checkbox says."""
+    rows = [group(verdict="PASS", status="Passed", n=2)]   # X and its unticked duplicate Y
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed"),
+        dup(ID_Y, "2026-11-04 09:00:00Z", dup_of=ID_X, verdict="PASS", status="Passed")])
+    v29 = res["tier_vs_decision"]["v2.9"]
+    assert v29["PASS"]["rejected"] == 1, v29["PASS"]
+    assert (res["totals"]["rows"], res["totals"]["excluded_rows"]) == (2, 1)
+    dq = res["data_quality"]["duplicate_recovery"]
+    assert (dq["flagged"], dq["moved_to_excluded"], dq["recovered"]) == (1, 1, 0), dq
+    print("  PASS test_flagged_duplicate_without_exclude_is_moved_to_excluded_unit")
+
+
+def test_earliest_first_sighting_wins_across_the_set_unit():
+    """Both rows scan-created: the canonical carries a LATER first sighting (T2) than its
+    flagged duplicate (T1). The earliest sighting is the prediction that was first made."""
+    rows = [group(verdict="T2 WATCH", verdict_first="T2 WATCH", status="Passed"),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-05 10:00:00Z", verdict="T2 WATCH", verdict_first="T2 WATCH",
+            status="Passed"),
+        dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)])
+    v29 = res["tier_vs_decision"]["v2.9"]
+    assert v29["T1 PURSUE"]["rejected"] == 1 and v29["T2 WATCH"]["logged"] == 0, v29
+    dq = res["data_quality"]["duplicate_recovery"]
+    assert (dq["recovered"], dq["replaced"]) == (0, 1), dq
+    print("  PASS test_earliest_first_sighting_wins_across_the_set_unit")
+
+
+def test_canonical_that_is_earliest_or_set_without_predictions_is_untouched_unit():
+    rows = [group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Passed"),
+            group(verdict="PASS", verdict_first="PASS", status="Dead", exclude=True),
+            group(verdict="PASS", status="Passed"),
+            group(verdict="PASS", status="Dead", exclude=True)]
+    other_x, other_y = "a" * 32, "b" * 32
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-02 09:00:00Z", verdict="T1 PURSUE", verdict_first="T1 PURSUE",
+            status="Passed"),
+        dup(ID_Y, "2026-11-04 09:00:00Z", dup_of=ID_X, verdict="PASS", verdict_first="PASS",
+            status="Dead", exclude=True),
+        dup(other_x, "2026-11-02 09:00:00Z", verdict="PASS", status="Passed"),
+        dup(other_y, "2026-11-04 09:00:00Z", dup_of=other_x, verdict="PASS", status="Dead",
+            exclude=True)])
+    assert res["tier_vs_decision"] == agg(rows)["tier_vs_decision"]
+    dq = res["data_quality"]["duplicate_recovery"]
+    assert (dq["sets"], dq["recovered"], dq["replaced"]) == (2, 0, 0), dq
+    print("  PASS test_canonical_that_is_earliest_or_set_without_predictions_is_untouched_unit")
+
+
+def test_chain_resolves_to_root_cycle_and_mismatch_are_fatal_unit():
+    rows = [group(verdict="PASS", status="Passed"),
+            group(verdict="PASS", status="Dead", exclude=True),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    chain = [dup(ID_X, "2026-11-05 10:00:00Z", verdict="PASS", status="Passed"),
+             dup(ID_Y, "2026-11-04 09:00:00Z", dup_of=ID_X, verdict="PASS", status="Dead",
+                 exclude=True),
+             dup(ID_Z, "2026-11-02 09:00:00Z", dup_of=ID_Y, verdict="T1 PURSUE",
+                 verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    res = apply_and_agg(rows, chain)
+    assert res["tier_vs_decision"]["v2.9"]["T1 PURSUE"]["rejected"] == 1
+    assert res["data_quality"]["duplicate_recovery"]["sets"] == 1
+    cycle = [dup(ID_X, "2026-11-05 10:00:00Z", dup_of=ID_Y, verdict="PASS", status="Passed"),
+             dup(ID_Y, "2026-11-04 09:00:00Z", dup_of=ID_X, verdict="PASS", status="Dead",
+                 exclude=True)]
+    expect_input_error(lambda: fb.apply_duplicates(rows, dups(*cycle), None), "cycle")
+    # a QUERY D row with no matching --rows group means the exports disagree
+    stray = [dup(ID_X, "2026-11-03 10:00:00Z", verdict="KILLED", status="Passed"),
+             dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+                 verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    expect_input_error(lambda: fb.apply_duplicates(rows, dups(*stray), None), "--dup-rows",
+                       "matches no --rows group")
+    expect_input_error(lambda: dups(dup(ID_X, "x", url="https://example.test/no-id")), "url")
+    expect_input_error(lambda: dups(dup(ID_X, "2026-11-03 10:00:00Z"),
+                                    dup(ID_X, "2026-11-04 10:00:00Z")), "twice")
+    print("  PASS test_chain_resolves_to_root_cycle_and_mismatch_are_fatal_unit")
+
+
+def test_unresolvable_target_still_excludes_the_flagged_row_unit():
+    rows = [group(verdict="PASS", status="Passed")]
+    res = apply_and_agg(rows, [dup(ID_Y, "2026-11-02 09:00:00Z", dup_of="f" * 32, verdict="PASS",
+                                   status="Passed")])
+    assert res["totals"]["excluded_rows"] == 1
+    dq = res["data_quality"]["duplicate_recovery"]
+    assert (dq["unresolved"], dq["moved_to_excluded"]) == (1, 1), dq
+    print("  PASS test_unresolvable_target_still_excludes_the_flagged_row_unit")
+
+
+def test_t1_rows_follow_the_recovery_unit():
+    """--t1-rows (QUERY B) misses a canonical row whose own Verdict and first sighting are not
+    T1; after recovery it is T1, so it must reach the stalled list when it is open and old.
+    A flagged duplicate in --t1-rows must stop counting as an open T1."""
+    rows = [group(verdict="PASS", status="Reviewing"),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Reviewing")]
+    t1 = [rec(created="2026-11-02", url="https://app.notion.com/" + ID_Y, name="Fixture Y",
+              verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Reviewing")]
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Reviewing"),
+        dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Reviewing")], t1_rows=t1)
+    st = res["stalled_t1"]
+    assert st["count"] == 1 and [x["url"][-32:] for x in st["list"]] == [ID_X], st
+    assert st["list"][0]["created"] == "2026-11-02", st   # created_day of X
+    print("  PASS test_t1_rows_follow_the_recovery_unit")
+
+
+def test_duplicate_recovery_not_run_and_cli_e2e():
+    rows = [group(verdict="PASS", status="Passed")]
+    res = agg(rows)
+    assert res["data_quality"]["duplicate_recovery"]["status"] == "not-run"
+    md = section(fb.render_markdown(res), "### 7. Data quality")
+    assert "duplicate recovery: NOT RUN (no --dup-rows)" in md, md
+    with tempfile.TemporaryDirectory() as tmp:
+        a = write_json(tmp, "a.json", [{"created": "2026-10-30", "verdict": "PASS",
+                                        "status": "Passed", "n": 1},
+                                       {"created": "2026-10-30", "verdict": "T1 PURSUE",
+                                        "verdict_first": "T1 PURSUE", "status": "Dead",
+                                        "exclude": "__YES__", "n": 1}])
+        d = write_json(tmp, "d.json", {"results": [
+            dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed"),
+            dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+                verdict_first="T1 PURSUE", status="Dead", exclude="__YES__")], "has_more": False})
+        rc, out, err = run_main(["--rows", a, "--dup-rows", d, "--today", "2026-12-15", "--json"])
+        assert rc == 0, err
+        got = json.loads(out)
+        assert got["tier_vs_decision"]["v2.9"]["T1 PURSUE"]["rejected"] == 1
+        assert got["params"]["dup_rows_files"] == [d]
+        rc, out, err = run_main(["--rows", a, "--dup-rows", d, "--today", "2026-12-15"])
+        assert rc == 0 and "duplicate recovery (--dup-rows, QUERY D): 1 set" in out, out
+        trunc = write_json(tmp, "t.json", {"results": [], "has_more": True})
+        rc, out, err = run_main(["--rows", a, "--dup-rows", trunc, "--today", "2026-12-15"])
+        assert rc == 2 and TRUNCATED in err, err
+    print("  PASS test_duplicate_recovery_not_run_and_cli_e2e")
+
+
+def test_every_query_d_row_must_match_an_original_group_unit():
+    """REFUTE C4: a QUERY D row with no --rows group is fatal even when it needs no move
+    (flagged-and-excluded, or a canonical needing no override), and an appended copy is never
+    consumed as if it were an original group (scenario J silently rewrote a recovered T1)."""
+    rows = [group(verdict="PASS", status="Passed"),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    base = [dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed"),
+            dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+                verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    a1 = base + [dup("c" * 32, "2026-11-04 09:00:00Z", dup_of=ID_X, verdict="KILLED",
+                     status="Dead", exclude=True)]
+    expect_input_error(lambda: fb.apply_duplicates(rows, dups(*a1), None), "matches no --rows group")
+    a2 = base + [dup("d" * 32, "2026-11-04 09:00:00Z", verdict="KILLED", status="Passed")]
+    expect_input_error(lambda: fb.apply_duplicates(rows, dups(*a2), None), "matches no --rows group")
+    # J: canonical W is absent from --rows but its key equals X's recovered copy
+    j = base + [dup("e" * 32, "2026-11-05 09:00:00Z", verdict="PASS", verdict_first="T1 PURSUE",
+                    status="Passed"),
+                dup("f" * 32, "2026-11-01 09:00:00Z", dup_of="e" * 32, verdict="T2 WATCH",
+                    verdict_first="T2 WATCH", status="Dead", exclude=True)]
+    expect_input_error(lambda: fb.apply_duplicates(rows, dups(*j), None), "matches no --rows group")
+    print("  PASS test_every_query_d_row_must_match_an_original_group_unit")
+
+
+def test_t1_rows_present_canonical_moves_away_or_stays_once_unit():
+    """REFUTE L1 / P2: a canonical already in --t1-rows takes the recovered tier there (away
+    from T1 -> not stalled) and is never added a second time when it becomes T1."""
+    rows = [group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Reviewing"),
+            group(verdict="T2 WATCH", verdict_first="T2 WATCH", status="Dead", exclude=True)]
+    t1 = [rec(created="2026-11-02", url="https://app.notion.com/" + ID_X, name="Fixture X",
+              verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Reviewing")]
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="T1 PURSUE", verdict_first="T1 PURSUE",
+            status="Reviewing"),
+        dup(ID_Y, "2026-11-01 09:00:00Z", dup_of=ID_X, verdict="T2 WATCH",
+            verdict_first="T2 WATCH", status="Dead", exclude=True)], t1_rows=t1)
+    assert res["stalled_t1"]["count"] == 0, res["stalled_t1"]
+    v29 = res["tier_vs_decision"]["v2.9"]
+    assert (v29["T1 PURSUE"]["logged"], v29["T2 WATCH"]["logged"]) == (0, 1), v29
+    rows2 = [group(verdict="T1 PURSUE", status="Reviewing"),
+             group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    t1b = [rec(created="2026-11-02", url="https://app.notion.com/" + ID_X, name="Fixture X",
+               verdict="T1 PURSUE", status="Reviewing")]
+    records, t1_out, _ = fb.apply_duplicates(rows2, dups(
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="T1 PURSUE", status="Reviewing"),
+        dup(ID_Y, "2026-11-01 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)), t1b)
+    assert len(t1_out) == 1 and t1_out[0]["verdict_first"] == "T1 PURSUE", t1_out
+    assert all(r["n"] >= 1 for r in records) and len(records) == 2, records
+    # REFUTE round 2 F1: two --rows groups with the SAME key (one partition exported under
+    # two filenames); an exhausted n == 0 group must never be taken again.
+    same = [group(verdict="PASS", status="Passed") for _ in range(3)]
+    recs3, _, _ = fb.apply_duplicates(same, dups(
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed"),
+        dup(ID_Y, "2026-11-04 10:00:00Z", dup_of=ID_X, verdict="PASS", status="Passed"),
+        dup(ID_Z, "2026-11-05 10:00:00Z", dup_of=ID_X, verdict="PASS", status="Passed")), None)
+    assert sum(r["n"] for r in recs3) == 3 and min(r["n"] for r in recs3) >= 1, recs3
+    print("  PASS test_t1_rows_present_canonical_moves_away_or_stays_once_unit")
+
+
+def test_created_ts_is_validated_and_compared_as_time_unit():
+    """REFUTE C3: '2026-11-03 23:00:00Z' vs '2026-11-03T01:00:00.000Z' must order by time,
+    not by string (space sorts before T); an unparseable or blank created_ts is fatal."""
+    rows = [group(verdict="T2 WATCH", verdict_first="T2 WATCH", status="Passed"),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 23:00:00Z", verdict="T2 WATCH", verdict_first="T2 WATCH",
+            status="Passed"),
+        dup(ID_Y, "2026-11-03T01:00:00.000Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)])
+    assert res["data_quality"]["duplicate_recovery"]["replaced"] == 1
+    assert res["tier_vs_decision"]["v2.9"]["T1 PURSUE"]["rejected"] == 1
+    expect_input_error(lambda: dups(dup(ID_X, "Nov 3, 2026 10:00")), "created_ts")
+    expect_input_error(lambda: dups(dup(ID_X, "")), "created_ts")
+    expect_input_error(lambda: dups(dup(ID_X, "2026-11-03 10:00:00+99:99")), "created_ts")
+    # REFUTE round 2 F2: a non-Z offset. 09:00-05:00 is 14:00Z, later than 12:00Z.
+    res2 = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 09:00:00-05:00", verdict="T2 WATCH", verdict_first="T2 WATCH",
+            status="Passed"),
+        dup(ID_Y, "2026-11-03 12:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)])
+    assert res2["data_quality"]["duplicate_recovery"]["replaced"] == 1
+    print("  PASS test_created_ts_is_validated_and_compared_as_time_unit")
+
+
+def test_page_ids_anchor_on_the_url_and_the_link_target_unit():
+    """REFUTE F1: a notion.so slug url or a ?v= view id must not change which page is meant;
+    a Duplicate Of with free text keeps the id right after the domain."""
+    rows = [group(verdict="PASS", status="Passed"),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    slug_x = "https://www.notion.so/Deal-Name-Here-" + ID_X + "?v=" + "9" * 32
+    res = apply_and_agg(rows, [
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed", url=slug_x),
+        dup(ID_Y, "2026-11-02 09:00:00Z", verdict="T1 PURSUE", verdict_first="T1 PURSUE",
+            status="Dead", exclude=True,
+            dup_of="www.notion.so/Deal-Name-Here-%s (deduped 2026-11-20; see %s)"
+            % (ID_X, "8" * 32))])
+    dq = res["data_quality"]["duplicate_recovery"]
+    assert (dq["recovered"], dq["unresolved"]) == (1, 0), dq
+    print("  PASS test_page_ids_anchor_on_the_url_and_the_link_target_unit")
+
+
+def test_excluded_canonical_is_left_alone_unit():
+    """REFUTE M11: a kept row that is itself excluded takes no recovered prediction."""
+    rows = [group(verdict="PASS", status="Passed", exclude=True),
+            group(verdict="T1 PURSUE", verdict_first="T1 PURSUE", status="Dead", exclude=True)]
+    records, _, stats = fb.apply_duplicates(rows, dups(
+        dup(ID_X, "2026-11-03 10:00:00Z", verdict="PASS", status="Passed", exclude=True),
+        dup(ID_Y, "2026-11-02 09:00:00Z", dup_of=ID_X, verdict="T1 PURSUE",
+            verdict_first="T1 PURSUE", status="Dead", exclude=True)), None)
+    assert (stats["recovered"], stats["replaced"]) == (0, 0), stats
+    assert sorted((r["verdict"], r["verdict_first"]) for r in records) == [
+        ("PASS", None), ("T1 PURSUE", "T1 PURSUE")], records
+    print("  PASS test_excluded_canonical_is_left_alone_unit")
+
+
 def main():
     test_option_sets_match_live_schema_2026_11_05_unit()
     test_known_select_values_and_blanks_unit()
@@ -1413,6 +1758,20 @@ def main():
     test_help_and_missing_rows_unit()
     test_definitions_in_docstring_and_footer_unit()
     test_sources_are_ascii_only_unit()
+    test_query_d_is_documented_verbatim_and_runs_in_sqlite_e2e()
+    test_canonical_row_recovers_the_duplicates_first_sighting_unit()
+    test_flagged_duplicate_without_exclude_is_moved_to_excluded_unit()
+    test_earliest_first_sighting_wins_across_the_set_unit()
+    test_canonical_that_is_earliest_or_set_without_predictions_is_untouched_unit()
+    test_chain_resolves_to_root_cycle_and_mismatch_are_fatal_unit()
+    test_unresolvable_target_still_excludes_the_flagged_row_unit()
+    test_t1_rows_follow_the_recovery_unit()
+    test_duplicate_recovery_not_run_and_cli_e2e()
+    test_every_query_d_row_must_match_an_original_group_unit()
+    test_t1_rows_present_canonical_moves_away_or_stays_once_unit()
+    test_created_ts_is_validated_and_compared_as_time_unit()
+    test_page_ids_anchor_on_the_url_and_the_link_target_unit()
+    test_excluded_canonical_is_left_alone_unit()
     print("ALL FUNNEL-BACKTEST TESTS PASS")
 
 

@@ -16,9 +16,9 @@ This is the deterministic engine for that back-test: the same exports in, the sa
 out, every time.
 
 EXPORT CONTRACT. Notion SQL mode returns one page of about 100 rows and cannot paginate, so
-the grouped export is era-bucketed and partitioned by verdict. The caller runs these four
+the grouped export is era-bucketed and partitioned by verdict. The caller runs these five
 queries exactly as written (they are also the module constants QUERY_A, QUERY_B, QUERY_P,
-QUERY_N; the Query A partition values are QUERY_A_PARTITIONS).
+QUERY_N, QUERY_D; the Query A partition values are QUERY_A_PARTITIONS).
 
 QUERY A (grouped; required; run 5 times with the single SQL param ["T1 PURSUE"],
 ["T2 WATCH"], ["PASS"], ["KILLED"], ["(none)"]; one --rows file each):
@@ -32,6 +32,20 @@ SELECT substr("Date Added",1,10) AS created, "Verdict" AS verdict, "P(exec) %" A
 
 QUERY N (row count; optional but recommended; feeds --expect-rows):
 SELECT COUNT(*) AS n FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b"
+
+QUERY D (per-row duplicate sets; optional but recommended; feeds --dup-rows):
+SELECT url, "Deal Name / Address" AS name, createdTime AS created_ts, CASE WHEN substr("Date Added",1,10) >= '2026-10-30' THEN '2026-10-30' ELSE '2026-01-01' END AS created, substr("Date Added",1,10) AS created_day, "Source" AS source, "Verdict" AS verdict, "Verdict at First Sighting" AS verdict_first, "Score at First Sighting" AS score_first, "Status" AS status, "Go / No-Go" AS go, "Scorecard Done" AS scorecard, CASE WHEN "date:LOI Sent Date:start" IS NOT NULL THEN substr("date:LOI Sent Date:start",1,7) || '-01' END AS loi_sent, "LOI Outcome" AS loi_outcome, "Loss Class" AS loss_class, "Exclude from Calibration" AS exclude, "Data Certification" AS cert, "Duplicate Of" AS dup_of FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" AS t WHERE coalesce(t."Duplicate Of",'') <> '' OR EXISTS (SELECT 1 FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" AS d WHERE coalesce(d."Duplicate Of",'') <> '' AND instr(lower(replace(d."Duplicate Of",'-','')), lower(substr(replace(t.url,'-',''),-32))) > 0) ORDER BY 3
+
+  - QUERY D returns every row in a duplicate set: each row whose "Duplicate Of" is set
+    (deal-retirement 3a / Closed 2b write "app.notion.com/<32-hex page id> (deduped ...)")
+    and each row such a value points at. Its created CASE and loi_sent bucket are QUERY A's,
+    so every QUERY D row falls in exactly one --rows group; every QUERY D row is checked
+    against the --rows groups before anything moves (a misfit is fatal). When the era set
+    changes, QUERY D's CASE changes in lockstep with QUERY A's. created_ts must read
+    'YYYY-MM-DD HH:MM[:SS][.fff][Z|+hh:mm]' (space or T); rows are ordered by that instant,
+    and anything else is fatal. A page id is the 32-hex id that ENDS the url (query string
+    dropped); a Duplicate Of target is the id ending the link after notion.com/ or
+    notion.so/, so free text after the link is ignored.
 
   - The CASE boundary in Query A must match the --era boundaries (default: one boundary,
     v2.9=2026-10-30). When the era set changes (a new --era), Query A's CASE must gain the
@@ -80,6 +94,8 @@ Every field is optional except created.
 An unknown select value is FATAL, never silently bucketed: exit 2 with one stderr line
 "[FATAL] row <i> (<file>): <field>=<value!r> is not a known option", where i is the 0-based
 position in that file's record array. A schema change must be loud.
+--dup-rows (Query D) re-attributes rows before any metric is computed (see DUPLICATE
+RECOVERY); it never adds or removes a row, so the row-count reconciliation is unchanged.
 --t1-rows (Query B) feeds ONLY the stalled-T1 count and list and, when every record carries
 cert, the T1 PROVISIONAL data-quality count. --pexec-rows (Query P) feeds ONLY the P(exec)
 calibration. Neither is ever added to any other count. --expect-rows (Query N) holds one
@@ -105,6 +121,24 @@ Design note: a row re-tiered away from T1 (Verdict overwritten, verdict_first st
 with no Go / No-Go and a status other than Dead or Passed counts as open, not decided, so
 T1 precision covers explicit decisions only; such rows appear in the stalled-T1 list once
 they age past --stall-days.
+
+DUPLICATE RECOVERY (--dup-rows). Two writers can create two rows for one parcel (a sourcing
+scan and a Code session racing). The write-once first-sighting fields are never moved by any
+writer, so the prediction can sit on a row that deal-retirement later flags as the duplicate.
+The engine recovers it instead:
+  - set: a kept (canonical) row plus every row whose "Duplicate Of" resolves to it,
+    following chains (a cycle, a page id seen twice, or a url with no page id is fatal).
+  - every flagged row is treated as excluded, even with Exclude unticked (it is moved from
+    its --rows group to an excluded copy, counted as moved_to_excluded).
+  - the canonical row's tier basis becomes the EARLIEST non-blank verdict_first in its set
+    (by created_ts): "recovered" when its own was blank, "replaced" when an earlier row's
+    differs. A canonical row that is itself excluded is left alone.
+  - a "Duplicate Of" whose target is not in the export is "unresolved"; its row is still
+    excluded.
+  - --t1-rows follows: flagged rows are excluded there, and a canonical row that becomes T1
+    is added with its exact created_day.
+  - a QUERY D row matching no --rows group means the exports disagree: fatal.
+Without --dup-rows the report says "duplicate recovery: NOT RUN".
 
 METRICS (all counts weighted by n):
   1. Tier vs decision, per era: logged, decided, go, rejected, withdrawn, open per tier;
@@ -139,7 +173,7 @@ OUTPUT: markdown (stdout, or --out-md as UTF-8) or --json (ASCII-escaped), plus 
 
 Usage:
   python funnel-backtest.py --rows A1.json --rows A2.json ... [--t1-rows B.json]
-      [--pexec-rows P.json] [--expect-rows N.json] [--era NAME=YYYY-MM-DD ...]
+      [--pexec-rows P.json] [--expect-rows N.json] [--dup-rows D.json] [--era NAME=YYYY-MM-DD ...]
       [--today YYYY-MM-DD] [--stall-days 14] [--min-n 5] [--out-md PATH] [--json]
 
 Stdlib only. ASCII-only.
@@ -170,6 +204,7 @@ QUERY_A_PARTITIONS = ("T1 PURSUE", "T2 WATCH", "PASS", "KILLED", "(none)")
 QUERY_B = '''SELECT url, "Deal Name / Address" AS name, substr("Date Added",1,10) AS created, "Verdict" AS verdict, "Verdict at First Sighting" AS verdict_first, "Score at First Sighting" AS score_first, "Status" AS status, "Go / No-Go" AS go, "Scorecard Done" AS scorecard, substr("date:LOI Sent Date:start",1,10) AS loi_sent, "LOI Outcome" AS loi_outcome, "Exclude from Calibration" AS exclude, "Data Certification" AS cert FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE "Verdict" = 'T1 PURSUE' OR "Verdict at First Sighting" = 'T1 PURSUE' ORDER BY 3'''
 QUERY_P = '''SELECT substr("Date Added",1,10) AS created, "Verdict" AS verdict, "P(exec) %" AS p_exec, "LOI Outcome" AS loi_outcome, "Exclude from Calibration" AS exclude FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE "P(exec) %" IS NOT NULL'''
 QUERY_N = '''SELECT COUNT(*) AS n FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b"'''
+QUERY_D = '''SELECT url, "Deal Name / Address" AS name, createdTime AS created_ts, CASE WHEN substr("Date Added",1,10) >= '2026-10-30' THEN '2026-10-30' ELSE '2026-01-01' END AS created, substr("Date Added",1,10) AS created_day, "Source" AS source, "Verdict" AS verdict, "Verdict at First Sighting" AS verdict_first, "Score at First Sighting" AS score_first, "Status" AS status, "Go / No-Go" AS go, "Scorecard Done" AS scorecard, CASE WHEN "date:LOI Sent Date:start" IS NOT NULL THEN substr("date:LOI Sent Date:start",1,7) || '-01' END AS loi_sent, "LOI Outcome" AS loi_outcome, "Loss Class" AS loss_class, "Exclude from Calibration" AS exclude, "Data Certification" AS cert, "Duplicate Of" AS dup_of FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" AS t WHERE coalesce(t."Duplicate Of",'') <> '' OR EXISTS (SELECT 1 FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" AS d WHERE coalesce(d."Duplicate Of",'') <> '' AND instr(lower(replace(d."Duplicate Of",'-','')), lower(substr(replace(t.url,'-',''),-32))) > 0) ORDER BY 3'''
 
 # --- option sets, read from the live Deal Sourcing Log schema on 2026-11-05 ---------------
 # Non-ASCII characters are 8-digit escapes so this source stays ASCII.
@@ -387,6 +422,226 @@ def check_row_count(covered, expected, path):
                          "changed between queries)" % (path, covered, expected))
 
 
+# --- duplicate recovery (--dup-rows, QUERY D) ----------------------------------------------
+
+_PAGE_ID_END_RE = re.compile(r"([0-9a-f]{32})$", re.ASCII)
+_LINK_RE = re.compile(r"notion\.(?:com|so)/(\S+)", re.ASCII | re.IGNORECASE)
+_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?"
+                    r"(Z|[+-]\d{2}:?\d{2})?", re.ASCII)
+# p_exec and floor are not in QUERY_A or QUERY_D (both read None); keeping them in the key
+# makes a --rows file that does carry them match deterministically or fail loudly.
+GROUP_KEY = ("created", "source", "verdict", "verdict_first", "status", "go", "scorecard",
+             "loi_sent", "loi_outcome", "loss_class", "exclude", "p_exec", "floor")
+
+
+def _page_id_at_end(text):
+    """The 32-hex page id that ENDS a Notion link (query and fragment dropped, dashes
+    removed): 'app.notion.com/<id>', 'notion.so/Some-Title-<id>?v=<view>' -> <id>."""
+    if not isinstance(text, str):
+        return None
+    path = text.strip().split("?", 1)[0].split("#", 1)[0].lower().replace("-", "")
+    match = _PAGE_ID_END_RE.search(path)
+    return match.group(1) if match else None
+
+
+def _url_page_id(url):
+    return _page_id_at_end(url)
+
+
+def _link_target(text):
+    """The page a Duplicate Of value points at: the link right after notion.com/ or
+    notion.so/ (free text after it is ignored), else the first whitespace-free token."""
+    if not isinstance(text, str):
+        return None
+    match = _LINK_RE.search(text)
+    token = match.group(1) if match else text.strip().split()[0] if text.strip() else ""
+    return _page_id_at_end(token.rstrip(").,;"))
+
+
+def _parse_ts(text):
+    """createdTime -> (date, hh, mm, ss, offset minutes) normalized to UTC minutes, or None."""
+    if not isinstance(text, str):
+        return None
+    match = _TS_RE.fullmatch(text.strip())
+    if not match:
+        return None
+    day = _parse_day(match.group(1))
+    if day is None:
+        return None
+    hh, mm, ss = int(match.group(2)), int(match.group(3)), int(match.group(4) or 0)
+    if hh > 23 or mm > 59 or ss > 59:
+        return None
+    zone = match.group(5)
+    offset = 0
+    if zone and zone != "Z":
+        sign = -1 if zone[0] == "-" else 1
+        digits = zone[1:].replace(":", "")
+        if int(digits[:2]) > 14 or int(digits[2:]) > 59:
+            return None
+        offset = sign * (int(digits[:2]) * 60 + int(digits[2:]))
+    return day.toordinal() * 86400 + hh * 3600 + mm * 60 + ss - offset * 60
+
+
+def normalize_dup_records(raws, source):
+    """Validate QUERY D records. Each also carries page_id (from url), dup_target (the page id
+    in dup_of, or None), created_day (exact date) and created_ts (ordering key)."""
+    out, seen = [], set()
+    for index, raw in enumerate(raws):
+        rec = normalize_record(raw, index, source)
+        rec["page_id"] = _url_page_id(raw.get("url"))
+        if rec["page_id"] is None:
+            raise _bad(index, source, "url", raw.get("url"), "does not end in a 32-hex page id")
+        if rec["page_id"] in seen:
+            raise _bad(index, source, "url", raw.get("url"), "appears twice in --dup-rows")
+        seen.add(rec["page_id"])
+        dup_of = raw.get("dup_of")
+        if _blank(dup_of):
+            rec["dup_target"] = None
+        else:
+            rec["dup_target"] = _link_target(dup_of)
+            if rec["dup_target"] is None:
+                raise _bad(index, source, "dup_of", dup_of, "does not link a 32-hex page id")
+            if rec["dup_target"] == rec["page_id"]:
+                raise _bad(index, source, "dup_of", dup_of, "points at its own row (a cycle)")
+        day = _parse_day(raw.get("created_day")) if isinstance(raw.get("created_day"), str) else None
+        if day is None:
+            raise _bad(index, source, "created_day", raw.get("created_day"),
+                       "is missing or not a YYYY-MM-DD date")
+        rec["created_day"] = day
+        rec["created_ts"] = _parse_ts(raw.get("created_ts"))
+        if rec["created_ts"] is None:
+            raise _bad(index, source, "created_ts", raw.get("created_ts"),
+                       "is missing or not a 'YYYY-MM-DD HH:MM[:SS][Z|+hh:mm]' timestamp")
+        out.append(rec)
+    return out
+
+
+def load_dup_records(paths):
+    seen, records = set(), []
+    for path in paths:
+        key = os.path.normcase(os.path.abspath(path))
+        if key in seen:
+            raise InputError("%s was passed to --dup-rows more than once" % path)
+        seen.add(key)
+        records.extend(normalize_dup_records(read_export(path), path))
+    ids = [r["page_id"] for r in records]
+    if len(ids) != len(set(ids)):
+        raise InputError("--dup-rows: a page id appears twice across the --dup-rows files")
+    return records
+
+
+def _key(rec):
+    return tuple(rec[f] for f in GROUP_KEY)
+
+
+def _no_group(dup_rec):
+    return InputError("--dup-rows row %d (%s): url %s matches no --rows group with a row left; "
+                      "the exports were taken at different times or with different queries"
+                      % (dup_rec["_row"], dup_rec["_file"], dup_rec["url"]))
+
+
+def _take(originals, dup_rec):
+    """Remove one row of dup_rec's ORIGINAL --rows group (never an appended copy) and return
+    a 1-row copy of that group."""
+    key = _key(dup_rec)
+    for group in originals:
+        if group["n"] >= 1 and _key(group) == key:
+            group["n"] -= 1
+            copy = dict(group)
+            copy["n"] = 1
+            return copy
+    raise _no_group(dup_rec)
+
+
+def apply_duplicates(records, dup_records, t1_rows):
+    """Re-attribute rows by duplicate set (module docstring, DUPLICATE RECOVERY). Returns
+    (records, t1_rows, stats); the inputs are not mutated and the weighted total is kept."""
+    if dup_records is None:
+        return records, t1_rows, {"status": "not-run"}
+    originals = [dict(r) for r in records]
+    tally = {}
+    for group in originals:
+        tally[_key(group)] = tally.get(_key(group), 0) + group["n"]
+    for row in dup_records:      # every QUERY_D row is a real row of the log: it must fit
+        key = _key(row)
+        if tally.get(key, 0) < 1:
+            raise _no_group(row)
+        tally[key] -= 1
+    appended = []
+    by_id = {r["page_id"]: r for r in dup_records}
+    flagged = [r for r in dup_records if r["dup_target"] is not None]
+
+    def root_of(page_id):
+        seen = [page_id]
+        while page_id in by_id and by_id[page_id]["dup_target"] is not None:
+            page_id = by_id[page_id]["dup_target"]
+            if page_id in seen:
+                raise InputError("--dup-rows: Duplicate Of forms a cycle through %s"
+                                 % ", ".join(seen))
+            seen.append(page_id)
+        return page_id
+
+    members, unresolved, moved = {}, 0, 0
+    for row in flagged:
+        root = root_of(row["page_id"])
+        if root in by_id:
+            members.setdefault(root, []).append(row)
+        else:
+            unresolved += 1
+    for row in flagged:
+        if not row["exclude"]:
+            copy = _take(originals, row)
+            copy["exclude"] = True
+            appended.append(copy)
+            moved += 1
+    recovered = replaced = 0
+    overrides = {}
+    for root, rows in members.items():
+        canon = by_id[root]
+        if canon["exclude"]:
+            continue
+        cands = [r for r in [canon] + rows if r["verdict_first"] is not None]
+        if not cands:
+            continue
+        first = min(cands, key=lambda r: (r["created_ts"], r["page_id"]))
+        if first is canon or first["verdict_first"] == canon["verdict_first"]:
+            continue
+        copy = _take(originals, canon)
+        copy["verdict_first"], copy["score_first"] = first["verdict_first"], first["score_first"]
+        appended.append(copy)
+        if canon["verdict_first"] is None:
+            recovered += 1
+        else:
+            replaced += 1
+        overrides[root] = first
+    records = [r for r in originals if r["n"] >= 1] + appended
+    if t1_rows is not None:
+        flagged_ids = {r["page_id"] for r in flagged}
+        adjusted, present = [], set()
+        for row in t1_rows:
+            row = dict(row)
+            pid = _url_page_id(row["url"])
+            present.add(pid)
+            if pid in flagged_ids:
+                row["exclude"] = True
+            elif pid in overrides:
+                row["verdict_first"] = overrides[pid]["verdict_first"]
+                row["score_first"] = overrides[pid]["score_first"]
+            adjusted.append(row)
+        for pid, first in sorted(overrides.items()):
+            if pid not in present and first["verdict_first"] == T1:
+                row = dict(by_id[pid])
+                row["created"] = row["created_day"]
+                row["verdict_first"], row["score_first"] = first["verdict_first"], first["score_first"]
+                row["n"] = 1
+                adjusted.append(row)
+        t1_rows = adjusted
+    stats = {"status": "run", "sets": len(members), "flagged": len(flagged),
+             "moved_to_excluded": moved, "recovered": recovered, "replaced": replaced,
+             "unresolved": unresolved}
+    return records, t1_rows, stats
+
+
 # --- eras ---------------------------------------------------------------------------------
 
 def parse_era(text):
@@ -571,6 +826,9 @@ DEFINITIONS = (
     "Row-count reconciliation: with --expect-rows (QUERY_N) the weighted rows of every --rows "
     "file, excluded rows included, must equal the log's row count, else exit 2 (a Verdict value "
     "outside QUERY_A_PARTITIONS); without --expect-rows the check is NOT RUN.",
+    "Duplicate recovery (--dup-rows, QUERY_D): every row with Duplicate Of set is excluded; "
+    "each kept row's tier basis is the earliest first-sighting verdict in its duplicate set "
+    "(by created time). No row is added or removed. Without --dup-rows: NOT RUN.",
     "Data quality rows are weighted, non-excluded rows (Excluded and the totals aside).",
     "Report-only: nothing here changes a score weight, band, gate, doctrine file or Notion; any "
     "change needs Gabriel's sign-off.",
@@ -633,7 +891,8 @@ def _pexec_section(source_records, source_label, source_count, min_n):
 
 
 def aggregate(records, eras, today, stall_days, min_n, t1_rows=None, pexec_rows=None,
-              rows_files=(), t1_files=(), pexec_files=(), expected_rows=None, expect_file=None):
+              rows_files=(), t1_files=(), pexec_files=(), expected_rows=None, expect_file=None,
+              dup_stats=None, dup_files=()):
     """Every metric from validated records. Pure (no I/O). t1_rows and pexec_rows feed only
     their own sections and are never added to any other count. expected_rows (the QUERY N
     count) must equal the weighted --rows total, excluded rows included, or InputError."""
@@ -762,7 +1021,7 @@ def aggregate(records, eras, today, stall_days, min_n, t1_rows=None, pexec_rows=
         "params": {"eras": [{"name": name, "start": start.isoformat()} for name, start in eras],
                    "stall_days": stall_days, "min_n": min_n, "rows_files": list(rows_files),
                    "t1_rows_files": list(t1_files), "pexec_rows_files": list(pexec_files),
-                   "expect_rows_file": expect_file},
+                   "expect_rows_file": expect_file, "dup_rows_files": list(dup_files)},
         "totals": totals,
         "tier_vs_decision": tiers,
         "funnel": funnel,
@@ -781,7 +1040,8 @@ def aggregate(records, eras, today, stall_days, min_n, t1_rows=None, pexec_rows=
             "tier_from_current_verdict": logged - first_rows,
             "tier_basis": {"label": basis, "first_sighting_rows": first_rows,
                            "logged_rows": logged},
-            "row_count_reconciliation": reconciliation},
+            "row_count_reconciliation": reconciliation,
+            "duplicate_recovery": dict(dup_stats) if dup_stats else {"status": "not-run"}},
         "definitions": list(DEFINITIONS),
     }
 
@@ -941,10 +1201,22 @@ def render_markdown(res):
             % (dq["dead_without_decision"], dq["dead_without_decision_t1"]),
             "",
             recon_line,
+            "",
+            _dup_line(dq["duplicate_recovery"]),
             ""]
 
     out += ["### Definitions", ""] + ["- " + text for text in res["definitions"]]
     return "\n".join(out) + "\n"
+
+
+def _dup_line(dup):
+    if dup["status"] != "run":
+        return "duplicate recovery: NOT RUN (no --dup-rows)"
+    return ("duplicate recovery (--dup-rows, QUERY D): %d set(s); %d flagged duplicate row(s), "
+            "%d moved to excluded (Duplicate Of set, Exclude unticked); first sighting recovered "
+            "on %d kept row(s), replaced by an earlier sighting on %d; %d Duplicate Of target(s) "
+            "not found" % (dup["sets"], dup["flagged"], dup["moved_to_excluded"], dup["recovered"],
+                           dup["replaced"], dup["unresolved"]))
 
 
 def summary_line(res):
@@ -975,6 +1247,10 @@ def build_parser():
     parser.add_argument("--expect-rows", metavar="FILE",
                         help="Query N result (the log's row count): exit 2 unless the --rows "
                              "partitions, excluded rows included, cover every row")
+    parser.add_argument("--dup-rows", action="append", metavar="FILE",
+                        help="per-row Query D export (duplicate sets): flagged duplicates are "
+                             "excluded and each kept row takes its set's earliest first-sighting "
+                             "prediction; never adds or removes a row")
     parser.add_argument("--era", action="append", metavar="NAME=YYYY-MM-DD",
                         help="era boundary; repeatable (default v2.9=2026-10-30; any --era "
                              "replaces the default; must match Query A's CASE)")
@@ -1015,10 +1291,13 @@ def main(argv=None):
         t1_rows = load_records(args.t1_rows, "--t1-rows") if args.t1_rows else None
         pexec_rows = load_records(args.pexec_rows, "--pexec-rows") if args.pexec_rows else None
         expected = load_expected_rows(args.expect_rows) if args.expect_rows else None
+        dup_records = load_dup_records(args.dup_rows) if args.dup_rows else None
+        records, t1_rows, dup_stats = apply_duplicates(records, dup_records, t1_rows)
         result = aggregate(records, eras, today, args.stall_days, args.min_n, t1_rows=t1_rows,
                            pexec_rows=pexec_rows, rows_files=args.rows,
                            t1_files=args.t1_rows or (), pexec_files=args.pexec_rows or (),
-                           expected_rows=expected, expect_file=args.expect_rows)
+                           expected_rows=expected, expect_file=args.expect_rows,
+                           dup_stats=dup_stats, dup_files=args.dup_rows or ())
         markdown = render_markdown(result)
         if args.out_md:
             try:
