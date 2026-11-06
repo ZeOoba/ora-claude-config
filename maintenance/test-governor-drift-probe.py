@@ -5,8 +5,18 @@ Two layers:
   * UNIT  -- import scan_line() and assert the DETECTION logic is intact: canonical
              governor lines are clean; real DSCR/LTV drift still flags. This is the
              guardrail that the false-positive fix did NOT weaken enforcement.
-  * E2E   -- run the probe against the real tree and assert (a) exit 0 and (b) no
-             finding cites event_log.md (the append-only narrative log we exclude).
+  * E2E   -- run the probe as a subprocess against a FIXTURE HOME built in a temp dir
+             (HOME/USERPROFILE redirected, see run_probe), never against the live machine.
+
+HERMETIC BY DEFAULT (2026-11-06): the E2E layer used to scan the live machine -- the real
+~/.claude, ~/ora-skills and, through ~/ora-skills/.claude/worktrees/, every OTHER Claude
+session's in-flight worktree copy. A drift sitting in someone else's unfinished worktree
+("portfolio-growth/SKILL.md:33 LTV 65% != 40%", a DSCR 1.75) failed this file and so blocked
+every push of ora-claude-config from unrelated branches via git-prepush-hook-tests-gate.py.
+The pass/fail of this file now depends only on the probe's code and the fixtures built here.
+Live-machine checks still exist, but are OPT-IN: they run only when
+ORA_GOVERNOR_PROBE_LIVE_TESTS=1 is set in the environment, which the pre-push gate never
+does (they SKIP otherwise).
 
 Run: python test-governor-drift-probe.py
 Pure stdlib. ASCII-only output (Windows cp1252 console).
@@ -17,8 +27,8 @@ import sys
 import shutil
 import subprocess
 import importlib.util
-import time
-import uuid
+import contextlib
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBE = os.path.join(HERE, "governor-drift-probe.py")
@@ -31,10 +41,52 @@ def _load_probe_module():
     return mod
 
 
-def run_probe(argv=None):
+# Opt-in flag for the tests that read LIVE machine state (the real ~/.claude, ~/ora-skills).
+# The pre-push gate never sets it, so the gate's verdict can never depend on what other
+# sessions have sitting in their worktrees. Run manually: ORA_GOVERNOR_PROBE_LIVE_TESTS=1.
+LIVE_TESTS_FLAG = "ORA_GOVERNOR_PROBE_LIVE_TESTS"
+
+# Every variable os.path.expanduser("~") can resolve the home directory from (ntpath:
+# USERPROFILE, else HOMEDRIVE+HOMEPATH; posixpath: HOME). All are stripped and replaced, so
+# the probe's module-level HOME -- and through it every scan root in build_targets() --
+# resolves inside the fixture.
+_HOME_ENV_VARS = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
+
+
+def _live_tests_enabled():
+    return os.environ.get(LIVE_TESTS_FLAG) == "1"
+
+
+def _skip_unless_live(name):
+    """True (and prints SKIP) when a live-machine test must not run."""
+    if _live_tests_enabled():
+        return False
+    print("  SKIP %s (reads live machine state; set %s=1 to run)" % (name, LIVE_TESTS_FLAG))
+    return True
+
+
+def _hermetic_env(home):
+    """A child environment whose home directory is `home` and nothing else."""
+    env = {k: v for k, v in os.environ.items() if k.upper() not in _HOME_ENV_VARS}
+    env["HOME"] = home
+    env["USERPROFILE"] = home
+    return env
+
+
+def run_probe(argv=None, home=None, live=False):
+    """Run the probe as a subprocess. `home` is REQUIRED (a fixture home dir) unless the
+    caller is an opt-in live test passing live=True -- an accidental bare run_probe() would
+    otherwise scan the live machine, which is exactly the isolation bug fixed 2026-11-06."""
     cmd = [sys.executable, PROBE]
     if argv:
         cmd += argv
+    if live:
+        assert _live_tests_enabled(), "live probe run requested without %s=1" % LIVE_TESTS_FLAG
+        env = None
+    else:
+        assert home is not None, (
+            "run_probe() needs a fixture home (or live=True from an opt-in live test)")
+        env = _hermetic_env(home)
     # encoding="utf-8" (found 2026-08-22): text=True with no explicit encoding decodes the
     # probe's stdout/stderr using locale.getpreferredencoding() (cp1252 on Windows). The
     # probe reconfigures ITS OWN stdout to UTF-8 (module docstring: "force UTF-8 so the
@@ -44,76 +96,60 @@ def run_probe(argv=None):
     # thread crashes (UnicodeDecodeError, printed straight to real stderr, never raised to
     # the caller) and silently drops the captured stdout to None instead.
     return subprocess.run(cmd, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace")
+                           encoding="utf-8", errors="replace", env=env)
 
 
-_SELFTEST_SCRATCH_STALE_AGE_SECONDS = 3600
-_SELFTEST_SCRATCH_PID_RE = re.compile(r"^(\d+)_")
+# Canonical governor declarations seeded into every fixture home, so each in-scope root
+# the probe walks has real, scannable, CLEAN content (a fixture that is clean only because
+# it is empty would prove nothing).
+_FIXTURE_CANON_LINE = "Acquisition governor (non-negotiable): DSCR >= 1.25x, LTV <= 40%.\n"
+_MEM_REL = (".claude", "projects", "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 
 
-def _pid_is_alive(pid):
-    """Best-effort Windows liveness check via ctypes (stdlib -- this file stays dependency-
-    free, no psutil). Used only to keep the sweep below from ever touching an entry still
-    owned by a running process regardless of its mtime age: a test suspended by this
-    laptop's Modern Standby (a real, previously-observed failure mode here -- see
-    reference_lastruntime_restamped_on_modern_standby_resume.md) can otherwise sit idle past
-    the staleness threshold while genuinely still in flight. Any failure to determine
-    liveness (bad pid, no permission, platform quirk) returns False -- i.e. falls back to
-    the age-based sweep rather than treating an unverifiable pid as permanently alive."""
+def _write(path, text):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def _seed_fixture_home(home):
+    _write(os.path.join(home, ".claude", "CLAUDE.md"), "# CLAUDE.md\n\n" + _FIXTURE_CANON_LINE)
+    _write(os.path.join(home, *(_MEM_REL + ("standards.md",))), _FIXTURE_CANON_LINE)
+    _write(os.path.join(home, "ora-skills", "deal-comparison", "SKILL.md"),
+           "---\nname: deal-comparison\n---\n\n" + _FIXTURE_CANON_LINE)
+    _write(os.path.join(home, ".claude", "scheduled-tasks", "ora-fixture-task", "SKILL.md"),
+           "---\nname: ora-fixture-task\n---\n\n" + _FIXTURE_CANON_LINE)
+    os.makedirs(os.path.join(home, ".claude", "hooks"), exist_ok=True)
+    os.makedirs(os.path.join(home, ".claude", "maintenance"), exist_ok=True)
+
+
+@contextlib.contextmanager
+def _fixture_home(prefix="gdp-home-"):
+    """A throwaway home dir seeded with clean canonical content in the probe's scan roots."""
+    home = tempfile.mkdtemp(prefix=prefix)
     try:
-        import ctypes
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return False
-        ctypes.windll.kernel32.CloseHandle(handle)
-        return True
-    except Exception:
-        return False
+        _seed_fixture_home(home)
+        yield home
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
-def _selftest_scratch_owner_pid(name, prefix):
-    """Extract the creator pid encoded in a "<prefix><pid>_<uuid8>[.ext]" scratch name, or
-    None if the name doesn't match that shape (an unrecognized name falls back to the
-    age-only sweep below instead of being treated as permanently alive)."""
-    m = _SELFTEST_SCRATCH_PID_RE.match(name[len(prefix):])
-    return int(m.group(1)) if m else None
-
-
-def _sweep_stale_selftest_scratch(parent_dir, prefix):
-    """Best-effort GC for the pid+uuid-suffixed scratch entries the e2e selftests below
-    create in live, gitignored ~/.claude directories (hooks/sessions, hooks/active-work).
-    A process killed between creating its own uniquely-named entry and its `finally` cleanup
-    leaks that one entry forever -- each run's own setup only ever clears its OWN (never
-    pre-existing) name, not a prior run's. Sweep anything matching this prefix that is older
-    than the staleness threshold AND whose owning pid (encoded in the name) is no longer
-    alive; a live sibling from a genuinely concurrent -- or merely slow/suspended -- run is
-    therefore never touched even past the age threshold."""
+def _load_probe_module_at_home(home):
+    """Load the probe with its module-level HOME/CLAUDE/MEM/ORA_SKILLS_REPO resolved inside
+    `home`, so path-shaped assertions never touch the live machine."""
+    saved = {k: os.environ.get(k) for k in _HOME_ENV_VARS}
     try:
-        entries = os.listdir(parent_dir)
-    except OSError:
-        return
-    now = time.time()
-    for name in entries:
-        if not name.startswith(prefix):
-            continue
-        path = os.path.join(parent_dir, name)
-        owner_pid = _selftest_scratch_owner_pid(name, prefix)
-        if owner_pid is not None and _pid_is_alive(owner_pid):
-            continue
-        try:
-            age = now - os.path.getmtime(path)
-        except OSError:
-            continue
-        if age < _SELFTEST_SCRATCH_STALE_AGE_SECONDS:
-            continue
-        if os.path.isdir(path):
-            shutil.rmtree(path, ignore_errors=True)
-        else:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+        for k in _HOME_ENV_VARS:
+            os.environ.pop(k, None)
+        os.environ["HOME"] = home
+        os.environ["USERPROFILE"] = home
+        return _load_probe_module()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def test_canonical_clean_unit():
@@ -929,6 +965,8 @@ def test_deal_comparison_skill_file_clean():
     """The live deal-comparison SKILL.md (repo copy) must scan CLEAN line-by-line -- the 2026-08-21
     false positive at line 153 (a v1.2 Changelog entry narrating the DSCR-wrong-LTV bug fix, see
     test_approximate_tilde_value_not_a_dscr_threshold_unit)."""
+    if _skip_unless_live("test_deal_comparison_skill_file_clean"):
+        return
     m = _load_probe_module()
     # Qodo PR #145 review finding (portability): use the probe's own canonical ora-skills root
     # (HOME/ora-skills) rather than a hardcoded Windows path, so this stays correct on a
@@ -1445,9 +1483,13 @@ def test_skill_version_changelog_wiring_hermetic_e2e():
 
 def test_acquisition_underwriting_skill_file_clean():
     """The live acquisition-underwriting SKILL.md (repo copy) must scan CLEAN line-by-line --
-    the 10 false positives of 2026-07-11 (lines 8, 50, 112, 196, 249, 260, 281, 300)."""
+    the 10 false positives of 2026-07-11 (lines 8, 50, 112, 196, 249, 260, 281, 300).
+    Opt-in live test (reads the real ora-skills checkout); the shapes are pinned hermetically by
+    the scan_line unit tests."""
+    if _skip_unless_live("test_acquisition_underwriting_skill_file_clean"):
+        return
     m = _load_probe_module()
-    path = r"C:\Users\Owner\ora-skills\acquisition-underwriting\SKILL.md"
+    path = os.path.join(m.ORA_SKILLS_REPO, "acquisition-underwriting", "SKILL.md")
     assert os.path.isfile(path), "skill file not found: %s" % path
     findings = []
     with open(path, encoding="utf-8", errors="replace") as fh:
@@ -1543,24 +1585,160 @@ def test_run_probe_survives_child_utf8_smartquote_e2e():
     real_probe = PROBE
     PROBE = child_path
     try:
-        r = run_probe()
+        r = run_probe(home=child_root)
     finally:
         PROBE = real_probe
+        shutil.rmtree(child_root, ignore_errors=True)
     assert r.stdout is not None and "GOVERNOR DRIFT DETECTED" in r.stdout, (
         "run_probe() must capture the child's UTF-8 smart-quote output instead of "
         "silently dropping it to None; got stdout=%r" % r.stdout)
     print("  PASS test_run_probe_survives_child_utf8_smartquote_e2e")
 
 
+_FLAG_LTV = "LTV governor ceiling raised to 65% per the review notes."
+_FLAG_DSCR = "DSCR governor floor 1.60x per the audit note."
+
+
+def _assert_flaggable(m, line):
+    """A payload used to prove an EXCLUSION must itself flag when scanned, or the e2e that
+    uses it proves nothing (see the round-1 review note on the active-work test)."""
+    assert m.scan_line(line), "payload must be a flaggable governor declaration: %r" % line
+
+
 def test_event_log_excluded_e2e():
-    """End-to-end: real tree is clean AND no finding cites event_log.md."""
-    r = run_probe()
+    """End-to-end over a FIXTURE home: memory/event_log.md carrying an unhedged drift line is
+    excluded (exit 0, never cited) while the same line in memory/standards.md flags (exit 1) --
+    so the exit 0 is the exclusion working, not an empty or unscanned tree."""
+    m = _load_probe_module()
+    _assert_flaggable(m, _FLAG_DSCR)
+    with _fixture_home() as home:
+        mem = os.path.join(home, *_MEM_REL)
+        _write(os.path.join(mem, "event_log.md"), "- 2026-11-06 note: " + _FLAG_DSCR + "\n")
+        r = run_probe(home=home)
+        assert r.returncode == 0, (
+            "expected exit 0 (event_log.md excluded), got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
+            % (r.returncode, r.stdout, r.stderr))
+        assert "event_log.md" not in r.stdout, (
+            "event_log.md narrative should not be scanned for governor drift:\n%s" % r.stdout)
+        _write(os.path.join(mem, "standards.md"), _FIXTURE_CANON_LINE + _FLAG_DSCR + "\n")
+        r = run_probe(home=home)
+        assert r.returncode == 1 and "standards.md" in r.stdout, (
+            "control: the same line in standards.md must flag; got %d\n%s"
+            % (r.returncode, r.stdout))
+    print("  PASS test_event_log_excluded_e2e (fixture: exit 0, event_log.md not scanned)")
+
+
+def test_fixture_roots_drift_detected_e2e():
+    """Detection is intact INSIDE the fixture: a drift planted in each in-scope fixture root
+    (CLAUDE.md, memory, the ora-skills checkout, the CC fleet) fails the probe and is cited by
+    a path under the fixture home -- proving run_probe() really points the probe's scan roots
+    at the fixture, and that a clean fixture run is not vacuous."""
+    m = _load_probe_module()
+    _assert_flaggable(m, _FLAG_LTV)
+    with _fixture_home() as home:
+        r = run_probe(home=home)
+        assert r.returncode == 0, "seeded fixture must start clean; got %d\n%s" % (
+            r.returncode, r.stdout)
+        targets = [
+            os.path.join(home, ".claude", "CLAUDE.md"),
+            os.path.join(home, *(_MEM_REL + ("rules.md",))),
+            os.path.join(home, "ora-skills", "portfolio-growth", "SKILL.md"),
+            os.path.join(home, ".claude", "scheduled-tasks", "ora-fixture-task", "SKILL.md"),
+        ]
+        for path in targets:
+            before = None
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as fh:
+                    before = fh.read()
+            _write(path, (before or "") + _FLAG_LTV + "\n")
+            try:
+                r = run_probe(home=home)
+                rel = os.path.relpath(path, home)
+                assert r.returncode == 1, "drift in fixture %s must flag; got %d\n%s" % (
+                    rel, r.returncode, r.stdout)
+                cited = [ln.strip() for ln in r.stdout.splitlines()
+                         if ln.startswith("  ") and not ln.strip().startswith("|")]
+                assert cited and all(ln.startswith(home) for ln in cited), (
+                    "every finding must cite a path under the fixture home %s; got\n%s"
+                    % (home, r.stdout))
+                assert os.path.basename(path) in r.stdout, r.stdout
+            finally:
+                if before is None:
+                    os.remove(path)
+                else:
+                    _write(path, before)
+    print("  PASS test_fixture_roots_drift_detected_e2e")
+
+
+# Shape of the real 2026-11-06 blocker: drift inside ANOTHER session's ora-skills worktree.
+_SIBLING_WORKTREE_REL = ("ora-skills", ".claude", "worktrees",
+                         "ora-skills-diffs-review-441806", "portfolio-growth", "SKILL.md")
+
+# The tests that drive the probe end-to-end. Every one must be ambient-home-independent.
+_HERMETIC_E2E_TESTS = (
+    "test_event_log_excluded_e2e",
+    "test_fixture_roots_drift_detected_e2e",
+    "test_active_work_claims_excluded_e2e",
+    "test_sessions_reviews_excluded_e2e",
+    "test_fleet_roots_are_scanned_unit",
+    "test_deal_comparison_skill_file_clean",
+    "test_acquisition_underwriting_skill_file_clean",
+    "test_live_tree_clean_optin",
+)
+
+
+def test_e2e_outcome_independent_of_ambient_home_e2e():
+    """ISOLATION REGRESSION GUARD (2026-11-06). Builds a POISONED home whose ora-skills checkout
+    holds a sibling session worktree with real drift (LTV 65%, DSCR 1.75 -- the exact class that
+    blocked every push), proves that drift is live (the probe run against the poisoned home
+    exits 1 citing the worktree), then re-runs every end-to-end and live-gated test of this file
+    in a child process whose OWN home is the poisoned one. They must all still pass (or SKIP,
+    for the opt-in live tests): the outcome depends only on fixtures. Any regression back to
+    live reads -- run_probe() inheriting the ambient home, a fixture path built from the real
+    HOME, a live test losing its opt-in gate -- makes the child see the planted drift and fail."""
+    m = _load_probe_module()
+    _assert_flaggable(m, _FLAG_LTV)
+    poisoned = tempfile.mkdtemp(prefix="gdp-poisoned-home-")
+    try:
+        _write(os.path.join(poisoned, *_SIBLING_WORKTREE_REL),
+               "---\nname: portfolio-growth\n---\n\n" + _FLAG_LTV + "\n"
+               "Acquisition governor: DSCR floor 1.75x.\n")
+        r = run_probe(home=poisoned)
+        assert r.returncode == 1 and "worktrees" in r.stdout, (
+            "control: the planted sibling-worktree drift must be visible to a probe that scans "
+            "the poisoned home; got %d\n%s" % (r.returncode, r.stdout))
+        code = ("import importlib.util, sys\n"
+                "spec = importlib.util.spec_from_file_location('gdp_tests', sys.argv[1])\n"
+                "t = importlib.util.module_from_spec(spec)\n"
+                "spec.loader.exec_module(t)\n"
+                "for name in sys.argv[2:]:\n"
+                "    getattr(t, name)()\n"
+                "print('CHILD-OK')\n")
+        env = _hermetic_env(poisoned)
+        env.pop(LIVE_TESTS_FLAG, None)
+        child = subprocess.run(
+            [sys.executable, "-c", code, os.path.abspath(__file__)] + list(_HERMETIC_E2E_TESTS),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+        assert child.returncode == 0 and "CHILD-OK" in child.stdout, (
+            "e2e tests must not depend on the ambient home (a sibling worktree's drift leaked "
+            "into the outcome); rc=%d\nSTDOUT:\n%s\nSTDERR:\n%s"
+            % (child.returncode, child.stdout, child.stderr[-3000:]))
+    finally:
+        shutil.rmtree(poisoned, ignore_errors=True)
+    print("  PASS test_e2e_outcome_independent_of_ambient_home_e2e")
+
+
+def test_live_tree_clean_optin():
+    """OPT-IN live check (the pre-2026-11-06 behaviour of test_event_log_excluded_e2e): the real
+    machine tree is clean and no finding cites event_log.md. Never run by the pre-push gate."""
+    if _skip_unless_live("test_live_tree_clean_optin"):
+        return
+    r = run_probe(live=True)
     assert r.returncode == 0, (
-        "expected exit 0 (event_log.md excluded), got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
+        "live tree: expected exit 0, got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
         % (r.returncode, r.stdout, r.stderr))
-    assert "event_log.md" not in r.stdout, (
-        "event_log.md narrative should not be scanned for governor drift:\n%s" % r.stdout)
-    print("  PASS test_event_log_excluded_e2e (exit 0, event_log.md not scanned)")
+    assert "event_log.md" not in r.stdout, r.stdout
+    print("  PASS test_live_tree_clean_optin (live machine, exit 0)")
 
 
 def test_active_work_claims_pruned_unit():
@@ -1581,60 +1759,21 @@ def test_active_work_claims_pruned_unit():
 
 
 def test_active_work_claims_excluded_e2e():
-    """End-to-end companion to test_event_log_excluded_e2e: a live claim_work.py claim file
-    quoting an off-canonical DSCR value in its free-text description must not fail the probe.
+    """End-to-end companion to test_event_log_excluded_e2e: a claim_work.py claim file quoting an
+    off-canonical DSCR value in its free-text description must not fail the probe.
 
-    REGRESSION GUARD (round-1 independent review, 2026-08-22): the original version of this
-    test used a payload that ALSO satisfied the tilde-hedge suppressor's own three signals
-    (tilde-glued + "corrected" + plain 1.25 companion) -- so it passed even with the
-    `active-work` prune reverted, since scan_line() on that text already returns [] on its
-    own. This payload is a BARE, unhedged, unsuppressed governor declaration
-    ("DSCR governor floor 1.60x") that WOULD flag if actually scanned (verified directly via
-    m.scan_line() before wiring it into the file below), so this test can only pass because of
-    the prune."""
+    REGRESSION GUARD (round-1 independent review, 2026-08-22): the payload is a BARE, unhedged
+    governor declaration that WOULD flag if scanned (asserted below), so this test can only pass
+    because of the active-work prune. Runs in a fixture home (2026-11-06) -- it used to write
+    into the live ~/.claude/hooks/active-work and scan the whole machine."""
     m = _load_probe_module()
-    would_flag = m.scan_line("DSCR governor floor 1.60x per the audit note.")
-    assert would_flag, (
-        "test payload must itself be a flaggable governor declaration, or this e2e proves "
-        "nothing about the active-work prune -- got %r" % would_flag)
-    claims_dir = os.path.join(m.CLAUDE, "hooks", "active-work")
-    os.makedirs(claims_dir, exist_ok=True)
-    # pid+uuid suffix (found 2026-08-28, session aa0eb89c, alongside the identical bug in
-    # test_sessions_reviews_excluded_e2e below): with 10+ Claude Code sessions routinely live
-    # in this shared checkout, two of them running this same test concurrently is the common
-    # case, not an anomaly -- a fixed filename made that a real, frequently reproducible
-    # "stale/concurrent" failure rather than the genuine-collision signal it was meant to be.
-    _sweep_stale_selftest_scratch(claims_dir, "_governor_probe_selftest_claim_")
-    probe_path = os.path.join(
-        claims_dir,
-        "_governor_probe_selftest_claim_%d_%s.json" % (os.getpid(), uuid.uuid4().hex[:8]))
-    payload = ('{"session_id": "test", "title": "selftest", '
-               '"description": "DSCR governor floor 1.60x per the audit note.", '
-               '"claimed_at": "2026-08-22T00:00:00"}')
-    # Read-before-write (Qodo PR #145 review finding): this is a shared checkout where another
-    # session could concurrently be mid-run of this same selftest -- read any existing content
-    # first so a genuine collision surfaces the OTHER run's payload in the failure message
-    # instead of silently clobbering it. Combined at the 2026-08-23 merge with the sibling
-    # branch's atomic create-only open (O_CREAT|O_EXCL, Qodo review PR #144): the exclusive
-    # create is what actually closes the check-then-act TOCTOU window (a plain "w" open after
-    # an exists-check could still truncate a file created in between), while the
-    # FileExistsError path preserves the read-and-surface behavior for a genuine collision.
-    # With the pid+uuid suffix above this branch should now be unreachable in practice; kept
-    # as defense in depth rather than removed.
-    try:
-        fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        with open(probe_path, encoding="utf-8", errors="replace") as fh:
-            existing = fh.read()
-        raise AssertionError(
-            "stale/concurrent selftest claim file at %s -- existing content: %r"
-            % (probe_path, existing))
-    try:
-        os.write(fd, payload.encode("utf-8"))
-    finally:
-        os.close(fd)
-    try:
-        r = run_probe()
+    _assert_flaggable(m, _FLAG_DSCR)
+    with _fixture_home() as home:
+        claim = os.path.join(home, ".claude", "hooks", "active-work",
+                             "_governor_probe_selftest_claim.json")
+        _write(claim, '{"session_id": "test", "title": "selftest", '
+                      '"description": "%s", "claimed_at": "2026-08-22T00:00:00"}' % _FLAG_DSCR)
+        r = run_probe(home=home)
         assert r.returncode == 0, (
             "a claim file quoting an off-canonical value must not fail the probe (proves the "
             "active-work prune, not merely that the payload text is independently suppressed); "
@@ -1642,9 +1781,14 @@ def test_active_work_claims_excluded_e2e():
         assert "active-work" not in r.stdout, (
             "hooks/active-work claim files should not be scanned for governor drift:\n%s"
             % r.stdout)
-    finally:
-        os.remove(probe_path)
-    print("  PASS test_active_work_claims_excluded_e2e (exit 0, active-work not scanned)")
+        # control: the same JSON one directory up (hooks/ is a .json scan root) DOES flag
+        _write(os.path.join(home, ".claude", "hooks", "selftest-control.json"),
+               '{"description": "%s"}' % _FLAG_DSCR)
+        r = run_probe(home=home)
+        assert r.returncode == 1 and "selftest-control.json" in r.stdout, (
+            "control: an unpruned hooks/*.json carrying the payload must flag; got %d\n%s"
+            % (r.returncode, r.stdout))
+    print("  PASS test_active_work_claims_excluded_e2e (fixture: active-work not scanned)")
 
 
 def test_sessions_dir_pruned_unit():
@@ -1665,56 +1809,19 @@ def test_sessions_dir_pruned_unit():
 
 
 def test_sessions_reviews_excluded_e2e():
-    """End-to-end companion to test_active_work_claims_excluded_e2e: a live eos-review-gate.py
-    review artifact quoting an off-canonical LTV value in its free-text notes must not fail the
-    probe.
-
-    The scratch session dir is suffixed with this process's pid + a uuid4 (found 2026-08-28,
-    session aa0eb89c): a fixed name here collided across the many Claude Code sessions that
-    routinely run in this shared checkout concurrently -- two runs of this same test raced on
-    the identical hooks/sessions/_governor_probe_selftest_session/reviews/ path, and a process
-    killed between writing the file and reaching `finally` left it behind for the next run to
-    trip over. Teardown uses shutil.rmtree (not a bare os.rmdir, which assumes the directory is
-    exactly empty) so a leftover or a late concurrent write can't turn a passing probe run into
-    a spurious WinError 145."""
+    """End-to-end companion to test_active_work_claims_excluded_e2e: an eos-review-gate.py review
+    artifact quoting an off-canonical LTV value in its free-text notes must not fail the probe.
+    Runs in a fixture home (2026-11-06) -- it used to create a scratch session dir under the live
+    ~/.claude/hooks/sessions and scan the whole machine."""
     m = _load_probe_module()
-    would_flag = m.scan_line("LTV governor ceiling raised to 65% per the review notes.")
-    assert would_flag, (
-        "test payload must itself be a flaggable governor declaration, or this e2e proves "
-        "nothing about the sessions prune -- got %r" % would_flag)
-    sessions_dir = os.path.join(m.CLAUDE, "hooks", "sessions")
-    _sweep_stale_selftest_scratch(sessions_dir, "_governor_probe_selftest_session_")
-    session_name = "_governor_probe_selftest_session_%d_%s" % (os.getpid(), uuid.uuid4().hex[:8])
-    session_dir = os.path.join(sessions_dir, session_name)
-    reviews_dir = os.path.join(session_dir, "reviews")
-    # Defense in depth only -- the pid+uuid suffix makes a real collision astronomically
-    # unlikely, but a bare os.makedirs(exist_ok=True) would silently merge into a leftover
-    # from some prior run under the same name rather than starting from a clean directory.
-    shutil.rmtree(session_dir, ignore_errors=True)
-    os.makedirs(reviews_dir)
-    probe_path = os.path.join(reviews_dir, "_governor_probe_selftest_review.json")
-    payload = ('{"key": "test", "verdict": "approved", '
-               '"notes": "LTV governor ceiling raised to 65% per the review notes.", '
-               '"ts": 0}')
-    # Read-before-write + atomic create (same house convention as the FileExistsError branch
-    # in test_active_work_claims_excluded_e2e above, Qodo PR #144/#145): reviews_dir was just
-    # created fresh by the os.makedirs() call above (no exist_ok), so probe_path cannot
-    # actually pre-exist here today -- kept for consistency with the sibling test and as
-    # defense in depth if that invariant is ever weakened.
-    try:
-        fd = os.open(probe_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        with open(probe_path, encoding="utf-8", errors="replace") as fh:
-            existing = fh.read()
-        raise AssertionError(
-            "stale/concurrent selftest review file at %s -- existing content: %r"
-            % (probe_path, existing))
-    try:
-        os.write(fd, payload.encode("utf-8"))
-    finally:
-        os.close(fd)
-    try:
-        r = run_probe()
+    _assert_flaggable(m, _FLAG_LTV)
+    with _fixture_home() as home:
+        review = os.path.join(home, ".claude", "hooks", "sessions",
+                              "_governor_probe_selftest_session", "reviews",
+                              "_governor_probe_selftest_review.json")
+        _write(review, '{"key": "test", "verdict": "approved", "notes": "%s", "ts": 0}'
+               % _FLAG_LTV)
+        r = run_probe(home=home)
         assert r.returncode == 0, (
             "a review artifact quoting an off-canonical value must not fail the probe (proves "
             "the sessions prune, not merely that the payload text is independently suppressed); "
@@ -1722,23 +1829,30 @@ def test_sessions_reviews_excluded_e2e():
         assert "sessions" not in r.stdout, (
             "hooks/sessions review artifacts should not be scanned for governor drift:\n%s"
             % r.stdout)
-    finally:
-        shutil.rmtree(session_dir, ignore_errors=True)
-    print("  PASS test_sessions_reviews_excluded_e2e (exit 0, sessions not scanned)")
+        _write(os.path.join(home, ".claude", "hooks", "selftest-control.json"),
+               '{"notes": "%s"}' % _FLAG_LTV)
+        r = run_probe(home=home)
+        assert r.returncode == 1 and "selftest-control.json" in r.stdout, (
+            "control: an unpruned hooks/*.json carrying the payload must flag; got %d\n%s"
+            % (r.returncode, r.stdout))
+    print("  PASS test_sessions_reviews_excluded_e2e (fixture: sessions not scanned)")
 
 
 def test_fleet_roots_are_scanned_unit():
     """COVERAGE GAP closed 2026-07-24: build_targets() scanned neither scheduled-task fleet
     root, yet 17 fleet SKILL.md files declare DSCR/LTV. A governor edit landing in
     ora-am-brief or ora-monthly-portfolio-briefing was invisible to the Hard-Invariant-4
-    guard. Both roots must now be targets."""
-    m = _load_probe_module()
-    roots = [os.path.normcase(os.path.normpath(r)) for r, _ in m.build_targets()]
-    cc = os.path.normcase(os.path.normpath(os.path.join(m.CLAUDE, "scheduled-tasks")))
-    lams = os.path.normcase(os.path.normpath(os.path.join(
-        m.HOME, "OneDrive - Oxford Capital Partners", "Documents", "Claude", "Scheduled")))
-    assert cc in roots, "CC/MCP fleet root not scanned: %s" % cc
-    assert lams in roots, "LAMS/Cowork fleet root not scanned: %s" % lams
+    guard. Both roots must now be targets. Resolved against a fixture home (2026-11-06), so
+    build_targets()'s isdir() checks never touch the live machine."""
+    with _fixture_home() as home:
+        m = _load_probe_module_at_home(home)
+        assert os.path.normcase(m.HOME) == os.path.normcase(home), (m.HOME, home)
+        roots = [os.path.normcase(os.path.normpath(r)) for r, _ in m.build_targets()]
+        cc = os.path.normcase(os.path.normpath(os.path.join(m.CLAUDE, "scheduled-tasks")))
+        lams = os.path.normcase(os.path.normpath(os.path.join(
+            m.HOME, "OneDrive - Oxford Capital Partners", "Documents", "Claude", "Scheduled")))
+        assert cc in roots, "CC/MCP fleet root not scanned: %s" % cc
+        assert lams in roots, "LAMS/Cowork fleet root not scanned: %s" % lams
     print("  PASS test_fleet_roots_are_scanned_unit")
 
 
@@ -3545,6 +3659,9 @@ def main():
     test_interim_checklist_refute_round1_false_positive_guards_unit()
     test_interim_checklist_refute_round2_unit()
     test_event_log_excluded_e2e()
+    test_fixture_roots_drift_detected_e2e()
+    test_e2e_outcome_independent_of_ambient_home_e2e()
+    test_live_tree_clean_optin()
     test_active_work_claims_pruned_unit()
     test_active_work_claims_excluded_e2e()
     test_sessions_dir_pruned_unit()
