@@ -27,6 +27,11 @@ import tempfile
 from datetime import datetime, timedelta
 
 HOOKS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# The gate under test reads ORA_GATE_MAX_PARALLEL; CI sets it for the outer run, and
+# this file inherits it. Unset it so the concurrency assertions below see the default
+# pool; the override's own tests set it explicitly (2026-11-06 review nit).
+os.environ.pop("ORA_GATE_MAX_PARALLEL", None)
+
 spec = importlib.util.spec_from_file_location(
     "gt", os.path.join(HOOKS, "git-prepush-hook-tests-gate.py"))
 gt = importlib.util.module_from_spec(spec)
@@ -1457,6 +1462,57 @@ finally:
     gt.CLAUDE_DIR, gt.REPO_ROOT_OVERRIDE = real_claude_dir, real_repo_override
     os.environ.pop("ORA_PREPUSH_TIER", None)
     gt._force_rmtree(tier_repo)
+
+# --- ORA_GATE_MAX_PARALLEL: worker-count override (2026-11-06, CI capacity) ----------
+# The 4-vCPU GitHub runner cannot carry 8 subprocess-heavy files at once (480s x2
+# timeouts on otherwise-passing files). The override may only LOWER the pool: the
+# MAX_PARALLEL_TESTS ceiling protects the interactive dev box from oversubscription.
+for raw, want, why in (
+        (None, gt.MAX_PARALLEL_TESTS, "unset -> the fixed default"),
+        ("3", 3, "a valid lower count is honoured"),
+        ("1", 1, "1 = sequential is allowed"),
+        (" 2 ", 2, "surrounding whitespace is tolerated"),
+        ("99", gt.MAX_PARALLEL_TESTS, "above the ceiling is capped, never raised"),
+        ("0", gt.MAX_PARALLEL_TESTS, "0 is invalid -> default"),
+        ("-2", gt.MAX_PARALLEL_TESTS, "negative is invalid -> default"),
+        ("abc", gt.MAX_PARALLEL_TESTS, "non-integer is invalid -> default"),
+        ("", gt.MAX_PARALLEL_TESTS, "empty is invalid -> default"),
+        ("2.5", gt.MAX_PARALLEL_TESTS, "non-integer number is invalid -> default")):
+    env = {} if raw is None else {"ORA_GATE_MAX_PARALLEL": raw}
+    with contextlib.redirect_stderr(io.StringIO()):
+        got = gt.max_parallel_tests(env)
+    expect("max_parallel_tests: %s (%r)" % (why, raw), got == want, "got %r" % got)
+
+_warn = io.StringIO()
+with contextlib.redirect_stderr(_warn):
+    gt.max_parallel_tests({"ORA_GATE_MAX_PARALLEL": "abc"})
+expect("max_parallel_tests: an invalid value is reported, not silently ignored",
+       "ORA_GATE_MAX_PARALLEL" in _warn.getvalue(), _warn.getvalue())
+
+# run_suite() must size its pool from the override (seam: capture max_workers).
+_seen_workers = []
+_real_tpe = gt.concurrent.futures.ThreadPoolExecutor
+
+
+class _SpyTPE(_real_tpe):
+    def __init__(self, max_workers=None, *a, **kw):
+        _seen_workers.append(max_workers)
+        super().__init__(max_workers, *a, **kw)
+
+
+_saved_env = os.environ.get("ORA_GATE_MAX_PARALLEL")
+gt.concurrent.futures.ThreadPoolExecutor = _SpyTPE
+try:
+    os.environ["ORA_GATE_MAX_PARALLEL"] = "2"
+    gt.run_suite(fixture_root)
+finally:
+    gt.concurrent.futures.ThreadPoolExecutor = _real_tpe
+    if _saved_env is None:
+        os.environ.pop("ORA_GATE_MAX_PARALLEL", None)
+    else:
+        os.environ["ORA_GATE_MAX_PARALLEL"] = _saved_env
+expect("run_suite: pool sized by ORA_GATE_MAX_PARALLEL", _seen_workers == [2],
+       "max_workers seen: %r" % _seen_workers)
 
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-hook-tests-gate tests: %d/%d passed" % (passed, len(results)))

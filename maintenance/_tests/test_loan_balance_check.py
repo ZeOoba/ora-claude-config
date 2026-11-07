@@ -8,6 +8,15 @@ from datetime import date
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import loan_balance_check as lbc  # noqa: E402
 
+# Every case below asserts exact lender figures from the LIVE, gitignored
+# data/loan-terms.json (real loan terms -- never committed, so never a fixture). A clean
+# checkout (CI, 2026-11-06) has no such file: declare ENV-SKIP per the hook-tests gate
+# contract. ONLY absence skips -- a present-but-malformed file still fails loudly below.
+if not os.path.exists(lbc.DEFAULT_TERMS):
+    print("CANNOT RUN: live loan terms file absent (%s) -- every case asserts its real "
+          "lender figures." % lbc.DEFAULT_TERMS)
+    sys.exit(1)
+
 TERMS = lbc.load_terms(lbc.DEFAULT_TERMS)
 BY_ID = {l["id"]: l for l in TERMS["loans"]}
 
