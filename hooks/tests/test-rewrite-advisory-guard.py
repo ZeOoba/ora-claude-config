@@ -192,18 +192,45 @@ def _timed_once(cmd):
     return rc, time.time() - t0
 
 
-def _timed(name, cmd, budget=4.0):
+# Host-relative budgets (2026-11-06). A fixed wall-clock budget encodes the dev box's
+# speed: the 200k-heredoc case runs ~1.4s there but ~10s on the 4-vCPU windows-latest CI
+# runner, where EVERY guard spawn is several times slower -- not a regression. With
+# scale_with=<control command>, the budget becomes max(budget, CONTROL_RATIO x the
+# control's own time on THIS host, measured right before). The control is a same-size
+# payload the guard handles linearly, so it absorbs host speed and load while a
+# quadratic blow-up (orders of magnitude, not a constant factor) still misses by far.
+# CONTROL_RATIO = 5 reproduces the dev-box budget: 3.0s / ~0.6s control (measured
+# 2026-11-06), so on that machine the effective budget is unchanged.
+CONTROL_RATIO = 5.0
+
+
+def _budget_for(budget, scale_with):
+    if scale_with is None:
+        return budget, ""
+    rc, el = _timed_once(scale_with)
+    if rc != 0:
+        return budget, " (control rc=%s, fixed budget)" % rc
+    return max(budget, CONTROL_RATIO * el), " (control %.1fs)" % el
+
+
+def _timed(name, cmd, budget=4.0, scale_with=None):
+    floor = budget
     try:
+        budget, why = _budget_for(floor, scale_with)
         rc, el = _timed_once(cmd)
         if rc == 0 and el >= budget:
+            # Re-measure the control too: the retry exists for load spikes, which hit
+            # the control and the case alike.
+            budget, why = _budget_for(floor, scale_with)
             rc2, el2 = _timed_once(cmd)
             if rc2 == 0 and el2 < budget * TIMED_RETRY_MULTIPLIER:
-                TIMED_RETRIES.append("%s: %.1fs > %.0fs, retry %.1fs < %.0fs"
-                                     % (name, el, budget, el2, budget * TIMED_RETRY_MULTIPLIER))
+                TIMED_RETRIES.append("%s: %.1fs > %.0fs, retry %.1fs < %.0fs%s"
+                                     % (name, el, budget, el2,
+                                        budget * TIMED_RETRY_MULTIPLIER, why))
                 PASSES[0] += 1
                 return
-            FAILS.append("%s took %.1fs then %.1fs on retry rc=%s (budget %.0fs, retry %.0fs)"
-                         % (name, el, el2, rc2, budget, budget * TIMED_RETRY_MULTIPLIER))
+            FAILS.append("%s took %.1fs then %.1fs on retry rc=%s (budget %.0fs, retry %.0fs)%s"
+                         % (name, el, el2, rc2, budget, budget * TIMED_RETRY_MULTIPLIER, why))
             return
     except subprocess.TimeoutExpired:
         FAILS.append("%s: guard run exceeded the 60s harness timeout" % name)
@@ -211,7 +238,7 @@ def _timed(name, cmd, budget=4.0):
     if rc == 0 and el < budget:
         PASSES[0] += 1
     else:
-        FAILS.append("%s took %.1fs rc=%s (budget %.0fs)" % (name, el, rc, budget))
+        FAILS.append("%s took %.1fs rc=%s (budget %.0fs)%s" % (name, el, rc, budget, why))
 
 
 def test_review_round2():
@@ -228,8 +255,11 @@ def test_review_round2():
     _timed("120 python -c stages (985KB)", ";".join([stage] * 120), budget=3.0)
     _timed("bash -c around 70 python stages", "bash -c '" + ";".join(
         ['python -c "' + "open(" * 1638 + '"'] * 70) + "'", budget=3.0)
-    _timed("200k heredoc operators", "cat " + "<<A" * 200000 + "\n" + "A\n" * 200000,
-           budget=3.0)
+    _heredoc = "cat " + "<<A" * 200000 + "\n" + "A\n" * 200000
+    # Control: same byte length, plain words, no heredoc operator -- linear tokenising
+    # only, so it measures this host's spawn + parse speed (see CONTROL_RATIO).
+    _timed("200k heredoc operators", _heredoc, budget=3.0,
+           scale_with="echo " + "ab " * ((len(_heredoc) - 5) // 3))
     # D2 -- open( arguments are parsed, not windowed
     for c in ("python -c \"print(open('f').read().replace('foo', 'bar'))\"",
               "python -c \"import json; d=json.load(open('f')); print(d.get('name', 'x'))\"",
@@ -312,16 +342,33 @@ def test_timed_retry_rule():
         _timed_once = lambda cmd: next(seq)
         _timed("selftest-rc", "x", budget=3.0)
         rcfail = len(FAILS) == len(seen_fails) + 2 and "selftest-rc" in FAILS[-1]
+        # Host-relative budget: a slow host (control 2.0s) stretches 3s to 10s ...
+        seq = iter([(0, 2.0), (0, 8.0)])           # control, then the case
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-slowhost", "x", budget=3.0, scale_with="c")
+        scaled = len(FAILS) == len(seen_fails) + 2 and PASSES[0] == seen_passes + 2
+        # ... a fast host never drops below the fixed floor ...
+        seq = iter([(0, 0.1), (0, 3.5), (0, 0.1), (0, 9.0)])
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-floor", "x", budget=3.0, scale_with="c")
+        floored = len(FAILS) == len(seen_fails) + 3 and "selftest-floor" in FAILS[-1]
+        # ... and a blow-up far past CONTROL_RATIO x control still fails.
+        seq = iter([(0, 2.0), (0, 30.0), (0, 2.0), (0, 30.0)])
+        _timed_once = lambda cmd: next(seq)
+        _timed("selftest-scaled-blowup", "x", budget=3.0, scale_with="c")
+        scaledblow = (len(FAILS) == len(seen_fails) + 4
+                      and "selftest-scaled-blowup" in FAILS[-1])
     finally:
         _timed_once = real
         del FAILS[len(seen_fails):]
         PASSES[0] = seen_passes
         TIMED_RETRIES[:] = [r for r in TIMED_RETRIES if not r.startswith("selftest-")]
-    if recovered and blew and rcfail:
+    if recovered and blew and rcfail and scaled and floored and scaledblow:
         PASSES[0] += 1
     else:
-        FAILS.append("_timed retry rule self-test: recovered=%s blowup=%s rc=%s"
-                     % (bool(recovered), blew, rcfail))
+        FAILS.append("_timed retry rule self-test: recovered=%s blowup=%s rc=%s "
+                     "scaled=%s floored=%s scaled-blowup=%s"
+                     % (bool(recovered), blew, rcfail, scaled, floored, scaledblow))
 
 
 def main():
