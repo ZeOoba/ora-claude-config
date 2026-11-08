@@ -244,6 +244,32 @@ ENV_SKIP_SENTINEL = "CANNOT RUN:"
 # measured on and still collapses the observed 137s sequential runtime to roughly
 # the single slowest file's own duration (a few seconds), not floor-to-zero.
 MAX_PARALLEL_TESTS = 8
+# Environment override for the pool size, LOWER-ONLY (added 2026-11-06). WHY: the CI
+# FULL run (.github/workflows/full-test-suite.yml) executes on a 4-vCPU windows-latest
+# runner, where 8 concurrent subprocess-heavy files starved each other into 480s x2
+# timeouts on files that pass when given CPU. The fix is fewer workers on that host, not
+# shorter timeouts or a skip list. The ceiling stays MAX_PARALLEL_TESTS so the override
+# can never oversubscribe the dev box; an invalid value falls back to the default with a
+# warning (a typo must not silently serialize, or silently parallelize, a run).
+MAX_PARALLEL_ENV = "ORA_GATE_MAX_PARALLEL"
+
+
+def max_parallel_tests(env=None):
+    """Worker-pool size for run_suite(): MAX_PARALLEL_TESTS, or ORA_GATE_MAX_PARALLEL
+    when it is an integer in [1, MAX_PARALLEL_TESTS] (above the ceiling is capped)."""
+    env = os.environ if env is None else env
+    raw = env.get(MAX_PARALLEL_ENV)
+    if raw is None:
+        return MAX_PARALLEL_TESTS
+    try:
+        n = int(raw.strip())
+    except ValueError:
+        n = 0
+    if n < 1:
+        sys.stderr.write("hook-tests-gate: ignoring invalid %s=%r (want an integer >= 1); "
+                         "using %d workers.\n" % (MAX_PARALLEL_ENV, raw, MAX_PARALLEL_TESTS))
+        return MAX_PARALLEL_TESTS
+    return min(n, MAX_PARALLEL_TESTS)
 
 # git sets these in a hook process's own environment so IT can operate on the outer
 # repo. Every test file is spawned as a subprocess of THIS gate, so without stripping
@@ -569,7 +595,7 @@ def run_suite(root=None, only=None):
     if not paths:
         return []
     results_by_path = {}
-    workers = min(MAX_PARALLEL_TESTS, len(paths))
+    workers = min(max_parallel_tests(), len(paths))
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         future_to_path = {pool.submit(_run_one, path): path for path in paths}
         for future in concurrent.futures.as_completed(future_to_path):

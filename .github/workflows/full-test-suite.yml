@@ -74,6 +74,13 @@ jobs:
           "TEMP=C:\Users\Owner\AppData\Local\Temp" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           "TMP=C:\Users\Owner\AppData\Local\Temp" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
           tzutil /s "Eastern Standard Time"
+          # hooks/bin/netlify-guard-global.js runs its token validator with a HARD-CODED
+          # interpreter (deliberately not an env var -- see the guard's 2026-10-17 note),
+          # so its test died on WinError 2 here: the dev box's Python 3.13 path did not
+          # exist. Point that exact path at the setup-python 3.13 install.
+          New-Item -ItemType Directory -Force -Path C:\Users\Owner\AppData\Local\Programs\Python | Out-Null
+          New-Item -ItemType Junction -Path C:\Users\Owner\AppData\Local\Programs\Python\Python313 -Target $env:pythonLocation | Out-Null
+          & C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe -I -S -c "import sys; print(sys.version)"
 
       # Test fixtures create throwaway git repos and commit into them. Runs after the
       # HOME switch so the identity lands in the emulated home's .gitconfig.
@@ -91,4 +98,9 @@ jobs:
         env:
           PYTHONUTF8: "1"
           PYTHONIOENCODING: utf-8
+          # The gate's default pool (8) is sized for the 16-core dev box; on this 4-vCPU
+          # runner 8 subprocess-heavy files starved each other into 480s x2 timeouts.
+          # Lower-only override (hooks/git-prepush-hook-tests-gate.py max_parallel_tests);
+          # per-test timeouts are unchanged.
+          ORA_GATE_MAX_PARALLEL: "3"
         run: python hooks/git-prepush-hook-tests-gate.py --full
