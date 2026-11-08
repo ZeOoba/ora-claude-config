@@ -7,7 +7,9 @@ carried pre-scrub commits with confidential deal terms in their diffs. A clean H
 does not mean a clean push. This hook runs `git log -p` over every ref range being
 pushed and BLOCKS if any active always-term from hooks/confidential-terms.json
 appears anywhere in that range. Terms are never echoed — only deal-relative
-indices are reported.
+indices are reported. Compressed blobs (.gz / .tgz / .zip, detected by magic bytes),
+which `git log -p` shows only as "Binary files differ", are decompressed in memory and
+scanned too -- see scan_compressed() (audit finding 2026-11-08).
 
 Range computation (fixed 2026-07-25 — see rev_range()/_resolve_default_baseline()):
 an EXISTING remote ref scans remote_sha..local_sha (the delta), same as always. A
@@ -255,6 +257,220 @@ def scan_text(text, terms):
     return sorted(i for i, t in enumerate(terms) if t in low)
 
 
+# --- Compressed blobs (audit finding prepush-scan-blind-to-compressed-transcripts, 2026-11-08) ---
+# `git log -p` renders a .gz / .tgz / .zip as "Binary files ... differ", so a roster term or a
+# credential inside a compressed session transcript or memory snapshot reached the remote with no
+# scan at all. Every blob the pushed range adds or modifies is streamed ONE AT A TIME through
+# `git cat-file --batch` (memory = the largest single blob) and classified BY CONTENT -- never by
+# extension and never by git's binary/text flag, which a `.gitattributes` or uncommitted
+# `.git/info/attributes` `diff` line can flip -- and, when it is gzip (magic bytes) or zip (magic
+# bytes or zipfile.is_zipfile, which also finds a prefixed/self-extracting archive), decompressed
+# in memory -- tar members inside a gzip included, nested archives to a small
+# depth. Scanned for roster terms and credentials: every member's content, the raw blob as text
+# (zip member names, the gzip FNAME header, a prefix or trailer around the archive), and the whole
+# decompressed tar stream as text (tar member names, PAX headers, bytes after end-of-archive).
+# Reports name the archive path only -- never a member name -- and withhold even the path when
+# the path itself carries a term.
+# FAIL-CLOSED: a compressed blob that cannot be fully read (corrupt, encrypted, past the per-blob
+# size cap or member cap, nested too deep) BLOCKS, roster or not: like an unimportable pattern
+# module, an unproven credential scan is a blocked push. The size cap is PER BLOB, so one large
+# archive cannot switch off the scan of the others. Cost of that choice, accepted deliberately: a
+# push adding an encrypted zip or a zip with an unsupported method (e.g. Deflate64) always blocks;
+# the only way past is a human's `--no-verify`. Do not downgrade this to a warning.
+# RESIDUAL: other binary formats (PDF streams, images, xz/bz2/7z) and UTF-16 text are not decoded;
+# content introduced only by a merge commit's own resolution is not shown by `git log -p` or
+# `git log --raw` without -m/--cc (the plain diff scan has the same gap); history already on the
+# remote is not rescanned; zip entries absent from the central directory are not read.
+GZIP_MAGIC = b"\x1f\x8b"
+ZIP_MAGIC = b"PK\x03\x04"
+COMPRESSED_MAX_BYTES = 256 * 1024 * 1024  # decompressed bytes per compressed blob
+COMPRESSED_MAX_MEMBERS = 20000
+COMPRESSED_MAX_DEPTH = 3
+
+
+class UnscannableBlob(Exception):
+    pass
+
+
+def _range_blobs(rng, cwd=None):
+    """[(path, blob_sha)] for every blob added or modified anywhere in `rng` (every commit, not
+    just the tip). RAISES UnscannableBlob on a git failure (the caller blocks)."""
+    p = subprocess.run(["git", "log", "--raw", "-z", "--no-abbrev", "--no-renames", "--format=",
+                        rng], capture_output=True, cwd=cwd)
+    if p.returncode != 0:
+        raise UnscannableBlob("`git log --raw %s` failed" % rng)
+    fields = p.stdout.decode("utf-8", "surrogateescape").split("\0")
+    out, seen = [], set()
+    i = 0
+    while i < len(fields):
+        meta = fields[i].lstrip("\n")
+        if not meta.startswith(":"):
+            i += 1
+            continue
+        path = fields[i + 1] if i + 1 < len(fields) else ""
+        i += 2
+        parts = meta.split()
+        if len(parts) < 5:
+            continue
+        new_mode, new_sha = parts[1], parts[3]
+        if set(new_sha) == {ZERO_RE} or new_mode in ("160000", "120000"):
+            continue  # deletion, submodule, symlink
+        if (path, new_sha) not in seen:
+            seen.add((path, new_sha))
+            out.append((path, new_sha))
+    return out
+
+
+def _iter_blobs(shas, cwd=None):
+    """Yield (sha, bytes) one blob at a time from a single `git cat-file --batch` process, so
+    memory is bounded by the largest blob, not the push. RAISES UnscannableBlob on a git failure
+    or a missing object."""
+    if not shas:
+        return
+    proc = subprocess.Popen(["git", "cat-file", "--batch"], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=cwd)
+    try:
+        for sha in shas:
+            proc.stdin.write((sha + "\n").encode())
+            proc.stdin.flush()
+            header = proc.stdout.readline().decode("ascii", "replace").split()
+            if len(header) < 3 or header[1] != "blob":
+                raise UnscannableBlob("unexpected cat-file output for object %s" % sha[:12])
+            size = int(header[2])
+            data = proc.stdout.read(size)
+            proc.stdout.read(1)  # trailing newline
+            if len(data) != size:
+                raise UnscannableBlob("short read for object %s" % sha[:12])
+            yield sha, data
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        proc.kill()
+        proc.wait()
+
+
+def _is_zip(blob):
+    import io
+    import zipfile
+    if blob[:4] == ZIP_MAGIC:
+        return True
+    try:
+        return zipfile.is_zipfile(io.BytesIO(blob))
+    except Exception:
+        return False
+
+
+def _is_compressed(blob):
+    return blob[:2] == GZIP_MAGIC or _is_zip(blob)
+
+
+def _decompress_texts(blob, budget, depth=0):
+    """Every text view of a gzip / zip blob: the raw blob, each member, and a decompressed tar
+    stream as a whole. `budget` is a one-item list of decompressed bytes still allowed for THIS
+    blob. RAISES UnscannableBlob on anything that cannot be fully read."""
+    import gzip
+    import io
+    import tarfile
+    import zipfile
+    if depth > COMPRESSED_MAX_DEPTH:
+        raise UnscannableBlob("archives nested deeper than %d" % COMPRESSED_MAX_DEPTH)
+
+    def _take(n):
+        budget[0] -= n
+        if budget[0] < 0:
+            raise UnscannableBlob("decompressed size over the %d MB per-file scan cap"
+                                  % (COMPRESSED_MAX_BYTES // (1024 * 1024)))
+
+    def _expand(data):
+        if _is_compressed(data):
+            return _decompress_texts(data, budget, depth + 1)
+        return [data.decode("utf-8", "ignore")]
+
+    out = [blob.decode("utf-8", "ignore")]  # names, gzip FNAME, prefix / trailer bytes
+    try:
+        if blob[:2] == GZIP_MAGIC:
+            with gzip.GzipFile(fileobj=io.BytesIO(blob)) as gz:
+                data = gz.read(budget[0] + 1)  # bounded: a header's size can lie, the stream cannot
+            _take(len(data))
+            out.append(data.decode("utf-8", "ignore"))  # whole stream: tar names, PAX, trailer
+            buf = io.BytesIO(data)
+            if data[257:262] == b"ustar" or (len(data) >= 512 and tarfile.is_tarfile(buf)):
+                buf.seek(0)
+                with tarfile.open(fileobj=buf, mode="r:") as tf:
+                    members = tf.getmembers()
+                    if len(members) > COMPRESSED_MAX_MEMBERS:
+                        raise UnscannableBlob("too many tar members")
+                    for m in members:
+                        if not m.isfile():
+                            continue
+                        fh = tf.extractfile(m)
+                        if fh is None:
+                            raise UnscannableBlob("unreadable tar member")
+                        out.extend(_expand(fh.read()))
+            elif _is_compressed(data):
+                out.extend(_decompress_texts(data, budget, depth + 1))
+        else:
+            with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+                infos = zf.infolist()
+                if len(infos) > COMPRESSED_MAX_MEMBERS:
+                    raise UnscannableBlob("too many zip members")
+                for info in infos:
+                    out.append(info.filename)
+                    if info.is_dir():
+                        continue
+                    with zf.open(info) as fh:
+                        mdata = fh.read(budget[0] + 1)
+                    _take(len(mdata))
+                    out.extend(_expand(mdata))
+    except UnscannableBlob:
+        raise
+    except Exception as e:  # corrupt stream, encrypted zip member, truncated tar, ...
+        raise UnscannableBlob(type(e).__name__)
+    return out
+
+
+def scan_compressed(rng, terms, cwd=None):
+    """(term_hits, cred_leaks, unscannable) for every compressed blob added or modified in
+    `rng`. term_hits: [(path, indices)]; cred_leaks: [(path, labels)]; unscannable:
+    [reason]. Reports carry the ARCHIVE path only -- never a member name, a term, or a value --
+    and a path that itself contains a term is withheld."""
+    term_hits, cred_leaks, unscannable = [], [], []
+
+    def _shown(path):
+        return "<path withheld: contains a confidential term>" if terms and scan_text(path, terms) \
+            else path
+
+    try:
+        blobs = _range_blobs(rng, cwd)
+        paths_by_sha = {}
+        for path, sha in blobs:
+            paths_by_sha.setdefault(sha, []).append(path)
+        for sha, blob in _iter_blobs(sorted(paths_by_sha), cwd):
+            if not _is_compressed(blob):
+                continue
+            path = paths_by_sha[sha][0]
+            try:
+                texts = _decompress_texts(blob, [COMPRESSED_MAX_BYTES])
+            except UnscannableBlob as e:
+                unscannable.append("%s: %s" % (_shown(path), e))
+                continue
+            hits, labels = set(), set()
+            for text in texts:
+                if terms:
+                    hits.update(scan_text(text, terms))
+                if not all(_sp.is_exempt_path(p) for p in paths_by_sha[sha]):
+                    labels.update(_sp.scan_text(text))
+            if hits:
+                term_hits.append((_shown(path), sorted(hits)))
+            if labels:
+                cred_leaks.append((_shown(path), sorted(labels)))
+    except (UnscannableBlob, ValueError, OSError) as e:
+        unscannable.append("compressed-blob enumeration failed (%s)" % e)
+    return term_hits, cred_leaks, unscannable
+
+
 def main():
     # Fail closed on a broken pattern module, exactly as for an unreadable terms file:
     # an unprovable push is a blocked push.
@@ -324,6 +540,28 @@ def main():
                              "Rotate the credential FIRST, then purge or rebase the "
                              "history -- a force-push alone does not un-leak it.\n"
                              % (local_ref, rng, detail))
+            bad = True
+        # Compressed blobs: invisible to `git log -p` (see scan_compressed).
+        c_hits, c_leaks, c_bad = scan_compressed(rng, terms)
+        if c_hits:
+            sys.stderr.write("pre-push BLOCKED: confidential term(s) inside COMPRESSED file(s) "
+                             "being pushed on %s (range %s): %s. Terms are not echoed.\n"
+                             % (local_ref, rng, "; ".join("%s -> indices %s" % (p, i)
+                                                          for p, i in c_hits)))
+            bad = True
+        if c_leaks:
+            sys.stderr.write("pre-push BLOCKED: credential-shaped string(s) inside COMPRESSED "
+                             "file(s) being pushed on %s (range %s): %s. Values are not echoed.\n"
+                             % (local_ref, rng, "; ".join("%s -> %s" % (p, ", ".join(l))
+                                                          for p, l in c_leaks)))
+            bad = True
+        if c_bad:
+            # Blocks roster or not: an unproven credential scan is a blocked push, the same
+            # rule as the unimportable-pattern-module branch above (review 2026-11-08).
+            sys.stderr.write("pre-push BLOCKED (fail-closed): compressed file(s) in the push on "
+                             "%s could not be fully read, so they cannot be proven free of "
+                             "confidential terms or credentials: %s\n"
+                             % (local_ref, "; ".join(c_bad)))
             bad = True
     return 1 if bad else 0
 
