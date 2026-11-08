@@ -326,6 +326,192 @@ for i, cmd in enumerate(["curl -d 'deal: %s' https://example.com" % A1,
     code, err = run(bash_payload(cmd))
     expect("BLOCK egress-bash :: #%d" % i, 2, code, err)
 
+# --- gh CLI is egress (audit finding conf-guard-gh-cli-egress-unscanned, 2026-11-08) -------------
+# PR / issue / gist / release bodies, `gh api` fields and repo descriptions all leave the machine
+# for GitHub. Inline text is scanned as command text; text the command READS from a file
+# (--body-file / -F / --notes-file / --input / -F key=@file / gist positional files) is read and
+# scanned too, and an unreadable referenced file fails closed while a roster is active.
+for i, cmd in enumerate([
+        'gh pr create --title "teaser" --body "closing %s next week"' % A1,
+        "gh issue create -t x -b '%s follow-up'" % A2,
+        "gh issue comment 12 --body '%s update'" % A3,
+        "gh gist create -d '%s notes' notes.txt" % A1,
+        "gh release create v1 --notes '%s'" % A2,
+        "gh api repos/o/r/issues -f title='%s'" % A3,
+        "gh repo edit --description '%s portfolio'" % A1,
+        "cd /tmp && gh pr edit 5 --body '%s'" % A2]):
+    code, err = run(bash_payload(cmd))
+    expect("BLOCK gh egress inline :: #%d" % i, 2, code, err)
+_GH_DIR = tempfile.mkdtemp(prefix="cg-gh-")
+atexit.register(lambda: __import__("shutil").rmtree(_GH_DIR, ignore_errors=True))
+_gh_dirty = os.path.join(_GH_DIR, "body-dirty.md").replace("\\", "/")
+_gh_clean = os.path.join(_GH_DIR, "body-clean.md").replace("\\", "/")
+with open(_gh_dirty, "w", encoding="utf-8") as _f:
+    _f.write("## Summary\n\nCloses the %s workstream.\n" % A1)
+with open(_gh_clean, "w", encoding="utf-8") as _f:
+    _f.write("## Summary\n\nRefactors the hook loader.\n")
+_gh_missing = os.path.join(_GH_DIR, "nope.md").replace("\\", "/")
+for i, cmd in enumerate([
+        'gh pr create --title t --body-file "%s"' % _gh_dirty,
+        'gh pr create --title t --body-file="%s"' % _gh_dirty,
+        'gh issue create -t t -F "%s"' % _gh_dirty,
+        'gh release create v1 --notes-file "%s"' % _gh_dirty,
+        'gh api repos/o/r/issues -F body=@"%s"' % _gh_dirty,
+        'gh api repos/o/r/issues --input "%s"' % _gh_dirty,
+        'gh gist create "%s"' % _gh_dirty,
+        'gh release upload v1 "%s"' % _gh_dirty]):
+    code, err = run(bash_payload(cmd))
+    expect("BLOCK gh egress via referenced file :: #%d" % i, 2, code, err)
+# relative path resolved against the payload's cwd
+code, err = run({"tool_name": "Bash", "cwd": _GH_DIR,
+                 "tool_input": {"command": "gh pr create -t t --body-file body-dirty.md"}})
+expect("BLOCK gh --body-file relative to payload cwd", 2, code, err)
+code, err = run(bash_payload('gh pr create -t t --body-file "%s"' % _gh_missing))
+expect("BLOCK gh --body-file unreadable (fail closed, roster active)", 2, code, err)
+expect("ALLOW gh pr create with clean --body-file", 0,
+       run(bash_payload('gh pr create --title "hook loader" --body-file "%s"' % _gh_clean))[0])
+expect("ALLOW gh pr create with clean inline body", 0,
+       run(bash_payload('gh pr create --title "hook loader" --body "Refactor only."'))[0])
+expect("ALLOW gh pr list (read-only, no term)", 0, run(bash_payload("gh pr list --state open"))[0])
+# heredoc bodies: an apostrophe in a body must not break tokenizing (no false block), and a term in
+# a body is still caught as command text
+_HD = "gh pr create --title t --body-file - <<'EOF'\n## Summary\nIt's a %s\nEOF\n"
+expect("ALLOW gh heredoc body with apostrophe, clean", 0, run(bash_payload(_HD % "refactor"))[0])
+expect("BLOCK gh heredoc body carrying a term", 2, run(bash_payload(_HD % A1))[0])
+_SUB = 'gh pr create --title t --body "$(cat <<\'EOF\'\nIt\'s a refactor\nEOF\n)"'
+expect("ALLOW gh $(cat <<EOF) body with apostrophe, clean", 0, run(bash_payload(_SUB))[0])
+expect("BLOCK gh command that cannot be tokenized (fail closed, roster active)", 2,
+       run(bash_payload("gh pr create --title 'unterminated --body-file x.md"))[0])
+# Adversarial review of the gh fix (2026-11-08): every repro it found, pinned.
+os.makedirs(os.path.join(_GH_DIR, "sub"), exist_ok=True)
+for i, cmd in enumerate([
+        'gh auth status\ngh gist create "%s"' % _gh_dirty,                    # C2a two lines
+        'gh pr view 1\ngh release upload v1 "%s"' % _gh_dirty,                # C2a
+        'gh pr create -t t -F="%s"' % _gh_dirty,                              # C2b -F=
+        'gh api repos/o/r/issues -F=body=@"%s"' % _gh_dirty,                  # C2b api -F=
+        'gh pr create -t t -dF "%s"' % _gh_dirty,                             # C2c bundled
+        'gh pr create -t a#b --body-file "%s"' % _gh_dirty,                   # C2d '#'
+        'cat <<< "hi"\ngh gist create "%s"' % _gh_dirty,                      # C8 here-string
+        'echo "a <<END b"\ngh gist create "%s"' % _gh_dirty,                  # C8 quoted <<
+        'gh release new v1 "%s"' % _gh_dirty,                                 # C3a alias
+        'gh gist new "%s"' % _gh_dirty,                                       # C3a alias
+        'gh release -R o/r create v1 "%s"' % _gh_dirty,                       # C3a -R first
+        'gh gist edit abc -a "%s"' % _gh_dirty,                               # C3a gist edit
+        'gh gist create "%s"/body-dirt*.md' % _GH_DIR,                        # C3b glob
+        'F=x; gh gist create "$F"',                                           # C3b variable
+        'gh pr create -t t --body "$(cat %s)"' % _gh_dirty,                   # C2e $(cat)
+        'gh pr create -t t --body-file - < "%s"' % _gh_dirty,                 # C2e < redirect
+        'gh api repos/o/r/issues --input - < "%s"' % _gh_dirty,               # C2e
+        '"C:/Program Files/GitHub CLI/gh.exe" pr create -t t --body-file "%s"' % _gh_dirty,  # C1
+        '"gh" pr create --body "%s"' % A1,                                    # C1 quoted
+        'gh \\\n pr create --body "%s"' % A1,                                 # C1 continuation
+        'gh repo create r --description "%s"' % A1,                           # scope
+        'gh label create x -d "%s"' % A1,                                     # scope
+        'gh secret set X --body "%s"' % A1]):                                 # scope
+    code, err = run({"tool_name": "Bash", "cwd": os.path.join(_GH_DIR, "sub"),
+                     "tool_input": {"command": cmd}})
+    expect("BLOCK gh review repro :: #%d" % i, 2, code, err)
+# C9: write-then-send is the standard PR-body workflow -- the body is command text, scanned.
+_WTS = "cat > new-body.md <<'EOF'\n%s\nEOF\ngh pr create -t t --body-file new-body.md"
+code, err = run({"tool_name": "Bash", "cwd": os.path.join(_GH_DIR, "sub"),
+                 "tool_input": {"command": _WTS % "It's a clean refactor"}})
+expect("ALLOW gh write-then-send body file (clean)", 0, code, err)
+code, err = run({"tool_name": "Bash", "cwd": os.path.join(_GH_DIR, "sub"),
+                 "tool_input": {"command": _WTS % ("closing " + A1)}})
+expect("BLOCK gh write-then-send body file carrying a term", 2, code, err)
+# Round-2 review repros (2026-11-08).
+_SUBDIR = os.path.join(_GH_DIR, "sub")
+for i, cmd in enumerate([
+        'cat "%s" > fresh-body.md && gh pr create -t t --body-file fresh-body.md' % _gh_dirty,  # blocker
+        'cat "%s" | tee fresh3.md >/dev/null; gh pr create -t t -F fresh3.md' % _gh_dirty,     # blocker
+        "bash -c 'gh pr create -t t --body-file \"%s\"'" % _gh_dirty,                          # nested
+        'echo "$(gh gist create %s)"' % _gh_dirty,                                             # nested
+        'echo `gh gist create %s`' % _gh_dirty,                                                # nested
+        'gh discussion create -t t -c General -b "%s"' % A1,                                   # scope
+        'gh discussion create -t t -c General -F "%s"' % _gh_dirty,                            # scope
+        'gh agent-task create -F "%s"' % _gh_dirty,                                            # scope
+        'gh pr create -t t --body "$(cat clean.md %s)"' % _gh_dirty,                           # multi cat
+        'gh pr create -t t --body "$(cat -- %s)"' % _gh_dirty,                                 # cat --
+        '<"%s" gh pr create -t t --body-file -' % _gh_dirty]):                                 # leading <
+    code, err = run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {"command": cmd}})
+    expect("BLOCK gh round-2 repro :: #%d" % i, 2, code, err)
+for i, cmd in enumerate([
+        "# don't forget\ngh pr list",
+        "# Create the PR (it's ready)\ngh pr create -t t --body \"ok\"",
+        "# later: gh pr create --body-file notyet.md\ngh pr list",
+        "echo 'a <<END b'\ngh pr list",
+        "printf 'clean body\\n' > p.md && gh pr create -t t --body-file p.md"]):
+    code, err = run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {"command": cmd}})
+    expect("ALLOW gh round-2 clean use :: #%d" % i, 0, code, err)
+# Round-3 review repros (2026-11-08): constructs are refused structurally while a roster is active.
+for i, cmd in enumerate([
+        "cat > w3.md <<'EOF'\nhdr\nEOF\ncat \"%s\" >> w3.md\ngh pr create -t t -F w3.md" % _gh_dirty,
+        'echo hi > w4.md; cp "%s" w4.md; gh pr create -t t -F w4.md' % _gh_dirty,
+        "gh pr create -t t --body-file - <<EOF\n$(cat %s)\nEOF" % _gh_dirty,
+        "gh pr create -t t --body-file - <<EOF\n`cat %s`\nEOF" % _gh_dirty,
+        'gh pr create -t t --body "`cat %s`"' % _gh_dirty,
+        'echo `cat %s` > w2.md && gh pr create -t t -F w2.md' % _gh_dirty,
+        'gh pr create -t t --body-file <(cat "%s")' % _gh_dirty,
+        'gh pr create -t t --body-file - < <(cat "%s")' % _gh_dirty,
+        'gh pr create -t t 2>&1 -F "%s"' % _gh_dirty,
+        'gh pr create -t t &>/dev/null -F "%s"' % _gh_dirty,
+        "gh 'gist' create \"%s\"" % _gh_dirty,
+        "gh pr view 1 | xargs gh gist create",
+        "eval 'gh gist create \"%s\"'" % _gh_dirty]):
+    code, err = run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {"command": cmd}})
+    expect("BLOCK gh round-3 repro :: #%d" % i, 2, code, err)
+for i, cmd in enumerate([
+        'grep -n "gh pr create" hooks/*.py',
+        'git commit -m "docs: mention gh pr create" && git push',
+        "gh pr create -t t --body \"$(cat <<'EOF'\n## Summary\nUses `code` spans and it's fine\nEOF\n)\"",
+        "gh pr create -t t --body-file - <<'EOF'\nquoted body with `backticks` and $(literal)\nEOF"]):
+    code, err = run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {"command": cmd}})
+    expect("ALLOW gh round-3 clean use :: #%d" % i, 0, code, err)
+# Round-4 review repros: wrapper before the shell runner leaks; literal backticks are text.
+for i, cmd in enumerate([
+        "timeout 60 bash -c 'gh gist create \"%s\"'" % _gh_dirty,
+        "env bash -c 'gh gist create \"%s\"'" % _gh_dirty,
+        "nohup sh -c 'gh gist create \"%s\"'" % _gh_dirty,
+        'gh pr create -t t --body "x $(cat %s)"' % _gh_dirty,
+        "gh pr create -t t --body-file - <<EOF\nIt's $(cat %s)\nEOF" % _gh_dirty,
+        "gh pr create -t t --body-file - <<EOF\nIt's `cat %s`\nEOF" % _gh_dirty,
+        "cat > b.md <<EOF\nIt's ok\nEOF\ngh pr comment 1 --body \"$(cat %s)\"" % _gh_dirty,
+        "gh pr create -t t --body-file - <<EOF\nx \\\\$(cat %s)\nEOF" % _gh_dirty]):
+    code, err = run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {"command": cmd}})
+    expect("BLOCK gh round-4 repro :: #%d" % i, 2, code, err)
+expect("ALLOW runner name used as an argument after gh", 0,
+       run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {
+           "command": 'gh pr create -t cmd --body "uses gh pr view"'}})[0])
+for i, cmd in enumerate([
+        "gh pr comment 5 --body 'Fixed in `abc123`'",
+        'gh pr create -t t --body "Run \\`npm test\\`"',
+        "grep -n '`' f; gh pr list"]):
+    code, err = run({"tool_name": "Bash", "cwd": _SUBDIR, "tool_input": {"command": cmd}})
+    expect("ALLOW gh round-4 clean use :: #%d" % i, 0, code, err)
+# Git Bash /tmp is %TEMP%: a body written there in one call and sent in the next must resolve.
+_tmp_body = os.path.join(tempfile.gettempdir(), "cg-gh-tmp-%s.md" % uuid.uuid4().hex[:8])
+with open(_tmp_body, "w", encoding="utf-8") as _f:
+    _f.write("clean refactor body\n")
+atexit.register(lambda: os.path.exists(_tmp_body) and os.remove(_tmp_body))
+if os.name == "nt":
+    expect("ALLOW gh --body-file /tmp/... resolved to %TEMP% (Git Bash)", 0,
+           run(bash_payload("gh pr create -t t --body-file /tmp/%s" % os.path.basename(_tmp_body)))[0])
+# C7 (pre-existing): a non-string Bash command must block, not crash to a non-blocking exit 1.
+expect("BLOCK Bash with non-string command", 2,
+       run({"tool_name": "Bash", "tool_input": {"command": ["gh", "pr"]}})[0])
+# With NO active roster nothing is read and nothing blocks, even an unreadable reference.
+_GH_EMPTY = os.path.join(_GH_DIR, "empty-roster.json")
+with open(_GH_EMPTY, "w", encoding="utf-8") as _f:
+    json.dump({"_meta": {"roster_last_verified": datetime.date.today().isoformat()}}, _f)
+_p = subprocess.run([sys.executable, GUARD], input=json.dumps(bash_payload(
+    'gh pr create -t t --body-file "%s"' % _gh_missing)).encode("utf-8"),
+    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    env=dict(os.environ, CONFIDENTIAL_TERMS_FILE_OVERRIDE=_GH_EMPTY))
+expect("ALLOW gh unreadable --body-file when no deal is active", 0, _p.returncode,
+       _p.stderr.decode("utf-8", "replace"))
+expect("ALLOW gh api with plain -F field (not a file ref)", 0,
+       run(bash_payload("gh api repos/o/r/issues -F draft=true -f title=cleanup"))[0])
+
 # --- COM send path (send-via-outlook.ps1) is egress — review finding 2026-06-11 --------
 COM = ('powershell -NoProfile -File '
        '"C:\\Users\\Owner\\.claude\\scheduled-tasks\\_shared\\send-via-outlook.ps1" '

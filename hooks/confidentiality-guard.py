@@ -11,7 +11,9 @@ confidential-terms.json) from crossing any EXTERNAL egress boundary:
   * Outlook send/draft/forward calls  (mcp__*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)*)
   * live M365 / HubSpot send surfaces (outlook mail + calendar, Teams, SharePoint uploads,
                                        HubSpot content writes -- MCP_SEND_SURFACES, 2026-09-30)
-  * egress shell commands             (git push / curl / wget / scp / rsync-remote / Invoke-WebRequest)
+  * egress shell commands             (git push / curl / wget / scp / rsync-remote / Invoke-WebRequest /
+                                       gh pr|issue|gist|release|api|repo edit, incl. the files gh
+                                       reads a body from -- see GH_EGRESS, 2026-11-08)
 
 The deal legitimately exists INSIDE the brain, so INTERNAL reads/writes/commands are
 allowed -- only egress is blocked. This is the whole point: confidentiality is an
@@ -47,7 +49,7 @@ repo) when this checkout's own copy is missing or unreadable and no explicit
 CONFIDENTIAL_TERMS_FILE_OVERRIDE is set. Still fail-closed if the file is unreadable in BOTH
 places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 """
-import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile, unicodedata, functools, time
+import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile, unicodedata, functools, time, glob
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(HOOK_DIR, "lib")
@@ -259,12 +261,425 @@ def mcp_scan_text(ti):
             views.append(t)
             views.extend(_rendered_views(t))
     return "\n".join(v for v in views if v)
+_GH_SUBS = (r"(?:pr|issue|gist|release|api|label|secret|variable|project|discussion|agent-task|"
+            r"repo\s+(?:edit|create|new)|workflow\s+run|codespace\s+cp)")
+# `gh`, `gh.exe`, a quoted full path ending in gh.exe, and a line continuation before the subcommand.
+_GH_HEAD = r"\bgh(?:\.exe)?[\"']?\s+(?:\\\r?\n\s*)?[\"']?"
 EGRESS_BASH = re.compile(
     r"\bgit\s+push\b|\bcurl\b|\bwget\b|\bscp\b|\brsync\b\s+\S+::|"
     r"invoke-webrequest|invoke-restmethod|\bnetlify\b.*\bdeploy\b|\bwrangler\b.*\b(deploy|publish)\b|"
-    r"send-via-outlook\.ps1",  # the SOLE live COM send path IS egress (review finding 2026-06-11)
+    r"send-via-outlook\.ps1|"  # the SOLE live COM send path IS egress (review finding 2026-06-11)
+    + _GH_HEAD + _GH_SUBS + r"\b",  # GitHub CLI (audit finding 2026-11-08)
     re.I,
 )
+
+# --- gh CLI egress (audit finding conf-guard-gh-cli-egress-unscanned, 2026-11-08) ----------------
+# PR / issue / gist / release / discussion bodies, `gh api` fields, repo and label descriptions,
+# secrets and variables leave the machine for GitHub. Inline text is in the command and is scanned
+# as command text like every other EGRESS_BASH match. Text gh READS FROM A FILE is not in the
+# command, so it is read and scanned too:
+#   --body-file / -F (pr, issue, discussion)   --notes-file / -F (release)   --input (api)
+#   -F/--field key=@file (api)   -f/--env-file (secret, variable)   -a/--add (gist edit)
+#   -F/--from-file (agent-task)   positional files of `gist create|new|edit`, `release create|new|upload`
+#   `< file` redirected into gh (before or after it)
+# Every one is REQUIRED: while a roster is active, a reference that cannot be read (missing, a glob
+# matching nothing, a $VARIABLE), a gh command that cannot be tokenized, a command or process
+# substitution / backtick anywhere in a gh command (bar the canonical quoted-heredoc
+# `--body "$(cat <<'EOF' ... EOF)"`), or gh run through another shell / eval / xargs BLOCKS (fail
+# closed) -- constructs are refused structurally rather than modelled one by one. One exception: a
+# file this same command writes first FROM COMMAND TEXT (`cat > f <<'EOF'`, `echo ... > f`,
+# `printf ... > f`), that nothing else in the command touches, and that does not exist yet -- its
+# content is in the command text, which is scanned.
+# RESIDUAL: `-` (stdin) fed by a pipe (`cat f | gh ... --body-file -`, `xargs gh ...`) is scanned as
+# command text only (a heredoc body IS command text and is covered); a heredoc executed as a script
+# (`bash <<EOF ... gh ... EOF`); a quoted or commented `<<X` whose X appears on a later line;
+# non-zip compressed assets (raw bytes only); `-T/--template` names a template already in the repo
+# (covered by the pre-push scan when committed); a gh alias (`gh alias set`), a `$G pr ...`
+# indirection or a split name (`g''h`) is not recognized as gh. `$VAR` paths, ANSI-C `$'...'`
+# quoting and backticks inside a single-quoted gh argument fail closed while a roster is active
+# (the safe direction), as does any expanding `$(...)` in a command that also runs a read-only gh
+# call (`B=$(git branch --show-current); gh pr list --head "$B"`). Also RESIDUAL: file content read
+# into a variable without a substitution (`read -r B < f`, `mapfile`) and then sent; gh run through
+# an interpreter other than a shell (`python -c`, `node -e`, `find -exec`).
+GH_EGRESS = re.compile(_GH_HEAD + _GH_SUBS + r"\b", re.I)
+_GH_FILE_FLAGS = {
+    "pr": ("--body-file", "-F"),
+    "issue": ("--body-file", "-F"),
+    "discussion": ("--body-file", "-F"),
+    "release": ("--notes-file", "-F"),
+    "api": ("--input",),
+    "secret": ("-f", "--env-file"),
+    "variable": ("-f", "--env-file"),
+    "gist": ("-a", "--add"),
+    "agent-task": ("-F", "--from-file"),
+}
+# Short boolean flags that may be bundled IN FRONT of a file flag (`-dF body.md`).
+_GH_BUNDLE_BOOLS = "dfwepi"
+_GH_VERB_ALIASES = {"new": "create"}
+_GH_POSITIONAL_VALUE_FLAGS = {
+    ("gist", "create"): {"-d", "--desc", "-f", "--filename"},
+    ("gist", "edit"): {"-a", "--add", "-d", "--desc", "-f", "--filename", "-r", "--remove"},
+    ("release", "create"): {"-n", "--notes", "-F", "--notes-file", "-t", "--title", "--target",
+                            "--discussion-category", "--notes-start-tag", "-R", "--repo"},
+    ("release", "upload"): {"-R", "--repo"},
+}
+# How many leading positionals are NOT files: the release tag, the gist id being edited.
+_GH_POSITIONAL_SKIP = {("release", "create"): 1, ("release", "upload"): 1, ("gist", "edit"): 1}
+_SHELL_PUNCT = re.compile(r"^[();<>|&\n]+$")
+_HEREDOC = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
+# Shell constructs whose output gh would send but no payload scan can see. While a roster is active
+# a gh command containing any of them BLOCKS, except the canonical quoted-heredoc body
+# `--body "$(cat <<'EOF' ... EOF)"` (a quoted delimiter means the body is literal command text).
+_SAFE_SUBST = re.compile(r"\$\(\s*cat\s+<<-?\s*(['\"])[A-Za-z_][A-Za-z0-9_]*\1")
+_SHELL_RUNNERS = ("bash", "sh", "zsh", "dash", "ksh", "eval", "pwsh", "powershell", "cmd", "xargs",
+                  "bash.exe", "sh.exe", "pwsh.exe", "powershell.exe", "cmd.exe")
+_GLOB_CHARS = re.compile(r"[*?\[]")
+
+
+def _strip_heredoc_bodies(cmd, quoted_only=False):
+    """The command with every heredoc BODY removed (the operator line is kept). A body is free
+    text -- an apostrophe in it would break shell tokenizing -- and it is already scanned as
+    command text, so dropping it here loses nothing. A heredoc whose end delimiter never appears
+    (an `<<` that was not really an operator, e.g. inside quotes) drops nothing."""
+    lines = cmd.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        out.append(line)
+        i += 1
+        for m in _HEREDOC.finditer(line):
+            if quoted_only and not m.group(1):
+                continue  # unquoted delimiter: the shell expands $(...) / backticks in the body
+            delim = m.group(2)
+            j = i
+            while j < len(lines) and lines[j].strip() != delim:
+                j += 1
+            if j < len(lines):
+                i = j + 1  # skip the body and the delimiter line
+    return chr(10).join(out)
+
+
+def _strip_comments(text):
+    """`text` without shell comments: a `#` that starts a word outside quotes, to end of line
+    (`a#b` stays one word). An apostrophe in a comment would otherwise break tokenizing, and a
+    gh command written in a comment is not run."""
+    out, quote, prev = [], None, "\n"
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if quote:
+            if c == "\\" and quote == '"' and i + 1 < len(text):
+                out.append(text[i:i + 2])
+                i += 2
+                prev = "x"
+                continue
+            if c == quote:
+                quote = None
+        elif c in ("'", '"'):
+            quote = c
+        elif c == "\\" and i + 1 < len(text):
+            out.append(text[i:i + 2])
+            i += 2
+            prev = "x"
+            continue
+        elif c == "#" and prev in " \t\n;|&()":
+            j = text.find("\n", i)
+            i = len(text) if j < 0 else j
+            continue
+        out.append(c)
+        prev = c
+        i += 1
+    return "".join(out)
+
+
+def _prepared(cmd):
+    """The command as the tokenizer sees it: heredoc bodies, comments and line continuations
+    removed."""
+    return re.sub(r"\\\r?\n", " ", _strip_comments(_strip_heredoc_bodies(cmd)))
+
+
+def _shell_tokens(cmd):
+    """Shell-ish tokens: words, and runs of operator characters (newline counts as one, so two
+    commands on two lines are two segments). RAISES when the command cannot be tokenized."""
+    import shlex
+    lex = shlex.shlex(_prepared(cmd), posix=True, punctuation_chars="();<>|&\n")
+    lex.whitespace = " \t\r"
+    lex.whitespace_split = True
+    lex.commenters = ""  # comments are already stripped; `a#b` is one word to the shell
+    return list(lex)
+
+
+def _is_gh(tok):
+    return os.path.basename(tok.replace("\\", "/")).lower() in ("gh", "gh.exe")
+
+
+def _segments(tokens):
+    """[(words, stdin_files, stdout_files, operators)] per simple command. `<` targets go to
+    stdin_files and `>`/`>>`/`>|` targets to stdout_files, wherever they sit in the command."""
+    segs, words, ins, outs, ops = [], [], [], [], []
+    pending = None
+    for tok in tokens:
+        if _SHELL_PUNCT.match(tok):
+            t = tok.strip(" \t\r")
+            if t in ("<", ">", ">>", ">|", "&>", "&>>"):
+                pending = "in" if t == "<" else "out"
+                continue
+            if t in (">&", "<&", "2>&", ">>&"):
+                pending = "skip"  # fd duplication: the next word is an fd, not a file
+                continue
+            if t in ("<<", "<<-", "<<<"):
+                ops.append(t)
+                pending = "skip"  # the heredoc delimiter / here-string word
+                continue
+            segs.append((words, ins, outs, ops))
+            words, ins, outs, ops, pending = [], [], [], [], None
+            continue
+        if pending == "in":
+            ins.append(tok)
+        elif pending == "out":
+            outs.append(tok)
+        elif pending != "skip":
+            words.append(tok)
+        pending = None
+    segs.append((words, ins, outs, ops))
+    return [s for s in segs if s[0] or s[1] or s[2]]
+
+
+def _gh_invocations(tokens):
+    """(args after `gh`, redirect-in files) for every gh invocation in a token stream."""
+    out = []
+    for words, ins, _outs, _ops in _segments(tokens):
+        starts = [i for i, w in enumerate(words) if _is_gh(w)]
+        for n, s in enumerate(starts):
+            end = starts[n + 1] if n + 1 < len(starts) else len(words)
+            out.append((words[s + 1:end], ins if n == 0 else []))
+    return out
+
+
+def _written_paths(tokens):
+    """Paths the command writes FROM ITS OWN TEXT, so their content is already scanned: the `>`
+    target of `echo` / `printf`, or of `cat` fed only by a heredoc / here-string -- and ONLY when
+    no other non-gh command in the same Bash call mentions that path (`>> f`, `cp x f`, `tee f`,
+    `dd of=f` would change what the file holds)."""
+    segs = _segments(tokens)
+    candidates = {}
+    for n, (words, ins, outs, ops) in enumerate(segs):
+        if not outs or not words:
+            continue
+        cmd0 = os.path.basename(words[0]).lower()
+        if cmd0 in ("echo", "printf") or (
+                cmd0 == "cat" and ops and not ins and all(w.startswith("-") for w in words[1:])):
+            for o in outs:
+                candidates.setdefault(o, []).append(n)
+    written = set()
+    for path, writers in candidates.items():
+        if len(writers) != 1:
+            continue
+        mentioned = False
+        for n, (words, ins, outs, _ops) in enumerate(segs):
+            if n == writers[0] or any(_is_gh(w) for w in words):
+                continue
+            if any(path in w for w in words + ins + outs):
+                mentioned = True
+                break
+        if not mentioned:
+            written.add(path)
+    return written
+
+
+def _flag_values(args, names):
+    """Values of the named flags: `--f v`, `--f=v`, `-Fv`, `-F=v` (pflag strips the `=`), and a
+    short flag bundled behind booleans (`-dF v`, `-dFv`)."""
+    vals = []
+    for i, a in enumerate(args):
+        for n in names:
+            if n.startswith("--"):
+                if a == n and i + 1 < len(args):
+                    vals.append(args[i + 1])
+                elif a.startswith(n + "="):
+                    vals.append(a[len(n) + 1:])
+                continue
+            m = re.match(r"^-([%s]*)%s(.*)$" % (_GH_BUNDLE_BOOLS, re.escape(n[1:])), a)
+            if not m or a.startswith("--"):
+                continue
+            rest = m.group(2)
+            if rest == "":
+                if i + 1 < len(args):
+                    vals.append(args[i + 1])
+            else:
+                vals.append(rest[1:] if rest.startswith("=") else rest)
+    return vals
+
+
+def _gh_sub_verb(args):
+    """(subcommand, verb, index of the first argument after the verb), skipping a `-R/--repo <v>`
+    placed between them (`gh release -R o/r create ...`)."""
+    sub = args[0].lower() if args else ""
+    i = 1
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in ("-R", "--repo") else 1
+    verb = args[i].lower() if i < len(args) else ""
+    return sub, _GH_VERB_ALIASES.get(verb, verb), i + 1
+
+
+def _check_structure(cmd, tokens):
+    """RAISE when the command hides what gh sends behind a construct no payload scan can read:
+    command / process substitution or backticks outside a quoted heredoc body (the canonical
+    `$(cat <<'EOF' ... EOF)` body is allowed), or gh run through another shell or eval
+    (`bash -c '...gh...'`, `eval`, `xargs gh`)."""
+    # Shell text (every heredoc body stripped) is checked quote-aware; each UNQUOTED-delimiter
+    # heredoc body is checked separately and quote-blind, because a body has no shell quoting --
+    # an apostrophe in it must not open a fake quote that hides a later `$(`.
+    text = _SAFE_SUBST.sub("", _strip_comments(_strip_heredoc_bodies(cmd)))
+    if _expanding_construct(text):
+        raise ValueError("command substitution, backticks or <(...) in a gh command")
+    for body in _unquoted_heredoc_bodies(cmd):
+        if re.search(r"(?<!\\)(?:\\\\)*(\$\(|`)", body):  # an even run of backslashes is no escape
+            raise ValueError("command substitution or backticks in an unquoted heredoc body")
+    for words, _ins, _outs, _ops in _segments(tokens):
+        # Every word before the first gh, not just the first word: `timeout 60 bash -c`,
+        # `env sh -c`, `nohup ...` (a runner name AFTER gh is just an argument).
+        first_gh = next((n for n, w in enumerate(words) if _is_gh(w)), len(words))
+        for n, w in enumerate(words[:first_gh]):
+            if os.path.basename(w.replace("\\", "/")).lower() in _SHELL_RUNNERS \
+                    and any(GH_EGRESS.search(x) or _is_gh(x) for x in words[n + 1:]):
+                raise ValueError("gh run through %s" % w)
+
+
+def _unquoted_heredoc_bodies(cmd):
+    """Bodies of heredocs whose delimiter is unquoted (the shell expands `$(...)` in them)."""
+    lines = cmd.splitlines()
+    bodies, i = [], 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        for m in _HEREDOC.finditer(line):
+            delim = m.group(2)
+            j = i
+            while j < len(lines) and lines[j].strip() != delim:
+                j += 1
+            if j < len(lines):
+                if not m.group(1):
+                    bodies.append(chr(10).join(lines[i:j]))
+                i = j + 1
+    return bodies
+
+
+def _expanding_construct(text):
+    """True when `text` holds a `$(`, backtick or `<(` the shell would EXPAND: outside single
+    quotes and not backslash-escaped (`<(` only outside any quotes). A literal backtick in a
+    single-quoted body or an escaped one in a double-quoted body is plain text, already scanned."""
+    quote, i = None, 0
+    while i < len(text):
+        c = text[i]
+        if quote == "'":
+            if c == "'":
+                quote = None
+        elif c == "\\":
+            i += 2
+            continue
+        elif c == "'" and quote is None:
+            quote = "'"
+        elif c == '"':
+            quote = None if quote == '"' else '"'
+        elif c == "`" or text.startswith("$(", i):
+            return True
+        elif quote is None and text.startswith("<(", i):
+            return True
+        i += 1
+    return False
+
+
+def gh_file_refs(cmd):
+    """(path, written_by_command) for every file a gh invocation in `cmd` sends the content of.
+    RAISES when the command cannot be tokenized or fails _check_structure."""
+    tokens = _shell_tokens(cmd)
+    _check_structure(cmd, tokens)
+    written = _written_paths(tokens)
+    invocations = _gh_invocations(tokens)
+    refs = []
+    for args, redir in invocations:
+        refs.extend(redir)
+        if not args:
+            continue
+        sub, verb, after = _gh_sub_verb(args)
+        refs.extend(_flag_values(args, _GH_FILE_FLAGS.get(sub, ())))
+        if sub == "api":
+            for v in _flag_values(args, ("-F", "--field")):
+                _k, sep, val = v.partition("=")
+                if sep and val.startswith("@"):
+                    refs.append(val[1:])
+        value_flags = _GH_POSITIONAL_VALUE_FLAGS.get((sub, verb))
+        if value_flags is not None:
+            pos, skip = [], False
+            for a in args[after:]:
+                if skip:
+                    skip = False
+                    continue
+                if a.startswith("-") and a != "-":
+                    skip = a in value_flags
+                    continue
+                pos.append(a)
+            pos = pos[_GH_POSITIONAL_SKIP.get((sub, verb), 0):]
+            refs.extend(p.split("#", 1)[0] for p in pos)
+    return [(p, p in written) for p in refs if p and p != "-"]
+
+
+def _resolve_ref(path, cwd):
+    p = os.path.expanduser(path)
+    if os.name == "nt":
+        if p == "/tmp" or p.startswith("/tmp/"):  # Git Bash /tmp is %TEMP%, not C:\tmp
+            import tempfile
+            p = os.path.join(tempfile.gettempdir(), p[5:])
+        m = re.match(r"^/([a-zA-Z])/(.*)$", p)
+        if m:  # Git Bash /c/Users/... form
+            p = "%s:/%s" % (m.group(1), m.group(2))
+    if not os.path.isabs(p):
+        p = os.path.join(cwd if isinstance(cwd, str) and cwd else os.getcwd(), p)
+    return p
+
+
+def gh_referenced_texts(cmd, cwd, roster_active):
+    """Readable text of every file a gh command sends. RAISES (caller blocks) while a roster is
+    active on a tokenize failure, a nested gh, or a reference that cannot be read; with no active
+    roster there is nothing to match, so nothing is read and nothing blocks."""
+    texts = []
+    if not roster_active:
+        return texts
+    try:
+        refs = gh_file_refs(cmd)
+    except Exception as e:
+        raise ValueError("the command's file references could not be determined (%s)" % e)
+    budget = [SCAN_MAX_DECODED_BYTES]
+    for path, written in refs:
+        _check_deadline()
+        if "$" in path or "`" in path:
+            raise ValueError("file reference %s is a shell expansion" % path)
+        full = _resolve_ref(path, cwd)
+        paths = sorted(glob.glob(full)) if _GLOB_CHARS.search(path) else [full]
+        if not paths:
+            raise ValueError("glob %s matches no file" % path)
+        for f in paths:
+            _check_deadline()
+            if written and not os.path.exists(f):
+                continue  # written by this same command from its own text, which is scanned
+            try:
+                with open(f, "rb") as fh:
+                    blob = fh.read(budget[0] + 1)
+            except Exception as e:
+                raise ValueError("cannot read %s (%s)" % (path, type(e).__name__))
+            texts.extend(_blob_texts(blob, budget))
+    return texts
+
+
+def roster_active(terms):
+    """True when at least one active deal carries a term (an empty roster cannot leak)."""
+    for key, deal in (terms.items() if isinstance(terms, dict) else ()):
+        if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
+            continue
+        if _str_terms(deal, "always") or _str_terms(deal, "context"):
+            return True
+    return False
 
 
 # --- Roster-freshness tripwire ------------------------------------------------------------------
@@ -1014,9 +1429,21 @@ def main():
     # Shell: only egress commands are scanned (internal commands may reference the deal).
     elif tool == "Bash":
         cmd = ti.get("command", "") or ""
+        if not isinstance(cmd, str):
+            # A non-string command used to raise TypeError in EGRESS_BASH.search -> exit 1, which
+            # is NON-blocking (review of the 2026-11-08 gh fix).
+            block("Bash command is not a string; cannot classify it.")
         if EGRESS_BASH.search(cmd):
             surface = "egress shell command"
             scan_text = cmd
+            if GH_EGRESS.search(cmd):
+                try:
+                    extra = gh_referenced_texts(cmd, data.get("cwd"), roster_active(terms))
+                except Exception as e:
+                    block("gh command sends file content that could not be read for scanning "
+                          "(%s)." % e)
+                if extra:
+                    scan_text = "\n".join([cmd] + extra)
 
     # Notion / Outlook / Teams / SharePoint / HubSpot writes: the whole payload is bound for an
     # external service (see MCP_SEND_SURFACES for what is in and out, and why).
