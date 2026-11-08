@@ -26,11 +26,102 @@ PROBE = os.path.join(HERE, "doctrine-integrity-probe.py")
 REAL_CLAUDE_MD = os.path.join(os.path.expanduser("~"), ".claude", "CLAUDE.md")
 
 
+# The live doctrine references hooks/confidential-terms.json, which is GITIGNORED (live
+# deal roster, never committed), so a clean checkout -- CI, 2026-11-06 -- has none, and
+# every live-mode probe run reports exactly that one unresolved reference and exits 1.
+# Same path the probe checks (its TERMS_JSON, pinned to the live ~/.claude).
+LIVE_TERMS_JSON = os.path.join(os.path.expanduser("~"), ".claude", "hooks",
+                               "confidential-terms.json")
+_ROSTER_ONLY_DRIFT = (
+    "DOCTRINE DRIFT: 1 unresolved reference(s)",
+    "  - confidential-terms.json (file %s)" % LIVE_TERMS_JSON,
+)
+# Live inputs this run could not reach -- (check, reason) pairs, reported by main() as
+# ENV-SKIP only after every assertion has passed.
+LIVE_INPUT_SKIPS = []
+
+
+def skip_live(check, reason):
+    if (check, reason) not in LIVE_INPUT_SKIPS:
+        LIVE_INPUT_SKIPS.append((check, reason))
+
+
+_HOME = os.path.expanduser("~")
+# Machine-local inputs a clean checkout never has. Absence is checked HERE, in the test
+# process, never inferred from the probe's own output: the probe is the code under test,
+# so a probe bug that merely CLAIMS a source is missing must still fail (adversarial
+# review, 2026-11-06 -- a mutated GUARD_CHAIN regex / a typo'd root otherwise skipped).
+MACHINE_LOCAL_SKILL_ROOTS = {
+    os.path.normcase(os.path.join(_HOME, "OneDrive - Oxford Capital Partners",
+                                  "Claude_Workspace")),
+    os.path.normcase(os.path.join(_HOME, "ora-skills")),
+    os.path.normcase(os.path.join(_HOME, ".claude", "plugins")),
+}
+PREPUSH_SHIM = os.path.join(_HOME, ".claude", ".git", "hooks", "pre-push")
+SESSION_CONTEXT_MD = os.path.join(_HOME, ".claude", "session-context.md")
+_ROOT_UNAVAILABLE = "skill-scan root unavailable (offline?): "
+
+
+def probe_degraded_for(r, kind, token, check):
+    """True (and the check recorded as ENV-SKIP) only when the probe downgraded TOKEN
+    AND every source it degraded on is a known machine-local input that is genuinely
+    absent, verified independently here. Otherwise False, so the caller's assertion
+    runs and fails as before.
+      skill: >= 1 'skill-scan root unavailable' line, each naming one of
+             MACHINE_LOCAL_SKILL_ROOTS that os.path.isdir() confirms absent; no
+             skill-scan IO errors; and this token's own degraded WARN.
+      guard: this guard's 'liveness source was unavailable' WARN, and the ONLY
+             guard-liveness degradation is the untracked pre-push shim, absent here.
+             settings.json / scheduled-tasks / dispatcher / GUARD_CHAIN are tracked,
+             so any degradation there still fails."""
+    warns = [l.strip() for l in r.stdout.splitlines() if l.strip().startswith("[WARN]")]
+    if kind == "skill":
+        roots = [l.split(_ROOT_UNAVAILABLE, 1)[1].strip()
+                 for l in warns if _ROOT_UNAVAILABLE in l]
+        hit = (bool(roots)
+               and all(os.path.normcase(x) in MACHINE_LOCAL_SKILL_ROOTS
+                       and not os.path.isdir(x) for x in roots)
+               and not any("IO error(s) during skill scan" in l for l in warns)
+               and any(" %s -> unresolved, but skill scan was degraded" % token in l
+                       for l in warns))
+    elif kind == "guard":
+        degradations = [l for l in warns
+                        if "guard-liveness:" in l and "not checked this run" in l]
+        hit = (len(degradations) == 1
+               and "pre-push shim unreadable" in degradations[0]
+               and not os.path.exists(PREPUSH_SHIM)
+               and any("guard '%s' unresolved, but a liveness source was unavailable"
+                       % token in l for l in warns))
+    else:
+        raise ValueError(kind)
+    if hit:
+        skip_live(check, "probe ran degraded: machine-local %s source absent" % kind)
+    return hit
+
+
 def run_probe(argv=None):
     cmd = [sys.executable, PROBE]
     if argv:
         cmd += argv
-    return subprocess.run(cmd, capture_output=True, text=True)
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    # Live mode only (no positional doc path; --memory-index= still audits the live
+    # CLAUDE.md), and ONLY when the roster file is genuinely absent: if
+    # the probe's sole unresolved reference is that file, treat the run as its exit 0 so
+    # every OTHER live assertion still runs; main() then reports ENV-SKIP for the one
+    # check that could not be made. Any second unresolved reference, or the roster
+    # missing from the report, keeps the real exit code and fails as before.
+    live_mode = not any(not a.startswith("--") for a in (argv or []))
+    if (live_mode and r.returncode == 1 and not os.path.exists(LIVE_TERMS_JSON)
+            and _ROSTER_ONLY_DRIFT[0] in r.stdout
+            and _ROSTER_ONLY_DRIFT[1] in r.stdout.splitlines()):
+        skip_live("doctrine roster reference resolves",
+                  "live %s absent" % LIVE_TERMS_JSON)
+        r.returncode = 0
+        # Drop only the roster's own [MISSING] line, so "no [MISSING]" assertions keep
+        # guarding every other reference.
+        roster_missing = "  [MISSING] confidential-terms.json -> %s" % LIVE_TERMS_JSON
+        r.stdout = "\n".join(l for l in r.stdout.split("\n") if l != roster_missing)
+    return r
 
 
 def test_real_doctrine_valid():
@@ -107,6 +198,13 @@ def test_real_doctrine_skills_resolve():
     for s in ("communication-intelligence", "deal-comparison"):
         line = next((l for l in r.stdout.splitlines()
                      if l.lstrip().startswith("[OK]") and (" " + s + " ") in l), "")
+        # Their real homes live in the OneDrive workspace / ora-skills checkouts, which
+        # a clean checkout (CI) does not have. Skip ONLY under probe_degraded_for()'s
+        # independent absence check; a token that resolves some other way (e.g. masked
+        # by the allowlist) still fails below.
+        if not line and probe_degraded_for(r, "skill", s,
+                                           "%s resolves via a real skill dir" % s):
+            continue
         assert "(Code/Cowork surface)" in line, (
             "%s should resolve via a real skill dir, not the allowlist:\n%s" % (s, r.stdout))
     print("  PASS test_real_doctrine_skills_resolve (real dirs resolve, not allowlist-masked)")
@@ -209,7 +307,8 @@ def test_missing_skill_fails():
             fh.write("## Engineering Operating System\n no commands here\n"
                      "## Skill precedence\n- Deal: `zzz-nonexistent-skill`\n")
         r = run_probe([path])
-        assert r.returncode == 1, (
+        assert (r.returncode == 1 or probe_degraded_for(
+            r, "skill", "zzz-nonexistent-skill", "unknown skill -> exit 1")), (
             "expected exit 1 for missing skill, got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
             % (r.returncode, r.stdout, r.stderr)
         )
@@ -251,7 +350,9 @@ def test_skill_section_case_insensitive():
             fh.write("## Engineering Operating System\n no commands here\n"
                      "## Skill Precedence (Recased)\n- Deal: `zzz-nonexistent-skill`\n")
         r = run_probe([path])
-        assert r.returncode == 1, (
+        assert (r.returncode == 1 or probe_degraded_for(
+            r, "skill", "zzz-nonexistent-skill",
+            "recased section: unknown skill -> exit 1")), (
             "expected exit 1 (recased section parsed, bogus skill found), got %d\n%s"
             % (r.returncode, r.stdout))
         assert "zzz-nonexistent-skill" in r.stdout, (
@@ -293,7 +394,9 @@ def test_v21_headers_parse():
         "- nothing referenced", "- Deal: `zzz-nonexistent-skill`"))
     try:
         r = run_probe([path])
-        assert r.returncode == 1, (
+        assert (r.returncode == 1 or probe_degraded_for(
+            r, "skill", "zzz-nonexistent-skill",
+            "v2.1 tie-breaks: unknown skill -> exit 1")), (
             "expected exit 1 (bogus skill in a parsed tie-breaks section), got %d\n%s"
             % (r.returncode, r.stdout))
         assert "zzz-nonexistent-skill" in r.stdout, (
@@ -849,8 +952,10 @@ def test_guard_liveness_fixture_orphan_and_override_excluded():
             "got %d\nSTDOUT:\n%s\nSTDERR:\n%s" % (r.returncode, r.stdout, r.stderr))
         assert "Guard liveness: 2 guard(s) checked" in r.stdout, (
             "expected exactly 2 guards extracted (override recipe excluded):\n%s" % r.stdout)
-        assert ("has no live invocation point found" in r.stdout
-                and "zzz-orphan-guard.py" in r.stdout), (
+        assert (("has no live invocation point found" in r.stdout
+                 and "zzz-orphan-guard.py" in r.stdout)
+                or probe_degraded_for(r, "guard", "zzz-orphan-guard.py",
+                                      "unwired guard flagged as orphan")), (
             "expected the unwired guard to be flagged an orphan:\n%s" % r.stdout)
         ok = next((l for l in r.stdout.splitlines()
                    if l.lstrip().startswith("[OK]") and " eos-telemetry " in l), "")
@@ -905,12 +1010,28 @@ def test_guard_liveness_falls_back_to_tech_md():
                    if l.lstrip().startswith("[OK]") and " eos-telemetry " in l), "")
         assert "live invocation point found" in ok, (
             "eos-telemetry should resolve against the real settings.json:\n%s" % r.stdout)
-        assert ("has no live invocation point found" in r.stdout
-                and "zzz-orphan-guard.py" in r.stdout), (
+        assert (("has no live invocation point found" in r.stdout
+                 and "zzz-orphan-guard.py" in r.stdout)
+                or probe_degraded_for(r, "guard", "zzz-orphan-guard.py",
+                                      "unwired guard flagged as orphan")), (
             "expected the unwired guard to be flagged an orphan:\n%s" % r.stdout)
-        for bad in ("zzz-decoy-3g", "not-a-guard-3e", "skipped"):
+        for bad in ("zzz-decoy-3g", "not-a-guard-3e"):
             assert bad not in r.stdout, (
                 "'%s' leaked into check 11 output:\n%s" % (bad, r.stdout))
+        # "skipped" stays a WHOLE-output check (it also catches fail-open skips on
+        # tracked inputs). Exempt only a "... skipped ...: not found: <path>" line whose
+        # path is a machine-local file genuinely absent here (2026-11-06, CI).
+        local_files = {os.path.normcase(SESSION_CONTEXT_MD), os.path.normcase(LIVE_TERMS_JSON)}
+        skipped = [l for l in r.stdout.splitlines() if "skipped" in l]
+        unexplained = []
+        for l in skipped:
+            m = re.search(r"skipped.*not found: (.+)$", l)
+            missing_file = m.group(1).strip() if m else ""
+            if not (missing_file and os.path.normcase(missing_file) in local_files
+                    and not os.path.exists(missing_file)):
+                unexplained.append(l)
+        assert not unexplained, (
+            "'skipped' leaked into check 11 output:\n%s" % r.stdout)
     finally:
         os.remove(path)
         os.remove(tech)
@@ -1978,6 +2099,14 @@ def main():
     test_agent_body_lint_outlook_needs_a_search_tool_not_any_outlook_tool()
     test_agent_body_lint_round2_edges()
     test_agent_body_lint_more_prohibition_forms_and_explicit_opt_out()
+    if LIVE_INPUT_SKIPS:
+        # Reached only if every assertion above passed (any failure raised first), so
+        # this sentinel can never mask a regression -- it names each live check this
+        # environment could not make, and why.
+        print("CANNOT RUN: %d live check(s) need machine-local inputs absent here; every "
+              "other assertion passed. %s" % (len(LIVE_INPUT_SKIPS), "; ".join(
+                  "%s (%s)" % cr for cr in LIVE_INPUT_SKIPS)))
+        sys.exit(1)
     print("ALL DOCTRINE-PROBE TESTS PASS")
 
 
