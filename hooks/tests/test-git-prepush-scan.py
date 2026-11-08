@@ -117,6 +117,27 @@ def expect(label, cond, detail=""):
         print("  FAIL: %s %s" % (label, detail))
 
 
+# END-TO-END cases spawn the real git-prepush-confidential-scan.py, which reads the
+# LIVE, gitignored hooks/confidential-terms.json (falling back to the main worktree's
+# copy) and fails CLOSED when neither is readable. Without the roster every such case
+# is meaningless: "expect allowed" cases fail, and "expect blocked" cases pass for the
+# WRONG reason (blocked by the fail-closed branch, not by the credential scan). So when
+# the roster is unreadable -- a clean CI checkout by design (2026-11-06, PR #423) --
+# those cases are SKIPPED, not counted; every pure/fixture assertion still runs and
+# still fails the file. Resolved with the module's OWN load_terms(), the exact
+# resolution the subprocess uses, BEFORE any test below monkeypatches pps.TERMS_FILE.
+LIVE_ROSTER = pps.load_terms() is not None
+gate_skipped = []
+
+
+def expect_gate(label, cond, detail=""):
+    """expect() for an end-to-end assertion that needs the live roster (see above)."""
+    if not LIVE_ROSTER:
+        gate_skipped.append(label)
+        return
+    expect(label, cond, detail)
+
+
 ZERO = "0" * 40
 SHA_A = "a" * 40
 SHA_B = "b" * 40
@@ -381,22 +402,22 @@ def _mk_repo(filename, content):
 # Real credential, no active deal terms -> MUST block (the dead-on-arrival case).
 repo, stdin_text = _mk_repo("notes.md", "the key is sk-ant-api03-" + "z" * 20 + "\n")
 r = _run_gate_on(repo, stdin_text)
-expect("credential blocks the push even with NO active deal terms", r.returncode == 1,
+expect_gate("credential blocks the push even with NO active deal terms", r.returncode == 1,
        "exit=%s err=%s" % (r.returncode, r.stderr[:200]))
-expect("the block message names the file", "notes.md" in r.stderr, r.stderr[:200])
-expect("the block message never echoes the value", "sk-ant-api03" not in r.stderr,
+expect_gate("the block message names the file", "notes.md" in r.stderr, r.stderr[:200])
+expect_gate("the block message never echoes the value", "sk-ant-api03" not in r.stderr,
        r.stderr[:200])
 
 # Clean repo -> allow.
 repo2, stdin2 = _mk_repo("notes.md", "DSCR 1.25x, LTV 40%, nothing secret here\n")
 r2 = _run_gate_on(repo2, stdin2)
-expect("a clean push is still allowed", r2.returncode == 0,
+expect_gate("a clean push is still allowed", r2.returncode == 0,
        "exit=%s err=%s" % (r2.returncode, r2.stderr[:200]))
 
 # A test fixture carrying fake keys -> allow (else every push blocks forever).
 repo3, stdin3 = _mk_repo("test-thing.py", '("AWS", "AKIAIOSFODNN7EXAMPLE")\n')
 r3 = _run_gate_on(repo3, stdin3)
-expect("a test fixture with fake keys does NOT block the push", r3.returncode == 0,
+expect_gate("a test fixture with fake keys does NOT block the push", r3.returncode == 0,
        "exit=%s err=%s" % (r3.returncode, r3.stderr[:200]))
 
 # Values must never be echoed -- a gate that prints the secret has leaked it into the
@@ -465,7 +486,7 @@ try:
     _feature_sha = _git("rev-parse", "HEAD", cwd=_local3).stdout.strip()
     _stdin = "refs/heads/feature-clean %s refs/heads/feature-clean %s\n" % (_feature_sha, ZERO)
     _r = _run_gate_on(_local3, _stdin)
-    expect("new branch with only clean commits on old placeholder history -> ALLOWED "
+    expect_gate("new branch with only clean commits on old placeholder history -> ALLOWED "
            "(the 2026-07-25 false positive this fix addresses)",
            _r.returncode == 0, "exit=%s err=%s" % (_r.returncode, _r.stderr[:300]))
 finally:
@@ -483,10 +504,10 @@ try:
     _leak_sha = _git("rev-parse", "HEAD", cwd=_local4).stdout.strip()
     _stdin = "refs/heads/feature-leak %s refs/heads/feature-leak %s\n" % (_leak_sha, ZERO)
     _r = _run_gate_on(_local4, _stdin)
-    expect("new branch whose OWN new commit leaks a real key -> still BLOCKED "
+    expect_gate("new branch whose OWN new commit leaks a real key -> still BLOCKED "
            "(bounded range does not weaken detection of genuinely new secrets)",
            _r.returncode == 1, "exit=%s err=%s" % (_r.returncode, _r.stderr[:300]))
-    expect("the block names the NEW file, not the old already-public commit's file",
+    expect_gate("the block names the NEW file, not the old already-public commit's file",
            "oops.py" in _r.stderr and "secrets.env.example" not in _r.stderr,
            _r.stderr[:300])
 finally:
@@ -507,7 +528,7 @@ try:
     _orphan_sha = _git("rev-parse", "HEAD", cwd=_local5).stdout.strip()
     _stdin = "refs/heads/orphan-branch %s refs/heads/orphan-branch %s\n" % (_orphan_sha, ZERO)
     _r = _run_gate_on(_local5, _stdin)
-    expect("orphan branch (no merge-base with origin/main) is scanned in FULL -> BLOCKED",
+    expect_gate("orphan branch (no merge-base with origin/main) is scanned in FULL -> BLOCKED",
            _r.returncode == 1, "exit=%s err=%s" % (_r.returncode, _r.stderr[:300]))
 finally:
     shutil.rmtree(os.path.dirname(_local5), ignore_errors=True)
@@ -530,7 +551,7 @@ with tempfile.TemporaryDirectory() as td:
     # "fetch" + exit 1 -- a `git log -p` failure for an unrelated reason (e.g. a
     # dangling/foreign sha) also says "run `git fetch` first" and exits 1, which
     # would make this pass for the wrong reason (caught in review).
-    expect("brand-new ref + no `origin` remote at all -> fail closed, not silently "
+    expect_gate("brand-new ref + no `origin` remote at all -> fail closed, not silently "
            "rescanned or silently allowed",
            _r.returncode == 1
            and "could not be resolved to bound the history scan" in _r.stderr,
@@ -551,7 +572,7 @@ try:
     _shadow_sha = _git("rev-parse", "HEAD", cwd=_local7).stdout.strip()
     _stdin = "refs/heads/feature-x %s refs/heads/feature-x %s\n" % (_shadow_sha, ZERO)
     _r = _run_gate_on(_local7, _stdin)
-    expect("a local branch literally named 'origin/main' cannot shadow the real "
+    expect_gate("a local branch literally named 'origin/main' cannot shadow the real "
            "baseline -- the secret it carries is still BLOCKED",
            _r.returncode == 1, "exit=%s err=%s" % (_r.returncode, _r.stderr[:300]))
 finally:
@@ -575,7 +596,7 @@ try:
     _poison_sha = _git("rev-parse", "HEAD", cwd=_local8).stdout.strip()
     _stdin = "refs/heads/feature-y %s refs/heads/feature-y %s\n" % (_poison_sha, ZERO)
     _r = _run_gate_on(_local8, _stdin)
-    expect("a refs/remotes/origin/HEAD symref poisoned to point at a refs/heads/ "
+    expect_gate("a refs/remotes/origin/HEAD symref poisoned to point at a refs/heads/ "
            "branch is ignored -- the secret it carries is still BLOCKED",
            _r.returncode == 1, "exit=%s err=%s" % (_r.returncode, _r.stderr[:300]))
 finally:
@@ -630,10 +651,19 @@ else:
             [sys.executable, os.path.join(HOOKS, "git-prepush-confidential-scan.py"),
              "origin", "https://example.invalid/x.git"],
             input=_stdin, capture_output=True, text=True, cwd=REPO_ROOT)
-        expect("real repo: fixed gate allows a brand-new ref pointing at an "
+        expect_gate("real repo: fixed gate allows a brand-new ref pointing at an "
                "already-public commit (2026-07-25 false positive, resolved)",
                _r.returncode == 0, "exit=%s err=%s" % (_r.returncode, _r.stderr[:500]))
 
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-scan tests: %d/%d passed" % (passed, len(results)))
-sys.exit(0 if passed == len(results) else 1)
+if passed != len(results):
+    # A real failure is a FAIL even when end-to-end cases were also skipped: the
+    # ENV-SKIP sentinel below must never mask a fixture regression.
+    sys.exit(1)
+if gate_skipped:
+    print("CANNOT RUN: %d end-to-end case(s) need the live hooks/confidential-terms.json "
+          "(unreadable here and in the main worktree); all %d other assertions passed. "
+          "Skipped: %s" % (len(gate_skipped), len(results), "; ".join(gate_skipped)))
+    sys.exit(1)
+sys.exit(0)
