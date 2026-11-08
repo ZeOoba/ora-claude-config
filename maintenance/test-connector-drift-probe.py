@@ -173,9 +173,20 @@ def test_malformed_roster_line_flags():
           "expected exit 2 on unknown verify scheme, got %s\n%s" % (rc, out))
 
 
+_env_skips = []
+
+
 def test_live_probe_smoke():
     # The probe with NO overrides runs against the real tree; it must not crash (exit 0/1,
     # never 2). If the real roster block is absent yet, this is skipped by the caller.
+    # ~/.claude.json is the live per-machine Claude Code config (outside the repo, never
+    # committed): a clean checkout (CI, 2026-11-06) has none, and the probe then exits 2
+    # BY DESIGN (test_unreadable_claude_json_is_probe_error pins that). Only its absence
+    # skips this case; a present-but-broken file still fails here.
+    live_cj = os.path.join(os.path.expanduser("~"), ".claude.json")
+    if not os.path.exists(live_cj):
+        _env_skips.append("test_live_probe_smoke (no live %s)" % live_cj)
+        return
     proc = subprocess.run([sys.executable, PROBE], capture_output=True, text=True)
     check("test_live_probe_smoke", proc.returncode in (0, 1),
           "live probe should exit 0 or 1, got %s\n%s" % (proc.returncode, proc.stdout + proc.stderr))
@@ -195,6 +206,11 @@ if __name__ == "__main__":
     test_live_probe_smoke()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
+        sys.exit(1)
+    if _env_skips:
+        # Only after every other case passed: the sentinel never masks a failure.
+        print("CANNOT RUN: %s; all other connector-drift-probe tests passed."
+              % "; ".join(_env_skips))
         sys.exit(1)
     print("\nALL connector-drift-probe tests passed.")
     sys.exit(0)
