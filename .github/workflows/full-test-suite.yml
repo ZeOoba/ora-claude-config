@@ -22,23 +22,89 @@
 # on regressions. Gitignored live files (e.g. hooks/confidential-terms.json) are absent
 # in a fresh checkout by design; tests that need them declare ENV-SKIP ("CANNOT RUN:"),
 # exactly as they do in any linked worktree.
+#
+# WHEN THE SUITE RUNS (cost trim 2026-11-08, Gabriel-chosen). windows-latest bills 2x on
+# this private repo and a FULL run takes ~15 min (~30 billed min). A ~10 s ubuntu
+# `classify` job decides first:
+#   * pull_request: runs, except on a DRAFT (marking it ready re-fires via ready_for_review).
+#   * push to main: runs when the pushed commit was made BY GITHUB (committer "GitHub":
+#     every PR merge, squash or merge commit, and any web-UI/API edit) OR is a PR's merge
+#     commit (commits/{sha}/pulls, matched on merge_commit_sha). Either signal is enough,
+#     so an API lag cannot silently skip a PR merge. That run tests the tree that actually
+#     landed: a PR can merge cleanly while BEHIND main, and its PR run tested the older
+#     base. A direct `git push` to main (auto-reconcile merge, heartbeat/backup push) is
+#     SKIPPED: the pre-push gate already ran the FULL tier locally for any ref updating main.
+#     Accepted gap (Gabriel, 2026-11-08), each re-checked only by the weekly run (up to
+#     7 days): a direct push whose local FULL run passed via an allow-hook-test-failure
+#     override, or only thanks to local state (untracked files, uncommitted edits -- the
+#     gate tests the working tree, not the pushed commit), or that came from a clone with
+#     no pre-push shim installed.
+#   * schedule (weekly, main) and workflow_dispatch: always run. The weekly run is that
+#     gap's backstop.
+#   * The PR lookup fails OPEN: if the API call errors, the suite runs.
+# Replayed over 2026-10-25..11-08: 42 of 61 main commits were PR merges (committer GitHub
+# AND merge_commit_sha match on all 42; still run), 19 direct pushes (neither; now skipped).
 name: Full test suite
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
+  schedule:
+    - cron: "17 9 * * 0" # Sundays 09:17 UTC: weekly FULL backstop on main
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: full-test-suite-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  pull-requests: read # classify: commits/{sha}/pulls lookup
 
 jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          DRAFT: ${{ github.event.pull_request.draft }}
+          COMMITTER: ${{ github.event.head_commit.committer.name }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          run=true; why="$EVENT"
+          if [ "$EVENT" = "pull_request" ] && [ "$DRAFT" = "true" ]; then
+            run=false; why="draft PR (runs when marked ready)"
+          elif [ "$EVENT" = "push" ] && [ "$COMMITTER" = "GitHub" ]; then
+            why="commit made by GitHub on main (PR merge or web/API edit)"
+          elif [ "$EVENT" = "push" ]; then
+            if n=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq "[.[] | select(.merge_commit_sha == \"$SHA\")] | length"); then
+              if [ "$n" = "0" ]; then
+                run=false; why="direct push to main, not a PR merge commit (FULL tier ran locally at pre-push)"
+              else
+                why="PR merge commit on main"
+              fi
+            else
+              why="PR lookup failed -- failing open, running the suite"
+            fi
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          echo "::notice title=full-test-suite::run=$run ($why)"
+
   full-test-suite:
+    needs: classify
+    if: needs.classify.outputs.run == 'true'
+    # Concurrency lives on THIS job, not the workflow: a run that classify skips never
+    # joins the group, so it cannot cancel another run's PENDING slot (GitHub keeps one
+    # pending run per group and drops the older one even with cancel-in-progress false).
+    # Only a newer push to the SAME PR cancels an in-progress run.
+    concurrency:
+      group: full-test-suite-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
