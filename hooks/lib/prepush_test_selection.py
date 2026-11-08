@@ -11,8 +11,9 @@ split, not another override:
   * LIGHT tier (pre-push, feature-branch pushes): the files chosen HERE from what the
     pushed diff touches, plus ALWAYS_RUN.
   * FULL tier: every discovered file. Runs (a) in GitHub Actions
-    (.github/workflows/full-test-suite.yml) on every PR and every push to main -- the
-    authoritative gate a merge must be green on -- and (b) locally whenever this module
+    (.github/workflows/full-test-suite.yml) on every non-draft PR -- the PR run is the
+    authoritative gate a merge must be green on -- plus on each PR merge commit on main
+    and weekly, and (b) locally whenever this module
     cannot PROVE a light selection is sound (see `select_tests`), whenever the push
     updates main, and whenever the gate is run outside a real pre-push (the weekly
     ora-prepush-gate-sweep, a human running it by hand).
