@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-11-06T20:00:00.000Z
+  modified: 2026-11-08T22:30:00.000Z
 ---
 
 # ORA Tech Stack & Reference
@@ -149,7 +149,7 @@ The hook-tests gate (`hooks/git-prepush-hook-tests-gate.py`, gate #2 of the pre-
 |---|---|---|
 | LIGHT | real pre-push via **shim v2** (git's ref lines on stdin), no ref targets main, diff mappable | tests the diff touches (changed test files, `test-<name>[-*]` naming, any test that names a changed file, one-hop importer closure) + always-run set (selector test, governor-drift-probe test — kept cheap; confidential terms stay guarded on every push by gate #3, the fail-closed history scan) |
 | FULL (local) | push updates `refs/heads/main`; no ref lines on stdin (shim v1: target unknown); no remote arg (weekly `ora-prepush-gate-sweep`, hand runs); `--full` / `ORA_PREPUSH_TIER=full`; diff undeterminable; diff touches the gates, `hooks/lib/`, `hooks/tests/lib/`, `.github/workflows/` or any path containing `confidential`; an always-run file vanished; any exception in tier selection | every discovered test file, same as before the split |
-| FULL (CI, authoritative) | every PR + every push to main (`.github/workflows/full-test-suite.yml`, `windows-latest`) | `python hooks/git-prepush-hook-tests-gate.py --full`; no session id, so no override token can pass it |
+| FULL (CI, authoritative) | every non-draft PR (a draft runs on `ready_for_review`); every PR **merge commit** pushed to main (tests the tree that landed, which a behind-but-clean PR's own run did not); weekly on main (Sun 09:17 UTC); `workflow_dispatch` (`.github/workflows/full-test-suite.yml`, `windows-latest`). A ~10 s ubuntu `classify` job skips **direct** `git push`es to main (they ran FULL locally at pre-push): it runs the suite when the commit's committer is `GitHub` OR the commit is a PR's `merge_commit_sha`, and fails open. Accepted gap (Gabriel, 2026-11-08), re-checked only by the weekly run: a direct push whose local FULL passed via override, or only thanks to local state (the gate tests the working tree, not the pushed commit), or pushed from a clone with no shim | `python hooks/git-prepush-hook-tests-gate.py --full`; no session id, so no override token can pass it |
 
 - **Merge rule:** a PR merges only with the `full-test-suite` check green. This is a merge-procedure rule (read the PR's checks before merging), NOT GitHub-enforced: `main` has no required status check, because direct pushes to main (the auto-reconcile corrector) would be rejected by one. That is also why main-target pushes keep the FULL local tier.
 - **Light-tier blind spot:** dependencies not named in text (directory globbing, computed paths) and transitive importers beyond one hop. CI's full run is the backstop; do not treat a green LIGHT push as a green suite.
