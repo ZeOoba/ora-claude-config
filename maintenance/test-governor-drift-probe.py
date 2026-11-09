@@ -3719,6 +3719,217 @@ def test_committed_ref_scan_fails_loud_e2e():
     print("  PASS test_committed_ref_scan_fails_loud_e2e")
 
 
+# Realistic narrations MOVING the governor to 65% that two refuted phrasing-based suppressors
+# (2026-11-09) silenced. Pinned so no future suppressor can silence them again.
+_V445_REFUTE_SILENCED_DRIFT = (
+    "Governor change: DSCR 1.25x, LTV 65% per-property (replacing the 40% aggregate).",
+    "Governors (updated): DSCR 1.25x / LTV 65% per-property across the portfolio",
+    "Governors (updated): DSCR 1.25x / LTV 65% per-property across all holdings",
+    "| Governor | DSCR 1.25x | LTV 65% per-property |",
+    "Going forward the governor is a 65%-LTV loan, DSCR 1.25x.",
+    "Per IC vote, the firm's leverage governor moves to a 65%-LTV loan basis; DSCR 1.25x.",
+    "Portfolio governors: DSCR 1.25x; LTV a 65%-LTV loan basis.",
+    "Governor update: leverage is now a 65%-LTV loan across the book.",
+    "Maximum leverage is a 65%-LTV loan; DSCR 1.25x minimum.",
+    "Governor: DSCR 1.25x; DSCR at 65% LTV.",
+    "Raise the LTV governor. Going forward every deal is sized as a 65%-LTV loan.",
+    "Consolidated LTV governor e.g. a 65%-LTV loan; DSCR 1.25x.",
+    "We will now finance new purchases with a 65%-LTV loan; DSCR 1.25x governor unchanged.",
+    "Underwrite every deal at DSCR at 65% LTV; LTV governor relaxed accordingly.",
+)
+
+
+def test_v445_refute_silenced_drift_lines_flag_unit():
+    """Regression pin for the refute pass: none of these may be silenced by the loan-basis
+    suppressor (each flagged under the parent probe)."""
+    m = _load_probe_module()
+    for line in _V445_REFUTE_SILENCED_DRIFT:
+        out = m.scan_line(line)
+        assert any("65" in o for o in out), (
+            "refute-pass drift line must flag 65; line=%r got=%r" % (line, out))
+    print("  PASS test_v445_refute_silenced_drift_lines_flag_unit")
+
+
+def test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e():
+    """Dedupe is cross-REF only: two identical drift lines in one file are two findings."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _DRIFT_LINE + "filler\n" + _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "two identical drift lines")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1 and "DRIFT DETECTED (2)" in out, "both lines must flag:\n%s\n%s" % (out, err)
+    print("  PASS test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e")
+
+
+def test_committed_ref_scan_dedupes_same_line_across_refs_e2e():
+    """A drift line present at both refs/heads/main and origin/main (local main lagging, so the
+    blobs differ and line numbers shift) is reported ONCE, not once per ref."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "drift at main")
+        _write_rel(repo, "s/SKILL.md", "new first line\n" + _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "origin moved ahead")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(repo, "reset", "-q", "--hard", "HEAD~1")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "drift must still flag (got %r)\n%s\n%s" % (code, out, err)
+        n = sum(1 for ln in out.splitlines() if "s/SKILL.md@" in ln.replace("\\", "/"))
+        assert n == 1, "same drift line at two refs must be reported once, got %d:\n%s" % (n, out)
+        assert "DRIFT DETECTED (1)" in out, out
+    print("  PASS test_committed_ref_scan_dedupes_same_line_across_refs_e2e")
+
+
+# --- Exact-text ratified-line allowlist (2026-11-09) ------------------------------------------
+_RATIFIED_LINE = "DSCR floor tested at a 65%-LTV loan (governor).\n"
+
+
+def _with_allowlist(m, d, entries):
+    """Point the probe at a temp allowlist file holding `entries` (None = no file at all)."""
+    import json as _json
+    path = os.path.join(d, "ratified-lines.json")
+    if entries is not None:
+        with open(path, "w", encoding="utf-8") as fh:
+            _json.dump({"entries": entries}, fh)
+    m.RATIFIED_LINES_PATH = path
+    return path
+
+
+def _entry(m, rel, text, reason):
+    return {"repo": "ora-skills", "path": rel, "reason": reason,
+            "sha256": m._line_hash(text), "ratified": "test fixture"}
+
+
+def _first_reason(m, text):
+    out = m.scan_line(text.strip())
+    assert out, "fixture line must flag on its own: %r" % text
+    return out[0]
+
+
+def test_ratified_line_allowlist_exempts_only_exact_line_e2e():
+    """An allowlisted (path, reason, exact text) is exempt; any edit, other path or other
+    reason still flags."""
+    import tempfile
+    m = _load_probe_module()
+    reason = _first_reason(m, _RATIFIED_LINE)
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "ratified line")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _with_allowlist(m, d, [_entry(m, "s/SKILL.md", _RATIFIED_LINE, reason)])
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 0, "exact allowlisted line must be exempt (got %r)\n%s\n%s" % (code, out, err)
+        # same text at another path -> flags
+        _write_rel(repo, "t/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "same text elsewhere")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1 and "t/SKILL.md" in out.replace("\\", "/"), "other path must flag:\n%s" % out
+        assert "s/SKILL.md" not in out.replace("\\", "/"), "allowlisted path leaked:\n%s" % out
+        # one-character edit to the allowlisted line -> flags
+        _write_rel(repo, "t/SKILL.md", "x\n")
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE.replace("governor", "governor!"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "edited line")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1 and "s/SKILL.md" in out.replace("\\", "/"), "edited line must re-arm:\n%s" % out
+        # wrong reason bound to the exact line -> flags
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "restore")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _with_allowlist(m, d, [_entry(m, "s/SKILL.md", _RATIFIED_LINE, "some other reason")])
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "an entry for a different reason must not exempt:\n%s" % out
+        # wrong repo directory name -> flags
+        e = _entry(m, "s/SKILL.md", _RATIFIED_LINE, reason)
+        e["repo"] = "other-repo"
+        _with_allowlist(m, d, [e])
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "an entry for another repo must not exempt:\n%s" % out
+    print("  PASS test_ratified_line_allowlist_exempts_only_exact_line_e2e")
+
+
+def test_ratified_line_allowlist_missing_and_malformed_e2e():
+    """Missing file = exempts nothing (drift flags); malformed file = probe error exit 2."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "line")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _with_allowlist(m, d, None)
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "missing allowlist must exempt nothing (got %r)\n%s" % (code, out)
+        for bad in ([{"repo": "ora-skills", "path": "s/SKILL.md", "reason": "r", "sha256": "abc",
+                      "ratified": "x"}],
+                    [{"repo": "ora-skills", "path": "s/SKILL.md", "reason": "r",
+                      "sha256": "0" * 64}]):
+            _with_allowlist(m, d, bad)
+            code, out, err = _run_main_over(m, _skills_target(m, repo))
+            assert code == 2, "malformed allowlist must exit 2 (got %r)\n%s\n%s" % (code, out, err)
+        path = os.path.join(d, "ratified-lines.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        m.RATIFIED_LINES_PATH = path
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 2, "unparseable allowlist must exit 2 (got %r)" % code
+    print("  PASS test_ratified_line_allowlist_missing_and_malformed_e2e")
+
+
+def test_shipped_ratified_allowlist_is_well_formed_unit():
+    """The committed allowlist parses, carries provenance, and every entry is an LTV-65 exemption
+    on an ora-skills path (no entry may exempt a DSCR finding or another LTV value)."""
+    import json as _json
+    m = _load_probe_module()
+    path = os.path.join(HERE, "_shared", "governor-drift-ratified-lines.json")
+    assert os.path.isfile(path), "shipped allowlist missing: %s" % path
+    entries = m.load_ratified_lines(path)
+    assert entries, "shipped allowlist is empty"
+    with open(path, "r", encoding="utf-8") as fh:
+        doc = _json.load(fh)
+    for e in doc["entries"]:
+        assert e["repo"] in ("ora-skills", ".claude"), e
+        assert e["reason"] == "LTV governor 65% != canonical 40%", e
+        assert "2026-11-08" in e["ratified"], e
+    print("  PASS test_shipped_ratified_allowlist_is_well_formed_unit")
+
+
+def test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e():
+    """Deployed at ~/.claude/maintenance/_shared/, the allowlist sits inside a scan root and
+    quotes the exact finding reason it exempts. The probe must not flag its own allowlist
+    (refute 2026-11-09: 39 self-findings, exit 1, would have blocked every push)."""
+    shipped = os.path.join(HERE, "_shared", "governor-drift-ratified-lines.json")
+    with _fixture_home() as home:
+        dest = os.path.join(home, ".claude", "maintenance", "_shared")
+        os.makedirs(dest, exist_ok=True)
+        shutil.copy(shipped, os.path.join(dest, "governor-drift-ratified-lines.json"))
+        r = run_probe(home=home)
+        assert r.returncode == 0, (
+            "deployed allowlist must not trip the probe; got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
+            % (r.returncode, r.stdout, r.stderr))
+        # and the same content under any OTHER name in that root still flags (skip is by name)
+        shutil.copy(shipped, os.path.join(dest, "copy-of-allowlist.json"))
+        r = run_probe(home=home)
+        assert r.returncode == 1 and "copy-of-allowlist.json" in r.stdout, (
+            "a renamed copy must still be scanned; got %d\n%s" % (r.returncode, r.stdout))
+    print("  PASS test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -3869,6 +4080,13 @@ def main():
     test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit()
     test_missing_required_root_fails_closed_e2e()
     test_missing_governor_constants_file_fails_closed_e2e()
+    test_committed_ref_scan_dedupes_same_line_across_refs_e2e()
+    test_v445_refute_silenced_drift_lines_flag_unit()
+    test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e()
+    test_ratified_line_allowlist_exempts_only_exact_line_e2e()
+    test_ratified_line_allowlist_missing_and_malformed_e2e()
+    test_shipped_ratified_allowlist_is_well_formed_unit()
+    test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 

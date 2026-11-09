@@ -247,9 +247,51 @@ class CanaryTest(unittest.TestCase):
             fh.write(src)
         return p
 
+    def _hermetic_real_scan(self, terms_json):
+        """This checkout's REAL scan bytes in a TEMP hooks dir, with hooks/lib beside it and a
+        synthetic confidential-terms.json (or none when terms_json is None). The real file is
+        gitignored, so a fresh CI checkout has none; run in place there, the scan fails closed
+        on 'terms unreadable' before it reaches either path the canary probes (and outside a
+        git repo the main-worktree fallback cannot rescue it either)."""
+        d = tempfile.mkdtemp(prefix="plb-realscan-")
+        self.addCleanup(shutil.rmtree, d, True)
+        hooks = os.path.join(d, "hooks")
+        os.makedirs(hooks)
+        shutil.copy2(self.REAL, os.path.join(hooks, os.path.basename(self.REAL)))
+        shutil.copytree(os.path.join(os.path.dirname(self.REAL), "lib"), os.path.join(hooks, "lib"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        if terms_json is not None:
+            with open(os.path.join(hooks, "confidential-terms.json"), "w", encoding="utf-8") as fh:
+                fh.write(terms_json)
+        return os.path.join(hooks, os.path.basename(self.REAL))
+
     def test_this_checkouts_real_scan_blocks_the_canary(self):
-        ok, why = plb.canary_scan(self.REAL)
+        # Hermetic: does not depend on the gitignored live terms file (absent in CI).
+        ok, why = plb.canary_scan(self._hermetic_real_scan("{}"))
         self.assertTrue(ok, why)
+
+    def test_real_scan_blocks_the_canary_with_a_loaded_roster(self):
+        # REFUTE 2026-11-09: the {} variant alone is blind to a regression that skips the
+        # compressed/credential scan only while a roster is loaded. Synthetic term only.
+        roster = '{"synthetic": {"active": true, "always": ["zz-not-in-any-blob"]}}'
+        ok, why = plb.canary_scan(self._hermetic_real_scan(roster))
+        self.assertTrue(ok, why)
+
+    def test_real_scan_without_terms_fails_the_canary_without_claiming_it_allowed(self):
+        # The CI state since #440: the scan BLOCKS (exit 1, terms unreadable) on the starved
+        # stdin. The canary must still fail (that block proves nothing about the guard), but
+        # must not report a fail-closed block as a push it "allowed".
+        ok, why = plb.canary_scan(self._hermetic_real_scan(None))
+        self.assertFalse(ok)
+        self.assertNotIn("allowed", why)
+        self.assertIn("unreadable", why)
+
+    def test_other_fail_closed_block_on_starved_stdin_is_not_reported_as_allowed(self):
+        ok, why = plb.canary_scan(self._stub(
+            "import sys\nsys.stdin.read()\nprint('BLOCKED (fail-closed): terms unreadable')\nsys.exit(1)\n"))
+        self.assertFalse(ok)
+        self.assertNotIn("allowed", why)
+        self.assertIn("CANARY FAILED", why)
 
     def test_scan_that_lets_everything_through_fails_the_canary(self):
         ok, why = plb.canary_scan(self._stub("import sys\nsys.stdin.read()\nsys.exit(0)\n"))
