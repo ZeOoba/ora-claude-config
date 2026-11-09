@@ -20,13 +20,19 @@ PUSH MODE (default)
     Rules (each is a refusal, never a workaround):
       * NEVER skips hooks. The push runs the checkout's normal pre-push shim (doctrine
         gate, hook-tests gate, confidentiality scan). There is no flag to bypass it.
-      * GATE PRECONDITION: refuses to push unless the hooks dir git will actually use
-        (`git rev-parse --git-path hooks`, honours core.hooksPath) has a pre-push that
-        invokes git-prepush-confidential-scan.py, AND this checkout's copy of that scan
-        defines and calls scan_compressed() (#427, 2026-11-08). A checkout whose gate
-        predates the compressed-blob scan would push .gz/.tgz contents unscanned -- the
-        live branch was in exactly that state when this was written.
-      * Pushes HEAD only while HEAD is on --branch (default live/primary-checkout). A
+      * GATE PRECONDITION, three layers, all must pass before any push:
+          1. the pre-push in the hooks dir git will actually use (`git rev-parse
+             --git-path hooks`, honours core.hooksPath) is, by EXACT normalized content,
+             one of KNOWN_GOOD_SHIMS (v2 / v1) -- pinned, not parsed: shell is not safely
+             parseable here (REFUTE rounds 1-2 defeated a substring and a line-parse check);
+          2. AST lint: this checkout's scan defines scan_compressed() and main() calls it
+             (fast, readable refusal; NOT proof -- dead code would pass it);
+          3. BEHAVIOURAL CANARY: that scan, run against a throwaway TEMP repo whose commit
+             adds a .gz carrying a credential-shaped string, must exit non-zero with a
+             COMPRESSED finding (canary_scan). This is the proof the #427 compressed-blob
+             scan is live. A checkout whose gate predates #427 -- the live branch's state
+             when this was written -- fails layer 2 and is refused.
+      * Pushes HEAD only while HEAD is on live/primary-checkout (a constant). A
         detached HEAD or another branch checked out is a refusal: backing up whatever
         happens to be checked out under the live backup name would overwrite the backup
         with the wrong history.
@@ -59,7 +65,6 @@ A RESULT_JSON= line is always the last line printed, so a piped caller still see
 
 Usage
     python maintenance/push-live-backup.py [--repo PATH] [--remote origin]
-        [--branch live/primary-checkout]
         [--state-dir PATH] [--push-timeout 2700]
     python maintenance/push-live-backup.py --check [--grace-hours 26] [--repo PATH] ...
 
@@ -75,7 +80,7 @@ import sys
 import time
 
 DEFAULT_REPO = os.path.join(os.path.expanduser("~"), ".claude")
-DEFAULT_BRANCH = "live/primary-checkout"
+BRANCH = "live/primary-checkout"   # constant, like TARGET_REF (REFUTE round 2 nit)
 # Fixed, not an option (REFUTE 2026-11-08: a --target flag let a typo force-rewrite any origin
 # branch, main included, and shared one beacon pair across targets).
 TARGET_REF = "refs/heads/backup/live-primary"
@@ -127,26 +132,59 @@ def push_argv(remote, sha, target_ref, expected_remote_sha):
     return ["push", "--porcelain", lease, remote, "%s:%s" % (sha, target_ref)]
 
 
-def hook_runs_scan(hook_text):
-    """Structural, not substring (REFUTE 2026-11-08: a hook of `exit 0` plus a COMMENT naming
-    the scan passed). True only when a non-comment line runs hooks/<scan> and no earlier
-    non-comment line is an unconditional `exit` or an `exec` (which would end the shim
-    before the scan)."""
-    for line in hook_text.splitlines():
-        t = line.strip()
-        if not t or t.startswith("#"):
+# Known-good pre-push shims, compared by EXACT normalized content (REFUTE rounds 1-2,
+# 2026-11-08: substring and then line-parse checks were each defeated -- a comment naming the
+# scan, `if false; then ...`, a backgrounded scan. Shell cannot be safely parsed here; it is
+# pinned instead). Normalization drops only inert text: CRLF, trailing whitespace, blank
+# lines and comment lines after the shebang. A new shim version must be added here, in
+# review, before the backup will push through it.
+KNOWN_GOOD_SHIMS = {
+    "v2 (installed 2026-11-08)": (
+        '#!/bin/sh\n'
+        'ROOT="$(git rev-parse --show-toplevel)"\n'
+        'REFS="$(mktemp)" || exit 1\n'
+        'trap \'rm -f "$REFS"\' EXIT\n'
+        'cat > "$REFS"\n'
+        'python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?\n'
+        'python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" <"$REFS" || exit $?\n'
+        'python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"\n'),
+    "v1 (archived 2026-11-08)": (
+        '#!/bin/sh\n'
+        'ROOT="$(git rev-parse --show-toplevel)"\n'
+        'python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?\n'
+        'python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" </dev/null || exit $?\n'
+        'exec python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"\n'),
+}
+
+
+def normalize_shim(text):
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out = []
+    for i, line in enumerate(lines):
+        t = line.rstrip()
+        if not t.strip():
             continue
-        if ("hooks/" + SCAN_NAME) in t.replace("\\", "/"):
-            return True
-        if re.match(r"(exit|exec)\b", t):
-            return False
-    return False
+        if t.lstrip().startswith("#") and not (i == 0 and t.startswith("#!")):
+            continue
+        out.append(t)
+    return "\n".join(out) + "\n"
+
+
+def known_shim(hook_text):
+    """Name of the allowlisted shim this hook is, or None."""
+    norm = normalize_shim(hook_text)
+    for name, good in KNOWN_GOOD_SHIMS.items():
+        if norm == normalize_shim(good):
+            return name
+    return None
 
 
 def scan_main_calls_compressed(src):
-    """Structural, not regex (REFUTE 2026-11-08: the scan's own docstring mention of
-    'scan_compressed()' satisfied a count of 2). True only when the module defines
-    scan_compressed at top level AND main() contains a real call to it."""
+    """AST LINT ONLY -- a fast, readable pre-check, not the proof. (REFUTE 2026-11-08: the
+    scan's own docstring mention of 'scan_compressed()' satisfied a regex count.) True only
+    when the module defines scan_compressed at top level AND main() contains a call whose
+    callee is the bare name scan_compressed. Dead code inside main() would still pass this;
+    canary_scan() is what proves the scan actually blocks a compressed credential."""
     import ast
     try:
         tree = ast.parse(src)
@@ -159,18 +197,19 @@ def scan_main_calls_compressed(src):
                for n in ast.walk(top["main"]))
 
 
-def gate_precondition(worktree_root, hooks_dir):
-    """(ok, reason). The pre-push hook git will run must invoke the confidentiality scan,
-    and this checkout's scan must define AND call scan_compressed()."""
+def gate_precondition(worktree_root, hooks_dir, canary=True):
+    """(ok, reason). The pre-push hook git will run must be an allowlisted shim (each of
+    which runs $ROOT/hooks/<scan> with git's ref lines), this checkout's scan must pass the
+    AST lint, and -- the actual proof -- it must block the canary (canary_scan)."""
     pre_push = os.path.join(hooks_dir, "pre-push")
     try:
         with open(pre_push, encoding="utf-8", errors="replace") as fh:
             hook = fh.read()
     except OSError:
         return False, "no pre-push hook at %s -- the push would run ungated" % pre_push
-    if not hook_runs_scan(hook):
-        return False, ("pre-push hook at %s does not run the confidential scan (%s) on an executable "
-                       "line ahead of any unconditional exit/exec" % (pre_push, SCAN_NAME))
+    if known_shim(hook) is None:
+        return False, ("pre-push hook at %s is not a known-good shim (KNOWN_GOOD_SHIMS); a changed "
+                       "shim must be reviewed and allowlisted before the backup pushes through it" % pre_push)
     scan = os.path.join(worktree_root, SCAN_REL)
     try:
         with open(scan, encoding="utf-8", errors="replace") as fh:
@@ -180,7 +219,75 @@ def gate_precondition(worktree_root, hooks_dir):
     if not scan_main_calls_compressed(src):
         return False, ("this checkout's %s lacks scan_compressed() (#427 compressed-blob scan); "
                        "merge origin/main into the live branch first" % SCAN_REL.replace(os.sep, "/"))
+    if canary:
+        ok, why = canary_scan(scan)
+        if not ok:
+            return False, why
     return True, "ok"
+
+
+def _canary_secret():
+    # Built at runtime so no credential-shaped literal sits in this file (the scan reads
+    # this repo's own history). AWS-access-key shape: AKIA + 16 of [0-9A-Z], from a fixed
+    # digest so it carries digits (the placeholder suppressor ignores digit-free values).
+    import hashlib
+    body = hashlib.sha256(b"ora-push-live-backup-canary").hexdigest().upper()[:16]
+    return "AKIA" + body
+
+
+def canary_scan(scan_path, timeout=120):
+    """BEHAVIOURAL proof that the scan the shim will run blocks a credential inside a .gz.
+    Builds a throwaway repo in TEMP (never the live checkout) with one commit adding
+    canary.jsonl.gz whose decompressed text carries a credential-shaped string, then runs
+    THIS checkout's scan against that commit as a brand-new remote ref, exactly as git's
+    pre-push would feed it. Passes only on a non-zero exit whose output names a COMPRESSED
+    finding -- a fail-closed block for another reason (unreadable terms, import failure)
+    does not prove the compressed path works, so it fails the canary too. (ok, reason)."""
+    import gzip
+    import shutil
+    import tempfile
+    tmp = tempfile.mkdtemp(prefix="plb-canary-")
+    try:
+        nohooks = os.path.join(tmp, "nohooks")
+        repo = os.path.join(tmp, "repo")
+        os.makedirs(nohooks)
+        env = _env()
+
+        def g(*args):
+            p = subprocess.run(["git", "-C", repo, "-c", "core.hooksPath=" + nohooks.replace("\\", "/"),
+                                "-c", "commit.gpgsign=false", "-c", "user.name=canary",
+                                "-c", "user.email=canary@localhost"] + list(args),
+                               capture_output=True, text=True, env=env, timeout=60)
+            if p.returncode != 0:
+                raise RuntimeError("canary git %s: %s" % (args[0], (p.stdout + p.stderr).strip()[-300:]))
+            return p.stdout.strip()
+
+        subprocess.run(["git", "init", "-q", repo], check=True, capture_output=True, env=env, timeout=60)
+        with open(os.path.join(repo, "README"), "w") as fh:
+            fh.write("canary base\n")
+        g("add", "-A")
+        g("commit", "-q", "-m", "base")
+        g("update-ref", "refs/remotes/origin/main", "HEAD")
+        with gzip.open(os.path.join(repo, "canary.jsonl.gz"), "wt") as fh:
+            fh.write('{"tool":"canary","aws_key_id":"%s"}\n' % _canary_secret())
+        g("add", "-A")
+        g("commit", "-q", "-m", "canary")
+        sha = g("rev-parse", "HEAD")
+        stdin = "refs/heads/canary %s %s %s\n" % (sha, TARGET_REF, "0" * 40)
+        p = subprocess.run([sys.executable, scan_path, "origin", "canary"], input=stdin, cwd=repo,
+                           capture_output=True, text=True, env=env, timeout=timeout,
+                           encoding="utf-8", errors="replace")
+        out = (p.stdout or "") + (p.stderr or "")
+        if p.returncode != 0 and "COMPRESSED" in out:
+            return True, "canary blocked"
+        return False, ("confidential-scan CANARY FAILED: %s did not block a credential inside a .gz "
+                       "(exit %s): %s" % (scan_path, p.returncode, out.strip()[-400:]))
+    except subprocess.TimeoutExpired:
+        return False, "confidential-scan canary timed out after %ss" % timeout
+    except Exception as exc:
+        return False, "confidential-scan canary could not run: %s: %s" % (type(exc).__name__, exc)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _utc_now_iso():
@@ -333,7 +440,7 @@ def remote_ref_sha(repo, remote, ref, timeout=120):
 
 def run_push(a):
     target_ref = TARGET_REF
-    res = {"mode": "push", "repo": a.repo, "remote": a.remote, "branch": a.branch,
+    res = {"mode": "push", "repo": a.repo, "remote": a.remote, "branch": BRANCH,
            "target": target_ref, "sha": None}
 
     def done(verdict, detail=""):
@@ -349,10 +456,10 @@ def run_push(a):
         rc, head_ref = git(a.repo, ["symbolic-ref", "-q", "HEAD"])
         head_ref = (head_ref or "").strip()
         if rc != 0 or not head_ref:
-            return done("PRECONDITION", "HEAD is detached; refusing to back up an unnamed state as %s" % a.branch)
-        if head_ref != "refs/heads/" + a.branch:
+            return done("PRECONDITION", "HEAD is detached; refusing to back up an unnamed state as %s" % BRANCH)
+        if head_ref != "refs/heads/" + BRANCH:
             return done("PRECONDITION", "HEAD is on %s, not %s; refusing to overwrite the live backup with another branch"
-                        % (head_ref, a.branch))
+                        % (head_ref, BRANCH))
         sha = _git_ok(a.repo, ["rev-parse", "--verify", "HEAD^{commit}"])
         res["sha"] = sha
         hooks_dir = _git_ok(a.repo, ["rev-parse", "--path-format=absolute", "--git-path", "hooks"])
@@ -416,8 +523,31 @@ class _UsageError(Exception):
 
 
 class _Parser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("allow_abbrev", False)   # no --rep / --che prefix matching
+        super().__init__(*args, **kwargs)
+
     def error(self, message):
         raise _UsageError(message)
+
+
+def _usage_state_dir(argv):
+    """Where a push-mode usage error may write its marker: the --state-dir / --repo this
+    argv names (lenient pre-parse), else the default. None for check mode or when even the
+    pre-parse fails."""
+    pre = _Parser(add_help=False)
+    pre.add_argument("--check", action="store_true")
+    pre.add_argument("--repo", default=DEFAULT_REPO)
+    pre.add_argument("--state-dir", default=None)
+    try:
+        known, _ = pre.parse_known_args(argv)
+    except _UsageError:
+        return None
+    if known.check:
+        return None
+    if known.state_dir:
+        return os.path.abspath(known.state_dir)
+    return os.path.join(os.path.abspath(known.repo), "maintenance", "_state")
 
 
 def main(argv=None):
@@ -426,7 +556,6 @@ def main(argv=None):
     p.add_argument("--check", action="store_true", help="report whether the live HEAD is off-box")
     p.add_argument("--repo", default=DEFAULT_REPO)
     p.add_argument("--remote", default="origin")
-    p.add_argument("--branch", default=DEFAULT_BRANCH)
     p.add_argument("--state-dir", default=None, help="default: <repo>/maintenance/_state")
     p.add_argument("--grace-hours", type=float, default=26.0)
     p.add_argument("--stamp-max-hours", type=float, default=48.0,
@@ -438,11 +567,15 @@ def main(argv=None):
     try:
         a = p.parse_args(argv)
     except _UsageError as exc:
-        # A mis-typed scheduler prompt must fail loud, not silently: the push-mode marker is
-        # written to the default state dir (check mode only reads it, so it writes nothing).
+        # A mis-typed scheduler prompt must fail loud, not silently: push mode writes the
+        # failure marker into the state dir THIS invocation names (pre-parsed --repo /
+        # --state-dir), so a usage error under --repo <elsewhere> can never land a marker in
+        # the live ~/.claude state. Check mode only reads the marker, so it writes nothing;
+        # if even the pre-parse fails, nothing is written (location unknown).
         res = {"verdict": "ERROR", "detail": "usage: %s" % exc}
-        if "--check" not in (argv if argv is not None else sys.argv[1:]):
-            write_beacon(os.path.join(DEFAULT_REPO, "maintenance", "_state"), False, res)
+        where = _usage_state_dir(argv if argv is not None else sys.argv[1:])
+        if where:
+            res["beacon_written"] = write_beacon(where, False, res)
         print("usage error: %s" % exc)
         print("RESULT_JSON=" + json.dumps(res, sort_keys=True))
         return 6

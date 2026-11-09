@@ -31,6 +31,7 @@ def _json(p):
 
 
 TARGET = "refs/heads/backup/live-primary"
+SHIM_V2 = plb.KNOWN_GOOD_SHIMS["v2 (installed 2026-11-08)"]
 GOOD_SCAN = ("def scan_compressed(rng, terms):\n    return [], [], False\n\n"
              "def main():\n    c_hits, c_leaks, c_bad = scan_compressed(None, [])\n    return 0\n")
 HDR = "To https://github.com/x/y.git\n"
@@ -98,6 +99,7 @@ class PushArgvTest(unittest.TestCase):
 
 
 class GatePreconditionTest(unittest.TestCase):
+    """Static half: allowlisted shim + AST lint (canary=False). Behavioural half: CanaryTest."""
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="plb-unit-")
         self.addCleanup(shutil.rmtree, self.root, True)
@@ -105,96 +107,121 @@ class GatePreconditionTest(unittest.TestCase):
         os.makedirs(self.hooks)
         os.makedirs(os.path.join(self.root, "hooks"))
 
-    def _write(self, rel, text):
-        p = os.path.join(self.root, rel)
-        with open(p, "w", encoding="utf-8") as f:
+    def _write(self, rel, text, newline="\n"):
+        with open(os.path.join(self.root, rel), "w", encoding="utf-8", newline=newline) as f:
             f.write(text)
 
     def _good(self):
-        self._write("githooks/pre-push", '#!/bin/sh\npython "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"\n')
+        self._write("githooks/pre-push", SHIM_V2)
         self._write("hooks/git-prepush-confidential-scan.py", GOOD_SCAN)
+
+    def _ok(self):
+        return plb.gate_precondition(self.root, self.hooks, canary=False)
 
     def test_ok(self):
         self._good()
-        ok, why = plb.gate_precondition(self.root, self.hooks)
+        ok, why = self._ok()
         self.assertTrue(ok, why)
+
+    def test_both_known_shims_accepted_including_crlf_and_comment_drift(self):
+        self._good()
+        for name, text in plb.KNOWN_GOOD_SHIMS.items():
+            drifted = text.replace("ROOT=", "# a reworded header comment\nROOT=").replace("\n", "  \r\n")
+            self._write("githooks/pre-push", drifted, newline="")
+            self.assertTrue(self._ok()[0], name)
 
     def test_missing_pre_push(self):
         self._good()
         os.remove(os.path.join(self.hooks, "pre-push"))
-        ok, why = plb.gate_precondition(self.root, self.hooks)
+        ok, why = self._ok()
         self.assertFalse(ok)
         self.assertIn("pre-push", why)
 
-    def test_pre_push_without_confidential_scan(self):
+    def test_shim_variants_that_skip_the_scan_are_refused(self):
+        # REFUTE rounds 1-2: each of these defeated a substring or line-parse check
         self._good()
-        self._write("githooks/pre-push", "#!/bin/sh\nexit 0\n")
-        ok, why = plb.gate_precondition(self.root, self.hooks)
-        self.assertFalse(ok)
-        self.assertIn("confidential", why)
+        scan = 'python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"'
+        variants = {
+            "comment only": "#!/bin/sh\nexit 0\n# git-prepush-confidential-scan.py\n",
+            "exit first": SHIM_V2.replace("ROOT=", "exit 0\nROOT="),
+            "exec first": SHIM_V2.replace("ROOT=", "exec true\nROOT="),
+            "if false": SHIM_V2.replace(scan, "if false; then " + scan + "; fi"),
+            "backgrounded": SHIM_V2.replace(scan, scan + " &"),
+            "or true": SHIM_V2.replace(scan, scan + " || true"),
+            "other ROOT": SHIM_V2.replace('ROOT="$(git rev-parse --show-toplevel)"', 'ROOT="/tmp/elsewhere"'),
+            "extra line after": SHIM_V2 + "exit 0\n",
+        }
+        for name, text in variants.items():
+            self._write("githooks/pre-push", text)
+            self.assertFalse(self._ok()[0], name)
 
     def test_scan_without_compressed_scan(self):
         # the live branch's state on 2026-11-08: scan present, #427's compressed scan absent
         self._good()
         self._write("hooks/git-prepush-confidential-scan.py", "def main():\n    pass\n")
-        ok, why = plb.gate_precondition(self.root, self.hooks)
+        ok, why = self._ok()
         self.assertFalse(ok)
         self.assertIn("scan_compressed", why)
 
-    def test_scan_defines_but_never_calls_compressed_scan(self):
-        self._good()
-        self._write("hooks/git-prepush-confidential-scan.py", "def scan_compressed(rng, terms):\n    pass\n")
-        ok, why = plb.gate_precondition(self.root, self.hooks)
-        self.assertFalse(ok)
-
-    def test_hook_naming_scan_only_in_a_comment(self):
-        # REFUTE 2026-11-08: substring match accepted this
-        self._good()
-        self._write("githooks/pre-push", "#!/bin/sh\nexit 0\n# git-prepush-confidential-scan.py\n")
-        self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0])
-
-    def test_hook_exits_or_execs_before_scan(self):
-        self._good()
-        for early in ("exit 0", "exec true"):
-            self._write("githooks/pre-push", '#!/bin/sh\n%s\npython "$ROOT/hooks/git-prepush-confidential-scan.py"\n' % early)
-            self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0], early)
-
-    def test_real_shim_shape_accepted(self):
-        # the installed SHIM v2 (2026-11-08): conditional `|| exit` lines precede the scan
-        self._good()
-        self._write("githooks/pre-push", '#!/bin/sh\nROOT="$(git rev-parse --show-toplevel)"\n'
-                    'REFS="$(mktemp)" || exit 1\ntrap \'rm -f "$REFS"\' EXIT\ncat > "$REFS"\n'
-                    'python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?\n'
-                    'python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" <"$REFS" || exit $?\n'
-                    'python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"\n')
-        self.assertTrue(plb.gate_precondition(self.root, self.hooks)[0])
-
-    def test_scan_mentioning_compressed_only_in_docstring(self):
-        # REFUTE 2026-11-08: a count of 'scan_compressed(' matched the docstring
-        self._good()
-        self._write("hooks/git-prepush-confidential-scan.py",
-                    '"""see scan_compressed() below"""\ndef scan_compressed(rng, terms):\n    pass\n\n'
-                    'def main():\n    a, b, c = [], [], []\n    return 0\n')
-        self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0])
-
-    def test_scan_calling_compressed_outside_main(self):
-        self._good()
-        self._write("hooks/git-prepush-confidential-scan.py",
-                    "def scan_compressed(rng, terms):\n    pass\n\ndef helper():\n    scan_compressed(1, 2)\n\n"
-                    "def main():\n    return 0\n")
-        self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0])
-
-    def test_real_scans_classified_correctly(self):
-        # this checkout's (post-#427) scan passes; the live branch's pre-#427 scan (no
-        # scan_compressed at all) is the refusal case, covered by test_scan_without_compressed_scan
-        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        self.assertTrue(plb.scan_main_calls_compressed(_read(os.path.join(root, "hooks", "git-prepush-confidential-scan.py"))))
+    def test_ast_lint_requires_a_bare_name_call_inside_main(self):
+        cases = {
+            "docstring mention only": '"""see scan_compressed() below"""\ndef scan_compressed(rng, terms):\n    pass\n\n'
+                                      'def main():\n    a, b, c = [], [], []\n',
+            "called outside main": "def scan_compressed(r, t):\n    pass\n\ndef helper():\n    scan_compressed(1, 2)\n\n"
+                                   "def main():\n    return 0\n",
+            "attribute call": "import x\ndef scan_compressed(r, t):\n    pass\n\ndef main():\n    x.scan_compressed(1, 2)\n",
+            "similar name": "def scan_compressed(r, t):\n    pass\n\ndef main():\n    scan_compressed_v2(1, 2)\n",
+            "not top-level": "class K:\n    def scan_compressed(self, r, t):\n        pass\n\ndef main():\n    scan_compressed(1, 2)\n",
+            "no main": "def scan_compressed(r, t):\n    pass\n\nscan_compressed(1, 2)\n",
+            "syntax error": "def main(:\n",
+        }
+        for name, src in cases.items():
+            self.assertFalse(plb.scan_main_calls_compressed(src), name)
+        self.assertTrue(plb.scan_main_calls_compressed(GOOD_SCAN))
 
     def test_scan_file_missing(self):
         self._good()
         os.remove(os.path.join(self.root, "hooks", "git-prepush-confidential-scan.py"))
-        ok, _ = plb.gate_precondition(self.root, self.hooks)
+        self.assertFalse(self._ok()[0])
+
+    def test_canary_is_on_by_default(self):
+        # the stub GOOD_SCAN passes the lint but blocks nothing: only the canary catches it
+        self._good()
+        ok, why = plb.gate_precondition(self.root, self.hooks)
         self.assertFalse(ok)
+        self.assertIn("CANARY", why)
+
+
+class CanaryTest(unittest.TestCase):
+    """canary_scan() runs a scan against a throwaway repo in TEMP. No live checkout touched."""
+    REAL = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                        "hooks", "git-prepush-confidential-scan.py")
+
+    def _stub(self, src):
+        d = tempfile.mkdtemp(prefix="plb-stub-")
+        self.addCleanup(shutil.rmtree, d, True)
+        p = os.path.join(d, "scan.py")
+        with open(p, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        return p
+
+    def test_this_checkouts_real_scan_blocks_the_canary(self):
+        ok, why = plb.canary_scan(self.REAL)
+        self.assertTrue(ok, why)
+
+    def test_scan_that_lets_everything_through_fails_the_canary(self):
+        ok, why = plb.canary_scan(self._stub("import sys\nsys.stdin.read()\nsys.exit(0)\n"))
+        self.assertFalse(ok)
+        self.assertIn("CANARY FAILED", why)
+
+    def test_fail_closed_block_for_another_reason_does_not_count(self):
+        # e.g. terms file unreadable: blocks, but proves nothing about the compressed path
+        ok, _ = plb.canary_scan(self._stub("import sys\nsys.stdin.read()\nprint('BLOCKED (fail-closed): terms unreadable')\nsys.exit(1)\n"))
+        self.assertFalse(ok)
+
+    def test_canary_secret_is_not_a_literal_in_the_source(self):
+        self.assertNotIn(plb._canary_secret(), _read(TOOL))
+        self.assertRegex(plb._canary_secret(), r"^AKIA[0-9A-Z]{16}$")
 
 
 class BeaconTest(unittest.TestCase):
@@ -297,6 +324,51 @@ class CliSurfaceTest(unittest.TestCase):
             rc = plb.main(["--check", "--repo", d, "--target", "main"])
         self.assertEqual(rc, 6)
         self.assertTrue(buf.getvalue().strip().splitlines()[-1].startswith("RESULT_JSON="))
+
+    def _run(self, argv):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = plb.main(argv)
+        return rc, buf.getvalue()
+
+    def test_branch_is_a_constant_not_an_option(self):
+        self.assertEqual(plb.BRANCH, "live/primary-checkout")
+        d = tempfile.mkdtemp(prefix="plb-cli-")
+        self.addCleanup(shutil.rmtree, d, True)
+        rc, _ = self._run(["--check", "--repo", d, "--branch", "main"])
+        self.assertEqual(rc, 6)
+
+    def test_option_abbreviations_are_rejected(self):
+        d = tempfile.mkdtemp(prefix="plb-cli-")
+        self.addCleanup(shutil.rmtree, d, True)
+        rc, out = self._run(["--che", "--repo", d])
+        self.assertEqual(rc, 6, out)
+        rc, out = self._run(["--check", "--rep", d])
+        self.assertEqual(rc, 6, out)
+
+    def test_push_usage_error_writes_marker_only_where_argv_points(self):
+        d = tempfile.mkdtemp(prefix="plb-cli-")
+        self.addCleanup(shutil.rmtree, d, True)
+        state = os.path.join(d, "st")
+        rc, _ = self._run(["--repo", d, "--state-dir", state, "--bogus"])
+        self.assertEqual(rc, 6)
+        self.assertEqual(_json(os.path.join(state, plb.FAILED_MARKER))["verdict"], "ERROR")
+        rc, _ = self._run(["--repo", d, "--bogus"])
+        self.assertTrue(os.path.exists(os.path.join(d, "maintenance", "_state", plb.FAILED_MARKER)))
+        # resolution, without writing: no --repo -> default live state; check mode -> nothing
+        self.assertEqual(plb._usage_state_dir(["--bogus"]),
+                         os.path.join(plb.DEFAULT_REPO, "maintenance", "_state"))
+        self.assertIsNone(plb._usage_state_dir(["--check", "--bogus"]))
+        self.assertEqual(plb._usage_state_dir(["--repo", d, "--x"]), os.path.join(d, "maintenance", "_state"))
+
+    def test_check_usage_error_writes_nothing(self):
+        d = tempfile.mkdtemp(prefix="plb-cli-")
+        self.addCleanup(shutil.rmtree, d, True)
+        rc, _ = self._run(["--check", "--repo", d, "--state-dir", os.path.join(d, "st"), "--bogus"])
+        self.assertEqual(rc, 6)
+        self.assertFalse(os.path.exists(os.path.join(d, "st")))
 
     def test_non_ascii_detail_cannot_break_result_line(self):
         # REFUTE 2026-11-08: em-dash in gate stderr + cp1252 stdout crashed print()
