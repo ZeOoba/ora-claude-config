@@ -13,6 +13,8 @@ Design notes (precision over recall, to avoid false positives):
   * The known-wrong historical value 1.75 co-occurring with DSCR/governor is always
     flagged UNLESS the line is an audit note ("corrected ...") that also states 1.25.
   * Exit 0 = clean; exit 1 = drift found; exit 2 = probe error (fail loud, not silent -- I5).
+    A missing required root (memory, CLAUDE.md, oxford-command-center/src) or a run that read
+    no governor constants file is a probe error (exit 2), never "OK" (2026-11-08 audit).
 
 Usage: python governor-drift-probe.py            # scan default roots
        python governor-drift-probe.py --quiet     # only print on drift
@@ -64,7 +66,8 @@ class GitRefTree:
     def __repr__(self):
         return "GitRefTree(exts=%r, refs=%r)" % (self.exts, self.refs)
 
-# Scan roots: (path, file-extensions | GitRefTree). Missing roots are skipped silently (logged once).
+# Scan roots: (path, file-extensions | GitRefTree). Missing OPTIONAL roots are skipped (logged once);
+# a missing REQUIRED root (see required_roots()) is a probe error, exit 2.
 def build_targets():
     targets = []
     targets.append((MEM, (".md",)))
@@ -124,6 +127,18 @@ _PRUNE_PREFIX = ("_archive_", "_staging_")
 # session's OWN review artifact for the LTV-narrative fix quoted "LTV 65%/40%" in its notes and
 # self-triggered the probe the moment it was written. Pruned by directory name (session ids are
 # unbounded, same as claim slugs) -- consistent with active-work's precedent above.
+
+# REQUIRED roots (audit governor-probe-missing-root-fail-open, 2026-11-08). Every other root is
+# optional and skipped when absent (a fleet root on a machine without that fleet, etc.), but these
+# three hold the governor's doctrinal homes (standards.md / rules.md in memory, CLAUDE.md) and its
+# ONE code source (governor-constants.ts under oxford-command-center/src). Skipping one used to
+# end in "OK" over a tree the probe never read -- a clean verdict nothing supports. A missing
+# required root is now a probe ERROR (exit 2, the I5 fail-loud contract), as is a run that
+# scanned zero GOVERNOR_CODE_FILES (the deletion guard below only fires when the file exists).
+def required_roots():
+    return (MEM, os.path.join(CLAUDE, "CLAUDE.md"),
+            os.path.join(HOME, "oxford-command-center", "src"))
+
 
 def _is_pruned_dir(name):
     return name in _PRUNE_EXACT or name.startswith(_PRUNE_PREFIX)
@@ -2277,6 +2292,7 @@ def main():
     findings = []
     scanned = 0
     skipped_roots = []
+    governor_code_hits = []
     self_path = os.path.abspath(__file__)  # never flag the probe's own example strings
     # Governor-tooling scripts legitimately mention 1.75 / wrong values to detect/restore/
     # test them -> skip them (mirrors self_path).
@@ -2361,6 +2377,15 @@ def main():
         if is_governor_code:
             # The ONE governor source file: validate enforcement CONSTANTS directly.
             content = read()
+            # Counts toward the "a governor file WAS read" check ONLY when it is the canonical
+            # oxford-command-center/src/contracts/governor-constants.ts -- matching by basename
+            # alone let a stray or
+            # legacy copy elsewhere (server/warehouse/capital-config.ts exists live) satisfy the
+            # check after src/contracts/governor-constants.ts was deleted (REFUTE C4, 2026-11-08).
+            # EXACT relpath, not a folder prefix (REFUTE round 2, residual D): a stray copy
+            # under src/legacy/ must not stand in for the deleted canonical file either.
+            if _norm(path) == governor_file:
+                governor_code_hits.append(where)
             for ln, reason, txt in scan_code(content):
                 findings.append((where, ln, reason, txt))
             # deletion guard: the governor file MUST carry a numeric declaration of each.
@@ -2383,7 +2408,23 @@ def main():
         with open(path, "r", encoding="utf-8", errors="replace") as fh:
             return fh.read()
 
-    for root, exts in build_targets():
+    targets = build_targets()
+    # Required = the required roots this run actually targets (all three under the default
+    # build_targets(); a harness that narrows build_targets() narrows the requirement with it).
+    _norm = lambda p: os.path.normcase(os.path.normpath(p))
+    target_roots = {_norm(r) for r, _ in targets}
+    required = [r for r in required_roots() if _norm(r) in target_roots]
+    governor_root = _norm(os.path.join(HOME, "oxford-command-center", "src"))
+    require_governor_code = governor_root in target_roots
+    governor_file = _norm(os.path.join(governor_root, "contracts", "governor-constants.ts"))
+    missing_required = [r for r in required if not (os.path.isfile(r) or os.path.isdir(r))]
+    if missing_required:
+        print("[ACTION] governor-drift-probe: required scan root(s) missing -- cannot prove the "
+              "governor is consistent (probe error, not clean): %s" % "; ".join(missing_required),
+              file=sys.stderr)
+        sys.exit(2)
+
+    for root, exts in targets:
         if not (os.path.isfile(root) or os.path.isdir(root)):
             skipped_roots.append(root)
             continue
@@ -2412,13 +2453,24 @@ def main():
                 print("[ACTION] governor-drift-probe could not read %s: %s" % (path, e), file=sys.stderr)
                 sys.exit(2)
 
+    no_gov_msg = ("[ACTION] governor-drift-probe: no governor code file (%s) was scanned -- the "
+                  "governor constants file is missing or renamed (probe error, not clean)."
+                  % ", ".join(sorted(GOVERNOR_CODE_FILES)))
+
     if findings:
         print("GOVERNOR DRIFT DETECTED (%d) -- canonical is DSCR >= %sx, LTV <= %s%%:"
               % (len(findings), CANON_DSCR, CANON_LTV))
         for path, ln, reason, txt in findings:
             print("  %s:%d  %s" % (path, ln, reason))
             print("        | %s" % txt)
+        if require_governor_code and not governor_code_hits:
+            print(no_gov_msg, file=sys.stderr)
         sys.exit(1)
+
+    if require_governor_code and not governor_code_hits:
+        # A run that never read the governor constants file can never be "OK".
+        print(no_gov_msg, file=sys.stderr)
+        sys.exit(2)
 
     if not quiet:
         print("governor-drift-probe OK -- %d files scanned, DSCR %sx / LTV %s%% consistent."

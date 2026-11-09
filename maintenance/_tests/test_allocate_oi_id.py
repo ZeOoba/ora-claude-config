@@ -190,7 +190,78 @@ def test_ledger_records_who_and_why():
                and "filing the thing" in body, body[:160])
 
 
+HISTORY = """# Open Items -- history
+
+| ID | Opened | Source | Detail |
+|---|---|---|---|
+| [OI-396](#OI-396) | 2026-11-05 | x | rolled over |
+
+### OI-396
+body
+"""
+
+TRACKER_395 = TRACKER.replace("OI-007", "OI-395")
+
+
+def test_history_file_ids_are_taken():
+    """Audit oi-allocator-ignores-history-file (2026-11-08): ids rolled into
+    open-items-tracker-history.md were invisible, so a history max above the live
+    tracker's max was handed out again."""
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        t, led = _fixture(td, TRACKER_395), os.path.join(td, "res.log")
+        io.open(os.path.join(td, "open-items-tracker-history.md"), "w",
+                encoding="utf-8", newline="").write(HISTORY)
+        got = m.allocate(t, led, session="s", note="x")
+        expect("allocate: history max OI-396 > tracker max OI-395 -> OI-397",
+               got == "OI-397", got)
+
+
+def test_history_explicit_path_and_missing_file():
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        t, led = _fixture(td, TRACKER_395), os.path.join(td, "res.log")
+        hist = os.path.join(td, "elsewhere-history.md")
+        io.open(hist, "w", encoding="utf-8", newline="").write(HISTORY)
+        got = m.allocate(t, led, session="s", note="x", history_path=hist)
+        expect("allocate: explicit history_path is honoured", got == "OI-397", got)
+    with tempfile.TemporaryDirectory() as td:
+        t, led = _fixture(td, TRACKER_395), os.path.join(td, "res.log")
+        got = m.allocate(t, led, session="s", note="x")
+        expect("allocate: no history file -> tracker/ledger only (OI-396)",
+               got == "OI-396", got)
+
+
+def test_history_ids_not_reported_as_orphans():
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        t, led = _fixture(td, TRACKER_395), os.path.join(td, "res.log")
+        io.open(os.path.join(td, "open-items-tracker-history.md"), "w",
+                encoding="utf-8", newline="").write(HISTORY)
+        io.open(led, "w", encoding="utf-8", newline="").write(
+            "OI-396 | 2026-11-05T00:00:00Z | s | rolled\n")
+        r = m.report(t, led)
+        expect("report: a reservation whose row rolled into history is not an orphan",
+               r["orphans"] == [], r)
+
+
+def test_cli_history_flag():
+    with tempfile.TemporaryDirectory() as td:
+        t, led = _fixture(td, TRACKER_395), os.path.join(td, "res.log")
+        hist = os.path.join(td, "h.md")
+        io.open(hist, "w", encoding="utf-8", newline="").write(HISTORY)
+        p = subprocess.run([sys.executable, ALLOC, "--tracker", t, "--ledger", led,
+                            "--history", hist, "--session", "s", "--note", "x"],
+                           capture_output=True, text=True)
+        expect("CLI --history: allocates past the history max",
+               p.returncode == 0 and p.stdout.strip() == "OI-397", (p.stdout, p.stderr))
+
+
 def main():
+    test_history_file_ids_are_taken()
+    test_history_explicit_path_and_missing_file()
+    test_history_ids_not_reported_as_orphans()
+    test_cli_history_flag()
     test_next_id_is_max_plus_one()
     test_reservation_is_honoured_before_the_row_exists()
     test_ids_never_reused_even_after_the_row_lands()

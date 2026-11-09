@@ -69,6 +69,15 @@ DEFAULT_TRACKER = os.path.join(
     HOME, ".claude", "projects",
     "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory",
     "open-items-tracker.md")
+# The tracker's rollover file (audit oi-allocator-ignores-history-file, 2026-11-08):
+# closed rows move here, and their ids stay TAKEN -- an allocator that reads only
+# the live tracker hands a rolled-over max out again. Resolved as the tracker's
+# SIBLING (history_for()), so a fixture tracker never reads the live history.
+HISTORY_BASENAME = "open-items-tracker-history.md"
+DEFAULT_HISTORY = os.path.join(
+    HOME, ".claude", "projects",
+    "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory",
+    HISTORY_BASENAME)
 DEFAULT_LEDGER = os.path.join(
     HOME, ".claude", "maintenance", "_state", "oi-id-reservations.log")
 # Highest id predating enforcement. Ids <= this are grandfathered: at switch-on
@@ -117,6 +126,24 @@ def ledger_ids(text):
     return {int(n) for n in LEDGER_ID_RE.findall(text)}
 
 
+def history_for(tracker_path, history_path=None):
+    """The history file to union in: `history_path` if given, else the tracker's
+    sibling open-items-tracker-history.md (DEFAULT_HISTORY for the default tracker)."""
+    if history_path:
+        return history_path
+    return os.path.join(os.path.dirname(os.path.abspath(tracker_path)), HISTORY_BASENAME)
+
+
+def _taken_tracker_ids(tracker_path, history_path=None):
+    """Tracker ids UNION history ids. A missing history file contributes nothing (a
+    fresh install has none); an unreadable tracker is the caller's to refuse."""
+    taken = tracker_ids(_read(tracker_path)) if os.path.isfile(tracker_path) else set()
+    hist = history_for(tracker_path, history_path)
+    if os.path.isfile(hist):
+        taken |= tracker_ids(_read(hist))
+    return taken
+
+
 def _acquire(lock_path, stale_lock_secs=STALE_LOCK_SECS,
              wait_secs=LOCK_WAIT_SECS):
     """O_EXCL lock with stale-breaking. Returns a note about any break, so the
@@ -160,7 +187,7 @@ def _release(lock_path):
 
 
 def allocate(tracker_path=None, ledger_path=None, session="unknown", note="",
-             stale_lock_secs=STALE_LOCK_SECS):
+             stale_lock_secs=STALE_LOCK_SECS, history_path=None):
     """Reserve and return the next free id as `OI-NNN`.
 
     Refuses if the tracker is unreadable: allocating from a missing tracker
@@ -178,7 +205,7 @@ def allocate(tracker_path=None, ledger_path=None, session="unknown", note="",
     lock_path = ledger_path + ".lock"
     broke = _acquire(lock_path, stale_lock_secs=stale_lock_secs)
     try:
-        taken = tracker_ids(_read(tracker_path))
+        taken = _taken_tracker_ids(tracker_path, history_path)
         if os.path.isfile(ledger_path):
             taken |= ledger_ids(_read(ledger_path))
         nxt = (max(taken) + 1) if taken else 1
@@ -266,7 +293,7 @@ def read_mode(path=None):
     return "WARN"
 
 
-def enforce(tracker_path=None, ledger_path=None, baseline=None):
+def enforce(tracker_path=None, ledger_path=None, baseline=None, history_path=None):
     """Ids ABOVE the baseline must carry a ledger reservation.
 
     Deliberately baseline-scoped rather than whole-file: at switch-on the ledger
@@ -281,7 +308,7 @@ def enforce(tracker_path=None, ledger_path=None, baseline=None):
     if baseline is None:
         return {"violations": [], "skipped": True,
                 "reason": "no readable baseline -- enforcement skipped, not asserted"}
-    taken = tracker_ids(_read(tracker_path)) if os.path.isfile(tracker_path) else set()
+    taken = _taken_tracker_ids(tracker_path, history_path)
     reserved = ledger_ids(_read(ledger_path)) if os.path.isfile(ledger_path) else set()
     violations = [{"id": "OI-%03d" % n} for n in sorted(taken)
                   if n > baseline and n not in reserved]
@@ -309,12 +336,13 @@ def format_enforcement(result):
     return "\n".join(lines)
 
 
-def report(tracker_path=None, ledger_path=None):
-    """Reservations that never became rows. Informational only -- never
-    reclaimed, because reclaiming re-opens the window this file closes."""
+def report(tracker_path=None, ledger_path=None, history_path=None):
+    """Reservations that never became rows (in the tracker OR its history file).
+    Informational only -- never reclaimed, because reclaiming re-opens the window
+    this file closes."""
     tracker_path = tracker_path or DEFAULT_TRACKER
     ledger_path = ledger_path or DEFAULT_LEDGER
-    t = tracker_ids(_read(tracker_path)) if os.path.isfile(tracker_path) else set()
+    t = _taken_tracker_ids(tracker_path, history_path)
     lines = _read(ledger_path).splitlines() if os.path.isfile(ledger_path) else []
     orphans = []
     for ln in lines:
@@ -331,6 +359,9 @@ def main(argv=None):
     ap.add_argument("--note", default="")
     ap.add_argument("--tracker", default=None)
     ap.add_argument("--ledger", default=None)
+    ap.add_argument("--history", default=None,
+                    help="tracker history file (default: the tracker's sibling %s)"
+                         % HISTORY_BASENAME)
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--enforce", action="store_true",
                     help="exit 1 if any id above the baseline lacks a reservation")
@@ -356,7 +387,7 @@ def main(argv=None):
     if a.enforce:
         base = read_baseline(a.baseline)
         mode = (a.mode or read_mode(a.mode_file)).upper()
-        r = enforce(a.tracker, a.ledger, baseline=base)
+        r = enforce(a.tracker, a.ledger, baseline=base, history_path=a.history)
         print(format_enforcement(r))
         if r["violations"]:
             if mode == "BLOCK":
@@ -368,7 +399,7 @@ def main(argv=None):
         return 0
 
     if a.report:
-        r = report(a.tracker, a.ledger)
+        r = report(a.tracker, a.ledger, history_path=a.history)
         print("reservations: %d | ids in tracker: %d | orphaned reservations: %d"
               % (r["reserved"], r["in_tracker"], len(r["orphans"])))
         for o in r["orphans"]:
@@ -377,7 +408,8 @@ def main(argv=None):
               "NOT reclaimed -- reclaiming re-opens the collision window.)")
         return 0
     try:
-        print(allocate(a.tracker, a.ledger, session=a.session, note=a.note))
+        print(allocate(a.tracker, a.ledger, session=a.session, note=a.note,
+                       history_path=a.history))
     except AllocatorError as e:
         sys.stderr.write("allocate-oi-id: %s\n" % e)
         return 1
