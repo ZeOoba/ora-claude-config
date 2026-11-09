@@ -102,6 +102,8 @@ OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)
 #   HubSpot manage_campaign_objects / manage_segment ........ free-text names, notes, audiences,
 #       filter expressions stored in the SaaS
 #   HubSpot manage_aeo_prompts . CREATE sends promptTexts to external AI assistants
+#   HubSpot manage_social_posts ........ content/title published to the firm's PUBLIC social channels
+#       (audit finding 2026-11-08; every call is scanned, previews included)
 #   Notion notion-send-message-to-session / notion-spawn-session ........ message / initial_message
 #       text goes to a Notion Custom Agent (NOTION_WRITE predates these and misses them)
 #   EXCLUDED
@@ -138,7 +140,7 @@ TEAMS_SEND = re.compile(
 SHAREPOINT_WRITE = re.compile(r"sharepoint_(upload_file|update_file)")
 HUBSPOT_WRITE = re.compile(
     r"__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
-    r"aeo_prompts)")
+    r"aeo_prompts|social_posts)")
 NOTION_AGENT = re.compile(r"notion-(send-message-to-session|spawn-session)")
 
 # Order is the old if/elif order (Notion, then Outlook) followed by the new surfaces; the first match

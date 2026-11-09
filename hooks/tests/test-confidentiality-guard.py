@@ -1016,6 +1016,8 @@ SEND_TOOLS = {
                                                          "name": t, "objectType": "CONTACT"}},
     HUBSPOT + "manage_aeo_prompts": lambda t: {"operation": {"_operationType": "CREATE", "businessUnitId": 1,
                                                              "promptTexts": [t]}},
+    # public social channels (audit finding 2026-11-08); live schema: action/channelId/content/...
+    HUBSPOT + "manage_social_posts": lambda t: {"action": "CREATE", "channelId": "c1", "content": t},
     "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-send-message-to-session":
         lambda t: {"session_url": "session://s1", "message": t},
     "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__notion-spawn-session":
@@ -1210,7 +1212,7 @@ PROPOSED_MATCHER = (
     "|mcp__.*teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat).*"
     "|mcp__.*sharepoint_(upload_file|update_file).*"
     "|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
-    "aeo_prompts).*"
+    "aeo_prompts|social_posts).*"
     "|mcp__.*notion-(send-message-to-session|spawn-session).*"
 )
 NOTION_LIVE = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__"
