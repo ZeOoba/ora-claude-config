@@ -811,6 +811,40 @@ with open(os.path.join(_repo, ".git", "info", "attributes"), "w", encoding="utf-
 _rc, _err = _main_inproc(_repo, _stdin, TERMS)
 expect("compressed review: R1 .git/info/attributes `*.gz diff` -> blocks", _rc == 1, _err[:300])
 
+# --- ORA_PREPUSH_REQUIRE_REFS (2026-11-09, push-live-backup REFUTE round 3). A stray \r or
+# Unicode space in a shim can starve this scan's stdin, so it sees ZERO ref lines and allows
+# an unscanned push. git itself DOES run pre-push with empty stdin on an up-to-date push
+# (verified, git 2.55.0.windows.2), so zero refs cannot fail closed unconditionally. A caller
+# that guarantees >=1 ref (push-live-backup.py never invokes push when up to date) opts in.
+_repo, _stdin = _mk_repo_bytes({"plain.txt": b"nothing secret\n"})
+
+
+def _with_env(val, fn):
+    saved = os.environ.get("ORA_PREPUSH_REQUIRE_REFS")
+    try:
+        if val is None:
+            os.environ.pop("ORA_PREPUSH_REQUIRE_REFS", None)
+        else:
+            os.environ["ORA_PREPUSH_REQUIRE_REFS"] = val
+        return fn()
+    finally:
+        if saved is None:
+            os.environ.pop("ORA_PREPUSH_REQUIRE_REFS", None)
+        else:
+            os.environ["ORA_PREPUSH_REQUIRE_REFS"] = saved
+
+
+for _label, _text in (("empty stdin", ""), ("only noise lines", "garbage\r\n\n  \n"),
+                      ("ref line mangled by a stray \\r", _stdin.replace(" refs/heads/main", "\r refs/heads/main", 1)[:20])):
+    _rc, _err = _with_env("1", lambda: _main_inproc(_repo, _text, []))
+    expect("require-refs: %s -> fail closed" % _label, _rc == 1 and "zero ref lines" in _err, _err[:200])
+_rc, _err = _with_env(None, lambda: _main_inproc(_repo, "", []))
+expect("require-refs unset: empty stdin (git's own up-to-date push) still allowed", _rc == 0, _err[:200])
+_rc, _err = _with_env("1", lambda: _main_inproc(_repo, _stdin, []))
+expect("require-refs: a real clean ref line still passes", _rc == 0, _err[:200])
+_rc, _err = _with_env("0", lambda: _main_inproc(_repo, "", []))
+expect("require-refs=0 is off (only the exact value 1 opts in)", _rc == 0, _err[:200])
+
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-scan tests: %d/%d passed" % (passed, len(results)))
 if passed != len(results):
