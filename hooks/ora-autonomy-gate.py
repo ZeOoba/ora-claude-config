@@ -1030,8 +1030,11 @@ def _check_social_post(tool_name, tool_input, session_id):
     # DRAFT that names no existing post and carries no schedule.
     if action == "CANCEL" and set(tool_input) <= {"action", "broadcastGuid", "confirmed"}:
         return
-    if action == "CREATE" and mode in (None, "DRAFT") and "publishAt" not in tool_input \
-            and "broadcastGuid" not in tool_input:
+    # DRAFT only when `mode` is ABSENT (the connector's documented default) or exactly "DRAFT".
+    # An explicit null is NOT the default (#427 review E4): its connector semantics are
+    # unverified, so it is treated as a publish and needs the token like any other mode.
+    if action == "CREATE" and ("mode" not in tool_input or mode == "DRAFT") \
+            and "publishAt" not in tool_input and "broadcastGuid" not in tool_input:
         return
     if not override_active(session_id, HUBSPOT_SOCIAL_PUBLISH):
         block("HubSpot social post %s%s -- public social channel" % (action[:20],
