@@ -75,6 +75,23 @@ SECRET_PATTERNS = [
      re.compile(r"(?i)\bpassword\b\s*[:=]\s*[\"']?[^\s\"']{6,}")),
     ("PEM private-key block",
      re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")),
+    # 2026-11-08 audit finding secret-patterns-missing-stack-token-prefixes: prefixed
+    # tokens ORA's own stack issues (tech.md 7) that no rule above matched. APPENDED, never
+    # inserted -- callers report by index. Value sides are length-bound so prose and short
+    # identifiers (`secret_sauce`, `ntn_notes`, `pat-na1-portal`) never fire.
+    #   github_pat_  GitHub fine-grained PAT ([A-Za-z0-9_], ~82 chars after the prefix)
+    #   ntn_         Notion integration token (current issuance)
+    #   secret_      Notion legacy integration token (43 alnum) -- bound at 43+ so the
+    #                common `secret_<word>` identifier stays quiet
+    #   pat-<rgn>N-  HubSpot private-app token (region tag + UUID)
+    #   sbp_         Supabase personal access token (40 hex)
+    ("GitHub fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{40,}")),
+    ("Notion token", re.compile(r"\bntn_[A-Za-z0-9]{30,}\b")),
+    ("Notion token", re.compile(r"\bsecret_[A-Za-z0-9]{43,}\b")),
+    ("HubSpot private app token",
+     re.compile(r"(?i)\bpat-[a-z]{2}[0-9]-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}"
+                r"-[0-9a-f]{12}\b")),
+    ("Supabase access token", re.compile(r"\bsbp_(?:v\d+_)?[A-Za-z0-9]{32,}\b")),
 ]
 
 # Paths whose credential-SHAPED strings are fixtures or documentation, never live keys.
