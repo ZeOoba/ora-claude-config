@@ -17,7 +17,7 @@ Design notes (precision over recall, to avoid false positives):
 Usage: python governor-drift-probe.py            # scan default roots
        python governor-drift-probe.py --quiet     # only print on drift
 """
-import os, re, subprocess, sys
+import hashlib, json, os, re, subprocess, sys
 
 # Output may echo file content with non-cp1252 chars (≠, ≥, ×) -> force UTF-8 so the
 # probe never crashes on its own output when stdout is a Windows cp1252 pipe (I5).
@@ -1426,97 +1426,6 @@ def _refi_member_value_spans(low):
             dscr_veto.append(mm.span(1))
     return ltv_noveto, ltv_veto, dscr_veto
 
-# --- AU v4.44/v4.45 per-property refi-LOAN-basis members (2026-11-09) -----------------------
-# ora-skills#228 (Gabriel in-turn rulings 2026-11-08) restated the per-property DSCR floor as DSCR
-# measured on a loan SIZED TO the ratified per-property 65% LTV: "DSCR at a loan sized to 65% LTV",
-# "a 65%-LTV loan", "the 65%-LTV DSCR", "DSCR at 65% LTV", and the constants restatement "65%
-# per-property". None matches an existing refi construct, so the bare-proximity LTV pass read the
-# ratified 65 as "LTV governor 65% != canonical 40%" -- 43 false positives across
-# acquisition-underwriting, deal-comparison, model-bulk-edit and portfolio-growth (2026-11-09).
-#
-# Same safety pattern as every suppressor above (detection over silence):
-#   * VALUE-LOCKED: the regexes match the literal ratified 65 only. Any other figure in these
-#     shapes never matches and stays fully checked (test_v445_refi_loan_basis_value_locked_unit).
-#   * MEMBER-SCOPED: only the 65's own digit span is returned; every other value on the line stays
-#     visible to the normal passes.
-#   * WEAKEST-PASS-ONLY: consumed solely by the bare-proximity LTV fallback; comparator, anchor,
-#     FROMTO and reverse-order passes stay armed, so "LTV ceiling 65%" still flags.
-#   * CLAUSE-BOUNDED WINDOW VETO (_loan_basis_declared_as_ceiling): an aggregate/portfolio subject
-#     or an acquisition/buy-box/hard-ceiling/LTV-governor declaration within 50 chars before / 30
-#     after the value (not clause-clipped) means the 65 is being asserted AS the ceiling, so it
-#     flags. This does
-#     NOT reuse _governor_declared_nearby: that helper vetoes on bare "floor", and every real
-#     loan-basis line is ABOUT the DSCR floor ("DSCR floor tested at a 65%-LTV loan"), so it would
-#     re-arm all 43 false positives. Skill names that merely contain a veto word
-#     ("acquisition-underwriting", "portfolio-growth") are masked before the clause check.
-RE_LOAN_BASIS_65 = (
-    re.compile(r"\b(65)\s*%[\s\-*]*ltv\b\**[\s\-]+(?:loan|dscr|basis|distribution)\b", re.I),
-    re.compile(r"\bloan\s+sized\s+to\s+\**\s*(65)\s*%", re.I),
-    re.compile(r"\bdscr\s+at\s+(?:a\s+)?(65)\s*%[\s\-*]*ltv\b", re.I),
-)
-# The all-canonical constants triple "(DSCR 1.25x; 65% per-property; 40% aggregate)" (either LTV
-# order) -- the changelog restatement "no governor constant changed". Every member is canonical and
-# the separators are bare ;/, so a drift cannot ride it ("LTV 65% per-property (replacing the 40%
-# aggregate)" does not match). NO veto: the restatement legitimately sits beside "governor
-# constants unchanged". A loose "65% per-property" shape was REMOVED after the 2026-11-09 refute
-# pass ("Governor change: DSCR 1.25x, LTV 65% per-property ..." must flag).
-RE_CANON_GOVERNOR_TRIPLE = re.compile(
-    r"\bdscr\s*" + re.escape(CANON_DSCR) + r"\s*[x×]\s*[;/,]\s*(?:"
-    r"(65)\s*%\s*per[\s\-]?property\s*[;/,]\s*" + re.escape(CANON_LTV) + r"\s*%\s*aggregate\b"
-    r"|" + re.escape(CANON_LTV) + r"\s*%\s*aggregate\s*[;/,]\s*(65)\s*%\s*per[\s\-]?property\b)",
-    re.I)
-LOAN_BASIS_VETO_BEFORE = 50
-LOAN_BASIS_VETO_AFTER = 30
-_LOAN_BASIS_NAME_MASK = re.compile(r"acquisition-underwriting|portfolio-growth", re.I)
-# Veto vocabulary. Bare "governor(s)", "leverage" and "max/maximum" were added after the 2026-11-09
-# refute pass: "Going forward the governor is a 65%-LTV loan", "the firm's leverage governor moves
-# to a 65%-LTV loan basis" and "Maximum leverage is a 65%-LTV loan" all went silent without them.
-_LOAN_BASIS_CEILING_DECL = re.compile(
-    r"\baggregate\b|\bportfolio\b|\bacquisition\b|\bbuy[\s\-]box\b|\bgovernors?\b|\bleverage\b"
-    r"|\bmax(?:imum)?\b|\bhard\s+(?:filter|screen|ceiling|cap)\b|\bltv\s+(?:ceiling|cap)\b",
-    re.I)
-
-
-def _loan_basis_65_spans(low):
-    """Digit-group spans of the ratified 65 stated as the per-property DSCR floor's loan basis.
-    Returns (vetoable, unconditional): the canonical triple's member needs no veto."""
-    spans = []
-    for rx in RE_LOAN_BASIS_65:
-        for mm in rx.finditer(low):
-            spans.append(mm.span(1))
-    triple = []
-    for mm in RE_CANON_GOVERNOR_TRIPLE.finditer(low):
-        triple.append(mm.span(1) if mm.group(1) else mm.span(2))
-    return spans, triple
-
-
-_WORD_TAIL = re.compile(r"\w*")
-
-
-def _loan_basis_declared_as_ceiling(low, vs):
-    """True when a governor/aggregate/portfolio/acquisition/leverage/max declaration sits within
-    LOAN_BASIS_VETO_BEFORE chars before or LOAN_BASIS_VETO_AFTER chars after the value -- the
-    loan-basis 65 is then being asserted AS that ceiling and must flag.
-    Deliberately NOT clause-clipped (refute pass 2026-11-09): a subject in a header or the
-    previous clause ("Raise the LTV governor. Going forward every deal is sized as a 65%-LTV
-    loan.", "Portfolio governors: DSCR 1.25x; LTV a 65%-LTV loan basis.") must still veto. The
-    after-window is extended to the end of the word it lands in, so "portfolio" cut at "po" still
-    matches. Widening a veto only adds detection. Skill names are masked (same length) so their
-    embedded veto words do not trip it. Real-tree margin: the skills name the SEPARATE
-    "portfolio-ltv governor" 170-250 chars from the loan-basis 65 (outside the window)."""
-    masked = _LOAN_BASIS_NAME_MASK.sub(lambda mm: " " * len(mm.group(0)), low)
-    # The all-canonical triple carries only canonical values, so its "aggregate" can never be the
-    # thing declaring a 65 ceiling; blank it (same length) so a loan-basis 65 just after a
-    # "(DSCR 1.25x; 65% per-property; 40% aggregate)" restatement is not vetoed by it
-    # (deal-comparison/SKILL.md v1.8 changelog: "... 40% aggregate). A rescale of the DSCR bands
-    # to the 65%-LTV distribution ...").
-    masked = RE_CANON_GOVERNOR_TRIPLE.sub(lambda mm: " " * len(mm.group(0)), masked)
-    lo = max(0, vs - LOAN_BASIS_VETO_BEFORE)
-    hi = min(len(masked), vs + LOAN_BASIS_VETO_AFTER)
-    hi = _WORD_TAIL.match(masked, hi).end()
-    return _LOAN_BASIS_CEILING_DECL.search(masked, lo, hi) is not None
-
-
 def _in_spans(vs, ve, spans):
     """True when the value span [vs, ve) is fully contained in one of `spans`."""
     return any(s <= vs and ve <= e for (s, e) in spans)
@@ -1892,8 +1801,6 @@ def scan_line(raw):
     # bare-proximity LTV fallback below -- every explicit-declaration pass stays armed.
     perprop_paired_veto = _perprop_portfolio_paired_veto_spans(low) if is_gov else []
     refi_ltv_veto = refi_ltv_veto + perprop_paired_veto
-    # AU v4.44/v4.45 per-property loan-basis 65 members (2026-11-09) -- bare-proximity pass only.
-    loan_basis_65, canon_triple_65 = _loan_basis_65_spans(low) if is_gov else ([], [])
     # Bug-fix/audit-changelog SCALING-MULTIPLIER spans (2026-08-22): DSCR values that are an
     # approximate inflation/scaling factor on a COMPUTED figure in a changelog narrative
     # ("inflating computed DSCR ~1.6x"), not a declared governor threshold. See
@@ -2170,14 +2077,6 @@ def scan_line(raw):
                             continue
                         if _in_spans(pvs, pve, refi_ltv_noveto):
                             continue
-                        # skip the ratified 65 stated as the per-property DSCR floor's LOAN basis
-                        # (AU v4.44/v4.45 wording) unless its clause declares it the aggregate/
-                        # acquisition ceiling -- see RE_LOAN_BASIS_65.
-                        if (_in_spans(pvs, pve, loan_basis_65)
-                                and not _loan_basis_declared_as_ceiling(low, pvs)):
-                            continue
-                        if _in_spans(pvs, pve, canon_triple_65):
-                            continue
                         if (_in_spans(pvs, pve, refi_ltv_veto)
                                 and not _governor_declared_nearby(low, pvs, pve)):
                             continue
@@ -2373,6 +2272,65 @@ def _is_skill_version_changelog(path):
     standards.md / rules.md / firm.md / CLAUDE.md / capital-config.ts would go unseen."""
     return bool(SKILL_CHANGELOG_RE.search(path.replace("\\", "/").lower()))
 
+# --- Exact-text RATIFIED-LINE allowlist (2026-11-09) -----------------------------------------
+# Gabriel's in-turn rulings of 2026-11-08 (AU v4.44/v4.45, ora-skills#228) restated the per-property
+# DSCR floor as DSCR at "a loan sized to 65% LTV" / "a 65%-LTV loan". The ratified 65 sits in the same
+# words a real governor drift would use ("going forward the governor is a 65%-LTV loan"), so a
+# phrasing-based suppressor was tried and REFUTED twice (2026-11-09: 25+ realistic aggregate-to-65%
+# declarations went silent). Gabriel chose an exact-line allowlist instead (2026-11-09).
+#
+# Each entry exempts ONE finding reason on ONE line, identified by the SHA-256 of the line's stripped
+# UTF-8 text, at ONE repo-relative path. Any edit to the line -- including a drift injected into it --
+# changes the hash and re-arms the finding. No phrasing rule, so nothing new can ride it.
+# Safety direction: a MISSING file is an empty allowlist (exempts nothing); a MALFORMED file is a
+# probe error (exit 2), never a silent widen. Rewording a ratified line re-alarms until its entry
+# is refreshed -- intended: a change to governor wording deserves a look.
+RATIFIED_LINES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared",
+                                   "governor-drift-ratified-lines.json")
+
+
+def _line_hash(raw):
+    return hashlib.sha256(raw.strip().encode("utf-8")).hexdigest()
+
+
+def load_ratified_lines(path):
+    """Return {(repo_rel_path_lower, reason, sha256)}. Missing file -> empty set. Malformed ->
+    ProbeError. Every entry must carry repo, path, reason, sha256 and ratified (provenance)."""
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        entries = doc["entries"]
+        out = set()
+        for e in entries:
+            for k in ("repo", "path", "reason", "sha256", "ratified"):
+                if not isinstance(e.get(k), str) or not e[k].strip():
+                    raise ValueError("entry missing %r: %r" % (k, e))
+            if not re.fullmatch(r"[0-9a-f]{64}", e["sha256"]):
+                raise ValueError("bad sha256 %r" % e["sha256"])
+            rel = (e["repo"].strip("/") + "/" + e["path"].strip("/")).lower()
+            out.add((rel, e["reason"], e["sha256"]))
+        return out
+    except ProbeError:
+        raise
+    except Exception as ex:
+        raise ProbeError("ratified-lines allowlist %s is malformed: %s" % (path, ex))
+
+
+def _ratified_line(ratified, path, reason, raw):
+    """True when (path, reason, exact line text) is on the ratified allowlist. `path` must END with
+    '/<repo>/<repo-relative path>' -- the repo directory name is part of the match."""
+    if not ratified:
+        return False
+    norm = path.replace("\\", "/").lower()
+    h = _line_hash(raw)
+    for rel, r, sha in ratified:
+        if r == reason and sha == h and norm.endswith("/" + rel):
+            return True
+    return False
+
+
 def main():
     quiet = "--quiet" in sys.argv
     findings = []
@@ -2452,6 +2410,13 @@ def main():
                 or _is_test_file(path) or _is_eval_harness_run_log(path)
                 or _is_skill_version_changelog(path) or is_data_json)
 
+    try:
+        ratified = load_ratified_lines(RATIFIED_LINES_PATH)
+    except ProbeError as e:
+        # fail loud per I5 -- a corrupt allowlist must never silently widen OR drop exemptions
+        print("[ACTION] governor-drift-probe: %s" % e, file=sys.stderr)
+        sys.exit(2)
+
     def _scan_file(path, where, read, dedupe=None):
         """`path` drives every rule (exemptions above, code/governor-code routing); `where` is
         what a finding cites (the path, or path@ref for a committed-ref read); read() returns the
@@ -2479,12 +2444,17 @@ def main():
             occ = {}
             for i, raw in enumerate(_lines(read()), 1):
                 for reason in scan_line(raw):
+                    # Exact-text ratified-line allowlist (see RATIFIED_LINES_PATH): only this
+                    # (path, reason, exact line text) triple is exempt -- any edit to the line
+                    # changes its hash and re-arms the finding.
+                    if _ratified_line(ratified, path, reason, raw):
+                        continue
                     # Committed-ref reads scan the same path at several refs (local main and
                     # origin/main); when local main lags, the blobs differ and line numbers shift,
                     # so one drift was reported once PER REF. Dedupe on (path, reason, line text,
                     # occurrence index within this file) -- the index keeps two identical drift
-                    # lines in ONE file as two findings (refute pass 2026-11-09). The first ref
-                    # read wins. Filesystem reads pass dedupe=None.
+                    # lines in ONE file as two findings. First ref read wins. Filesystem reads
+                    # pass dedupe=None.
                     if dedupe is not None:
                         base = (path, reason, raw.strip())
                         occ[base] = occ.get(base, 0) + 1

@@ -3427,79 +3427,6 @@ def test_interim_checklist_refute_round2_unit():
 # ls-tree / cat-file. What it FLAGS is unchanged; only WHERE it reads.
 # --------------------------------------------------------------------------------------------
 
-# --- AU v4.44/v4.45 per-property refi-LOAN-basis wording (2026-11-09) ------------------------
-# ora-skills#228 restated the DSCR floor as "DSCR at a loan sized to 65% LTV" / "a 65%-LTV loan"
-# across acquisition-underwriting, deal-comparison, model-bulk-edit and portfolio-growth. None of
-# those shapes matched an existing refi-construct suppressor, so the bare-proximity LTV pass read
-# the ratified per-property 65 as "LTV governor 65% != canonical 40%" -- 43 false positives on the
-# daily doctrine guard (2026-11-09 review). Representative sentences lifted from the real lines.
-_V445_CLEAN_LINES = (
-    "| v4.45 | 2026-11-08 | Gabriel in-turn ruling 2026-11-08 | Floor DSCR at a 65%-LTV loan uses "
-    "stabilized NOI, the NOI the refi is sized on; Year-1 DSCR reported separately. |",
-    "- **DSCR floor (per-property governor -- v3.8; reported on every UNDERWRITE; floor basis restated "
-    "v4.44, Gabriel in-turn ratification 2026-11-08):** DSCR at a loan sized to **65% LTV** "
-    "(per-property, on the same value basis as the UNDERWRITE refi). Report the 65%-LTV DSCR alongside "
-    "the IRR floor line on every screen.",
-    "SCREEN: inline verdict block (ledger precedent citations -> gates -> floors incl. per-property "
-    "DSCR at a 65%-LTV loan on stabilized NOI (v4.45; Year-1 DSCR reported beside it).",
-    "**FLOOR FLAG (Ruling 5):** DSCR <1.25x at a loan sized to 65% LTV per-property, on the "
-    "acquisition-underwriting refi value basis -- while this DSCR flag stays on the levered 65%-LTV "
-    "basis = flag, not a kill.",
-    "- v1.8 (2026-11-08): Floor DSCR NOI basis stated. Scoring bands, point values and governor "
-    "constants unchanged (DSCR 1.25x; 65% per-property; 40% aggregate). A rescale of the DSCR bands "
-    "to the 65%-LTV distribution (triage row X2) is pending Gabriel's ratification.",
-    "Test DSCR at a loan sized to 65% LTV per-property, on the acquisition-underwriting refi value "
-    "basis. If DSCR at 65% LTV falls below 1.25x, the refi is sized down under lesser-of sizing.",
-    "The 65%-LTV DSCR floor test above is the per-deal underwriting check for a specific "
-    "acquisition, and a projection never sizes its debt to it.",
-    "floors incl. per-property DSCR at a 65%-LTV loan and the 10-yr unlevered IRR floor (v4.33) -> "
-    "quality/economics/combined table -> levered IRR line (reported only, v4.33) -> bear-mode state "
-    "-> portfolio-LTV governor + concentration state -> P(exec)/expected.",
-    "the test is all-cash -- the deal adds no acquisition debt to its numerator, per "
-    "acquisition-underwriting STAGE 2.3 v4.29 -- while this DSCR flag stays on the levered 65%-LTV "
-    "basis) = flag, not a kill.",
-)
-
-
-def test_v445_refi_loan_basis_wording_stays_clean_unit():
-    """The ratified per-property 65 stated as the DSCR floor's LOAN basis is not aggregate drift."""
-    m = _load_probe_module()
-    for line in _V445_CLEAN_LINES:
-        out = m.scan_line(line)
-        assert not any("65" in o for o in out), (
-            "v4.44/v4.45 refi-loan-basis wording must not flag 65; line=%r got=%r" % (line, out))
-    print("  PASS test_v445_refi_loan_basis_wording_stays_clean_unit")
-
-
-def test_v445_refi_loan_basis_value_locked_unit():
-    """VALUE-LOCK: the same loan-basis shapes with any figure other than the ratified 65 still flag."""
-    m = _load_probe_module()
-    for val in ("70", "75", "55", "80"):
-        for tmpl in ("DSCR floor tested at a %s%%-LTV loan (governor).",
-                     "DSCR floor: DSCR at a loan sized to %s%% LTV per-property governor.",
-                     "Governor constants: per-property LTV %s%%; DSCR measured at a %s%%-LTV loan.",
-                     "The DSCR floor governor: if DSCR at %s%% LTV falls below 1.25x, flag."):
-            line = tmpl % ((val,) * tmpl.count("%s"))
-            out = m.scan_line(line)
-            assert any(val in o for o in out), (
-                "non-ratified %s%% in loan-basis shape must flag; line=%r got=%r" % (val, line, out))
-    print("  PASS test_v445_refi_loan_basis_value_locked_unit")
-
-
-def test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit():
-    """VETO: a 65 in loan-basis shape that is declared AS the aggregate/acquisition ceiling flags."""
-    m = _load_probe_module()
-    for line in ("Aggregate LTV governor is now a 65%-LTV loan on every deal.",
-                 "Portfolio governor: size every loan to 65% LTV going forward.",
-                 "Acquisition LTV governor: a loan sized to 65% LTV, hard cap.",
-                 "The buy-box LTV governor is a 65% LTV loan.",
-                 "From now on a 65%-LTV loan is the aggregate governor."):
-        out = m.scan_line(line)
-        assert any("65" in o for o in out), (
-            "65 declared as aggregate/acquisition governor must flag; line=%r got=%r" % (line, out))
-    print("  PASS test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit")
-
-
 _DRIFT_LINE = "DSCR governor floor 1.60x\n"
 _CLEAN_LINE = "Governor: DSCR >= 1.25x, LTV <= 40% aggregate.\n"
 
@@ -3736,8 +3663,8 @@ def test_committed_ref_scan_fails_loud_e2e():
     print("  PASS test_committed_ref_scan_fails_loud_e2e")
 
 
-# Every line the 2026-11-09 adversarial refute pass showed the first draft silencing (old probe
-# flagged, draft probe did not). Each is a realistic narration MOVING the governor to 65%.
+# Realistic narrations MOVING the governor to 65% that two refuted phrasing-based suppressors
+# (2026-11-09) silenced. Pinned so no future suppressor can silence them again.
 _V445_REFUTE_SILENCED_DRIFT = (
     "Governor change: DSCR 1.25x, LTV 65% per-property (replacing the 40% aggregate).",
     "Governors (updated): DSCR 1.25x / LTV 65% per-property across the portfolio",
@@ -3765,17 +3692,6 @@ def test_v445_refute_silenced_drift_lines_flag_unit():
         assert any("65" in o for o in out), (
             "refute-pass drift line must flag 65; line=%r got=%r" % (line, out))
     print("  PASS test_v445_refute_silenced_drift_lines_flag_unit")
-
-
-def test_v445_canonical_triple_restatement_stays_clean_unit():
-    """The all-canonical 'no constant changed' triple stays clean in either LTV order."""
-    m = _load_probe_module()
-    for line in ("Scoring bands, point values and governor constants unchanged (DSCR 1.25x; 65% "
-                 "per-property; 40% aggregate).",
-                 "No governor value changed (DSCR 1.25x; 40% aggregate; 65% per-property)."):
-        out = m.scan_line(line)
-        assert not any("65" in o for o in out), "triple must stay clean; line=%r got=%r" % (line, out)
-    print("  PASS test_v445_canonical_triple_restatement_stays_clean_unit")
 
 
 def test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e():
@@ -3814,6 +3730,127 @@ def test_committed_ref_scan_dedupes_same_line_across_refs_e2e():
         assert n == 1, "same drift line at two refs must be reported once, got %d:\n%s" % (n, out)
         assert "DRIFT DETECTED (1)" in out, out
     print("  PASS test_committed_ref_scan_dedupes_same_line_across_refs_e2e")
+
+
+# --- Exact-text ratified-line allowlist (2026-11-09) ------------------------------------------
+_RATIFIED_LINE = "DSCR floor tested at a 65%-LTV loan (governor).\n"
+
+
+def _with_allowlist(m, d, entries):
+    """Point the probe at a temp allowlist file holding `entries` (None = no file at all)."""
+    import json as _json
+    path = os.path.join(d, "ratified-lines.json")
+    if entries is not None:
+        with open(path, "w", encoding="utf-8") as fh:
+            _json.dump({"entries": entries}, fh)
+    m.RATIFIED_LINES_PATH = path
+    return path
+
+
+def _entry(m, rel, text, reason):
+    return {"repo": "ora-skills", "path": rel, "reason": reason,
+            "sha256": m._line_hash(text), "ratified": "test fixture"}
+
+
+def _first_reason(m, text):
+    out = m.scan_line(text.strip())
+    assert out, "fixture line must flag on its own: %r" % text
+    return out[0]
+
+
+def test_ratified_line_allowlist_exempts_only_exact_line_e2e():
+    """An allowlisted (path, reason, exact text) is exempt; any edit, other path or other
+    reason still flags."""
+    import tempfile
+    m = _load_probe_module()
+    reason = _first_reason(m, _RATIFIED_LINE)
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "ratified line")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _with_allowlist(m, d, [_entry(m, "s/SKILL.md", _RATIFIED_LINE, reason)])
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 0, "exact allowlisted line must be exempt (got %r)\n%s\n%s" % (code, out, err)
+        # same text at another path -> flags
+        _write_rel(repo, "t/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "same text elsewhere")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1 and "t/SKILL.md" in out.replace("\\", "/"), "other path must flag:\n%s" % out
+        assert "s/SKILL.md" not in out.replace("\\", "/"), "allowlisted path leaked:\n%s" % out
+        # one-character edit to the allowlisted line -> flags
+        _write_rel(repo, "t/SKILL.md", "x\n")
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE.replace("governor", "governor!"))
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "edited line")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1 and "s/SKILL.md" in out.replace("\\", "/"), "edited line must re-arm:\n%s" % out
+        # wrong reason bound to the exact line -> flags
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "restore")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _with_allowlist(m, d, [_entry(m, "s/SKILL.md", _RATIFIED_LINE, "some other reason")])
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "an entry for a different reason must not exempt:\n%s" % out
+        # wrong repo directory name -> flags
+        e = _entry(m, "s/SKILL.md", _RATIFIED_LINE, reason)
+        e["repo"] = "other-repo"
+        _with_allowlist(m, d, [e])
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "an entry for another repo must not exempt:\n%s" % out
+    print("  PASS test_ratified_line_allowlist_exempts_only_exact_line_e2e")
+
+
+def test_ratified_line_allowlist_missing_and_malformed_e2e():
+    """Missing file = exempts nothing (drift flags); malformed file = probe error exit 2."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _RATIFIED_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "line")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _with_allowlist(m, d, None)
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "missing allowlist must exempt nothing (got %r)\n%s" % (code, out)
+        for bad in ([{"repo": "ora-skills", "path": "s/SKILL.md", "reason": "r", "sha256": "abc",
+                      "ratified": "x"}],
+                    [{"repo": "ora-skills", "path": "s/SKILL.md", "reason": "r",
+                      "sha256": "0" * 64}]):
+            _with_allowlist(m, d, bad)
+            code, out, err = _run_main_over(m, _skills_target(m, repo))
+            assert code == 2, "malformed allowlist must exit 2 (got %r)\n%s\n%s" % (code, out, err)
+        path = os.path.join(d, "ratified-lines.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        m.RATIFIED_LINES_PATH = path
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 2, "unparseable allowlist must exit 2 (got %r)" % code
+    print("  PASS test_ratified_line_allowlist_missing_and_malformed_e2e")
+
+
+def test_shipped_ratified_allowlist_is_well_formed_unit():
+    """The committed allowlist parses, carries provenance, and every entry is an LTV-65 exemption
+    on an ora-skills path (no entry may exempt a DSCR finding or another LTV value)."""
+    import json as _json
+    m = _load_probe_module()
+    path = os.path.join(HERE, "_shared", "governor-drift-ratified-lines.json")
+    assert os.path.isfile(path), "shipped allowlist missing: %s" % path
+    entries = m.load_ratified_lines(path)
+    assert entries, "shipped allowlist is empty"
+    with open(path, "r", encoding="utf-8") as fh:
+        doc = _json.load(fh)
+    for e in doc["entries"]:
+        assert e["repo"] == "ora-skills", e
+        assert e["reason"] == "LTV governor 65% != canonical 40%", e
+        assert "2026-11-08" in e["ratified"], e
+    print("  PASS test_shipped_ratified_allowlist_is_well_formed_unit")
 
 
 def main():
@@ -3964,13 +4001,12 @@ def main():
     test_stabilization_qualifier_does_not_mask_reversed_word_order_unit()
     test_stabilization_qualifier_veto_covers_arming_vocabulary_unit()
     test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit()
-    test_v445_refi_loan_basis_wording_stays_clean_unit()
-    test_v445_refi_loan_basis_value_locked_unit()
-    test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit()
     test_committed_ref_scan_dedupes_same_line_across_refs_e2e()
     test_v445_refute_silenced_drift_lines_flag_unit()
-    test_v445_canonical_triple_restatement_stays_clean_unit()
     test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e()
+    test_ratified_line_allowlist_exempts_only_exact_line_e2e()
+    test_ratified_line_allowlist_missing_and_malformed_e2e()
+    test_shipped_ratified_allowlist_is_well_formed_unit()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 
