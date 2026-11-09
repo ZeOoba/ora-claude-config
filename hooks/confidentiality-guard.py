@@ -169,6 +169,230 @@ def classify_tool(tool):
     return None
 
 
+# ------------------------------------------------------------------------------------------------
+# EGRESS TOOLS BEYOND Bash / Edit / Write (cc-audit-army 2026-11-09, HIGH 1 + HIGH 2)
+#
+# Before this block the guard classified only Bash, the native file tools and MCP_SEND_SURFACES;
+# everything else hit "Not an egress surface -> allow". Live, that let these reach an external
+# surface unscanned: a Desktop Commander / terminal-panel / PowerShell `curl -d`, a Desktop
+# Commander write into the site repo or /outputs/, an Artifact publish (claude.ai page plus every
+# local file it uploads), Artifact database rows and comment replies, Claude Docs writes, browser
+# form input / typing / scripted fetches / navigation URLs, and Excel writes into an egress path.
+#
+# Kept SEPARATE from MCP_SEND_SURFACES on purpose: that table is pinned verbatim into the
+# pre.confidentiality-guard settings matcher and its prefix(alt|alt) shape is generator-tested.
+# These surfaces need ACTION-aware classification (an Artifact read or a browser screenshot is
+# not egress) and some carry their content by local file reference, which must be read.
+# They are routed by their own wiring row, pre.confidentiality-guard-egress-tools.
+#
+# Self-contained (no tool_call_paths import) so a broken shared lib can never turn this
+# fail-closed guard into an import-time exit 1 (= non-blocking = fail-open).
+# ------------------------------------------------------------------------------------------------
+_SHELL_SUFFIXES = ("start_process", "interact_with_process", "run_in_terminal")
+_DC_WRITE_SUFFIXES = ("write_file", "edit_block", "write_pdf")
+_DC_PATH_FIELDS = ("file_path", "path", "output_path", "outputPath")
+DOCS_WRITE = re.compile(r"^mcp__[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}__(batch|update|create)$")
+BROWSER_TOOL = re.compile(r"^mcp__.*(claude-in-chrome|Claude_Browser)__"
+                          r"(form_input|computer|javascript_tool|navigate|browser_batch|"
+                          r"upload_image|file_upload)$")
+ARTIFACT_READ_ACTIONS = frozenset(("read", "list", "open", "pin", "unpin", "quickstart", "delete"))
+ARTIFACT_DATA_READ_ACTIONS = frozenset(("get", "list", "query", "profiles", "delete"))
+ARTIFACT_COMMENT_READ_ACTIONS = frozenset(("read", "watch", "resolve"))
+# Tools whose payload may name local files that leave the machine; any string value that is an
+# existing local file is read and scanned (schemas vary: path, paths, file_path, imagePath...).
+FILE_CARRYING = re.compile(r"(upload_image|file_upload)$")
+EXCEL_READ = re.compile(r"^mcp__excel__(read_|get_|validate_)")
+# Local files an egress call uploads are read with this cap per call (shares the decode budget).
+FILE_READ_MAX_FILES = 200
+
+
+def _mcp_suffix(tool, suffixes):
+    return isinstance(tool, str) and tool.startswith("mcp__") and tool.endswith(suffixes)
+
+
+def is_shell_tool(tool):
+    return tool in ("Bash", "PowerShell") or _mcp_suffix(tool, _SHELL_SUFFIXES)
+
+
+def shell_command(tool, ti):
+    return ti.get("input") if _mcp_suffix(tool, ("interact_with_process",)) else ti.get("command")
+
+
+def classify_extra(tool, ti, cwd=None):
+    """Surface label for an action-aware send surface outside MCP_SEND_SURFACES, else None."""
+    if not isinstance(tool, str):
+        return None
+    action = ti.get("action")
+    if action is not None and not isinstance(action, str):
+        raise ValueError("action is not a string")
+    act = (action or "").strip().lower()
+    # DENY-LIST of known READ / housekeeping actions; every other action -- including one a
+    # future tool version adds -- is treated as egress (REFUTE 2026-11-09: an allow-list of
+    # write actions failed open on any unknown action).
+    if tool == "Artifact":
+        return None if act in ARTIFACT_READ_ACTIONS else "Artifact publish/upload"
+    if tool == "ArtifactData":
+        return None if act in ARTIFACT_DATA_READ_ACTIONS else "Artifact database write"
+    if tool == "ArtifactComments":
+        return None if act in ARTIFACT_COMMENT_READ_ACTIONS else "Artifact comment"
+    if DOCS_WRITE.match(tool):
+        return "Claude Docs write (%s)" % tool
+    m = BROWSER_TOOL.match(tool)
+    if m:
+        if m.group(2) == "computer" and act not in ("type", "key"):
+            return None  # clicks, scrolls, screenshots carry no text to a page
+        return "browser input (%s)" % tool
+    if tool.startswith("mcp__excel__") and not EXCEL_READ.match(tool):
+        path = ti.get("filepath")
+        if path is not None and not isinstance(path, str):
+            raise ValueError("Excel filepath is not a string")
+        path = resolve_against(path, cwd)
+        return ("Excel write into %s" % path_egress_surface(path)) if path_egress_surface(path) else None
+    return None
+
+
+def _resolve_local(path, base):
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("file reference is not a non-empty string")
+    return path if os.path.isabs(path) else os.path.join(base or os.getcwd(), path)
+
+
+def local_file_texts(paths, base, budget):
+    """Readable text of every local file (or directory tree) an egress call uploads.
+    RAISES on anything unreadable, missing, or over budget -- main() blocks on that."""
+    texts, count = [], 0
+
+    def _walk(full):
+        # LAZY: the cap and deadline apply while listing, not after a full os.walk (review
+        # 2026-11-09: a publish of a huge directory ran past any hook timeout before the cap).
+        if not os.path.isdir(full):
+            yield full
+            return
+        for d, _, fs in os.walk(full):
+            _check_deadline()
+            for f in fs:
+                yield os.path.join(d, f)
+
+    for p in paths:
+        for f in _walk(_resolve_local(p, base)):
+            count += 1
+            if count > FILE_READ_MAX_FILES:
+                raise ValueError("too many files to scan")
+            _check_deadline()
+            with open(f, "rb") as fh:
+                blob = fh.read(max(budget[0], 0) + 1)
+            texts.extend(_blob_texts(blob, budget))
+    return texts
+
+
+def artifact_upload_refs(ti, cwd):
+    """(local file paths, base dir) an Artifact publish sends. Server-side copies
+    ({artifact, path}) and removals (null) carry no local content."""
+    base = ti.get("root")
+    base = _resolve_local(base, cwd) if base else cwd
+    refs = []
+    if ti.get("file_path") is not None:
+        refs.append(ti.get("file_path"))
+    if isinstance(ti.get("file_paths"), list):
+        refs.extend(ti["file_paths"])
+    files = ti.get("files")
+    if isinstance(files, dict):
+        for v in files.values():
+            if v is None:
+                continue
+            if isinstance(v, dict):
+                # Read `from` WHENEVER present, even beside `artifact` (REFUTE 2026-11-09 decoy).
+                if v.get("from") is not None:
+                    refs.append(v.get("from"))
+                elif "artifact" not in v:
+                    raise ValueError("files entry has neither from nor artifact")
+                continue
+            refs.append(v)
+    elif isinstance(files, list):
+        refs.extend(e.get("path") if isinstance(e, dict) else e for e in files)
+    elif files is not None:
+        raise ValueError("unrecognised files shape")
+    return refs, base
+
+
+def extra_scan_text(tool, ti, cwd):
+    """Everything a classify_extra surface sends, as one string. RAISES when part of it cannot be
+    read; main() blocks on that (fail closed)."""
+    views = [mcp_scan_text(ti)]
+    budget = [SCAN_MAX_DECODED_BYTES]
+    if tool == "Artifact":
+        refs, base = artifact_upload_refs(ti, cwd)
+        views.extend(local_file_texts(refs, base, budget))
+    elif tool == "ArtifactData":
+        refs = [ti.get("file_path")] if ti.get("file_path") is not None else []
+        for w in ti.get("writes") or []:
+            if isinstance(w, dict) and w.get("file_path") is not None:
+                refs.append(w["file_path"])
+        views.extend(local_file_texts(refs, cwd, budget))
+    elif FILE_CARRYING.search(tool):
+        refs = [s for s in _strings(ti) if _looks_local_file(s, cwd)]
+        views.extend(local_file_texts(refs, cwd, budget))
+    return "\n".join(v for v in views if v)
+
+
+def _strings(obj):
+    if isinstance(obj, str):
+        yield obj
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            yield from _strings(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _strings(v)
+
+
+def _looks_local_file(s, cwd):
+    try:
+        return len(s) < 1024 and os.path.isfile(_resolve_local(s, cwd))
+    except Exception:
+        return False
+
+
+def resolve_against(path, cwd):
+    """A relative tool path resolved against the payload's cwd, so a relative write inside the
+    site repo is classified by where it lands (REFUTE 2026-11-09 residual 2)."""
+    if isinstance(path, str) and path and not os.path.isabs(path) and isinstance(cwd, str) and cwd:
+        return os.path.join(cwd, path)
+    return path
+
+
+def dc_write_as_native(tool, ti, terms, cwd=None):
+    """Map a Desktop Commander write_file / edit_block / write_pdf call onto the native
+    Write / Edit shape main() already classifies, so the same egress-path test, content scan
+    and edit-seam simulation apply. DECOY DEFENSE: every candidate path field is checked and an
+    egress one wins, because the tool may honor a different field than the one a check reads.
+    RAISES on a non-string path; main() blocks on that."""
+    cands = []
+    for field in _DC_PATH_FIELDS:
+        v = ti.get(field)
+        if v is None:
+            continue
+        if not isinstance(v, str):
+            raise ValueError("path field %r is not a string" % field)
+        cands.append(resolve_against(v, cwd))
+    egress = [p for p in cands if path_egress_surface(p)]
+    path = egress[0] if egress else (cands[0] if cands else "")
+    if tool.endswith("edit_block"):
+        return "Edit", {"file_path": path, "old_string": ti.get("old_string", ""),
+                        "new_string": ti.get("new_string", "")}
+    content = ti.get("content", "")
+    if not isinstance(content, str):
+        content = collect_text(content)  # write_pdf structured content
+    if tool.endswith("write_file") and ti.get("mode") == "append" and path_egress_surface(path) \
+            and _exists(path):
+        # Appended text joins the file's tail: a term can be formed across that seam.
+        width = _seam_width(terms) or 256
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            tail = fh.read()[-width:]
+        content = tail + content
+    return "Write", {"file_path": path, "content": content}
+
+
 # What the recipient sees is not always the raw payload string: an HTML body is rendered (an empty
 # tag can split a name, an entity can spell one of its letters), an upload arrives base64-encoded,
 # and an Office file is a zip of XML whose runs split words at arbitrary points. Each view is added
@@ -270,6 +494,11 @@ _GH_HEAD = r"\bgh(?:\.exe)?[\"']?\s+(?:\\\r?\n\s*)?[\"']?"
 EGRESS_BASH = re.compile(
     r"\bgit\s+push\b|\bcurl\b|\bwget\b|\bscp\b|\brsync\b\s+\S+::|"
     r"invoke-webrequest|invoke-restmethod|\bnetlify\b.*\bdeploy\b|\bwrangler\b.*\b(deploy|publish)\b|"
+    # PowerShell-native network/mail verbs (REFUTE 2026-11-09: the PowerShell tool and the
+    # terminal panel are now egress-gated, and these idioms reached exit 0 before).
+    r"\b(?:iwr|irm|curl\.exe|wget\.exe)\b|send-mailmessage|start-bitstransfer|"
+    r"\bnet\.webclient\b|\bwebclient\b|\bhttpclient\b|upload(?:string|file|data|values)\b|"
+    r"\bssh\b|\bsftp\b|\bftp\b|"
     r"send-via-outlook\.ps1|"  # the SOLE live COM send path IS egress (review finding 2026-06-11)
     + _GH_HEAD + _GH_SUBS + r"\b",  # GitHub CLI (audit finding 2026-11-08)
     re.I,
@@ -1346,7 +1575,9 @@ def _exists(path):
 
 
 def path_egress_surface(path):
-    pl = (path or "").lower()
+    # Slash-normalized (review 2026-11-09): a joined relative path is mixed-slash on Windows
+    # (C:\ws/outputs/x), which neither "/outputs/" nor "\\outputs\\" matched.
+    pl = (path or "").replace("\\", "/").lower()
     if any(m in pl for m in SITE_MARKERS):
         return "public website repo"
     if pl.endswith(ARTIFACT_EXT):
@@ -1378,14 +1609,32 @@ def main():
     except Exception:
         block("tool-call payload could not be parsed; cannot verify egress safety.")
 
+    if not isinstance(data, dict):
+        # A non-object payload used to raise on data.get -> exit 1 = fail-OPEN (REFUTE 2026-11-09).
+        block("tool-call payload is not a JSON object; cannot verify egress safety.")
     tool = (data.get("tool_name") or data.get("tool") or "")
     ti = data.get("tool_input") or {}
     if not isinstance(ti, dict):
+        # The tools gated since 2026-11-09 are read field-by-field; a non-dict input cannot be
+        # classified, so fail closed for them (legacy tools keep the whole-payload wrap below).
+        if (_mcp_suffix(tool, _DC_WRITE_SUFFIXES + ("move_file",)) or is_shell_tool(tool)
+                and tool != "Bash") or tool in ("Artifact", "ArtifactData", "ArtifactComments") \
+                or (isinstance(tool, str) and (DOCS_WRITE.match(tool) or BROWSER_TOOL.match(tool)
+                                               or tool.startswith("mcp__excel__"))):
+            block("%s tool_input is not an object; cannot verify egress safety." % tool)
         ti = {"_": ti}
 
     # --- Determine egress surface + scan text -----------------------------------------
     surface = None
     scan_text = None
+
+    # Desktop Commander writes reuse the native file-tool path below (HIGH 1, 2026-11-09).
+    if _mcp_suffix(tool, _DC_WRITE_SUFFIXES):
+        try:
+            tool, ti = dc_write_as_native(tool, ti, terms, data.get("cwd"))
+        except Exception as e:
+            block("Desktop Commander write could not be classified (%s); cannot verify egress "
+                  "safety." % e)
 
     # File-writing tools: only egress when the target path is an external surface.
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
@@ -1428,13 +1677,31 @@ def main():
                 # egress write we cannot read -> fail closed
                 block("write to %s but content could not be extracted." % surface)
 
+    # Desktop Commander move_file: egress when the DESTINATION is an external surface; what lands
+    # there is the source file's bytes, so read and scan them (HIGH 1, 2026-11-09).
+    elif _mcp_suffix(tool, ("move_file",)):
+        src, dst = ti.get("source"), ti.get("destination")
+        if not isinstance(dst, str) or (src is not None and not isinstance(src, str)):
+            block("move_file source/destination is not a string; cannot classify the move.")
+        surface = path_egress_surface(resolve_against(dst, data.get("cwd")))
+        if surface:
+            try:
+                scan_text = "\n".join(local_file_texts([src], data.get("cwd"),
+                                                       [SCAN_MAX_DECODED_BYTES]))
+            except Exception as e:
+                block("move into %s, but the source could not be read for scanning (%s)."
+                      % (surface, e))
+
     # Shell: only egress commands are scanned (internal commands may reference the deal).
-    elif tool == "Bash":
-        cmd = ti.get("command", "") or ""
+    # Every shell-capable tool, not just Bash (HIGH 1, 2026-11-09): Desktop Commander
+    # start_process / interact_with_process, the terminal panel's run_in_terminal, PowerShell.
+    elif is_shell_tool(tool):
+        cmd = shell_command(tool, ti)
+        cmd = "" if cmd is None else cmd
         if not isinstance(cmd, str):
             # A non-string command used to raise TypeError in EGRESS_BASH.search -> exit 1, which
             # is NON-blocking (review of the 2026-11-08 gh fix).
-            block("Bash command is not a string; cannot classify it.")
+            block("%s command is not a string; cannot classify it." % tool)
         if EGRESS_BASH.search(cmd):
             surface = "egress shell command"
             scan_text = cmd
@@ -1456,6 +1723,18 @@ def main():
                 scan_text = mcp_scan_text(ti)
             except Exception as e:
                 block("payload for %s could not be fully decoded for scanning (%s)." % (surface, e))
+        else:
+            # Artifact / Docs / browser / Excel (HIGH 2, 2026-11-09) -- see classify_extra.
+            try:
+                surface = classify_extra(tool, ti, data.get("cwd"))
+            except Exception as e:
+                block("%s could not be classified (%s); cannot verify egress safety." % (tool, e))
+            if surface:
+                try:
+                    scan_text = extra_scan_text(tool, ti, data.get("cwd"))
+                except Exception as e:
+                    block("content for %s could not be fully read for scanning (%s)."
+                          % (surface, e))
 
     # Not an egress surface -> allow.
     if surface is None:
