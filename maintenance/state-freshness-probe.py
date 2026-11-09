@@ -76,6 +76,11 @@ NOT_PERIODIC = {
         "step fails and removed on the next success; its absence or age means nothing "
         "(OI-331, same class as heartbeat-publish-failed.json). A dead or failing backup is "
         "caught by backup-push-ok.json (48h, pause-independent)",
+    "live-backup-push-failed.json":
+        "failure marker: written by push-live-backup.py only when the live-branch backup push "
+        "fails and removed on the next success; its absence or age means nothing. Read by "
+        "push-live-backup.py --check (fleet-deadman.ps1 check 6); a dead backup task is caught "
+        "by live-backup-push-ok.json (48h) and by --check's own off-box age test",
     "fleet-pause-windows.json":
         "written by pause_windows.capture() only when a hold starts or ends, so it is "
         "untouched for as long as the fleet is live; any age limit false-alarms after "
@@ -105,6 +110,8 @@ MAX_AGE_OVERRIDES = {
     "ensure-claude-renderer.log": 48.0,  # ORA Claude Desktop Wake-and-Launch (Windows, daily) (R6)
     "pause-resume-guard-state.json": 48.0,  # ORA Fleet Pause-Resume Guard: save_state() on EVERY 6h run (R7;
                                             # was misfiled as NOT_PERIODIC, leaving the guard unwatched)
+    "live-backup-push-ok.json": 48.0,    # ora-live-branch-offbox-backup (CC/MCP, daily) -- NOT
+                                         # pause-independent: a CC fleet pause explains it
     # quarterly producers would go here, with the cron that justifies the number
 }
 
