@@ -93,7 +93,12 @@ try:
     f = run(bad)
     check("B1 changed timeout -> one CHANGED", kinds(f) == ["CHANGED"], repr(kinds(f)))
     check("B1b CHANGED names the table row", f and f[0]["id"] == "pre.ora-autonomy-gate")
-    bad = mutated(lambda o: pre(o).pop(5))
+    # By NAME, not position (2026-11-09: new egress-tool rows shifted the index).
+    def _pop_registry(o):
+        p = pre(o)
+        p.pop(next(i for i, e in enumerate(p)
+                   if "registry-write-guard.py" in e["hooks"][0].get("command", "")))
+    bad = mutated(_pop_registry)
     f = run(bad)
     check("B2 entry deleted from settings -> UNWIRED (unexpected removal)",
           kinds(f) == ["UNWIRED"] and f[0]["id"] == "pre.registry-write-guard", repr(f))
@@ -129,7 +134,7 @@ try:
     check("B12 settings that is not JSON -> exit 2", rc == 2 and "ERROR:" in err, out + err)
     drift_path = os.path.join(tmp, "drift.json")
     with open(drift_path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(mutated(lambda o: pre(o).pop(5)))
+        fh.write(mutated(_pop_registry))
     rc, out, err = cli("--check", "--settings", drift_path)
     check("B13 CLI exit 1 and prints UNWIRED on drift",
           rc == 1 and "UNWIRED" in out and "pre.registry-write-guard" in out, out + err)
@@ -212,7 +217,8 @@ try:
 
     # ---- F. capability gate (R-09 stages onFailure:block behind it) -----------------------
     t3 = sw.validate_table(__import__("tomllib").loads(TABLE_TEXT.replace(
-        "script = 'ora-autonomy-gate.py'", "script = 'ora-autonomy-gate.py'\nmin_binary = '2.1.295'")))
+        "script = 'ora-autonomy-gate.py'", "script = 'ora-autonomy-gate.py'\nmin_binary = '2.1.295'",
+        1)))  # first row only: the script now appears in two rows (2026-11-09 egress-tools row)
     check("F1 min_binary above the lowest binary -> CAPABILITY",
           kinds(sw.check_capability(t3, "2.1.278")) == ["CAPABILITY"])
     check("F2 min_binary satisfied -> nothing", not sw.check_capability(t3, "2.1.295"))

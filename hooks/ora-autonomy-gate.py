@@ -462,6 +462,10 @@ HUBSPOT_SOCIAL_PUBLISH = Tier("allow-hubspot-social-publish", "hubspot-social-pu
 SITE_WRITE_INDICATORS = (
     ">", "cp ", "copy ", "mv ", "move ", "rm ", "del ", "remove-item",
     "set-content", "add-content", "out-file", "tee ", "new-item",
+    # PowerShell / Windows copy-and-write idioms (REFUTE 2026-11-09): the PowerShell tool and
+    # the terminal panel now reach check_bash, and these reached exit 0 into the site tree.
+    "copy-item", "move-item", "rename-item", "[io.file]", "[system.io.file]",
+    "robocopy", "xcopy", "expand-archive", "writealltext", "writeallbytes", "writealllines",
 )
 # Domain group is `*` (zero-or-more dot segments), not `+`: a `+` required at least one
 # dot, so a dotless recipient like `attacker@evilhost` was INVISIBLE to this regex --
@@ -494,7 +498,21 @@ NULL_REDIRECT_RE = re.compile(r"\d*>\s*(?:/dev/null|nul)\b", re.IGNORECASE)
 # positive (a commit message or echo that merely mentions the phrase) costs a retry; a
 # false negative here publishes to the live site. Combined, as before, with `deploy` and
 # `--prod` also required anywhere in the command.
-NETLIFY_INVOKE_RE = re.compile(r"\bnetlify(?:-cli)?(?:\.cmd|\.exe)?\b", re.IGNORECASE)
+NETLIFY_INVOKE_RE = re.compile(r"\b(?:netlify(?:-cli)?|ntl)(?:\.cmd|\.exe)?\b", re.IGNORECASE)
+# `-p` is the CLI's documented short form of `--prod` (REFUTE 2026-11-09: `netlify deploy -p`
+# reached exit 0). Also `--prod=...` / `--prod-if-unlocked` contain "--prod" already.
+# The short flag is scoped to the deploy segment so `mkdir -p dist && netlify deploy` (a DRAFT
+# deploy) is not mistaken for a prod one. LINEAR by construction (review 2026-11-09: a single
+# regex over the whole command was quadratic on padded input, and a hook timeout does not block).
+_SEGMENT_SPLIT_RE = re.compile(r"[;&|\n]")
+_SHORT_PROD_RE = re.compile(r"\s-p(?:\s|$|=)")
+
+
+def _has_prod_flag(lowered):
+    if "--prod" in lowered:
+        return True
+    return any("deploy" in seg and _SHORT_PROD_RE.search(seg)
+               for seg in _SEGMENT_SPLIT_RE.split(lowered))
 # Windows auto-generates an 8.3 short name for every long filename on an 8.3-enabled NTFS
 # volume (this one is) with ZERO setup -- confirmed live: send-via-outlook.ps1 -> SEND-V~1.PS1
 # (`dir /x`). Referencing the script by that alias reached exit 0 (Round 2 adversarial review,
@@ -631,7 +649,7 @@ def check_bash(command, session_id):
     # nothing left and denied it. Proven live 2026-08-24 (the incident that prompted this
     # fix). Gate 2c below (Netlify MCP mutating tools) has no such downstream layer to defer
     # to, so it deliberately keeps the default consume=True -- it is the only checker there.
-    if NETLIFY_INVOKE_RE.search(normalized) and "deploy" in lowered and "--prod" in lowered:
+    if NETLIFY_INVOKE_RE.search(normalized) and "deploy" in lowered and _has_prod_flag(lowered):
         if not override_active(session_id, WEBSITE_DEPLOY, consume=False):
             block("production deploy to oxfordra.net (netlify --prod)", WEBSITE_DEPLOY,
                   session_id)
@@ -1350,6 +1368,39 @@ def _check_calendar(short, tool_name, tool_input, session_id):
 
 
 FILE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+# cc-audit-army HIGH 1 (2026-11-09): shell-capable and file-writing tools beyond Bash and the
+# native file tools. Suffix-matched on mcp__ names so every Desktop Commander prefix (and a
+# re-registered connector) is covered, the same rule as lib/tool_call_paths._mcp_family.
+# Self-contained on purpose: a broken shared lib must not make this gate exit 1 (= allow).
+_SHELL_SUFFIXES = ("start_process", "interact_with_process", "run_in_terminal")
+_DC_FILE_SUFFIXES = ("write_file", "edit_block", "write_pdf", "move_file")
+_DC_PATH_FIELDS = ("file_path", "path", "output_path", "outputPath", "source", "destination")
+
+
+def _mcp_suffix(tool_name, suffixes):
+    return isinstance(tool_name, str) and tool_name.startswith("mcp__") \
+        and tool_name.endswith(suffixes)
+
+
+def _is_shell_tool(tool_name):
+    return tool_name in ("Bash", "PowerShell") or _mcp_suffix(tool_name, _SHELL_SUFFIXES)
+
+
+def _is_dc_file_tool(tool_name):
+    return _mcp_suffix(tool_name, _DC_FILE_SUFFIXES)
+
+
+def _is_excel_write(tool_name):
+    return isinstance(tool_name, str) and tool_name.startswith("mcp__excel__") \
+        and not re.match(r"mcp__excel__(read_|get_|validate_)", tool_name)
+
+
+def _resolve_against(path, cwd):
+    """A relative tool path resolved against the PAYLOAD cwd (where the tool runs), not this
+    hook process's cwd (REFUTE 2026-11-09 residual 2)."""
+    if path and not os.path.isabs(path) and isinstance(cwd, str) and cwd:
+        return os.path.join(cwd, path)
+    return path
 
 
 def main():
@@ -1404,17 +1455,45 @@ def main():
     if not isinstance(session_id, str):
         session_id = ""
 
-    if tool_name == "Bash":
+    if _is_shell_tool(tool_name):
         # A gated action whose input we cannot inspect must fail CLOSED, not error through
         # to exit 1 (which a PreToolUse hook treats as non-blocking). A real Bash call
         # always carries a dict tool_input with a string command, so this never over-blocks
         # a legitimate call (adversarial review, 2026-07-16).
+        # Every shell-capable tool takes this path (cc-audit-army HIGH 1, 2026-11-09):
+        # Desktop Commander start_process / interact_with_process, the terminal panel's
+        # run_in_terminal and PowerShell run real command lines exactly like Bash does.
         if not isinstance(tool_input, dict):
-            block_shape("Bash", session_id)
-        command = tool_input.get("command", "")
+            block_shape(tool_name, session_id)
+        field = "input" if tool_name.endswith("interact_with_process") else "command"
+        command = tool_input.get(field, "")
+        command = "" if command is None else command
         if not isinstance(command, str):
-            block_shape("Bash", session_id)
+            block_shape(tool_name, session_id)
         check_bash(command, session_id)
+    elif _is_dc_file_tool(tool_name):
+        # Desktop Commander write_file / edit_block / write_pdf / move_file (HIGH 1). Every
+        # candidate path field is gated -- the tool may honor a different field than the one a
+        # check reads (decoy defense) -- and a move_file SOURCE counts too: moving a file out
+        # of the site tree mutates the site exactly as deleting it would.
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        for field in _DC_PATH_FIELDS:
+            path = tool_input.get(field)
+            if path is None:
+                continue
+            if not isinstance(path, str):
+                block_shape(tool_name, session_id)
+            check_file_write(_resolve_against(path, payload.get("cwd")), session_id)
+    elif _is_excel_write(tool_name):
+        # Excel MCP writes land in a file like any other write (REFUTE 2026-11-09 residual 4).
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        path = tool_input.get("filepath")
+        if path is not None:
+            if not isinstance(path, str):
+                block_shape(tool_name, session_id)
+            check_file_write(_resolve_against(path, payload.get("cwd")), session_id)
     elif tool_name in FILE_TOOLS:
         if not isinstance(tool_input, dict):
             block_shape(tool_name, session_id)

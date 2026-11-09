@@ -96,6 +96,7 @@ DC_START_PROCESS_NAMES = _dc_names("start_process")
 DC_INTERACT_PROCESS_NAMES = _dc_names("interact_with_process")
 
 NATIVE_FILE_TOOLS = frozenset(("Write", "Edit", "MultiEdit"))
+NATIVE_SHELL_TOOLS = frozenset(("Bash", "PowerShell"))
 NOTEBOOK_TOOLS = frozenset(("NotebookEdit",))
 
 
@@ -129,8 +130,15 @@ def is_dc_write_pdf(tool_name):
 
 
 def is_shell_tool(tool_name):
-    return tool_name == "Bash" or _mcp_family(tool_name, "start_process") \
-        or _mcp_family(tool_name, "interact_with_process")
+    """Every tool that hands a command line to a real shell or REPL.
+
+    2026-11-09 (cc-audit-army HIGH 1): the terminal panel's run_in_terminal (types the
+    line into the user's own PowerShell, outside any sandbox) and Claude Code's native
+    PowerShell tool joined Bash and the Desktop Commander process tools. All four carry
+    the line in `command`; interact_with_process carries it in `input` (_shell_text)."""
+    return tool_name in NATIVE_SHELL_TOOLS or _mcp_family(tool_name, "start_process") \
+        or _mcp_family(tool_name, "interact_with_process") \
+        or _mcp_family(tool_name, "run_in_terminal")
 
 
 def is_file_tool(tool_name):
@@ -142,7 +150,7 @@ def is_file_tool(tool_name):
 # Exact-name sets kept for consumers that need enumeration (legacy guards' content
 # simulation, the SHAPES registry, settings matchers) -- recognition FUNCTIONS above
 # are what the normalization paths use.
-SHELL_TOOLS = frozenset(("Bash",)) | DC_START_PROCESS_NAMES | DC_INTERACT_PROCESS_NAMES
+SHELL_TOOLS = NATIVE_SHELL_TOOLS | DC_START_PROCESS_NAMES | DC_INTERACT_PROCESS_NAMES
 FILE_TOOLS = (NATIVE_FILE_TOOLS | NOTEBOOK_TOOLS | DC_WRITE_FILE_NAMES
               | DC_EDIT_BLOCK_NAMES | DC_WRITE_PDF_NAMES)
 WRITE_CAPABLE_TOOLS = FILE_TOOLS | DC_MOVE_FILE_NAMES | SHELL_TOOLS
@@ -246,7 +254,8 @@ def primary_write_path(tool_name, tool_input):
     if is_dc_write_pdf(tool_name):
         return _clean_str(tool_input.get("file_path")) \
             or _clean_str(tool_input.get("path")) \
-            or _clean_str(tool_input.get("output_path"))
+            or _clean_str(tool_input.get("output_path")) \
+            or _clean_str(tool_input.get("outputPath"))
     # DC write_file: the live DC schema uses "path"; older payloads used "file_path"
     # -- accept both. Field ORDER is file_path-first for every branch below, because
     # that is the legacy guards' exact historical behavior (`file_path or path`) and
@@ -294,7 +303,8 @@ def write_targets(tool_name, tool_input):
         # path-gating consumer gets a target for EVERY distinct candidate, not just
         # primary_write_path()'s single legacy-ordered answer.
         candidates = []
-        for field in ("file_path", "path", "notebook_path", "output_path"):
+        # outputPath: the camelCase spelling Desktop Commander's write_pdf schema uses.
+        for field in ("file_path", "path", "notebook_path", "output_path", "outputPath"):
             raw = _clean_str(tool_input.get(field))
             if raw is not None and raw not in candidates:
                 candidates.append(raw)
@@ -675,6 +685,12 @@ def _shell_text(tool_name, tool_input):
     if _mcp_family(tool_name, "interact_with_process"):
         return tool_input.get("input")
     return tool_input.get("command")
+
+
+def shell_text(tool_name, tool_input):
+    """Public alias of _shell_text: the raw command line a shell tool will run (may be a
+    non-str -- callers that gate on it must fail closed on that)."""
+    return _shell_text(tool_name, tool_input)
 
 
 def shell_may_write(command):
