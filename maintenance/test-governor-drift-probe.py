@@ -1670,6 +1670,57 @@ def test_event_log_excluded_e2e():
     print("  PASS test_event_log_excluded_e2e (fixture: exit 0, event_log.md not scanned)")
 
 
+def test_missing_required_root_fails_closed_e2e():
+    """Audit governor-probe-missing-root-fail-open (2026-11-08): a missing memory dir, CLAUDE.md
+    or oxford-command-center/src used to be logged as 'skipped' and the probe exited 0 "OK" --
+    a clean verdict over a tree it never read. Each must now be a probe error (exit 2)."""
+    cases = [
+        ("memory dir", lambda h: os.path.join(h, *_MEM_REL)),
+        ("CLAUDE.md", lambda h: os.path.join(h, ".claude", "CLAUDE.md")),
+        ("oxford-command-center/src", lambda h: os.path.join(h, "oxford-command-center", "src")),
+    ]
+    for label, path_of in cases:
+        with _fixture_home() as home:
+            r = run_probe(home=home)
+            assert r.returncode == 0, "seeded fixture must start clean; got %d\n%s%s" % (
+                r.returncode, r.stdout, r.stderr)
+            target = path_of(home)
+            if os.path.isdir(target):
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
+            r = run_probe(home=home)
+            assert r.returncode == 2 and "required" in (r.stdout + r.stderr).lower(), (
+                "missing %s must fail closed (exit 2); got %d\n%s%s"
+                % (label, r.returncode, r.stdout, r.stderr))
+    print("  PASS test_missing_required_root_fails_closed_e2e")
+
+
+def test_missing_governor_constants_file_fails_closed_e2e():
+    """The deletion guard only fired when governor-constants.ts EXISTED but lost a declaration;
+    deleting (or renaming) the file itself left zero governor-code hits and exit 0. Now exit 2."""
+    with _fixture_home() as home:
+        os.remove(os.path.join(home, "oxford-command-center", *_BRAIN_GOV_REL))
+        r = run_probe(home=home)
+        assert r.returncode == 2 and "governor" in (r.stdout + r.stderr).lower(), (
+            "a missing governor constants file must fail closed (exit 2); got %d\n%s%s"
+            % (r.returncode, r.stdout, r.stderr))
+    # REFUTE C4: a same-named file OUTSIDE src/ (the live repo has server/warehouse/
+    # capital-config.ts) must not stand in for the deleted canonical constants file.
+    for stray in (("server", "warehouse", "capital-config.ts"),
+                  ("scripts", "old", "governor-constants.ts"),
+                  ("src", "legacy", "governor-constants.ts")):   # round-2 residual D
+        with _fixture_home() as home:
+            brain = os.path.join(home, "oxford-command-center")
+            os.remove(os.path.join(brain, *_BRAIN_GOV_REL))
+            _write(os.path.join(brain, *stray), _BRAIN_GOV_TS)
+            r = run_probe(home=home)
+            assert r.returncode == 2, (
+                "a stray %s outside src/ must not satisfy the governor-file check; got %d\n%s%s"
+                % ("/".join(stray), r.returncode, r.stdout, r.stderr))
+    print("  PASS test_missing_governor_constants_file_fails_closed_e2e")
+
+
 def test_fixture_roots_drift_detected_e2e():
     """Detection is intact INSIDE the fixture: a drift planted in each in-scope fixture root
     (CLAUDE.md, memory, the ora-skills checkout -- committed on main, which is what the probe
@@ -1808,6 +1859,11 @@ def test_e2e_outcome_independent_of_ambient_home_e2e():
         # so the poison that a leaked ambient-home read would actually see is the same drift
         # COMMITTED on the poisoned checkout's main.
         _write(os.path.join(poisoned, *_SIBLING_WORKTREE_REL), poison)
+        # The probe's REQUIRED roots (memory, CLAUDE.md, the governor constants file) must exist
+        # or it exits 2 before scanning anything (governor-probe-missing-root-fail-open).
+        _write(os.path.join(poisoned, ".claude", "CLAUDE.md"), _FIXTURE_CANON_LINE)
+        _write(os.path.join(poisoned, *(_MEM_REL + ("standards.md",))), _FIXTURE_CANON_LINE)
+        _write(os.path.join(poisoned, "oxford-command-center", *_BRAIN_GOV_REL), _BRAIN_GOV_TS)
         _commit_fixture_skills(poisoned, "init")
         r = run_probe(home=poisoned)
         assert r.returncode == 0 and "worktrees" not in r.stdout, (
@@ -4022,6 +4078,8 @@ def main():
     test_stabilization_qualifier_does_not_mask_reversed_word_order_unit()
     test_stabilization_qualifier_veto_covers_arming_vocabulary_unit()
     test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit()
+    test_missing_required_root_fails_closed_e2e()
+    test_missing_governor_constants_file_fails_closed_e2e()
     test_committed_ref_scan_dedupes_same_line_across_refs_e2e()
     test_v445_refute_silenced_drift_lines_flag_unit()
     test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e()
