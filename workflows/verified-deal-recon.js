@@ -62,17 +62,18 @@ const BRIEF_SCHEMA = {
     oneLineThesis:{type:'string'}, snapshot:{type:'string'},
     verifiedRentComps:{type:'string'}, verifiedSaleComps:{type:'string'},
     basisRead:{type:'string'}, submarketDemand:{type:'string'},
+    basisClearsFloor:{type:'string', enum:['YES','NO','UNKNOWN']},
     killRisks:{type:'array', items:{type:'string'}},
     preMortem:{type:'string'},
     openItems:{type:'array', items:{type:'string'}},
     confidence:{type:'string', enum:['low','medium','high']}
-  }, required:['verdict','oneLineThesis','snapshot','basisRead','killRisks','preMortem','openItems','confidence']
+  }, required:['verdict','oneLineThesis','snapshot','basisRead','basisClearsFloor','killRisks','preMortem','openItems','confidence']
 }
 
 // ---- Phase 1: deal-recon fan-out ----
 phase('Recon')
 const recon = await agent(
-  `Pre-screen this acquisition target for Oxford Realty Advisors. Do your full fan-out (rent comps, sale comps, submarket fundamentals, demographics/demand, parcel/condition signal, and basis-vs-replacement) and return your consolidated pre-screen brief. Cite every external figure with source + date; mark anything unconfirmed [UNVERIFIED]. Apply ORA basis discipline (basis-buyer: the all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) should clear the vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW), with >8% stabilized yield-on-cost; a floor miss is a flag, not an automatic kill; do not call PURSUE on a fair-basis deal with no value-add path, and do not hard-kill on basis alone when a real value-add path exists).\n\n${PROPERTY}`,
+  `Pre-screen this acquisition target for Oxford Realty Advisors. Do your full fan-out (rent comps, sale comps, submarket fundamentals, demographics/demand, parcel/condition signal, and basis-vs-replacement) and return your consolidated pre-screen brief. Cite every external figure with source + date; mark anything unconfirmed [UNVERIFIED]. Apply ORA basis discipline (basis-buyer: the all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) should clear the vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW), with >8% stabilized yield-on-cost; a floor miss caps the recommendation at NEEDS_MORE regardless of value-add upside, but is not an automatic kill: do not call PURSUE unless the all-in basis clears the floor, and do not hard-kill on basis alone when a real value-add path exists).\n\n${PROPERTY}`,
   { agentType:'deal-recon', schema:RECON_SCHEMA, phase:'Recon', label:'deal-recon' }
 )
 if (!recon) {
@@ -83,7 +84,7 @@ const reconStr = JSON.stringify(recon, null, 2)
 // ---- Phase 2: 3 adversarial verifiers (Explore = read-only web research) ----
 phase('Verify')
 const lenses = [
-  { key:'comps-basis', focus:`COMPS & BASIS. Independently web-search recent LIKE-KIND rent comps (NNN $/SF) and sale comps ($/SF, cap rate) for the subject's submarket and asset profile. Scrutinize comparability: SF, lot coverage (yard vs no-yard), buyer type (owner-user vs investor), vintage — a yard-heavy owner-user comp does NOT support a no-yard box. Then judge the recon's BASIS claim against a MARKET-SPECIFIC replacement cost: does the all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) clear ORA's vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW), or is it merely fair? A floor miss is a flag, not an automatic kill. Confirm or refute the recon's comp set with your own sources.` },
+  { key:'comps-basis', focus:`COMPS & BASIS. Independently web-search recent LIKE-KIND rent comps (NNN $/SF) and sale comps ($/SF, cap rate) for the subject's submarket and asset profile. Scrutinize comparability: SF, lot coverage (yard vs no-yard), buyer type (owner-user vs investor), vintage — a yard-heavy owner-user comp does NOT support a no-yard box. Then judge the recon's BASIS claim against a MARKET-SPECIFIC replacement cost: does the all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) clear ORA's vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW), or is it merely fair? A floor miss caps the verdict at NEEDS_MORE but is not an automatic kill. Confirm or refute the recon's comp set with your own sources.` },
   { key:'functional-environmental', focus:`FUNCTIONAL & ENVIRONMENTAL. Assess functional leasability as modern shallow-bay industrial: clear height, loading/docks, truck court/yard, parking, column spacing, footprint vs realistic tenant pool — flag functional obsolescence. Assess environmental risk: pre-~1980 vintage or prior industrial/manufacturing use => Phase I warranted, possible REC. Be concrete about whether physical/environmental issues KILL or merely gate the deal.` },
   { key:'demand-leaseup', focus:`SUBMARKET DEMAND & LEASE-UP. Web-search the subject's specific submarket: vacancy, absorption, supply pipeline, asking rents for comparable small space, tenant demand. If the asset is vacant or low-occupancy the return rides on lease-up — estimate realistic lease-up velocity, effective NNN, and concession load. Is demand real and durable at THIS micro-location, or is the vacancy structural?` },
 ]
@@ -96,10 +97,10 @@ const verifs = await parallel(lenses.map(L => () =>
 
 // ---- Phase 3: synthesize ----
 phase('Synthesize')
-const brief = await agent(
+const synth = await agent(
   `You are the lead acquisitions analyst. Synthesize the FINAL one-page pre-screen from the recon brief and the independent adversarial verifications below. Weight verifiers over the recon where they conflict (they did their own research).
 
-Apply ORA basis discipline to the verdict: basis at/above MARKET-SPECIFIC replacement AND no credible value-add path to >8% stabilized yield-on-cost -> PASS; merely-fair basis (below replacement but short of the vintage-ramp floor) WITH a credible value-add path -> NEEDS_MORE (underwrite the upside); all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) that clears the vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW) OR clear value-add upside -> PURSUE. A floor miss is a flag, not an automatic kill: do NOT hard-kill on basis alone when a real value-add path exists; do NOT call PURSUE on a fair-basis deal with no upside path. Give the basis read explicitly, the kill-risks, the single most-likely failure mode (pre-mortem), and concrete open items to confirm before underwriting (clear height, environmental/Phase I, zoning, lot/yard, authoritative SF). Be concise — Gabriel reads fast. Do NOT underwrite (no DSCR/LTV/IRR) — this is a screen.
+Apply ORA basis discipline to the verdict. Clearing the floor is NECESSARY for PURSUE; value-add upside never substitutes for it. Rules: basis at/above MARKET-SPECIFIC replacement AND no credible value-add path to >8% stabilized yield-on-cost -> PASS; all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) that clears the vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW) -> PURSUE, unless the kill-risks warrant a lower verdict; all-in basis that misses the vintage-ramp floor -> NEEDS_MORE at most, regardless of value-add upside (with a credible value-add path, say what re-priced basis would clear the floor and underwrite the upside). A floor miss caps the verdict but is not an automatic kill: do NOT hard-kill on basis alone when a real value-add path exists. Set basisClearsFloor to YES only when the all-in basis clears the floor on the evidence, NO when it misses, UNKNOWN when replacement cost or basis cannot be established; any answer other than YES caps the verdict at NEEDS_MORE. Give the basis read explicitly, the kill-risks, the single most-likely failure mode (pre-mortem), and concrete open items to confirm before underwriting (clear height, environmental/Phase I, zoning, lot/yard, authoritative SF). Be concise — Gabriel reads fast. Do NOT underwrite (no DSCR/LTV/IRR) — this is a screen.
 
 === RECON BRIEF ===
 ${reconStr}
@@ -108,6 +109,25 @@ ${reconStr}
 ${JSON.stringify(verifs, null, 2)}`,
   { schema:BRIEF_SCHEMA, phase:'Synthesize', label:'synthesis' }
 )
+
+// ---- Vintage-ramp floor cap (v1.2, decision 2026-11-08) ----
+// A floor miss caps the verdict at NEEDS_MORE regardless of value-add upside. The synthesis prompt
+// says so, but the prompt is advisory: enforce it here so a PURSUE that does not affirmatively
+// clear the floor (NO, UNKNOWN, or the field missing) can never reach Gabriel as PURSUE. The cap
+// only lowers PURSUE; PASS and NEEDS_MORE pass through. The agent's raw object is not mutated.
+let verdictCap = null
+// Verdict compared case/space-insensitively: the schema enum should prevent 'pursue', but the
+// cap must not depend on the runtime enforcing it.
+if (synth && String(synth.verdict || '').trim().toUpperCase() === 'PURSUE' && synth.basisClearsFloor !== 'YES') {
+  const floorState = synth.basisClearsFloor === undefined ? 'MISSING' : String(synth.basisClearsFloor)
+  verdictCap = {
+    from: 'PURSUE', to: 'NEEDS_MORE',
+    reason: 'All-in basis not shown to clear the vintage-ramp floor (basisClearsFloor=' + floorState + '); a floor miss caps the verdict at NEEDS_MORE regardless of value-add upside.',
+  }
+}
+const brief = verdictCap
+  ? { ...synth, verdict: 'NEEDS_MORE', openItems: [...(Array.isArray(synth.openItems) ? synth.openItems : []), 'Re-test all-in basis against the vintage-ramp floor (synthesis said PURSUE; capped at NEEDS_MORE because basisClearsFloor=' + (synth.basisClearsFloor === undefined ? 'MISSING' : synth.basisClearsFloor) + ').'] }
+  : synth
 
 // ---- Ledger-row draft (v1.1) — NOT written to disk; the calling session appends this only
 // after Gabriel confirms the verdict in-session. See the file-header note above.
@@ -125,6 +145,7 @@ return {
   verifierCount: verifs.length,
   anyFlip: verifs.some(v => v && v.flipsRecommendation),
   brief,
+  verdictCap,
   ledgerRowDraft,
   ledgerAppendInstruction: 'DRAFT ONLY — on any PURSUE/PASS/NEEDS_MORE verdict Gabriel confirms in-session, append `ledgerRowDraft` (Date | Deal | Verdict | one-line reason | buy-box rule validated/refined) as one row to memory/deal-decision-ledger.md using the existing schema. This workflow never appends it itself.',
 }
