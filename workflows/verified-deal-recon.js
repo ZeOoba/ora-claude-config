@@ -84,7 +84,7 @@ const reconStr = JSON.stringify(recon, null, 2)
 // ---- Phase 2: 3 adversarial verifiers (Explore = read-only web research) ----
 phase('Verify')
 const lenses = [
-  { key:'comps-basis', focus:`COMPS & BASIS. Independently web-search recent LIKE-KIND rent comps (NNN $/SF) and sale comps ($/SF, cap rate) for the subject's submarket and asset profile. Scrutinize comparability: SF, lot coverage (yard vs no-yard), buyer type (owner-user vs investor), vintage — a yard-heavy owner-user comp does NOT support a no-yard box. Then judge the recon's BASIS claim against a MARKET-SPECIFIC replacement cost: does the all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) clear ORA's vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW), or is it merely fair? A floor miss is a flag, not an automatic kill. Confirm or refute the recon's comp set with your own sources.` },
+  { key:'comps-basis', focus:`COMPS & BASIS. Independently web-search recent LIKE-KIND rent comps (NNN $/SF) and sale comps ($/SF, cap rate) for the subject's submarket and asset profile. Scrutinize comparability: SF, lot coverage (yard vs no-yard), buyer type (owner-user vs investor), vintage — a yard-heavy owner-user comp does NOT support a no-yard box. Then judge the recon's BASIS claim against a MARKET-SPECIFIC replacement cost: does the all-in basis (price + 2% closing + CapEx + lease-up carry; [est] where unknown) clear ORA's vintage-ramp floor (65% at/below 1995 -> 60% at/above 2005, linear between, as a discount below the construction-type-adjusted MARKET-SPECIFIC replacement LOW), or is it merely fair? A floor miss caps the verdict at NEEDS_MORE but is not an automatic kill. Confirm or refute the recon's comp set with your own sources.` },
   { key:'functional-environmental', focus:`FUNCTIONAL & ENVIRONMENTAL. Assess functional leasability as modern shallow-bay industrial: clear height, loading/docks, truck court/yard, parking, column spacing, footprint vs realistic tenant pool — flag functional obsolescence. Assess environmental risk: pre-~1980 vintage or prior industrial/manufacturing use => Phase I warranted, possible REC. Be concrete about whether physical/environmental issues KILL or merely gate the deal.` },
   { key:'demand-leaseup', focus:`SUBMARKET DEMAND & LEASE-UP. Web-search the subject's specific submarket: vacancy, absorption, supply pipeline, asking rents for comparable small space, tenant demand. If the asset is vacant or low-occupancy the return rides on lease-up — estimate realistic lease-up velocity, effective NNN, and concession load. Is demand real and durable at THIS micro-location, or is the vacancy structural?` },
 ]
@@ -116,7 +116,9 @@ ${JSON.stringify(verifs, null, 2)}`,
 // clear the floor (NO, UNKNOWN, or the field missing) can never reach Gabriel as PURSUE. The cap
 // only lowers PURSUE; PASS and NEEDS_MORE pass through. The agent's raw object is not mutated.
 let verdictCap = null
-if (synth && synth.verdict === 'PURSUE' && synth.basisClearsFloor !== 'YES') {
+// Verdict compared case/space-insensitively: the schema enum should prevent 'pursue', but the
+// cap must not depend on the runtime enforcing it.
+if (synth && String(synth.verdict || '').trim().toUpperCase() === 'PURSUE' && synth.basisClearsFloor !== 'YES') {
   const floorState = synth.basisClearsFloor === undefined ? 'MISSING' : String(synth.basisClearsFloor)
   verdictCap = {
     from: 'PURSUE', to: 'NEEDS_MORE',
