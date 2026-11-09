@@ -329,3 +329,14 @@ maintenance/_state/ground-truth-pending-approval/
 *.xlsx
 *.xlsm
 *.xlsb
+
+# (2026-11-08) Session-audit transcript archive. maintenance/audit-log-sweep.py
+# --apply (scheduled task ora-audit-log-sweep) gzips stale LAMS/Cowork per-session
+# audit.jsonl tool-call transcripts here -- LOCAL-ONLY disk reclamation by the
+# script's own design, and transcripts can carry roster terms and credentials.
+# Dirty-tree triage commit 927d1c0e on live/primary-checkout swept 13 of them into
+# git because nothing ignored this directory. Second line catches a relocated or
+# hand-copied transcript anywhere in the tree. Pinned by
+# maintenance/_tests/test_session_audit_archive_ignored.py.
+/maintenance/_archive/session-audit-logs/
+audit.jsonl.gz
