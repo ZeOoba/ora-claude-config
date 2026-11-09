@@ -340,3 +340,6 @@ maintenance/_state/ground-truth-pending-approval/
 # maintenance/_tests/test_session_audit_archive_ignored.py.
 /maintenance/_archive/session-audit-logs/
 audit.jsonl.gz
+# Same triage (cf2591ba) also tracked a dirty-tree snapshot tarball; #427's compressed
+# scan finds a credential-shaped string inside it. origin/main tracks no .tgz.
+*.tgz
