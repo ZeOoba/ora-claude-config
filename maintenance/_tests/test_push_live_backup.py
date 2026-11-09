@@ -123,10 +123,10 @@ class GatePreconditionTest(unittest.TestCase):
         ok, why = self._ok()
         self.assertTrue(ok, why)
 
-    def test_both_known_shims_accepted_including_crlf_and_comment_drift(self):
+    def test_both_known_shims_accepted_including_comment_and_whitespace_drift(self):
         self._good()
         for name, text in plb.KNOWN_GOOD_SHIMS.items():
-            drifted = text.replace("ROOT=", "# a reworded header comment\nROOT=").replace("\n", "  \r\n")
+            drifted = text.replace("ROOT=", "# a reworded header comment\nROOT=").replace("\n", "  \n")
             self._write("githooks/pre-push", drifted, newline="")
             self.assertTrue(self._ok()[0], name)
 
@@ -154,6 +154,48 @@ class GatePreconditionTest(unittest.TestCase):
         for name, text in variants.items():
             self._write("githooks/pre-push", text)
             self.assertFalse(self._ok()[0], name)
+
+    def test_each_stray_character_on_the_refs_line_is_refused(self):
+        # REFUTE round 3 (2026-11-09): one stray \r or Unicode space after `cat > "$REFS"`
+        # compared equal, starved the scan's stdin, and pushed unscanned end to end.
+        self._good()
+        line = 'cat > "$REFS"'
+        self.assertIn(line + "\n", SHIM_V2)
+        for ch in ("\r", "\x0b", "\x0c", "\x1f", "\x85", "\xa0", " ", "　", "\x7f", "\x00"):
+            text = SHIM_V2.replace(line + "\n", line + ch + "\n")
+            self.assertIsNone(plb.known_shim(text), repr(ch))
+            with open(os.path.join(self.hooks, "pre-push"), "wb") as fh:
+                fh.write(text.encode("utf-8"))   # on disk, as the shell would read it
+            self.assertFalse(self._ok()[0], repr(ch))
+
+    def test_crlf_is_refused_whole_file_or_one_line(self):
+        # one CRLF line in an LF shim IS the round-3 bypass; installed shims are LF-only
+        self._good()
+        for text in (SHIM_V2.replace("\n", "\r\n"), SHIM_V2.replace('cat > "$REFS"\n', 'cat > "$REFS"\r\n')):
+            with open(os.path.join(self.hooks, "pre-push"), "wb") as fh:
+                fh.write(text.encode("ascii"))
+            self.assertFalse(self._ok()[0])
+
+    def test_trailing_space_tab_and_utf8_comment_lines_accepted(self):
+        # the installed shims carry UTF-8 em-dashes in header comments (verified 2026-11-09)
+        self._good()
+        text = SHIM_V2.replace("#!/bin/sh\n", "#!/bin/sh\n# Pre-push gate — SHIM v2 — note\n", 1)
+        text = text.replace('cat > "$REFS"\n', 'cat > "$REFS" \t\n')
+        with open(os.path.join(self.hooks, "pre-push"), "wb") as fh:
+            fh.write(text.encode("utf-8"))
+        self.assertTrue(self._ok()[0])
+
+    def test_non_ascii_on_an_executable_line_is_refused_even_in_a_trailing_comment(self):
+        self.assertIsNone(plb.known_shim(SHIM_V2.replace('cat > "$REFS"\n', 'cat > "$REFS" # —\n')))
+
+    def test_only_hash_lines_are_dropped_as_comments(self):
+        # a line that merely starts with whitespace-then-something-else is content
+        self.assertIsNone(plb.known_shim(SHIM_V2.replace('cat > "$REFS"\n', 'cat > "$REFS"\n  true\n')))
+        self.assertEqual(plb.known_shim(SHIM_V2.replace('cat > "$REFS"\n', 'cat > "$REFS"\n \t# note\n')),
+                         "v2 (installed 2026-11-08)")
+
+    def test_push_env_opts_into_require_refs(self):
+        self.assertEqual(plb._env().get(plb.REQUIRE_REFS_ENV), "1")
 
     def test_scan_without_compressed_scan(self):
         # the live branch's state on 2026-11-08: scan present, #427's compressed scan absent
@@ -218,6 +260,23 @@ class CanaryTest(unittest.TestCase):
         # e.g. terms file unreadable: blocks, but proves nothing about the compressed path
         ok, _ = plb.canary_scan(self._stub("import sys\nsys.stdin.read()\nprint('BLOCKED (fail-closed): terms unreadable')\nsys.exit(1)\n"))
         self.assertFalse(ok)
+
+    def test_scan_that_ignores_starved_stdin_fails_the_canary(self):
+        # blocks the compressed credential, but allows zero ref lines: the pre-round-3 scan
+        src = ("import sys\nt = sys.stdin.read()\n"
+               "if t.strip():\n    print('pre-push BLOCKED: ... inside COMPRESSED file(s)')\n    sys.exit(1)\n"
+               "sys.exit(0)\n")
+        ok, why = plb.canary_scan(self._stub(src))
+        self.assertFalse(ok)
+        self.assertIn("ZERO ref lines", why)
+
+    def test_scan_that_only_guards_starved_stdin_fails_the_canary(self):
+        src = ("import sys\nt = sys.stdin.read()\n"
+               "if not t.strip():\n    print('BLOCKED: zero ref lines')\n    sys.exit(1)\n"
+               "sys.exit(0)\n")
+        ok, why = plb.canary_scan(self._stub(src))
+        self.assertFalse(ok)
+        self.assertIn(".gz", why)
 
     def test_canary_secret_is_not_a_literal_in_the_source(self):
         self.assertNotIn(plb._canary_secret(), _read(TOOL))

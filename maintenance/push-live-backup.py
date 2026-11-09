@@ -88,6 +88,7 @@ OK_STAMP = "live-backup-push-ok.json"
 FAILED_MARKER = "live-backup-push-failed.json"
 SCAN_REL = os.path.join("hooks", "git-prepush-confidential-scan.py")
 SCAN_NAME = "git-prepush-confidential-scan.py"
+REQUIRE_REFS_ENV = "ORA_PREPUSH_REQUIRE_REFS"
 DETAIL_MAX = 4000
 
 EXIT_PUSH = {
@@ -157,14 +158,46 @@ KNOWN_GOOD_SHIMS = {
 }
 
 
+_COMMENT_LINE = re.compile(r"^[ \t]*#")
+
+
+def shim_text_is_clean(text):
+    """REFUTE round 3 (2026-11-09): a single stray \\r or Unicode space survived str.rstrip()
+    and line normalization, compared equal, and starved the scan's stdin -- an end-to-end
+    unscanned push. Rules (text is the file's bytes decoded latin-1):
+      * no \\r ANYWHERE -- not even as CRLF: one CRLF line in an LF shim IS that bypass
+        (`cat > "$REFS"\\r` writes a different file), and both installed shims are LF-only;
+      * no control character anywhere except \\n and \\t;
+      * executable lines are printable ASCII only. Bytes > 126 are tolerated only on
+        comment lines (^[ \\t]*#, never executed by sh) because both installed shims carry
+        UTF-8 em-dashes in their header comments."""
+    if "\r" in text:
+        return False
+    for i, line in enumerate(text.split("\n")):
+        comment = _COMMENT_LINE.match(line) is not None and not (i == 0 and line.startswith("#!"))
+        for ch in line:
+            o = ord(ch)
+            if (o < 32 and ch != "\t") or o == 127:
+                return False
+            if o > 126 and not comment:
+                return False
+    return True
+
+
 def normalize_shim(text):
-    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    """Only inert text is dropped: trailing SPACE/TAB, blank lines, and comment lines
+    matching ^[ \\t]*# after the shebang. Callers must check shim_text_is_clean() first;
+    this never strips or translates any other character."""
+    lines = text.split("\n")
     out = []
     for i, line in enumerate(lines):
-        t = line.rstrip()
-        if not t.strip():
+        t = line.rstrip(" \t")
+        if not t.strip(" \t"):
             continue
-        if t.lstrip().startswith("#") and not (i == 0 and t.startswith("#!")):
+        if i == 0 and t.startswith("#!"):
+            out.append(t)
+            continue
+        if re.match(r"^[ \t]*#", t):
             continue
         out.append(t)
     return "\n".join(out) + "\n"
@@ -172,6 +205,8 @@ def normalize_shim(text):
 
 def known_shim(hook_text):
     """Name of the allowlisted shim this hook is, or None."""
+    if not shim_text_is_clean(hook_text):
+        return None
     norm = normalize_shim(hook_text)
     for name, good in KNOWN_GOOD_SHIMS.items():
         if norm == normalize_shim(good):
@@ -203,8 +238,10 @@ def gate_precondition(worktree_root, hooks_dir, canary=True):
     AST lint, and -- the actual proof -- it must block the canary (canary_scan)."""
     pre_push = os.path.join(hooks_dir, "pre-push")
     try:
-        with open(pre_push, encoding="utf-8", errors="replace") as fh:
-            hook = fh.read()
+        # Bytes, decoded latin-1: text mode would translate a lone \r and hide it, and
+        # latin-1 keeps every byte >127 visible to shim_text_is_clean().
+        with open(pre_push, "rb") as fh:
+            hook = fh.read().decode("latin-1")
     except OSError:
         return False, "no pre-push hook at %s -- the push would run ungated" % pre_push
     if known_shim(hook) is None:
@@ -252,6 +289,10 @@ def canary_scan(scan_path, timeout=120):
         repo = os.path.join(tmp, "repo")
         os.makedirs(nohooks)
         env = _env()
+        # Hermetic: no global/system git config (hooks paths, templates, aliases) reaches the
+        # throwaway repo or the scan's git calls.
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
 
         def g(*args):
             p = subprocess.run(["git", "-C", repo, "-c", "core.hooksPath=" + nohooks.replace("\\", "/"),
@@ -274,14 +315,24 @@ def canary_scan(scan_path, timeout=120):
         g("commit", "-q", "-m", "canary")
         sha = g("rev-parse", "HEAD")
         stdin = "refs/heads/canary %s %s %s\n" % (sha, TARGET_REF, "0" * 40)
-        p = subprocess.run([sys.executable, scan_path, "origin", "canary"], input=stdin, cwd=repo,
-                           capture_output=True, text=True, env=env, timeout=timeout,
-                           encoding="utf-8", errors="replace")
-        out = (p.stdout or "") + (p.stderr or "")
-        if p.returncode != 0 and "COMPRESSED" in out:
+        def scan(stdin_text):
+            p = subprocess.run([sys.executable, scan_path, "origin", "canary"], input=stdin_text, cwd=repo,
+                               capture_output=True, text=True, env=env, timeout=timeout,
+                               encoding="utf-8", errors="replace")
+            return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+        # (b) starved stdin: with the opt-in set, zero ref lines must block too (REFUTE r3)
+        rc0, out0 = scan("")
+        if rc0 == 0 or "zero ref lines" not in out0:
+            return False, ("confidential-scan CANARY FAILED: %s allowed a push with ZERO ref lines under "
+                           "%s=1 (exit %s) -- this scan predates the starved-stdin guard: %s"
+                           % (scan_path, REQUIRE_REFS_ENV, rc0, out0.strip()[-300:]))
+        # (a) a credential inside a .gz on a brand-new remote ref
+        rc, out = scan(stdin)
+        if rc != 0 and "COMPRESSED" in out:
             return True, "canary blocked"
         return False, ("confidential-scan CANARY FAILED: %s did not block a credential inside a .gz "
-                       "(exit %s): %s" % (scan_path, p.returncode, out.strip()[-400:]))
+                       "(exit %s): %s" % (scan_path, rc, out.strip()[-400:]))
     except subprocess.TimeoutExpired:
         return False, "confidential-scan canary timed out after %ss" % timeout
     except Exception as exc:
@@ -388,6 +439,10 @@ def _env():
         env.pop(k, None)
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "never"   # a Git Credential Manager GUI prompt would hang the run
+    # The confidential scan fails closed on ZERO ref lines when this is set (a starved stdin
+    # from a malformed shim). Safe here because run_push never invokes `git push` when the
+    # remote already holds HEAD, so every push this tool makes carries >=1 ref line.
+    env[REQUIRE_REFS_ENV] = "1"
     return env
 
 
@@ -468,6 +523,11 @@ def run_push(a):
             return done("PRECONDITION", why)
         expected = remote_ref_sha(a.repo, a.remote, target_ref)
         res["remote_before"] = expected
+        if expected == sha:
+            # Nothing to push: do NOT invoke git push (git would run pre-push with empty stdin,
+            # which the REQUIRE_REFS opt-in deliberately blocks). The ls-remote read IS the
+            # verification here.
+            return done("UP_TO_DATE")
         rc, out = git(a.repo, push_argv(a.remote, sha, target_ref, expected), timeout=a.push_timeout)
         if rc is None:
             return done("ERROR", "push " + out)

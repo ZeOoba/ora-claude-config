@@ -232,7 +232,11 @@ class PushLiveBackupGitTest(unittest.TestCase):
             rc, res = self.push()
         finally:
             plb.remote_ref_sha = real
-        self.assertEqual((rc, res["verdict"]), (2, "LEASE_REJECTED"), res)
+        # git rejects a stale lease LOCALLY and still runs pre-push with zero ref lines, so
+        # with ORA_PREPUSH_REQUIRE_REFS=1 the scan blocks first and git prints no porcelain
+        # status: the verdict reads BLOCKED_OR_FAILED, not LEASE_REJECTED (git 2.55, observed
+        # 2026-11-09). The safety properties are what matter and are asserted below.
+        self.assertIn((rc, res["verdict"]), ((2, "LEASE_REJECTED"), (1, "BLOCKED_OR_FAILED")), res)
         self.assertEqual(self.remote_tip(), first)
         self.assertTrue(os.path.exists(self.marker()))
 
