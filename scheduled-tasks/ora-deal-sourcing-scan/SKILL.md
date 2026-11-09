@@ -1365,7 +1365,7 @@ property or a select option will fail the write:
         Columbus OH · Kansas City MO · Indianapolis IN · Maryland · Cleveland OH ·
         Nashville TN · Multi-Market · Des Moines IA · Cincinnati OH · Louisville KY ·
         Madison WI · Grand Rapids MI · Richmond VA · Chicago IL
-      (Des Moines IA through Richmond VA were ADDED to the database by Gabriel's direction on
+      (Cincinnati OH through Richmond VA were ADDED to the database by Gabriel's direction on
       2026-09-19 — the original 8 kept their option ids and all 9 existing rows read
       identically before and after. `Chicago IL` was ADDED 2026-11-09 (Gabriel in-turn); the
       13 prior options kept their ids. Use it for Chicago–Greater Cook County brokers.) For a market with NO matching option — e.g. a new entry market — LEAVE
