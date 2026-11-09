@@ -1,0 +1,267 @@
+"""push-live-backup.py end-to-end against real git: a bare 'remote', a clone on
+live/primary-checkout, and a REAL pre-push hook that runs a stand-in confidential scan.
+
+Not discovered by the pre-push hook-tests gate (git-spawn suite; see
+_tests/test_push_live_backup.py). Run by hand after any change to push-live-backup.py:
+    python maintenance/_tests/integration/test_push_live_backup_git.py
+"""
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+TOOL = os.path.join(os.path.dirname(os.path.dirname(HERE)), "push-live-backup.py")
+_spec = importlib.util.spec_from_file_location("push_live_backup", TOOL)
+plb = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(plb)
+
+BRANCH = "live/primary-checkout"
+TARGET_REF = "refs/heads/backup/live-primary"
+PY = sys.executable.replace("\\", "/")
+
+SCAN_OK = (
+    "import os, sys\n"
+    "def scan_compressed(rng, terms):\n    return []\n"
+    "sys.stdin.read()\n"
+    "scan_compressed(None, None)\n"
+    "here = os.path.dirname(os.path.abspath(__file__))\n"
+    "open(os.path.join(here, 'RAN'), 'a').write('x')\n"
+    "if os.path.exists(os.path.join(here, 'BLOCK')):\n"
+    "    print('confidential-scan: BLOCKED (stand-in)')\n"
+    "    sys.exit(1)\n"
+)
+SCAN_OLD = "import sys\nsys.stdin.read()\nsys.exit(0)\n"   # the live branch's pre-#427 shape
+
+
+def run(cwd, *args, env=None):
+    e = dict(os.environ)
+    e.update(env or {})
+    p = subprocess.run(["git", "-C", cwd] + list(args), capture_output=True, text=True, env=e)
+    if p.returncode != 0:
+        raise AssertionError("git %s failed: %s" % (" ".join(args), p.stdout + p.stderr))
+    return p.stdout.strip()
+
+
+class PushLiveBackupGitTest(unittest.TestCase):
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="plb-git-")
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.remote = os.path.join(self.root, "remote.git")
+        self.repo = os.path.join(self.root, "live")
+        self.state = os.path.join(self.root, "state")
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.remote], check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.repo], check=True)
+        run(self.repo, "config", "user.name", "t")
+        run(self.repo, "config", "user.email", "t@t")
+        run(self.repo, "config", "commit.gpgsign", "false")
+        run(self.repo, "remote", "add", "origin", self.remote)
+        os.makedirs(os.path.join(self.repo, "hooks"))
+        self.scan = os.path.join(self.repo, "hooks", "git-prepush-confidential-scan.py")
+        self._write_scan(SCAN_OK)
+        self.commit("base")
+        run(self.repo, "push", "-q", "--no-verify", "origin", "main")  # fixture setup only, before any hook exists
+        run(self.repo, "checkout", "-q", "-b", BRANCH)
+        hook = os.path.join(self.repo, ".git", "hooks", "pre-push")
+        with open(hook, "w", newline="\n") as fh:
+            fh.write('#!/bin/sh\nROOT="$(git rev-parse --show-toplevel)"\n'
+                     'exec "%s" "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"\n' % PY)
+        os.chmod(hook, 0o755)
+
+    # -- helpers
+    def _write_scan(self, src):
+        with open(self.scan, "w", newline="\n") as fh:
+            fh.write(src)
+
+    def commit(self, msg, when=None):
+        with open(os.path.join(self.repo, "f.txt"), "a") as fh:
+            fh.write(msg + "\n")
+        run(self.repo, "add", "-A")
+        env = {"GIT_COMMITTER_DATE": when, "GIT_AUTHOR_DATE": when} if when else None
+        run(self.repo, "commit", "-q", "-m", msg, env=env)
+        return run(self.repo, "rev-parse", "HEAD")
+
+    def push(self, *extra):
+        argv = ["--repo", self.repo, "--state-dir", self.state, "--push-timeout", "120"] + list(extra)
+        return self._main(argv)
+
+    def check(self, *extra):
+        return self._main(["--check", "--repo", self.repo, "--state-dir", self.state] + list(extra))
+
+    def _main(self, argv):
+        import io
+        import contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = plb.main(argv)
+        last = buf.getvalue().strip().splitlines()[-1]
+        self.assertTrue(last.startswith("RESULT_JSON="), buf.getvalue())
+        return rc, json.loads(last[len("RESULT_JSON="):])
+
+    def remote_tip(self):
+        out = subprocess.run(["git", "--git-dir", self.remote, "rev-parse", "-q", "--verify", TARGET_REF],
+                             capture_output=True, text=True)
+        return out.stdout.strip() or None
+
+    def marker(self):
+        return os.path.join(self.state, plb.FAILED_MARKER)
+
+    def stamp(self):
+        return os.path.join(self.state, plb.OK_STAMP)
+
+    def hook_ran(self):
+        return os.path.exists(os.path.join(self.repo, "hooks", "RAN"))
+
+    # -- tests
+    def test_first_push_creates_backup_through_the_hook(self):
+        sha = self.commit("live work")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (0, "PUSHED"), res)
+        self.assertEqual(self.remote_tip(), sha)
+        self.assertTrue(self.hook_ran(), "pre-push hook did not run -- hooks were skipped")
+        self.assertTrue(os.path.exists(self.stamp()))
+        self.assertFalse(os.path.exists(self.marker()))
+        rc, res = self.check()
+        self.assertEqual((rc, res["verdict"]), (0, "CONTAINED"), res)
+
+    def test_second_run_is_up_to_date(self):
+        self.commit("live work")
+        self.assertEqual(self.push()[0], 0)
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (0, "UP_TO_DATE"), res)
+
+    def test_gate_block_fails_loud_and_writes_marker(self):
+        self.commit("live work")
+        open(os.path.join(self.repo, "hooks", "BLOCK"), "w").close()
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (1, "BLOCKED_OR_FAILED"), res)
+        self.assertIsNone(self.remote_tip())
+        self.assertEqual(json.load(open(self.marker()))["verdict"], "BLOCKED_OR_FAILED")
+        rc, res = self.check()
+        self.assertEqual(rc, 1, res)
+        self.assertTrue(any("BACKUP_PUSH_FAILED" in p for p in res["problems"]), res)
+
+    def test_success_after_failure_clears_marker(self):
+        self.commit("live work")
+        open(os.path.join(self.repo, "hooks", "BLOCK"), "w").close()
+        self.assertEqual(self.push()[0], 1)
+        os.remove(os.path.join(self.repo, "hooks", "BLOCK"))
+        self.assertEqual(self.push()[0], 0)
+        self.assertFalse(os.path.exists(self.marker()))
+
+    def test_refuses_when_gate_lacks_compressed_scan(self):
+        self._write_scan(SCAN_OLD)
+        self.commit("live work on a stale gate")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (4, "PRECONDITION"), res)
+        self.assertIn("scan_compressed", res["detail"])
+        self.assertIsNone(self.remote_tip())
+        self.assertFalse(self.hook_ran())
+        self.assertTrue(os.path.exists(self.marker()))
+
+    def test_refuses_without_pre_push_hook(self):
+        os.remove(os.path.join(self.repo, ".git", "hooks", "pre-push"))
+        self.commit("live work")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (4, "PRECONDITION"), res)
+        self.assertIsNone(self.remote_tip())
+
+    def test_honours_core_hookspath(self):
+        # git would run the hook from core.hooksPath, so the precondition must look THERE
+        alt = os.path.join(self.root, "althooks")
+        os.makedirs(alt)
+        run(self.repo, "config", "core.hooksPath", alt.replace("\\", "/"))
+        self.commit("live work")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (4, "PRECONDITION"), res)
+        shutil.copy(os.path.join(self.repo, ".git", "hooks", "pre-push"), os.path.join(alt, "pre-push"))
+        self.assertEqual(self.push()[0], 0)
+
+    def test_refuses_on_other_branch_and_detached(self):
+        self.commit("live work")
+        run(self.repo, "checkout", "-q", "main")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (4, "PRECONDITION"), res)
+        run(self.repo, "checkout", "-q", "--detach", BRANCH)
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (4, "PRECONDITION"), res)
+        self.assertIsNone(self.remote_tip())
+
+    def test_rewritten_live_branch_still_backs_up(self):
+        self.commit("a")
+        self.assertEqual(self.push()[0], 0)
+        run(self.repo, "reset", "-q", "--hard", "HEAD~1")
+        sha = self.commit("a-rewritten")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (0, "PUSHED"), res)
+        self.assertEqual(self.remote_tip(), sha)
+
+    def test_lease_protects_a_concurrently_moved_backup(self):
+        first = self.commit("a")
+        self.assertEqual(self.push()[0], 0)
+        # another writer moves the backup ref after our ls-remote read: simulate by handing
+        # the push a stale expected value
+        self.commit("b")
+        real = plb.remote_ref_sha
+        calls = {"n": 0}
+
+        def stale(repo, remote, ref, timeout=120):
+            calls["n"] += 1
+            return ("f" * 40) if calls["n"] == 1 else real(repo, remote, ref, timeout)
+        plb.remote_ref_sha = stale
+        try:
+            rc, res = self.push()
+        finally:
+            plb.remote_ref_sha = real
+        self.assertEqual((rc, res["verdict"]), (2, "LEASE_REJECTED"), res)
+        self.assertEqual(self.remote_tip(), first)
+        self.assertTrue(os.path.exists(self.marker()))
+
+    def test_check_grace_and_not_offbox(self):
+        self.commit("fresh")
+        rc, res = self.check()
+        self.assertEqual((rc, res["verdict"]), (0, "PENDING_WITHIN_GRACE"), res)
+        old = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 3 * 86400))
+        run(self.repo, "reset", "-q", "--hard", "HEAD~1")
+        self.commit("old", when=old)
+        self.commit("fresh-on-top")
+        rc, res = self.check()
+        self.assertEqual((rc, res["verdict"]), (1, "NOT_OFFBOX"), res)
+        self.assertEqual(res["pending_count"], 2)
+
+    def test_check_counts_backup_ref_as_offbox(self):
+        old = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 3 * 86400))
+        self.commit("old", when=old)
+        self.assertEqual(self.check()[0], 1)
+        self.assertEqual(self.push()[0], 0)
+        self.assertEqual(self.check()[0], 0)
+
+    def test_check_prunes_deleted_remote_refs(self):
+        old = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() - 3 * 86400))
+        self.commit("old", when=old)
+        self.assertEqual(self.push()[0], 0)
+        self.assertEqual(self.check()[0], 0)
+        subprocess.run(["git", "--git-dir", self.remote, "update-ref", "-d", TARGET_REF], check=True)
+        rc, res = self.check()
+        self.assertEqual((rc, res["verdict"]), (1, "NOT_OFFBOX"), res)
+
+    def test_check_unreachable_remote_is_could_not_look(self):
+        run(self.repo, "remote", "set-url", "origin", os.path.join(self.root, "nope.git"))
+        rc, res = self.check()
+        self.assertEqual((rc, res["verdict"]), (2, "COULD_NOT_LOOK"), res)
+
+    def test_push_unreachable_remote_fails_with_marker(self):
+        self.commit("x")
+        run(self.repo, "remote", "set-url", "origin", os.path.join(self.root, "nope.git"))
+        rc, res = self.push()
+        self.assertNotEqual(rc, 0, res)
+        self.assertTrue(os.path.exists(self.marker()))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)

@@ -45,6 +45,21 @@ def test_backup_push_failed_marker_is_declared_not_periodic():
     assert sfp.NOT_PERIODIC["backup-push-failed.json"].strip()
 
 
+def test_live_backup_push_failed_marker_is_declared_not_periodic():
+    # 2026-11-08: push-live-backup.py writes it only on failure and removes it on success; its
+    # reader is push-live-backup.py --check (fleet-deadman.ps1 check 6), not this probe.
+    assert "live-backup-push-failed.json" in sfp.NOT_PERIODIC
+    assert sfp.NOT_PERIODIC["live-backup-push-failed.json"].strip()
+
+
+def test_live_backup_ok_stamp_is_daily_and_pause_explainable():
+    # Producer is the CC/MCP task ora-live-branch-offbox-backup (daily), so it is held to 48h,
+    # but a CC fleet pause DOES explain it -- it is not a Windows-scheduler producer.
+    assert sfp.MAX_AGE_OVERRIDES.get("live-backup-push-ok.json") == 48.0
+    assert "live-backup-push-ok.json" not in sfp.PAUSE_INDEPENDENT
+    assert "live-backup-push-ok.json" not in sfp.NOT_PERIODIC
+
+
 def test_default_covers_one_weekly_cycle_plus_grace():
     assert sfp.DEFAULT_MAX_AGE_H >= 7 * 24 + 12
     assert sfp.DEFAULT_MAX_AGE_H <= 8 * 24
