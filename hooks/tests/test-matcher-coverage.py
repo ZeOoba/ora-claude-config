@@ -135,6 +135,7 @@ def routed(settings, chains, tool, anchored=True):
 NOTION = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__"
 M365 = "mcp__c0ea3c01-b8f1-4371-aa06-08a1449f59fc__"
 NETLIFY = "mcp__a66aaa4a-ffcd-4066-b2af-79c4ce807809__"
+DOCS = "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c__"  # Claude Docs connector
 DC = ("mcp__Desktop_Commander__", "mcp__plugin_desktop-commander_desktop-commander__")
 
 M365_SEND_FIXTURES = [M365 + n for n in (
@@ -162,7 +163,29 @@ def expectations(chains):
                          "config-write-guard", "lint-config-guard",
                          "workbook-write-guard"},
         "mcp__excel__write_data_to_excel": {"config-write-guard",
-                                            "workbook-write-guard"},
+                                            "workbook-write-guard",
+                                            "confidentiality-guard",
+                                            "ora-autonomy-gate"},
+        # cc-audit-army 2026-11-09 HIGH 1+2: egress tools beyond Bash/Edit/Write.
+        "PowerShell": {"ora-autonomy-gate", "confidentiality-guard", "override-mint-guard",
+                       "config-write-guard", "lint-config-guard", "workbook-write-guard"},
+        "mcp__terminal__run_in_terminal": {"ora-autonomy-gate", "confidentiality-guard",
+                                           "override-mint-guard", "config-write-guard",
+                                           "lint-config-guard", "workbook-write-guard"},
+        "mcp__claude-in-chrome__upload_image": {"confidentiality-guard"},
+        "mcp__excel__apply_formula": {"ora-autonomy-gate", "confidentiality-guard",
+                                      "config-write-guard", "workbook-write-guard"},
+        "Artifact": {"confidentiality-guard"},
+        "ArtifactData": {"confidentiality-guard"},
+        "ArtifactComments": {"confidentiality-guard"},
+        DOCS + "batch": {"confidentiality-guard"},
+        DOCS + "update": {"confidentiality-guard"},
+        DOCS + "create": {"confidentiality-guard"},
+        "mcp__claude-in-chrome__form_input": {"confidentiality-guard"},
+        "mcp__claude-in-chrome__computer": {"confidentiality-guard"},
+        "mcp__claude-in-chrome__javascript_tool": {"confidentiality-guard"},
+        "mcp__Claude_Browser__form_input": {"confidentiality-guard"},
+        "mcp__Claude_Browser__browser_batch": {"confidentiality-guard"},
         NETLIFY + "netlify-deploy-services-updater": {"ora-autonomy-gate"},
         NETLIFY + "netlify-project-services-updater": {"ora-autonomy-gate"},
         NETLIFY + "netlify-extension-services-updater": {"ora-autonomy-gate"},
@@ -175,13 +198,15 @@ def expectations(chains):
         # Case-sensitivity pins: a lowercase spelling is NOT the real tool.
         "edit": set(), "bash": set(),
     }
+    # HIGH 1 + REFUTE residual 1, 2026-11-09
+    egress = {"ora-autonomy-gate", "confidentiality-guard", "override-mint-guard"}
     for p in DC:
-        exp[p + "write_file"] = set(dc_file)
-        exp[p + "edit_block"] = set(dc_file)
-        exp[p + "move_file"] = set(dc_shell)
-        exp[p + "start_process"] = set(dc_shell)
-        exp[p + "interact_with_process"] = set(dc_shell)
-        exp[p + "write_pdf"] = set(dc_shell)
+        exp[p + "write_file"] = dc_file | egress
+        exp[p + "edit_block"] = dc_file | egress
+        exp[p + "move_file"] = dc_shell | egress
+        exp[p + "start_process"] = dc_shell | egress
+        exp[p + "interact_with_process"] = dc_shell | egress
+        exp[p + "write_pdf"] = dc_shell | egress
         exp[p + "read_file"] = set()
     return exp
 
