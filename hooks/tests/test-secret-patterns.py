@@ -273,6 +273,44 @@ expect("bracketed/starred placeholder branches unaffected",
        sp.scan_text("password=<password>") == []
        and sp.scan_text("password: ********") == [])
 
+# --- 2026-11-08 audit finding secret-patterns-missing-stack-token-prefixes ------------
+# ORA's own stack issues prefixed tokens the module had no rule for. Each must fire on a
+# realistic shape and stay quiet on prose / short look-alikes. Fixtures are built by
+# concatenation so no complete credential-shaped literal sits in this file's source.
+_A40 = "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7dEf0h"  # 40 mixed alnum chars, synthetic
+expect("GitHub fine-grained PAT is caught",
+       "GitHub fine-grained token" in sp.scan_text("github_pat_" + "11ABCDEFG0" + _A40 + "_" + _A40))
+expect("Notion ntn_ integration token is caught",
+       "Notion token" in sp.scan_text("NOTION=ntn_" + _A40 + "abcdef"))
+expect("Notion legacy secret_ (43+ chars) is caught",
+       "Notion token" in sp.scan_text("key secret_" + _A40 + "xyz"))
+expect("HubSpot private-app pat-na1- token is caught",
+       "HubSpot private app token" in sp.scan_text(
+           "pat-na1-" + "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"))
+expect("HubSpot pat-eu1- token is caught",
+       "HubSpot private app token" in sp.scan_text(
+           "pat-eu1-" + "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"))
+expect("Supabase sbp_ access token is caught",
+       "Supabase access token" in sp.scan_text("sbp_" + "0123456789abcdef0123456789abcdef01234567"))
+expect("Supabase versioned sbp_v0_ token is caught",
+       "Supabase access token" in sp.scan_text("sbp_v0_" + "0123456789abcdef0123456789abcdef01234567"))
+# negatives: prose and short look-alikes must not flag
+expect("prose 'secret_sauce' does not flag",
+       sp.scan_text("our secret_sauce is shallow-bay flex") == [])
+expect("short secret_ identifier (< 43 chars) does not flag",
+       sp.scan_text("x = secret_" + "a" * 30) == [])
+expect("ntn_ prose word does not flag", sp.scan_text("see ntn_notes for detail") == [])
+expect("pat-na1 without a uuid does not flag", sp.scan_text("pat-na1-portal setting") == [])
+expect("github_pat_ placeholder word does not flag", sp.scan_text("github_pat_HERE") == [])
+expect("sbp_ short id does not flag", sp.scan_text("sbp_123") == [])
+expect("new labels appended AFTER the original 13 (callers report by index)",
+       [l for l, _ in sp.SECRET_PATTERNS][:13] == [
+           "Anthropic API key", "Composio-style key", "AWS access key ID", "GitHub token",
+           "Slack token", "generic API key assignment", "Netlify token",
+           "secret/token assignment", "secret/token assignment",
+           "generic API key assignment", "generic bearer token", "password assignment",
+           "PEM private-key block"])
+
 npass = sum(1 for ok, _ in results if ok)
 print("secret-patterns tests: %d/%d pass" % (npass, len(results)))
 sys.exit(0 if npass == len(results) else 1)
