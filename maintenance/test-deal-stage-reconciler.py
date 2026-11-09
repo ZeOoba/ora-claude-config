@@ -35,17 +35,17 @@ tmpdir = tempfile.mkdtemp(prefix="dsr-test-")
 
 # --- load_snapshot / save_snapshot --------------------------------------------------
 missing_path = os.path.join(tmpdir, "does-not-exist.json")
-expect("load_snapshot: missing file -> {}", dsr.load_snapshot(missing_path) == {})
+expect("load_snapshot: missing file -> None", dsr.load_snapshot(missing_path) is None)
 
 corrupt_path = os.path.join(tmpdir, "corrupt.json")
 with open(corrupt_path, "w", encoding="utf-8") as f:
     f.write("{not valid json")
-expect("load_snapshot: corrupt file -> {}", dsr.load_snapshot(corrupt_path) == {})
+expect("load_snapshot: corrupt file -> None", dsr.load_snapshot(corrupt_path) is None)
 
 not_dict_path = os.path.join(tmpdir, "not-dict.json")
 with open(not_dict_path, "w", encoding="utf-8") as f:
     json.dump([1, 2, 3], f)
-expect("load_snapshot: non-dict JSON -> {}", dsr.load_snapshot(not_dict_path) == {})
+expect("load_snapshot: non-dict JSON -> None", dsr.load_snapshot(not_dict_path) is None)
 
 roundtrip_path = os.path.join(tmpdir, "snap.json")
 sample = {"pg1": {"deal": "511 Industrial Mile Rd", "stage": "Candidate"}}
@@ -128,8 +128,11 @@ with open(cli_map_path, "w", encoding="utf-8") as f:
 cli_snapshot_path = os.path.join(tmpdir, "cli-snapshot.json")
 dsr.save_snapshot(cli_snapshot_path, snapshot)
 
+# `snapshot` carries pg4, which `current` no longer has (an archived Notion row). Since the
+# 2026-11-08 key-set guard, a dropped row is refused (exit 3) unless --allow-shrink accepts it.
 proc = run_cli(["--current-file", cli_current_path, "--stage-map-file", cli_map_path,
-                "--snapshot-file", cli_snapshot_path, "--date", "2026-07-10"])
+                "--snapshot-file", cli_snapshot_path, "--date", "2026-07-10",
+                "--allow-shrink"])
 expect("CLI: exit 0 on normal run", proc.returncode == 0, proc.stderr)
 payload = json.loads(proc.stdout) if proc.returncode == 0 else {}
 expect("CLI: reports 2 transitions", payload.get("count") == 2, payload)
@@ -230,6 +233,50 @@ expect("CLI --bootstrap: exits 0 even when current-file has fewer rows than the 
 expect("CLI --bootstrap: overwrites snapshot to the smaller current-file content "
        "(guard bypassed by design)",
        dsr.load_snapshot(shrink_bootstrap_snapshot_path) == shrink_current)
+
+# --- 2026-11-08 audit deal-stage-reconciler-empty-snapshot-fail-open ---------------------
+# A missing / corrupt snapshot used to load as {} -- every live row then read as a first-seen
+# "transition" (mass false event_log + ledger rows) and the shrink guard (count-only) passed.
+for _lbl, _seed in (("missing", None), ("corrupt", "{not valid json"), ("non-dict", "[1, 2]")):
+    _snap = os.path.join(tmpdir, "fo-%s-snapshot.json" % _lbl)
+    if _seed is not None:
+        with open(_snap, "w", encoding="utf-8") as f:
+            f.write(_seed)
+    _before = open(_snap, encoding="utf-8").read() if _seed is not None else None
+    _p = run_cli(["--current-file", cli_current_path, "--stage-map-file", cli_map_path,
+                  "--snapshot-file", _snap])
+    expect("CLI: %s snapshot without --bootstrap exits 4" % _lbl, _p.returncode == 4,
+           (_p.returncode, _p.stderr))
+    expect("CLI: %s snapshot emits ZERO transition rows" % _lbl, _p.stdout.strip() == "",
+           _p.stdout)
+    expect("CLI: %s snapshot is left untouched" % _lbl,
+           (not os.path.exists(_snap)) if _seed is None
+           else open(_snap, encoding="utf-8").read() == _before)
+    expect("CLI: %s snapshot stderr points at --bootstrap" % _lbl, "--bootstrap" in _p.stderr,
+           _p.stderr)
+
+# Equal row counts but DIFFERENT keys (a partial fetch padded by new rows, or a page-id format
+# change) must be refused -- the count-only guard let this through.
+_swap_snap = os.path.join(tmpdir, "swap-snapshot.json")
+dsr.save_snapshot(_swap_snap, {"pg1": {"deal": "zephyr corp a", "stage": "Candidate"},
+                               "pg2": {"deal": "zephyr corp b", "stage": "Candidate"}})
+_swap_cur = os.path.join(tmpdir, "swap-current.json")
+with open(_swap_cur, "w", encoding="utf-8") as f:
+    json.dump({"pg1": {"deal": "zephyr corp a", "stage": "Candidate"},
+               "pg9": {"deal": "zephyr corp z", "stage": "Candidate"}}, f)
+_p = run_cli(["--current-file", _swap_cur, "--stage-map-file", cli_map_path,
+              "--snapshot-file", _swap_snap])
+expect("CLI: equal counts with a dropped snapshot key exits 3", _p.returncode == 3,
+       (_p.returncode, _p.stderr))
+expect("CLI: dropped-key refusal leaves the snapshot unchanged",
+       set(dsr.load_snapshot(_swap_snap)) == {"pg1", "pg2"})
+_p = run_cli(["--current-file", _swap_cur, "--stage-map-file", cli_map_path,
+              "--snapshot-file", _swap_snap, "--allow-shrink"])
+expect("CLI --allow-shrink: accepts a dropped key (deliberate archive) and exits 0",
+       _p.returncode == 0, (_p.returncode, _p.stderr))
+expect("CLI --allow-shrink: new row reported, snapshot advanced",
+       _p.returncode == 0 and json.loads(_p.stdout)["count"] == 1
+       and set(dsr.load_snapshot(_swap_snap)) == {"pg1", "pg9"}, _p.stdout)
 
 # --- summary ----------------------------------------------------------------------------
 passed = sum(1 for ok, _ in results if ok)
