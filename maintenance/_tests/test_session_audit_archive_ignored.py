@@ -66,6 +66,15 @@ def test_audit_transcript_gz_ignored_anywhere():
         assert ignored(p), "%s is NOT git-ignored" % p
 
 
+def test_dirty_tree_snapshot_tarballs_ignored():
+    """Same 2026-11-04 triage (cf2591ba) tracked a .tgz snapshot of a dirty tree; the
+    #427 compressed scan flags a credential-shaped string inside it. origin/main tracks
+    no .tgz; none should ever be tracked."""
+    for p in ("maintenance/_state/_archive/2026-10-17_scratch-triage/r27-baseline/claude-dirty-snapshot.tgz",
+              "anywhere/else/snapshot.tgz"):
+        assert ignored(p), "%s is NOT git-ignored" % p
+
+
 def test_rule_is_not_too_broad():
     """Control: the rest of maintenance/_archive/ and ordinary maintenance files stay
     trackable, so the checks above are not passing because of a blanket rule."""
