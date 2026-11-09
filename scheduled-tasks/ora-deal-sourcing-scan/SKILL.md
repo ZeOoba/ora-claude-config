@@ -3,7 +3,13 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.15, 2026-11-06).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.16, 2026-11-09).
+
+v2.16 — BROKERS `Markets` OPTION `Chicago IL` (2026-11-09, Gabriel in-turn). The Broker
+Relationships DB (48e43778) gained a `Chicago IL` option; STEP 5A's option list now names it,
+so Chicago brokers are tagged instead of left blank with a "Markets option missing" note.
+NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE, BUDGET OR GOVERNOR CHANGED (the 30-load 1B-A cap
+was reviewed and kept, Gabriel 2026-11-09: re-check after the 11-10 and 11-17 runs).
 
 v2.15 — CHICAGO–GREATER COOK COUNTY IL LEG ADDED; THE SCAN IS NOW ELEVEN CLUSTERS, NOT TEN
 (2026-11-06, coverage fix; NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE OR GOVERNOR CHANGED).
@@ -1358,10 +1364,11 @@ property or a select option will fail the write:
   - `Markets`              (multi_select) — ONLY an option that ALREADY EXISTS:
         Columbus OH · Kansas City MO · Indianapolis IN · Maryland · Cleveland OH ·
         Nashville TN · Multi-Market · Des Moines IA · Cincinnati OH · Louisville KY ·
-        Madison WI · Grand Rapids MI · Richmond VA
-      (The last five were ADDED to the database by Gabriel's direction on 2026-09-19 — the
-      original 8 kept their option ids and all 9 existing rows read identically before
-      and after.) For a market with NO matching option — e.g. a new entry market — LEAVE
+        Madison WI · Grand Rapids MI · Richmond VA · Chicago IL
+      (Des Moines IA through Richmond VA were ADDED to the database by Gabriel's direction on
+      2026-09-19 — the original 8 kept their option ids and all 9 existing rows read
+      identically before and after. `Chicago IL` was ADDED 2026-11-09 (Gabriel in-turn); the
+      13 prior options kept their ids. Use it for Chicago–Greater Cook County brokers.) For a market with NO matching option — e.g. a new entry market — LEAVE
       `Markets` BLANK and name the market in `Notes`. NEVER invent a select option — the
       scan runs unattended and must not mutate the DB's schema. Report any such gap once
       per run in the digest ("Markets option missing for: <market>") so Gabriel can add it
@@ -1562,7 +1569,7 @@ Body order:
           detail page not loaded / no agent shown / OM-or-email with no agent named);
         - NEW Broker Relationships rows created this run.
       Also name here, when they occur: the 25-row cap being hit and the names not
-      created; any missing `Markets` select option (e.g. a market outside the 13 current options);
+      created; any missing `Markets` select option (e.g. a market outside the 14 current options);
       and any duplicate broker rows found while matching. This section is the audit
       trail for the 56.9% broker-name gap this version exists to close — report the
       counts even when they are bad, and never round them up.
