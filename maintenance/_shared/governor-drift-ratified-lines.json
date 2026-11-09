@@ -1,0 +1,277 @@
+{
+  "_doc": "Exact-text exemptions for governor-drift-probe.py. Each entry exempts ONE finding reason on ONE line (SHA-256 of the stripped UTF-8 line) at ONE repo-relative path. Any edit to the line re-arms it. Add entries only for wording Gabriel ratified in-turn; cite the ruling in 'ratified'. 'excerpt' is informational only.",
+  "entries": [
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "bcc6a09614d9f5f72ef74b03ec61204c927a91a0f39d2edb3fa7074741cafdb7",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "| v4.45 | 2026-11-08 | Gabriel in-turn ruling 2026-11-08 | Floor DSCR at a 65%-LTV loan uses stabili"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "f828ecd35a7e4775d8afad27e3deeda0ba50648f57f55112204a037304ec61fd",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "| v4.44 | 2026-11-08 | Gabriel in-turn ratification 2026-11-08 | DSCR floor tested at a 65%-LTV loan"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "b62c9b316803f2b2be2a139c830628f67b757d9bb40fafe7bd3dda11bad17eaa",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **DSCR floor (per-property governor — v3.8; reported on every UNDERWRITE; floor basis restated v4."
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "c5258a356b61c90da4b5027eee419dd10bcbd26f48ab043e503d8bf1e7b06de2",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **Madison DSCR caution:** owner-user pricing $148–$176/SF makes DSCR ≥1.25x extremely difficult on"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "cd7b697f0ab10eb0dd6cab0085bd793fe04ae6c20145d710832982e28e1bcd19",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: **deal-decision-ledger precedent check (Stage -1 item 5) — read the ledger first, cite match"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "1202ecf6641255969b6971a5bba7cd794a1f7fad501e649ea14ed98a4daf8b43",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: inline verdict block (ledger precedent citations → gates → floors incl. per-property DSCR at"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "2b2383970311ad345da6a337189d84f6aa32669662e8ebafe9f1b026da8bba09",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **DSCR floor (per-property governor — v3.8; reported on every UNDERWRITE; floor basis restated v4."
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "a1ee0bdc69bd50e943c6b1840d226aad902423006cc9f7c319791ec418414254",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: **deal-decision-ledger precedent check (Stage -1 item 5) — read the ledger first, cite match"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "82d95e33f87624971480fb4286c50b91244cd9e743776407e90f848db5c817f2",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: inline verdict block (deal-decision-ledger precedent citations → gates → floors incl. per-pr"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/ic-memo-structure.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "d20c664f5ffbc6480bec4a2141b4c7a1337bd5738062251ab2aa9debccb17019",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "7. **Debt & Capital Structure** — all-cash close + per-property refi terms (per UNDERWRITING CONVENT"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/ic-memo-structure.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "2000da658b57078be812917ab593d37edeaf65be302a99a7c4b9a339f9338cc9",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "12. **Recommendation & Next Steps** — restated verdict, offer price and aggressiveness (set by selle"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/underwrite-model-mechanics.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "c45f59d9682c863105c5d09b8dc800e0eb3f59545408dcf1bbc34b41443957df",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **LTV-governor check:** the refi LTV assumption on the Inputs tab must be validated against the st"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "deal-comparison/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "fc7853ff1639700b76693ca42f62e8fc9571f4b25e09c172ddcec50937786034",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "**FLOOR FLAG (Ruling 5):** DSCR <1.25x at a loan sized to 65% LTV per-property, on the acquisition-u"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "deal-comparison/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "6a8f2e7da5bc89213c4492c3880290a23bfd70b67ab14d08d10173755a8ecf3f",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "| DSCR at a 65%-LTV loan on stabilized NOI (floor basis per acquisition-underwriting STAGE 1 v4.44, "
+    },
+    {
+      "repo": "ora-skills",
+      "path": "deal-comparison/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "1e10c6c41366574d4d70b4bdc21da6d6a3fa0deedd784e2cd5e121049b9bc835",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- v1.8 (2026-11-08): Floor DSCR NOI basis stated (Gabriel in-turn ruling 2026-11-08, acquisition-und"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "deal-comparison/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "79d160ee2e70d5ae47e6592d9dfb86a5587012084519b4e25e03c8f5d8ab39b6",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- v1.7 (2026-11-08): DSCR floor basis restated (Gabriel in-turn ratification 2026-11-08, acquisition"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "model-bulk-edit/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "cdb089f712a7475f10285e59f5375e28b41df1661c2a9c7980a324281218bcad",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "any **floor state change**. The DSCR floor row is DSCR on stabilized NOI at a loan sized to 65% LTV "
+    },
+    {
+      "repo": "ora-skills",
+      "path": "model-bulk-edit/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "65af3c120722d49511aaa852c9f7c81b57b24f7533d35d28edd3a5bdcda7155c",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- v1.2 (2026-11-08): STEP 5 names the DSCR floor-test basis, DSCR at a 65%-LTV loan (Gabriel in-turn"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "portfolio-growth/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "7874d16c5637d5f5007c1daa035d67fc551d564eb0139744fd38fa8714e35c1e",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "Test DSCR at a loan sized to 65% LTV per-property, on the acquisition-underwriting refi value basis "
+    },
+    {
+      "repo": "ora-skills",
+      "path": "portfolio-growth/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "0486f304bd74ab06418000e5ac33cbcfec79678f94b70b2e6128b35a4e77414f",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "**Two bases, two questions (Gabriel in-turn 2026-11-05).** Multi-year projections (Modules 1, 3 and "
+    },
+    {
+      "repo": "ora-skills",
+      "path": "portfolio-growth/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "bef377acf4cd4ce68bb5094e731cc3064a5d3c0c40c6111aa5a7ee77edce4646",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- DSCR cushion over the 1.25x floor on the scenario's own modeled debt (40% aggregate LTV), and the "
+    },
+    {
+      "repo": "ora-skills",
+      "path": "portfolio-growth/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "329ba6c3d61744ce7bcd2151fcfe3eda92efe0adef631f75f1d64f9b0f2850b2",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **v1.4 (2026-11-08, Gabriel in-turn ruling 2026-11-08, under Hard Invariant 4):** The Module 2 DSC"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "portfolio-growth/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "ae4f27b38fe37b8c7613cdcbec3e17cf57075b2219e4293df6af1da848cb6173",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **v1.3 (2026-11-08, Gabriel in-turn ratification 2026-11-08, under Hard Invariant 4):** The Module"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "89e203e06a451295433cb22a6f713c23d8008e777487480811beff3aa06212e6",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **DSCR floor (per-property governor — v3.8; reported on every UNDERWRITE; floor basis restated v4."
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "78e62ee2889f5455427c61a72baa74851c19b3f12029d264e1bc7b9aa8181564",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: **deal-decision-ledger precedent check (Stage -1 item 5) — read the ledger first, cite match"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "f3a4fe78372bac7d6e1bc4fc49d9103ba9cca5886294d0d55c9af09a475f87a8",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: inline verdict block (ledger precedent citations → gates → floors incl. per-property DSCR at"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "a760285763bb08f784df742f3e99fb98fc9f45db205bd0dfba03486bead5dcc6",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **DSCR floor (per-property governor — v3.8; reported on every UNDERWRITE; floor basis restated v4."
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "acf8c9526b70e7d0bc80036a9f9f2665bb67684db700d5d4cd2994a0aebd3c0b",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: **deal-decision-ledger precedent check (Stage -1 item 5) — read the ledger first, cite match"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/doctrine-rationale-and-incidents.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "f4d0c31aecc0b41a4fb1ddb3c8e66f15f7b7d2dd61d7167f86275ac93d696427",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "SCREEN: inline verdict block (deal-decision-ledger precedent citations → gates → floors incl. per-pr"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/underwrite-model-mechanics.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "55f4b4b3978f1f00fc063be536969ceaad179b32edf26cd8809f3b0f0632b864",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **LTV-governor check:** the refi LTV assumption on the Inputs tab must be validated against the st"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "deal-comparison/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "ab7c9e2937bb0832f391362897af9b15b8e8d032556d12a3449d0948af36c82b",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "**FLOOR FLAG (Ruling 5):** DSCR <1.25x at a loan sized to 65% LTV per-property, on the acquisition-u"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "deal-comparison/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "b5d8befbc52d6367a80e1400086d9d5946df2a4122d0438656c051e157ac133a",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "| DSCR at a 65%-LTV loan (floor basis per acquisition-underwriting STAGE 1 v4.44; the lesser-of loan"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "model-bulk-edit/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "d5b7bbb339faf46dcc64e0c8bac6b00afaa0798e92fc3337337fe1d4c4eba8c6",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "any **floor state change**. The DSCR floor row is DSCR at a loan sized to 65% LTV (stabilized value "
+    },
+    {
+      "repo": "ora-skills",
+      "path": "portfolio-growth/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "dc43493d7fde3db184001747204e9418ae215b9d7224216690fde9682e43424e",
+      "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "Test DSCR at a loan sized to 65% LTV per-property, on the acquisition-underwriting refi value basis "
+    }
+  ]
+}
