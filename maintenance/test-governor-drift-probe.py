@@ -3736,6 +3736,63 @@ def test_committed_ref_scan_fails_loud_e2e():
     print("  PASS test_committed_ref_scan_fails_loud_e2e")
 
 
+# Every line the 2026-11-09 adversarial refute pass showed the first draft silencing (old probe
+# flagged, draft probe did not). Each is a realistic narration MOVING the governor to 65%.
+_V445_REFUTE_SILENCED_DRIFT = (
+    "Governor change: DSCR 1.25x, LTV 65% per-property (replacing the 40% aggregate).",
+    "Governors (updated): DSCR 1.25x / LTV 65% per-property across the portfolio",
+    "Governors (updated): DSCR 1.25x / LTV 65% per-property across all holdings",
+    "| Governor | DSCR 1.25x | LTV 65% per-property |",
+    "Going forward the governor is a 65%-LTV loan, DSCR 1.25x.",
+    "Per IC vote, the firm's leverage governor moves to a 65%-LTV loan basis; DSCR 1.25x.",
+    "Portfolio governors: DSCR 1.25x; LTV a 65%-LTV loan basis.",
+    "Governor update: leverage is now a 65%-LTV loan across the book.",
+    "Maximum leverage is a 65%-LTV loan; DSCR 1.25x minimum.",
+    "Governor: DSCR 1.25x; DSCR at 65% LTV.",
+    "Raise the LTV governor. Going forward every deal is sized as a 65%-LTV loan.",
+    "Consolidated LTV governor e.g. a 65%-LTV loan; DSCR 1.25x.",
+    "We will now finance new purchases with a 65%-LTV loan; DSCR 1.25x governor unchanged.",
+    "Underwrite every deal at DSCR at 65% LTV; LTV governor relaxed accordingly.",
+)
+
+
+def test_v445_refute_silenced_drift_lines_flag_unit():
+    """Regression pin for the refute pass: none of these may be silenced by the loan-basis
+    suppressor (each flagged under the parent probe)."""
+    m = _load_probe_module()
+    for line in _V445_REFUTE_SILENCED_DRIFT:
+        out = m.scan_line(line)
+        assert any("65" in o for o in out), (
+            "refute-pass drift line must flag 65; line=%r got=%r" % (line, out))
+    print("  PASS test_v445_refute_silenced_drift_lines_flag_unit")
+
+
+def test_v445_canonical_triple_restatement_stays_clean_unit():
+    """The all-canonical 'no constant changed' triple stays clean in either LTV order."""
+    m = _load_probe_module()
+    for line in ("Scoring bands, point values and governor constants unchanged (DSCR 1.25x; 65% "
+                 "per-property; 40% aggregate).",
+                 "No governor value changed (DSCR 1.25x; 40% aggregate; 65% per-property)."):
+        out = m.scan_line(line)
+        assert not any("65" in o for o in out), "triple must stay clean; line=%r got=%r" % (line, out)
+    print("  PASS test_v445_canonical_triple_restatement_stays_clean_unit")
+
+
+def test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e():
+    """Dedupe is cross-REF only: two identical drift lines in one file are two findings."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _DRIFT_LINE + "filler\n" + _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "two identical drift lines")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1 and "DRIFT DETECTED (2)" in out, "both lines must flag:\n%s\n%s" % (out, err)
+    print("  PASS test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e")
+
+
 def test_committed_ref_scan_dedupes_same_line_across_refs_e2e():
     """A drift line present at both refs/heads/main and origin/main (local main lagging, so the
     blobs differ and line numbers shift) is reported ONCE, not once per ref."""
@@ -3911,6 +3968,9 @@ def main():
     test_v445_refi_loan_basis_value_locked_unit()
     test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit()
     test_committed_ref_scan_dedupes_same_line_across_refs_e2e()
+    test_v445_refute_silenced_drift_lines_flag_unit()
+    test_v445_canonical_triple_restatement_stays_clean_unit()
+    test_committed_ref_scan_keeps_identical_lines_in_one_file_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 
