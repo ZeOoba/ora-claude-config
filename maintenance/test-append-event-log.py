@@ -473,6 +473,44 @@ for bad in ("## Undated heading\n- x", "2026-09-22 — no hashes\n- x",
         expect("malformed header wrote nothing", f.read() == before)
     os.remove(epath)
 
+# 2026-11-08 audit event-log-unicodedecodeerror-is-valueerror: UnicodeDecodeError IS a
+# ValueError, so main()'s `except ValueError: raise` turned an undecodable log (a stray
+# invalid byte from another writer) into a traceback -- the entry was neither appended nor
+# spooled. Only a MALFORMED ENTRY may skip the retry/spool net; an unreadable log must spool.
+_bad_dir = tempfile.mkdtemp(prefix="ael-baddecode-")
+_bad_log = os.path.join(_bad_dir, "event_log.md")
+with open(_bad_log, "wb") as f:
+    f.write(b"# Event log\n\n## 2026-11-01 \xe2\x80\x94 older\n- body \xff\xfe bad byte\n")
+with open(_bad_log, "rb") as f:
+    _bad_before = f.read()
+efd, epath = tempfile.mkstemp(suffix=".md", text=True)
+with os.fdopen(efd, "w", encoding="utf-8") as f:
+    f.write("## 2026-11-08 — zephyr corp decode test\n- body")
+_saved_sleep = ael.time.sleep
+ael.time.sleep = lambda s: None
+try:
+    try:
+        rc_bad = ael.main(["--entry-file", epath, "--log", _bad_log])
+    except Exception as e:
+        rc_bad = "raised %r" % (e,)
+finally:
+    ael.time.sleep = _saved_sleep
+expect("undecodable log: main() exits 0 (entry spooled, not lost)", rc_bad == 0, repr(rc_bad))
+_spooled = glob.glob(os.path.join(ael.spool_dir_for(_bad_log), "*.md"))
+expect("undecodable log: entry landed in the spool",
+       len(_spooled) == 1 and "decode test" in open(_spooled[0], encoding="utf-8").read(),
+       _spooled)
+with open(_bad_log, "rb") as f:
+    expect("undecodable log: log bytes untouched", f.read() == _bad_before)
+os.remove(epath)
+expect("MalformedEntryError is what insert_newest raises (still a ValueError subclass)",
+       issubclass(ael.MalformedEntryError, ValueError))
+try:
+    ael.insert_newest("x", "no header")
+    expect("insert_newest raises MalformedEntryError", False)
+except ael.MalformedEntryError:
+    expect("insert_newest raises MalformedEntryError", True)
+
 
 passed = sum(1 for ok, _ in results if ok)
 print("\nappend-event-log tests: %d/%d passed" % (passed, len(results)))
