@@ -394,7 +394,8 @@ def _arg_verdict(lowered_text, arg_text, strict, cache=None):
 # same documented ceiling as the rest of this file and its sibling guards.
 _COM_INVOCATION_RE = re.compile(r"-comobject\s+['\"]?excel\.application['\"]?")
 
-SHELL_TOOL_MARKERS = ("bash", "start_process", "interact_with_process")
+SHELL_TOOL_MARKERS = ("bash", "start_process", "interact_with_process",
+                      "powershell", "run_in_terminal")  # 2026-11-09 egress-tool wiring
 
 SHELL_COMMAND_FIELDS = ("command", "cmd", "input", "script")
 

@@ -18,11 +18,11 @@ dc_write = 'mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_bloc
 # authority; check mode fails on any difference in membership or order.
 [[chain]]
 name = "editwrite"
-guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared-checkout-guard", "registry-write-guard", "config-write-guard", "eos-claude-md-guard", "memory-index-guard", "rules-md-guard", "lint-config-guard", "sensitive-file-guard", "ascii-only-guard"]
+guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared-checkout-guard", "registry-write-guard", "config-write-guard", "eos-claude-md-guard", "memory-index-guard", "rules-md-guard", "lint-config-guard", "sensitive-file-guard", "override-mint-guard", "ascii-only-guard"]
 
 [[chain]]
 name = "bash"
-guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "winpath-guard", "rewrite-advisory-guard", "pipe-mask-guard"]
+guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "override-mint-guard", "winpath-guard", "rewrite-advisory-guard", "pipe-mask-guard"]
 
 [[row]]
 id = 'ups.engineering-router'
@@ -112,6 +112,30 @@ kind = "py"
 script = 'confidentiality-guard.py'
 
 [[row]]
+id = 'pre.ora-autonomy-gate-egress-tools'
+note = 'cc-audit-army 2026-11-09 HIGH 1: shell-capable and file-writing tools beyond Bash/Edit/Write (Desktop Commander, terminal panel, PowerShell) reach check_bash / check_file_write. Disjoint from pre.ora-autonomy-gate so no tool runs the gate twice.'
+event = 'PreToolUse'
+matcher = 'PowerShell|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__excel__(?!read_|get_|validate_).*'
+kind = "py"
+script = 'ora-autonomy-gate.py'
+
+[[row]]
+id = 'pre.override-mint-guard-egress-tools'
+note = 'REFUTE 2026-11-09 residual 1: the dispatcher chains carry override-mint-guard for Bash/Edit/Write only; PowerShell, the terminal panel, Desktop Commander and NotebookEdit could otherwise write an override token from a scheduled session. Disjoint from both dispatcher rows (EXPECTED_ONCE holds: one settings entry).'
+event = 'PreToolUse'
+matcher = 'PowerShell|NotebookEdit|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)'
+kind = "py"
+script = 'override-mint-guard.py'
+
+[[row]]
+id = 'pre.confidentiality-guard-egress-tools'
+note = 'cc-audit-army 2026-11-09 HIGH 1+2: shell/DC tools plus the action-aware send surfaces (Artifact, ArtifactData, ArtifactComments, Claude Docs, browser input, Excel) -- classify_extra in the guard. Kept apart from pre.confidentiality-guard, whose matcher is pinned verbatim to MCP_SEND_SURFACES.'
+event = 'PreToolUse'
+matcher = 'PowerShell|Artifact|ArtifactData|ArtifactComments|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__[0-9a-f-]{36}__(batch|update|create)|mcp__.*(claude-in-chrome|Claude_Browser)__(form_input|computer|javascript_tool|navigate|browser_batch|upload_image|file_upload)|mcp__excel__.*'
+kind = "py"
+script = 'confidentiality-guard.py'
+
+[[row]]
 id = 'pre.registry-write-guard'
 event = 'PreToolUse'
 matcher = '@{dc_write}'
@@ -128,21 +152,21 @@ script = 'ascii-only-guard.py'
 [[row]]
 id = 'pre.config-write-guard'
 event = 'PreToolUse'
-matcher = 'NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)'
+matcher = 'NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf|run_in_terminal)|PowerShell'
 kind = "py"
 script = 'config-write-guard.py'
 
 [[row]]
 id = 'pre.lint-config-guard'
 event = 'PreToolUse'
-matcher = 'NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)'
+matcher = 'NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf|run_in_terminal)|PowerShell'
 kind = "py"
 script = 'lint-config-guard.py'
 
 [[row]]
 id = 'pre.workbook-write-guard'
 event = 'PreToolUse'
-matcher = 'Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)'
+matcher = 'Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf|run_in_terminal)|PowerShell'
 kind = "py"
 script = 'workbook-write-guard.py'
 
