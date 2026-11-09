@@ -78,6 +78,16 @@ FORBIDDEN = {
 GOVERNOR = "DSCR >= 1.25x; LTV <= 40% portfolio aggregate and a 65% per-property refi ceiling"
 
 
+def pursue_on_upside(text):
+    """Clauses that put PURSUE and value-add/upside together. The exact-wording negative scans
+    let a REWORDED upside route to PURSUE through (REFUTE on fix/vdr-pursue-floor: 'strong
+    value-add upside -> PURSUE-eligible' and 'a compelling value-add story may still be called
+    PURSUE' both passed). After the 2026-11-08 decision no clause may pair the two at all."""
+    clauses = re.split(r"[.;:,]", text)
+    return [c.strip() for c in clauses
+            if re.search(r"PURSUE", c) and re.search(r"value-add|upside", c, re.I)]
+
+
 def forbidden_hits(line):
     stripped = line
     for rx in ALLOWED_NUMERIC:
@@ -198,6 +208,8 @@ def main():
           re.search(r"or clear value-add upside", rec, re.I) is None, ascii(rec))
     check("agent: Recommendation drops the fair-basis + value-add -> NEEDS MORE sub-rule",
           "*fair* basis" not in rec, ascii(rec))
+    hits = pursue_on_upside(rec)
+    check("agent: no Recommendation clause pairs PURSUE with value-add/upside", not hits, ascii(hits))
 
     # 5b. Negative scans: nothing on the basis / recommendation lines may state a second,
     #     wrong threshold, numerator, denominator or verdict next to the bound clauses.
@@ -227,6 +239,8 @@ def main():
               WF_FLOOR.search(ln) is not None, ascii(ln[:400]))
         check("workflow[%s]: a floor miss is not an automatic kill" % name,
               "not an automatic kill" in ln, ascii(ln[:300]))
+        hits = pursue_on_upside(ln)
+        check("workflow[%s]: no clause pairs PURSUE with value-add/upside" % name, not hits, ascii(hits))
         if name in WF_CAP_SITES:
             check("workflow[%s]: a floor miss caps at NEEDS_MORE" % name,
                   WF_CAP_SITES[name] in ln, ascii(ln[:300]))
