@@ -272,6 +272,14 @@
       "sha256": "dc43493d7fde3db184001747204e9418ae215b9d7224216690fde9682e43424e",
       "ratified": "Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); exact-line allowlist chosen 2026-11-09",
       "excerpt": "Test DSCR at a loan sized to 65% LTV per-property, on the acquisition-underwriting refi value basis "
+    },
+    {
+      "repo": ".claude",
+      "path": "agents/underwriting-checker.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "b47933753f70b0baadcb7743c9043cc258d93ecd69a8a6bbbe9442bbbb4d99e3",
+      "ratified": "Gabriel in-turn ruling 2026-11-08 (AU v4.45 stabilized-NOI floor; ora-claude-config#433); exact-line allowlist chosen 2026-11-09",
+      "excerpt": "- **DSCR (per-property governor; floor basis per acquisition-underwriting v4.44, Gabriel in-turn rat"
     }
   ]
 }
