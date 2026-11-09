@@ -7,6 +7,8 @@
 #   3. overrides\allow-config-write, overrides\allow-website-write (config-write-guard.py)
 #      -- Tier-based, hook enforces a real 3600s (60min) TTL already; anything older is
 #      already functionally inert to the hook, sweeping it changes no behavior.
+#      Same class: overrides\allow-hubspot-cms-write, overrides\allow-hubspot-social-publish
+#      (ora-autonomy-gate.py; 600s / 300s TTLs) -- added 2026-11-08, audit E5.
 # Manual sweep 2026-07-21 found 114 stale tokens (all from sessions long since idle/closed)
 # with zero functional impact -- this script automates that, on the same weekly cadence as
 # Block K's session-env-retention.ps1, and follows the identical safety pattern: live-sessionId
@@ -56,7 +58,11 @@ $ttlCut   = (Get-Date).AddMinutes(-$TtlWindowMinutes)
 
 # Candidate token relative paths (within each session dir) and which cutoff governs them.
 $noTtlNames = @('override', 'allow-foreign-commit')
-$ttlNames   = @('overrides\allow-config-write', 'overrides\allow-website-write')
+# HubSpot tiers added 2026-11-08 (audit E5): ora-autonomy-gate.py's allow-hubspot-cms-write
+# (600s TTL) and allow-hubspot-social-publish (300s TTL, single-use). Both TTLs are shorter
+# than $TtlWindowMinutes, so anything swept is already inert to the gate.
+$ttlNames   = @('overrides\allow-config-write', 'overrides\allow-website-write',
+                'overrides\allow-hubspot-cms-write', 'overrides\allow-hubspot-social-publish')
 
 $sessionDirs = Get-ChildItem $root -Directory | Where-Object { $_.Name -ne '_archive_override_tokens' }
 $moved = 0; $keptLive = 0; $keptYoung = 0; $scanned = 0
