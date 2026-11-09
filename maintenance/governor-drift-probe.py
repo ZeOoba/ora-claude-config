@@ -19,7 +19,7 @@ Design notes (precision over recall, to avoid false positives):
 Usage: python governor-drift-probe.py            # scan default roots
        python governor-drift-probe.py --quiet     # only print on drift
 """
-import os, re, subprocess, sys
+import hashlib, json, os, re, subprocess, sys
 
 # Output may echo file content with non-cp1252 chars (≠, ≥, ×) -> force UTF-8 so the
 # probe never crashes on its own output when stdout is a Windows cp1252 pipe (I5).
@@ -2287,6 +2287,65 @@ def _is_skill_version_changelog(path):
     standards.md / rules.md / firm.md / CLAUDE.md / capital-config.ts would go unseen."""
     return bool(SKILL_CHANGELOG_RE.search(path.replace("\\", "/").lower()))
 
+# --- Exact-text RATIFIED-LINE allowlist (2026-11-09) -----------------------------------------
+# Gabriel's in-turn rulings of 2026-11-08 (AU v4.44/v4.45, ora-skills#228) restated the per-property
+# DSCR floor as DSCR at "a loan sized to 65% LTV" / "a 65%-LTV loan". The ratified 65 sits in the same
+# words a real governor drift would use ("going forward the governor is a 65%-LTV loan"), so a
+# phrasing-based suppressor was tried and REFUTED twice (2026-11-09: 25+ realistic aggregate-to-65%
+# declarations went silent). Gabriel chose an exact-line allowlist instead (2026-11-09).
+#
+# Each entry exempts ONE finding reason on ONE line, identified by the SHA-256 of the line's stripped
+# UTF-8 text, at ONE repo-relative path. Any edit to the line -- including a drift injected into it --
+# changes the hash and re-arms the finding. No phrasing rule, so nothing new can ride it.
+# Safety direction: a MISSING file is an empty allowlist (exempts nothing); a MALFORMED file is a
+# probe error (exit 2), never a silent widen. Rewording a ratified line re-alarms until its entry
+# is refreshed -- intended: a change to governor wording deserves a look.
+RATIFIED_LINES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_shared",
+                                   "governor-drift-ratified-lines.json")
+
+
+def _line_hash(raw):
+    return hashlib.sha256(raw.strip().encode("utf-8")).hexdigest()
+
+
+def load_ratified_lines(path):
+    """Return {(repo_rel_path_lower, reason, sha256)}. Missing file -> empty set. Malformed ->
+    ProbeError. Every entry must carry repo, path, reason, sha256 and ratified (provenance)."""
+    if not os.path.isfile(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            doc = json.load(fh)
+        entries = doc["entries"]
+        out = set()
+        for e in entries:
+            for k in ("repo", "path", "reason", "sha256", "ratified"):
+                if not isinstance(e.get(k), str) or not e[k].strip():
+                    raise ValueError("entry missing %r: %r" % (k, e))
+            if not re.fullmatch(r"[0-9a-f]{64}", e["sha256"]):
+                raise ValueError("bad sha256 %r" % e["sha256"])
+            rel = (e["repo"].strip("/") + "/" + e["path"].strip("/")).lower()
+            out.add((rel, e["reason"], e["sha256"]))
+        return out
+    except ProbeError:
+        raise
+    except Exception as ex:
+        raise ProbeError("ratified-lines allowlist %s is malformed: %s" % (path, ex))
+
+
+def _ratified_line(ratified, path, reason, raw):
+    """True when (path, reason, exact line text) is on the ratified allowlist. `path` must END with
+    '/<repo>/<repo-relative path>' -- the repo directory name is part of the match."""
+    if not ratified:
+        return False
+    norm = path.replace("\\", "/").lower()
+    h = _line_hash(raw)
+    for rel, r, sha in ratified:
+        if r == reason and sha == h and norm.endswith("/" + rel):
+            return True
+    return False
+
+
 def main():
     quiet = "--quiet" in sys.argv
     findings = []
@@ -2297,7 +2356,11 @@ def main():
     # Governor-tooling scripts legitimately mention 1.75 / wrong values to detect/restore/
     # test them -> skip them (mirrors self_path).
     skip_names = {"governor-drift-probe.py", "restore-skill-governor.py",
-                  "test-governor-drift-probe.py"}
+                  "test-governor-drift-probe.py",
+                  # the ratified-lines allowlist quotes the finding reason it exempts
+                  # ("LTV governor 65% != canonical 40%") and ratified excerpts; deployed at
+                  # ~/.claude/maintenance/_shared/ it sits inside a scan root (refute 2026-11-09)
+                  os.path.basename(RATIFIED_LINES_PATH)}
     # Append-only history logs NARRATE past/incident values (a deal's "65% LTV financing",
     # a [SPECULATIVE] audit note) that are not live governor declarations -- they legitimately
     # quote off-canonical numbers and would false-positive forever. The LIVING governor lives in
@@ -2367,7 +2430,14 @@ def main():
                 or _is_test_file(path) or _is_eval_harness_run_log(path)
                 or _is_skill_version_changelog(path) or is_data_json)
 
-    def _scan_file(path, where, read):
+    try:
+        ratified = load_ratified_lines(RATIFIED_LINES_PATH)
+    except ProbeError as e:
+        # fail loud per I5 -- a corrupt allowlist must never silently widen OR drop exemptions
+        print("[ACTION] governor-drift-probe: %s" % e, file=sys.stderr)
+        sys.exit(2)
+
+    def _scan_file(path, where, read, dedupe=None):
         """`path` drives every rule (exemptions above, code/governor-code routing); `where` is
         what a finding cites (the path, or path@ref for a committed-ref read); read() returns the
         file's text with universal newlines already applied."""
@@ -2400,8 +2470,27 @@ def main():
             # an unreadable one was an exit-2 probe error (I5) -- preserved.
             read()
         else:
+            occ = {}
             for i, raw in enumerate(_lines(read()), 1):
                 for reason in scan_line(raw):
+                    # Exact-text ratified-line allowlist (see RATIFIED_LINES_PATH): only this
+                    # (path, reason, exact line text) triple is exempt -- any edit to the line
+                    # changes its hash and re-arms the finding.
+                    if _ratified_line(ratified, path, reason, raw):
+                        continue
+                    # Committed-ref reads scan the same path at several refs (local main and
+                    # origin/main); when local main lags, the blobs differ and line numbers shift,
+                    # so one drift was reported once PER REF. Dedupe on (path, reason, line text,
+                    # occurrence index within this file) -- the index keeps two identical drift
+                    # lines in ONE file as two findings. First ref read wins. Filesystem reads
+                    # pass dedupe=None.
+                    if dedupe is not None:
+                        base = (path, reason, raw.strip())
+                        occ[base] = occ.get(base, 0) + 1
+                        key = base + (occ[base],)
+                        if key in dedupe:
+                            continue
+                        dedupe.add(key)
                     findings.append((where, i, reason, raw.strip()[:120]))
 
     def _read_fs(path):
@@ -2431,10 +2520,11 @@ def main():
         if isinstance(exts, GitRefTree):
             # committed content only (see GitRefTree) -- never another session's working tree
             try:
+                ref_seen = set()
                 for path, ref, text in iter_git_ref_files(root, exts):
                     if _exempt(path):
                         continue
-                    _scan_file(path, "%s@%s" % (path, ref), lambda t=text: t)
+                    _scan_file(path, "%s@%s" % (path, ref), lambda t=text: t, dedupe=ref_seen)
                     scanned += 1
             except Exception as e:
                 # fail loud per I5 -- an unreadable committed tree is a probe error, not a skip
