@@ -499,7 +499,19 @@ def main():
     # bounded against origin/main rather than that remote's own trunk.
     baseline = _resolve_default_baseline()
     bad = False
-    for local_ref, local_sha, remote_ref, remote_sha in parse_pushrefs(sys.stdin.read()):
+    pushrefs = parse_pushrefs(sys.stdin.read())
+    # ZERO ref lines (2026-11-09, push-live-backup REFUTE round 3): a stray \r or Unicode
+    # space in a shim can starve this scan's stdin, and with no ref lines it scans nothing
+    # and allows. git itself runs pre-push with EMPTY stdin on an up-to-date push (verified,
+    # git 2.55.0.windows.2), so this cannot fail closed unconditionally without breaking
+    # every no-op push. A caller that guarantees >=1 ref opts in with
+    # ORA_PREPUSH_REQUIRE_REFS=1 (push-live-backup.py; git passes the env to the hook).
+    if not pushrefs and os.environ.get("ORA_PREPUSH_REQUIRE_REFS") == "1":
+        sys.stderr.write("pre-push BLOCKED (fail-closed): zero ref lines on stdin while "
+                         "ORA_PREPUSH_REQUIRE_REFS=1 -- the caller guaranteed a ref to push, so "
+                         "the shim did not hand this scan git's ref lines.\n")
+        return 1
+    for local_ref, local_sha, remote_ref, remote_sha in pushrefs:
         if set(local_sha) == {ZERO_RE}:
             continue  # ref deletion — nothing new is pushed
         rng = rev_range(local_sha, remote_sha, baseline)
