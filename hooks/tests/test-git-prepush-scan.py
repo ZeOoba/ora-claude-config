@@ -655,6 +655,162 @@ else:
                "already-public commit (2026-07-25 false positive, resolved)",
                _r.returncode == 0, "exit=%s err=%s" % (_r.returncode, _r.stderr[:500]))
 
+# --- Compressed blobs (audit finding prepush-scan-blind-to-compressed-transcripts, 2026-11-08) ---
+# `git log -p` prints "Binary files differ" for a .gz/.tgz/.zip, so a roster term or a credential
+# inside one reached the remote unscanned. The gate now decompresses every compressed blob the
+# pushed range adds or modifies and scans its text; a compressed blob it cannot read BLOCKS while a
+# roster is active. Driven IN-PROCESS with a synthetic roster (no env override exists on purpose:
+# the pre-push gate runs in a model-controlled shell, so an override would be a bypass).
+import gzip as _gzip
+import io as _io
+import tarfile as _tarfile
+import zipfile as _zipfile
+
+
+def _gz(text):
+    return _gzip.compress(text.encode("utf-8"))
+
+
+def _tgz(members):
+    buf = _io.BytesIO()
+    with _tarfile.open(fileobj=buf, mode="w:gz") as tf:
+        for name, text in members.items():
+            data = text.encode("utf-8")
+            info = _tarfile.TarInfo(name)
+            info.size = len(data)
+            tf.addfile(info, _io.BytesIO(data))
+    return buf.getvalue()
+
+
+def _zip(members):
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        for name, text in members.items():
+            zf.writestr(name, text)
+    return buf.getvalue()
+
+
+def _mk_repo_bytes(files):
+    """Like _mk_repo, but writes raw bytes for each {relpath: bytes}."""
+    origin_dir = _mk_bare_origin_with_seed()
+    repo = gitfixture.blank_repo(prefix="pps-gz-", identity=("t@example.invalid", "t"))
+    for cmd in (["git", "-C", repo, "remote", "add", "origin", origin_dir],
+                ["git", "-C", repo, "fetch", "-q", "origin"]):
+        subprocess.run(cmd, capture_output=True)
+    for rel, data in files.items():
+        full = os.path.join(repo, rel)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as fh:
+            fh.write(data)
+    subprocess.run(["git", "add", "-A"], cwd=repo, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "x"], cwd=repo, capture_output=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo,
+                         capture_output=True, text=True).stdout.strip()
+    return repo, "refs/heads/main %s refs/heads/main %s\n" % (sha, ZERO)
+
+
+def _main_inproc(repo, stdin_text, terms):
+    saved = (pps.load_terms, sys.stdin, sys.stderr, os.getcwd())
+    err = _io.StringIO()
+    try:
+        pps.load_terms = lambda: list(terms)
+        sys.stdin, sys.stderr = _io.StringIO(stdin_text), err
+        os.chdir(repo)
+        rc = pps.main()
+    finally:
+        pps.load_terms, sys.stdin, sys.stderr = saved[0], saved[1], saved[2]
+        os.chdir(saved[3])
+    return rc, err.getvalue()
+
+
+_GZ_CASES = [
+    ("term inside a .gz transcript", {"logs/a/audit.jsonl.gz": _gz('{"m": "Zephyr Corp teaser"}\n')}, 1),
+    ("term inside a .tgz snapshot member",
+     {"snap/memory.tgz": _tgz({"m/notes.md": "met 9999 Example Ave owner"})}, 1),
+    ("term inside a .zip member", {"out/pack.zip": _zip({"a.txt": "zephyr corp"})}, 1),
+    ("term inside a gzip blob with a misleading extension",
+     {"data/blob.bin": _gz("ZEPHYR CORP portfolio")}, 1),
+    ("corrupt .gz (unreadable) fails closed while a roster is active",
+     {"logs/b/audit.jsonl.gz": b"\x1f\x8b\x08\x00" + b"\x00" * 20}, 1),
+    ("clean .gz is allowed", {"logs/c/audit.jsonl.gz": _gz('{"m": "quarterly summary"}\n')}, 0),
+    ("clean .tgz is allowed", {"snap/clean.tgz": _tgz({"m/x.md": "nothing here"})}, 0),
+]
+for _lbl, _files, _want in _GZ_CASES:
+    _repo, _stdin = _mk_repo_bytes(_files)
+    _rc, _err = _main_inproc(_repo, _stdin, TERMS)
+    expect("compressed: %s -> exit %d" % (_lbl, _want), _rc == _want, "rc=%s err=%s" % (_rc, _err[:300]))
+    expect("compressed: %s -> never echoes a term" % _lbl,
+           not any(t in _err.lower() for t in TERMS), _err[:300])
+
+# A credential inside a .gz blocks even with NO active roster (the credential scan is independent).
+_repo, _stdin = _mk_repo_bytes({"logs/d/audit.jsonl.gz": _gz("key sk-ant-api03-" + "z" * 20 + "\n")})
+_rc, _err = _main_inproc(_repo, _stdin, [])
+expect("compressed: credential inside a .gz blocks with no active roster", _rc == 1, _err[:300])
+expect("compressed: credential block names the archive path", "audit.jsonl.gz" in _err, _err[:300])
+# An unreadable compressed blob blocks even with NO active roster: its credential scan is
+# unproven (review 2026-11-08, D2 -- same rule as an unimportable pattern module).
+_repo, _stdin = _mk_repo_bytes({"logs/e/audit.jsonl.gz": b"\x1f\x8b\x08\x00" + b"\x00" * 20})
+_rc, _err = _main_inproc(_repo, _stdin, [])
+expect("compressed: corrupt .gz with NO active roster still blocks", _rc == 1, "rc=%s err=%s" % (_rc, _err[:300]))
+
+# Adversarial review of this fix (2026-11-08): each repro pinned.
+_tar_with_inner_gz = _io.BytesIO()
+with _tarfile.open(fileobj=_tar_with_inner_gz, mode="w:gz") as _tf:
+    _inner = _gz("zephyr corp")  # only the tar path + nested gzip finds this
+    _ti = _tarfile.TarInfo("m/inner.gz")
+    _ti.size = len(_inner)
+    _tf.addfile(_ti, _io.BytesIO(_inner))
+_REVIEW_CASES = [
+    ("D1/D3 term only in a zip member NAME", {"out/a.zip": _zip({"zephyr corp loi.txt": "clean"})}),
+    ("D3 term only in a tar member NAME", {"snap/b.tgz": _tgz({"zephyr corp/x.md": "clean"})}),
+    ("D4 zip with a 64-byte prefix (self-extracting shape)",
+     {"out/sfx.bin": b"\x00" * 64 + _zip({"a.txt": "zephyr corp"})}),
+    ("D5 plaintext after a zip end-of-central-directory",
+     {"out/tail.zip": _zip({"a.txt": "clean"}) + b"zephyr corp"}),
+    ("D7 gzip nested inside a tar.gz member", {"snap/nested.tgz": _tar_with_inner_gz.getvalue()}),
+]
+for _lbl, _files in _REVIEW_CASES:
+    _repo, _stdin = _mk_repo_bytes(_files)
+    _rc, _err = _main_inproc(_repo, _stdin, TERMS)
+    expect("compressed review: %s -> blocks" % _lbl, _rc == 1, "rc=%s err=%s" % (_rc, _err[:300]))
+    expect("compressed review: %s -> never echoes a term" % _lbl,
+           not any(t in _err.lower() for t in TERMS), _err[:300])
+# D2: the size cap is PER BLOB -- an oversize archive must not switch off the scan of another.
+_saved_cap = pps.COMPRESSED_MAX_BYTES
+try:
+    pps.COMPRESSED_MAX_BYTES = 4096
+    _repo, _stdin = _mk_repo_bytes({"a/cred.gz": _gz("key sk-ant-api03-" + "z" * 20 + "\n"),
+                                    "b/bomb.gz": _gzip.compress(b"\x00" * 100000)})
+    _rc, _err = _main_inproc(_repo, _stdin, [])
+    expect("compressed review: D2 per-blob cap -- the readable credential .gz is still reported",
+           _rc == 1 and "a/cred.gz" in _err and "credential" in _err, _err[:400])
+    expect("compressed review: D2 the oversize blob is reported as unscannable (blocks)",
+           "b/bomb.gz" in _err and "fail-closed" in _err, _err[:400])
+finally:
+    pps.COMPRESSED_MAX_BYTES = _saved_cap
+# Round-2 review (2026-11-08): classification is BY CONTENT, so git attributes or a NUL-free
+# prefix cannot hide an archive; a path carrying a term is withheld from the report.
+_R2 = [
+    ("R1 committed .gitattributes `*.gz diff`",
+     {".gitattributes": b"*.gz diff\n", "logs/f/audit.jsonl.gz": _gz("zephyr corp")}),
+    ("R2 9 KB NUL-free prefix before a zip", {"inst.sh": b"#!/bin/sh\n" + b"echo x\n" * 1300
+                                              + _zip({"a.txt": "zephyr corp"})}),
+    ("R4 archive path itself carries the term", {"zephyr corp/x.gz": _gz("zephyr corp")}),
+]
+for _lbl, _files in _R2:
+    _repo, _stdin = _mk_repo_bytes(_files)
+    _rc, _err = _main_inproc(_repo, _stdin, TERMS)
+    expect("compressed review: %s -> blocks" % _lbl, _rc == 1, "rc=%s err=%s" % (_rc, _err[:300]))
+    expect("compressed review: %s -> never echoes a term" % _lbl,
+           not any(t in _err.lower() for t in TERMS), _err[:300])
+# R1 via an UNCOMMITTED .git/info/attributes (invisible in the pushed range).
+_repo, _stdin = _mk_repo_bytes({"logs/g/audit.jsonl.gz": _gz("zephyr corp")})
+os.makedirs(os.path.join(_repo, ".git", "info"), exist_ok=True)
+with open(os.path.join(_repo, ".git", "info", "attributes"), "w", encoding="utf-8") as _fh:
+    _fh.write("*.gz diff\n")
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("compressed review: R1 .git/info/attributes `*.gz diff` -> blocks", _rc == 1, _err[:300])
+
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-scan tests: %d/%d passed" % (passed, len(results)))
 if passed != len(results):
