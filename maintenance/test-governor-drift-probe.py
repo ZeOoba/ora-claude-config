@@ -3427,6 +3427,79 @@ def test_interim_checklist_refute_round2_unit():
 # ls-tree / cat-file. What it FLAGS is unchanged; only WHERE it reads.
 # --------------------------------------------------------------------------------------------
 
+# --- AU v4.44/v4.45 per-property refi-LOAN-basis wording (2026-11-09) ------------------------
+# ora-skills#228 restated the DSCR floor as "DSCR at a loan sized to 65% LTV" / "a 65%-LTV loan"
+# across acquisition-underwriting, deal-comparison, model-bulk-edit and portfolio-growth. None of
+# those shapes matched an existing refi-construct suppressor, so the bare-proximity LTV pass read
+# the ratified per-property 65 as "LTV governor 65% != canonical 40%" -- 43 false positives on the
+# daily doctrine guard (2026-11-09 review). Representative sentences lifted from the real lines.
+_V445_CLEAN_LINES = (
+    "| v4.45 | 2026-11-08 | Gabriel in-turn ruling 2026-11-08 | Floor DSCR at a 65%-LTV loan uses "
+    "stabilized NOI, the NOI the refi is sized on; Year-1 DSCR reported separately. |",
+    "- **DSCR floor (per-property governor -- v3.8; reported on every UNDERWRITE; floor basis restated "
+    "v4.44, Gabriel in-turn ratification 2026-11-08):** DSCR at a loan sized to **65% LTV** "
+    "(per-property, on the same value basis as the UNDERWRITE refi). Report the 65%-LTV DSCR alongside "
+    "the IRR floor line on every screen.",
+    "SCREEN: inline verdict block (ledger precedent citations -> gates -> floors incl. per-property "
+    "DSCR at a 65%-LTV loan on stabilized NOI (v4.45; Year-1 DSCR reported beside it).",
+    "**FLOOR FLAG (Ruling 5):** DSCR <1.25x at a loan sized to 65% LTV per-property, on the "
+    "acquisition-underwriting refi value basis -- while this DSCR flag stays on the levered 65%-LTV "
+    "basis = flag, not a kill.",
+    "- v1.8 (2026-11-08): Floor DSCR NOI basis stated. Scoring bands, point values and governor "
+    "constants unchanged (DSCR 1.25x; 65% per-property; 40% aggregate). A rescale of the DSCR bands "
+    "to the 65%-LTV distribution (triage row X2) is pending Gabriel's ratification.",
+    "Test DSCR at a loan sized to 65% LTV per-property, on the acquisition-underwriting refi value "
+    "basis. If DSCR at 65% LTV falls below 1.25x, the refi is sized down under lesser-of sizing.",
+    "The 65%-LTV DSCR floor test above is the per-deal underwriting check for a specific "
+    "acquisition, and a projection never sizes its debt to it.",
+    "floors incl. per-property DSCR at a 65%-LTV loan and the 10-yr unlevered IRR floor (v4.33) -> "
+    "quality/economics/combined table -> levered IRR line (reported only, v4.33) -> bear-mode state "
+    "-> portfolio-LTV governor + concentration state -> P(exec)/expected.",
+    "the test is all-cash -- the deal adds no acquisition debt to its numerator, per "
+    "acquisition-underwriting STAGE 2.3 v4.29 -- while this DSCR flag stays on the levered 65%-LTV "
+    "basis) = flag, not a kill.",
+)
+
+
+def test_v445_refi_loan_basis_wording_stays_clean_unit():
+    """The ratified per-property 65 stated as the DSCR floor's LOAN basis is not aggregate drift."""
+    m = _load_probe_module()
+    for line in _V445_CLEAN_LINES:
+        out = m.scan_line(line)
+        assert not any("65" in o for o in out), (
+            "v4.44/v4.45 refi-loan-basis wording must not flag 65; line=%r got=%r" % (line, out))
+    print("  PASS test_v445_refi_loan_basis_wording_stays_clean_unit")
+
+
+def test_v445_refi_loan_basis_value_locked_unit():
+    """VALUE-LOCK: the same loan-basis shapes with any figure other than the ratified 65 still flag."""
+    m = _load_probe_module()
+    for val in ("70", "75", "55", "80"):
+        for tmpl in ("DSCR floor tested at a %s%%-LTV loan (governor).",
+                     "DSCR floor: DSCR at a loan sized to %s%% LTV per-property governor.",
+                     "Governor constants: per-property LTV %s%%; DSCR measured at a %s%%-LTV loan.",
+                     "The DSCR floor governor: if DSCR at %s%% LTV falls below 1.25x, flag."):
+            line = tmpl % ((val,) * tmpl.count("%s"))
+            out = m.scan_line(line)
+            assert any(val in o for o in out), (
+                "non-ratified %s%% in loan-basis shape must flag; line=%r got=%r" % (val, line, out))
+    print("  PASS test_v445_refi_loan_basis_value_locked_unit")
+
+
+def test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit():
+    """VETO: a 65 in loan-basis shape that is declared AS the aggregate/acquisition ceiling flags."""
+    m = _load_probe_module()
+    for line in ("Aggregate LTV governor is now a 65%-LTV loan on every deal.",
+                 "Portfolio governor: size every loan to 65% LTV going forward.",
+                 "Acquisition LTV governor: a loan sized to 65% LTV, hard cap.",
+                 "The buy-box LTV governor is a 65% LTV loan.",
+                 "From now on a 65%-LTV loan is the aggregate governor."):
+        out = m.scan_line(line)
+        assert any("65" in o for o in out), (
+            "65 declared as aggregate/acquisition governor must flag; line=%r got=%r" % (line, out))
+    print("  PASS test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit")
+
+
 _DRIFT_LINE = "DSCR governor floor 1.60x\n"
 _CLEAN_LINE = "Governor: DSCR >= 1.25x, LTV <= 40% aggregate.\n"
 
@@ -3663,6 +3736,29 @@ def test_committed_ref_scan_fails_loud_e2e():
     print("  PASS test_committed_ref_scan_fails_loud_e2e")
 
 
+def test_committed_ref_scan_dedupes_same_line_across_refs_e2e():
+    """A drift line present at both refs/heads/main and origin/main (local main lagging, so the
+    blobs differ and line numbers shift) is reported ONCE, not once per ref."""
+    import tempfile
+    m = _load_probe_module()
+    with tempfile.TemporaryDirectory() as d:
+        repo = _make_skills_repo(d)
+        _write_rel(repo, "s/SKILL.md", _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "drift at main")
+        _write_rel(repo, "s/SKILL.md", "new first line\n" + _DRIFT_LINE)
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-q", "-m", "origin moved ahead")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+        _git(repo, "reset", "-q", "--hard", "HEAD~1")
+        code, out, err = _run_main_over(m, _skills_target(m, repo))
+        assert code == 1, "drift must still flag (got %r)\n%s\n%s" % (code, out, err)
+        n = sum(1 for ln in out.splitlines() if "s/SKILL.md@" in ln.replace("\\", "/"))
+        assert n == 1, "same drift line at two refs must be reported once, got %d:\n%s" % (n, out)
+        assert "DRIFT DETECTED (1)" in out, out
+    print("  PASS test_committed_ref_scan_dedupes_same_line_across_refs_e2e")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -3811,6 +3907,10 @@ def main():
     test_stabilization_qualifier_does_not_mask_reversed_word_order_unit()
     test_stabilization_qualifier_veto_covers_arming_vocabulary_unit()
     test_stabilization_qualifier_does_not_mask_year_YYYY_dates_unit()
+    test_v445_refi_loan_basis_wording_stays_clean_unit()
+    test_v445_refi_loan_basis_value_locked_unit()
+    test_v445_refi_loan_basis_declared_as_aggregate_or_acquisition_still_flags_unit()
+    test_committed_ref_scan_dedupes_same_line_across_refs_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 
