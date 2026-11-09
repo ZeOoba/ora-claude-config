@@ -270,6 +270,13 @@ class CanaryTest(unittest.TestCase):
         ok, why = plb.canary_scan(self._hermetic_real_scan("{}"))
         self.assertTrue(ok, why)
 
+    def test_real_scan_blocks_the_canary_with_a_loaded_roster(self):
+        # REFUTE 2026-11-09: the {} variant alone is blind to a regression that skips the
+        # compressed/credential scan only while a roster is loaded. Synthetic term only.
+        roster = '{"synthetic": {"active": true, "always": ["zz-not-in-any-blob"]}}'
+        ok, why = plb.canary_scan(self._hermetic_real_scan(roster))
+        self.assertTrue(ok, why)
+
     def test_real_scan_without_terms_fails_the_canary_without_claiming_it_allowed(self):
         # The CI state since #440: the scan BLOCKS (exit 1, terms unreadable) on the starved
         # stdin. The canary must still fail (that block proves nothing about the guard), but
