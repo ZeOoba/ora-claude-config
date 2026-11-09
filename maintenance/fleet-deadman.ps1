@@ -74,6 +74,25 @@ function Get-PublishVerdict($pr) {
     return @{ Ok = $false; Problem = ('publish-fleet-heartbeat.py --status returned unexpected exit ' + $pr.Rc) }
 }
 
+function Get-OffboxVerdict($r) {
+    # Returns @{ Ok; Problem } for push-live-backup.py --check (2026-11-08). 0 = live HEAD is on a
+    # remote ref (or pending within grace); 1 = not off-box past grace OR the last backup push
+    # failed; 2 = could not look. A timeout or any other exit is UNKNOWN, never ok.
+    if ($r.TimedOut) {
+        return @{ Ok = $false; Problem = 'push-live-backup.py --check TIMED OUT - live branch off-box state UNKNOWN, not clean' }
+    }
+    $first = (@((($r.Out | Out-String) -split "`r?`n") | Where-Object { $_ -and $_ -notmatch '^RESULT_JSON=' }) | Select-Object -First 1)
+    if ($r.Rc -eq 0) { return @{ Ok = $true; Problem = $null } }
+    if ($r.Rc -eq 1) {
+        return @{ Ok = $false; Problem = ('LIVE BRANCH NOT OFF-BOX: ' + $first +
+                                          ' - live/primary-checkout history would be lost with this disk') }
+    }
+    if ($r.Rc -eq 2) {
+        return @{ Ok = $false; Problem = ('push-live-backup.py --check COULD NOT LOOK (exit 2): ' + $first + ' - off-box state UNKNOWN, not clean') }
+    }
+    return @{ Ok = $false; Problem = ('push-live-backup.py --check returned unexpected exit ' + $r.Rc) }
+}
+
 function Invoke-PyBounded($py, [string[]]$pyArgs, [int]$TimeoutSec = 120) {
     # Added 2026-09-22. Runs a child with a hard wall-clock limit and returns
     # @{ Out; Rc; TimedOut }. Before this, both python calls below were unbounded: a child
@@ -406,6 +425,22 @@ try {
         if ($v.Ok) { $okBits += 'heartbeat-publish=ok' } else { $problems += $v.Problem }
     }
 
+    # (6) Live branch off-box (2026-11-08). ~/.claude sits on live/primary-checkout, whose
+    # commits reach GitHub only via push-live-backup.py (CC/MCP task ora-live-branch-offbox-backup,
+    # daily) pushing it to backup/live-primary. --check fetches and alarms when the oldest live
+    # commit on no remote ref is past the grace window, or when the last backup push left its
+    # failure marker (gate block, lease rejection, refusal). Fetch failure = could not look.
+    $plb = Join-Path $env:USERPROFILE '.claude\maintenance\push-live-backup.py'
+    if (-not (Test-Path $plb)) {
+        $problems += 'push-live-backup.py MISSING - the live branch off-box backup is unmonitored'
+    } else {
+        $py = 'C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe'
+        if (-not (Test-Path $py)) { $py = 'python' }
+        $lr = Invoke-PyBounded $py @($plb, '--check') 240
+        $lv = Get-OffboxVerdict $lr
+        if ($lv.Ok) { $okBits += 'live-offbox=ok' } else { $problems += $lv.Problem }
+    }
+
     if ($problems.Count -eq 0) {
         Log ('OK: ' + ($okBits -join '; ') + '; last send ' + $sendAgeH + 'h ago')
         if (Test-Path $alert) { Remove-Item $alert -Force }
@@ -435,7 +470,9 @@ sessions; Roaming + MSIX LocalCache mirror, biggest-then-newest, GUIDs never har
 (2) per-fleet liveness via newest lastRunAt (fallback registry mtime); (3) send-log.txt freshness;
 (4) phantom dispatch via maintenance\phantom-dispatch-probe.py (the only check here that does
 NOT trust lastRunAt); (5) heartbeat publish via maintenance\publish-fleet-heartbeat.py --status
-(marker left by push-fleet-heartbeat.ps1 when the GitHub publish failed).
+(marker left by push-fleet-heartbeat.ps1 when the GitHub publish failed); (6) live branch off-box
+via maintenance\push-live-backup.py --check (live HEAD on no remote ref past grace, or the last
+backup push to backup/live-primary failed -- see maintenance\_state\live-backup-push-failed.json).
 NOTE: during a Composio key-rotation window, sends fail so send-log stays stale even if tasks
 run -- the first SUCCESSFUL send after rotation clears this. Both fleets fire only while the
 Desktop app is open -- if a registry is stale, check the app is running before re-creating tasks.

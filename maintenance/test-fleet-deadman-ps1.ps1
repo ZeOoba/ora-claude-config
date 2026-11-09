@@ -149,6 +149,18 @@ Expect 'publish exit 1 is a problem'                     (($v.Ok -eq $false) -an
 $v = Get-PublishVerdict @{ TimedOut = $false; Rc = 3; Out = '' }
 Expect 'publish unexpected exit is a problem, not ok'    (($v.Ok -eq $false) -and ($v.Problem -match 'unexpected exit 3'))
 
+# --- (6) live branch off-box (push-live-backup.py --check, 2026-11-08)
+$v = Get-OffboxVerdict @{ TimedOut = $true; Rc = $null; Out = '' }
+Expect 'offbox timeout is a problem, not ok'             (($v.Ok -eq $false) -and ($v.Problem -match 'TIMED OUT'))
+$v = Get-OffboxVerdict @{ TimedOut = $false; Rc = 0; Out = "[CONTAINED] 0 pending commit(s)`nRESULT_JSON={}" }
+Expect 'offbox exit 0 is ok'                             (($v.Ok -eq $true) -and ($null -eq $v.Problem))
+$v = Get-OffboxVerdict @{ TimedOut = $false; Rc = 1; Out = "[NOT_OFFBOX] NOT_OFFBOX: 41 live commit(s)`nRESULT_JSON={}" }
+Expect 'offbox exit 1 is a problem carrying the reason'  (($v.Ok -eq $false) -and ($v.Problem -match 'LIVE BRANCH NOT OFF-BOX') -and ($v.Problem -match '41 live commit') -and ($v.Problem -notmatch 'RESULT_JSON'))
+$v = Get-OffboxVerdict @{ TimedOut = $false; Rc = 2; Out = '[COULD_NOT_LOOK] fetch failed' }
+Expect 'offbox exit 2 is could-not-look, not ok'         (($v.Ok -eq $false) -and ($v.Problem -match 'COULD NOT LOOK'))
+$v = Get-OffboxVerdict @{ TimedOut = $false; Rc = 7; Out = '' }
+Expect 'offbox unexpected exit is a problem, not ok'     (($v.Ok -eq $false) -and ($v.Problem -match 'unexpected exit 7'))
+
 # --- AST checks on the scripts' main bodies (round-2 merge-gate findings, 2026-09-22) ---
 # Regex over source text was defeated by trivial respellings; everything below walks the AST.
 $T = [System.Management.Automation.Language.Ast]
@@ -265,6 +277,22 @@ Expect 'main body calls Get-PublishVerdict and branches on its .Ok' (($gpv.Count
 # publish raises no alarm at all.
 Expect 'a not-ok publish verdict is appended to $problems' (($vOkIfs.Count -ge 1) -and
     (@($vOkIfs | Where-Object { $_.ElseClause -and ($_.ElseClause.Extent.Text -match '\$problems\s*\+=\s*\$v\.Problem') }).Count -ge 1))
+
+# (6) live off-box: the verdict must come from push-live-backup.py --check's own result and
+# a not-ok verdict must land in $problems.
+$govCalls = @(Cmds $ast 'Get-OffboxVerdict' | Where-Object { -not (InsideFunction $_ 'Get-OffboxVerdict') })
+$lrRhs = @(AssignRhs $ast '$lr')
+Expect ('Get-OffboxVerdict is fed $lr, and $lr comes from Invoke-PyBounded on $plb --check (' + ($lrRhs -join ' ; ') + ')') (
+    ($govCalls.Count -ge 1) -and
+    (@($govCalls | Where-Object { ((@($_.CommandElements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text })) -join ' ') -ne '$lr' }).Count -eq 0) -and
+    ($lrRhs.Count -eq 1) -and ($lrRhs[0] -match "^Equals Invoke-PyBounded \`$py @\(\`$plb, '--check'"))
+$lvIfs = AllOf $ast { param($n) $n -is [System.Management.Automation.Language.IfStatementAst] -and
+                                $n.Clauses[0].Item1.Extent.Text -match '^\$lv\.Ok$' }
+Expect 'a not-ok off-box verdict is appended to $problems' (($lvIfs.Count -ge 1) -and
+    (@($lvIfs | Where-Object { $_.ElseClause -and ($_.ElseClause.Extent.Text -match '\$problems\s*\+=\s*\$lv\.Problem') }).Count -ge 1))
+$plbAssign = @(AssignRhs $ast '$plb')
+Expect ('$plb points at maintenance\push-live-backup.py (' + ($plbAssign -join ' ; ') + ')') (
+    ($plbAssign.Count -eq 1) -and ($plbAssign[0] -match "maintenance\\push-live-backup\.py'"))
 
 # R3-F3: the pause call must pass the fleet's own label, and those labels must be the
 # carve-out table's keys -- a typo'd or wrong property silently disables the carve-out.
