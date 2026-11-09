@@ -17,7 +17,10 @@ Usage:
 --current-file / --stage-map-file are always files, never stdin -- Windows cp1252 stdin
 decoding mangles UTF-8 em-dashes/arrows (see feedback_append_event_log_stdin_encoding.md).
 Exit 0 = ran fine (transitions may be zero). Exit 2 = could not read an input file
-(fail loud, not silent).
+(fail loud, not silent). Exit 3 = refused: a snapshot row is absent from --current-file
+(apparent partial fetch; --allow-shrink accepts a deliberate removal). Exit 4 = refused: the
+snapshot is missing, unreadable or not a JSON object (re-seed with --bootstrap). Exits 3/4
+write nothing and emit no transitions.
 """
 import argparse
 import datetime as dt
@@ -38,18 +41,21 @@ DISPOSITION_TOKENS = {"PASS", "SKIP", "DROP", "PARK", "CLOSE", "TERMINATE"}
 
 
 def load_snapshot(path):
-    """Read the snapshot JSON file. Returns {} if missing or unparseable -- never
-    raises; the CLI decides what "fail loud" means for its own inputs, not this
-    internal state file."""
+    """Read the snapshot JSON file. Returns None if missing, unreadable or not a JSON
+    object -- never raises. None is NOT an empty baseline (2026-11-08 audit
+    deal-stage-reconciler-empty-snapshot-fail-open): treating it as {} made every live
+    row a first-seen "transition", i.e. mass false event_log entries and ledger rows,
+    and the shrink guard (then count-only) could not catch it. main() refuses (exit 4)
+    unless --bootstrap re-seeds deliberately."""
     if not os.path.isfile(path):
-        return {}
+        return None
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
-        return {}
+        return None
     if not isinstance(data, dict):
-        return {}
+        return None
     return data
 
 
@@ -141,6 +147,10 @@ def main(argv=None):
     ap.add_argument("--bootstrap", action="store_true",
                      help="seed the snapshot from --current-file with ZERO diff output "
                           "(first-run only -- never logs pre-existing state as a change)")
+    ap.add_argument("--allow-shrink", action="store_true",
+                     help="accept snapshot rows that are absent from --current-file "
+                          "(a deliberate Notion delete/archive); without it such a run is "
+                          "refused (exit 3) as an apparent partial fetch")
     ap.add_argument("--date", default=None,
                      help="YYYY-MM-DD to stamp entries with (default: today)")
     a = ap.parse_args(argv)
@@ -172,10 +182,21 @@ def main(argv=None):
 
     date = a.date or dt.date.today().isoformat()
     snapshot = load_snapshot(a.snapshot_file)
-    if len(current) < len(snapshot):
+    if snapshot is None:
         sys.stderr.write(
-            "current-file has fewer rows (%d) than the snapshot (%d) -- refusing to "
-            "overwrite (possible partial Notion fetch)\n" % (len(current), len(snapshot)))
+            "snapshot %s is missing, unreadable or not a JSON object -- refusing to diff "
+            "against an empty baseline (every row would read as a new transition). Re-seed "
+            "deliberately with --bootstrap.\n" % a.snapshot_file)
+        return 4
+    # KEY-SET guard, not a count guard: a partial fetch padded by new rows (or a page-id
+    # format change) keeps the count while dropping real rows.
+    dropped = set(snapshot) - set(current)
+    if dropped and not a.allow_shrink:
+        sys.stderr.write(
+            "current-file is missing %d snapshot row(s) (current has %d rows, the snapshot "
+            "has %d; fewer rows or swapped keys) -- refusing to overwrite (possible partial "
+            "Notion fetch). Pass --allow-shrink if the rows were deliberately removed.\n"
+            % (len(dropped), len(current), len(snapshot)))
         return 3
     transitions = diff_stages(current, snapshot)
     out = []

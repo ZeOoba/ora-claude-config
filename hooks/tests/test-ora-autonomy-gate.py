@@ -1992,6 +1992,9 @@ SOCIAL_BLOCK = (
     {"action": "UPDATE", "broadcastGuid": "g", "mode": "PUBLISH_NOW", "confirmed": True},
     {"action": "UPDATE", "broadcastGuid": "g", "content": "x", "confirmed": True},   # may be scheduled
     {"action": "FUTURE_ACTION", "confirmed": True},
+    # E4 (#427 review, 2026-11-08): an EXPLICIT null mode is not the documented default. Only an
+    # absent key or "DRAFT" is provably a draft; how the connector treats null is unverified.
+    {"action": "CREATE", "channelId": "c1", "content": "x", "mode": None, "confirmed": True},
 )
 SOCIAL_MALFORMED = (
     {"action": "CREATE", "channelId": "c1", "content": "x", "confirmed": "true"},

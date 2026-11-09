@@ -811,7 +811,137 @@ with open(os.path.join(_repo, ".git", "info", "attributes"), "w", encoding="utf-
 _rc, _err = _main_inproc(_repo, _stdin, TERMS)
 expect("compressed review: R1 .git/info/attributes `*.gz diff` -> blocks", _rc == 1, _err[:300])
 
-passed = sum(1 for ok, _ in results if ok)
+# --- UTF-16 text inside archives (audit E6, 2026-11-08) ------------------------------
+# A UTF-16 member decoded as utf-8 with errors="ignore" keeps only the ASCII bytes
+# interleaved with NULs, so "zephyr corp" became "z\0e\0p..." and never matched.
+
+
+def _zip_bytes(members):
+    buf = _io.BytesIO()
+    with _zipfile.ZipFile(buf, "w", _zipfile.ZIP_DEFLATED) as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+    return buf.getvalue()
+
+
+_U16 = [
+    ("UTF-16LE member WITH BOM in a .zip",
+     {"out/u16.zip": _zip_bytes({"a.txt": "notes: zephyr corp".encode("utf-16")})}),
+    ("UTF-16LE member WITHOUT BOM in a .zip",
+     {"out/u16le.zip": _zip_bytes({"a.txt": "notes: zephyr corp".encode("utf-16-le")})}),
+    ("UTF-16BE member WITHOUT BOM in a .zip",
+     {"out/u16be.zip": _zip_bytes({"a.txt": "notes: zephyr corp".encode("utf-16-be")})}),
+    ("UTF-16LE text inside a .gz",
+     {"logs/u16.gz": _gzip.compress("zephyr corp".encode("utf-16"))}),
+]
+for _lbl, _files in _U16:
+    _repo, _stdin = _mk_repo_bytes(_files)
+    _rc, _err = _main_inproc(_repo, _stdin, TERMS)
+    expect("utf-16: %s -> blocks" % _lbl, _rc == 1, "rc=%s err=%s" % (_rc, _err[:300]))
+    expect("utf-16: %s -> never echoes a term" % _lbl,
+           not any(t in _err.lower() for t in TERMS), _err[:300])
+_repo, _stdin = _mk_repo_bytes({"out/u16c.zip": _zip_bytes(
+    {"a.txt": ("key sk-ant-api03-" + "z" * 20).encode("utf-16")})})
+_rc, _err = _main_inproc(_repo, _stdin, [])
+expect("utf-16: credential in a UTF-16 zip member blocks with no roster", _rc == 1, _err[:300])
+_repo, _stdin = _mk_repo_bytes({"out/u16ok.zip": _zip_bytes(
+    {"a.txt": "quarterly summary".encode("utf-16")})})
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("utf-16: clean UTF-16 zip member is allowed", _rc == 0, "rc=%s err=%s" % (_rc, _err[:300]))
+# REFUTE 2026-11-08: a BARE UTF-16 file (no archive) is "Binary files differ" to `git log -p`;
+# Windows PowerShell 5.1's `>` / Out-File write exactly this.
+_repo, _stdin = _mk_repo_bytes({"notes/ps.txt": "met with zephyr corp\r\n".encode("utf-16")})
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("utf-16: bare UTF-16 file (not archived) with a term blocks", _rc == 1,
+       "rc=%s err=%s" % (_rc, _err[:300]))
+expect("utf-16: bare UTF-16 block never echoes a term",
+       not any(t in _err.lower() for t in TERMS), _err[:300])
+_repo, _stdin = _mk_repo_bytes({"notes/ps2.txt": ("key sk-ant-api03-" + "z" * 20).encode("utf-16-le")})
+_rc, _err = _main_inproc(_repo, _stdin, [])
+expect("utf-16: bare BOM-less UTF-16LE credential blocks with no roster", _rc == 1, _err[:300])
+_repo, _stdin = _mk_repo_bytes({"notes/ok.txt": "quarterly summary\r\n".encode("utf-16"),
+                                "img/blank.bin": b"\x89PNG\r\n" + b"\x00" * 4000})
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("utf-16: clean bare UTF-16 file and a NUL-heavy binary are allowed", _rc == 0,
+       "rc=%s err=%s" % (_rc, _err[:300]))
+# REFUTE round 2: NUL code units must terminate a value. sc.exe-shaped UTF-16LE output with an
+# EMPTY password field followed by NUL padding must not read as a password; a real one must.
+_sc = ("[SC] ChangeServiceConfig SUCCESS\r\npassword=".encode("utf-16-le") + b"\x00\x00" * 8
+       + "DisplayName=Zephyr Service\r\n".encode("utf-16-le"))
+_repo, _stdin = _mk_repo_bytes({"logs/sc-out.txt": _sc})
+_rc, _err = _main_inproc(_repo, _stdin, [])
+expect("utf-16: sc.exe shape (password= + NULs + DisplayName=) is allowed", _rc == 0,
+       "rc=%s err=%s" % (_rc, _err[:300]))
+for _lbl, _data in (("plain", "password=Hunter2Secret9\r\n".encode("utf-16")),
+                    ("NUL-terminated", "password=Hunter2Secret9".encode("utf-16-le")
+                     + b"\x00\x00" * 8 + "DisplayName=x".encode("utf-16-le"))):
+    _repo, _stdin = _mk_repo_bytes({"logs/real-%s.txt" % _lbl.replace(" ", ""): _data})
+    _rc, _err = _main_inproc(_repo, _stdin, [])
+    expect("utf-16: real UTF-16 password (%s) is still caught" % _lbl,
+           _rc == 1 and "password" in _err.lower(), "rc=%s err=%s" % (_rc, _err[:300]))
+expect("utf-16: _text_views decodes a BOM-less UTF-16LE buffer",
+       any("zephyr corp" in v for v in pps._text_views("xx zephyr corp".encode("utf-16-le"))))
+expect("utf-16: _text_views leaves plain utf-8 as a single view",
+       pps._text_views(b"plain ascii text") == ["plain ascii text"])
+
+# --- Merge commits (audit prepush-scan-skips-merge-commit-diffs + E6 merge half) -----
+# `git log -p` prints NO diff for a merge commit, so content introduced only by a merge's own
+# conflict resolution (an "evil merge") reached the remote unscanned.
+
+
+def _evil_merge_repo(evil_text, evil_rel="base.txt", archive=None):
+    """main: base -> (side branch edits side.txt) + (main edits main.txt) -> merge whose
+    resolution ALSO writes `evil_text` into `evil_rel` (and optionally adds `archive`
+    bytes as evil.zip) -- content that exists in NEITHER parent."""
+    repo, _ = _mk_repo_bytes({"base.txt": b"clean base\n"})
+    g = lambda *a: subprocess.run(["git"] + list(a), cwd=repo, capture_output=True, text=True)
+    g("checkout", "-q", "-b", "side")
+    with open(os.path.join(repo, "side.txt"), "w", encoding="utf-8") as fh:
+        fh.write("side work\n")
+    g("add", "-A"); g("commit", "-qm", "side")
+    g("checkout", "-q", "-")
+    with open(os.path.join(repo, "main.txt"), "w", encoding="utf-8") as fh:
+        fh.write("main work\n")
+    g("add", "-A"); g("commit", "-qm", "main")
+    g("merge", "--no-ff", "--no-commit", "side")
+    if evil_text is not None:
+        with open(os.path.join(repo, evil_rel), "a", encoding="utf-8") as fh:
+            fh.write(evil_text)
+    if archive is not None:
+        with open(os.path.join(repo, "evil.zip"), "wb") as fh:
+            fh.write(archive)
+    g("add", "-A"); g("commit", "-qm", "merge side")
+    sha = g("rev-parse", "HEAD").stdout.strip()
+    parents = g("rev-list", "--parents", "-n", "1", "HEAD").stdout.split()
+    assert len(parents) == 3, "fixture must be a real two-parent merge"
+    return repo, "refs/heads/main %s refs/heads/main %s\n" % (sha, ZERO)
+
+
+_repo, _stdin = _evil_merge_repo("resolution note: zephyr corp\n")
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("merge: roster term added ONLY in a merge resolution blocks", _rc == 1,
+       "rc=%s err=%s" % (_rc, _err[:300]))
+expect("merge: never echoes the term", not any(t in _err.lower() for t in TERMS), _err[:300])
+_repo, _stdin = _evil_merge_repo("token sk-ant-api03-" + "q" * 20 + "\n", evil_rel="notes.md")
+_rc, _err = _main_inproc(_repo, _stdin, [])
+expect("merge: credential added ONLY in a merge resolution blocks", _rc == 1,
+       "rc=%s err=%s" % (_rc, _err[:300]))
+_repo, _stdin = _evil_merge_repo(None, archive=_zip({"a.txt": "zephyr corp"}))
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("merge: compressed blob added ONLY in a merge resolution is decompressed + blocks",
+       _rc == 1, "rc=%s err=%s" % (_rc, _err[:300]))
+_repo, _stdin = _evil_merge_repo(None)
+_rc, _err = _main_inproc(_repo, _stdin, TERMS)
+expect("merge: a clean merge is allowed", _rc == 0, "rc=%s err=%s" % (_rc, _err[:300]))
+# A combined-diff (`diff --cc`) section must start its own file attribution, or it is folded
+# into the PREVIOUS section -- and silently dropped when that section is an exempt test path.
+_body = ("diff --git a/hooks/tests/test-x.py b/hooks/tests/test-x.py\n+fixture only\n"
+         "diff --cc notes.md\n++token sk-ant-api03-" + "q" * 20 + "\n")
+_leaks = pps._sp.scan_diff(_body)
+expect("merge: scan_diff attributes a `diff --cc` section to its own path (not the exempt one)",
+       any(p == "notes.md" for p, _ in _leaks), repr(_leaks))
+
+passed =sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-scan tests: %d/%d passed" % (passed, len(results)))
 if passed != len(results):
     # A real failure is a FAIL even when end-to-end cases were also skipped: the
