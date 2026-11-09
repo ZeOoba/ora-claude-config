@@ -1969,6 +1969,93 @@ def test_hubspot_cms_unknown_or_malformed_fails_closed():
     print("PASS test_hubspot_cms_unknown_or_malformed_fails_closed")
 
 
+# Gate 3b (audit finding confidentiality-guard-misses-hubspot-social-posts, 2026-11-08):
+# manage_social_posts publishes to the firm's public social channels. Live schema (read
+# 2026-11-08): action CREATE|UPDATE|CANCEL, confirmed (the connector's own preview gate),
+# mode DRAFT|SCHEDULE|PUBLISH_NOW, plus broadcastGuid/channelId/content/fileIds/mediaUrl/
+# publishAt/title; additionalProperties false.
+SOCIAL = HUBSPOT + "manage_social_posts"
+SOCIAL_PASS = (
+    {"action": "CREATE", "channelId": "c1", "content": "x"},                         # preview
+    {"action": "CREATE", "channelId": "c1", "content": "x", "mode": "PUBLISH_NOW",
+     "confirmed": False},                                                            # preview
+    {"action": "UPDATE", "broadcastGuid": "g", "content": "x"},                      # preview
+    {"action": "CREATE", "channelId": "c1", "content": "x", "confirmed": True},      # draft
+    {"action": "CREATE", "channelId": "c1", "content": "x", "mode": "DRAFT", "confirmed": True},
+    {"action": "CANCEL", "broadcastGuid": "g", "confirmed": True},                   # unschedule
+)
+SOCIAL_BLOCK = (
+    {"action": "CREATE", "channelId": "c1", "content": "x", "mode": "PUBLISH_NOW", "confirmed": True},
+    {"action": "CREATE", "channelId": "c1", "content": "x", "mode": "SCHEDULE", "confirmed": True},
+    {"action": "CREATE", "channelId": "c1", "content": "x", "publishAt": "2027-01-01T10:00:00Z",
+     "confirmed": True},
+    {"action": "UPDATE", "broadcastGuid": "g", "mode": "PUBLISH_NOW", "confirmed": True},
+    {"action": "UPDATE", "broadcastGuid": "g", "content": "x", "confirmed": True},   # may be scheduled
+    {"action": "FUTURE_ACTION", "confirmed": True},
+)
+SOCIAL_MALFORMED = (
+    {"action": "CREATE", "channelId": "c1", "content": "x", "confirmed": "true"},
+    {"action": "CREATE", "channelId": "c1", "content": "x", "confirmed": True, "extra": 1},
+    {"action": 5, "confirmed": True},
+    {"action": "CREATE", "mode": 5, "confirmed": True},
+)
+
+
+def test_hubspot_social_posts_previews_drafts_and_cancel_pass():
+    for ti in SOCIAL_PASS:
+        rc, _, err = run_hook(tool_payload(SOCIAL, ti))
+        assert rc == 0, "%r writes nothing public and must pass, got %s (%s)" % (ti, rc, err)
+    print("PASS test_hubspot_social_posts_previews_drafts_and_cancel_pass")
+
+
+def test_hubspot_social_posts_publish_schedule_update_block():
+    for ti in SOCIAL_BLOCK:
+        rc, _, err = run_hook(tool_payload(SOCIAL, ti))
+        assert rc == 2, "%r can make a post public and must block, got %s (%s)" % (ti, rc, err)
+    print("PASS test_hubspot_social_posts_publish_schedule_update_block")
+
+
+def test_hubspot_social_posts_malformed_fails_closed():
+    for ti in SOCIAL_MALFORMED + (None, "CREATE", []):
+        rc, _, err = run_hook(tool_payload(SOCIAL, ti))
+        assert rc == 2, "%r must fail closed, got %s (%s)" % (ti, rc, err)
+    print("PASS test_hubspot_social_posts_malformed_fails_closed")
+
+
+def test_hubspot_social_posts_token_is_dedicated_and_single_use():
+    """Review C8 (2026-11-08): a broadcast to an external network cannot be pulled back, and is one
+    call, so it gets its OWN single-use tier -- a multi-use CMS editing token must not authorize it."""
+    p = tool_payload(SOCIAL, SOCIAL_BLOCK[0])
+    d = fresh_sessions_dir()
+    mint(d, "allow-hubspot-social-publish", "hubspot-social-publish")
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 0, "a hubspot-social-publish token must authorize one publish, got %s (%s)" % (rc, err)
+    rc, _, err = run_hook(p, sessions_dir=d)
+    assert rc == 2, "the social token is single-use; a second publish must block, got %s (%s)" % (rc, err)
+    d2 = fresh_sessions_dir()
+    mint(d2, "allow-hubspot-cms-write", "hubspot-cms-write")
+    rc, _, err = run_hook(p, sessions_dir=d2)
+    assert rc == 2, "a CMS write token must not authorize a social publish, got %s (%s)" % (rc, err)
+    d3 = fresh_sessions_dir()
+    mint(d3, "allow-external-send", "external-send", recipients=["c1"])
+    rc, _, err = run_hook(p, sessions_dir=d3)
+    assert rc == 2, "an external-send token must not authorize a social publish, got %s (%s)" % (rc, err)
+    print("PASS test_hubspot_social_posts_token_is_dedicated_and_single_use")
+
+
+def test_hubspot_social_posts_cancel_and_draft_pass_only_in_minimal_shape():
+    """Review C3a: a CANCEL or DRAFT create carrying scheduling/edit fields is not provably inert."""
+    for ti in ({"action": "CANCEL", "broadcastGuid": "g", "mode": "PUBLISH_NOW", "confirmed": True},
+               {"action": "CANCEL", "broadcastGuid": "g", "publishAt": "2027-01-01T00:00:00Z",
+                "confirmed": True},
+               {"action": "CANCEL", "broadcastGuid": "g", "content": "x", "confirmed": True},
+               {"action": "CREATE", "broadcastGuid": "g", "channelId": "c1", "content": "x",
+                "mode": "DRAFT", "confirmed": True}):
+        rc, _, err = run_hook(tool_payload(SOCIAL, ti))
+        assert rc == 2, "%r must need a token, got %s (%s)" % (ti, rc, err)
+    print("PASS test_hubspot_social_posts_cancel_and_draft_pass_only_in_minimal_shape")
+
+
 def test_hubspot_cms_token_authorizes_multi_use_and_is_not_interchangeable():
     p = tool_payload(HUBSPOT + "manage_blog_post", {"action": "PUBLISH", "contentId": 1})
     d = fresh_sessions_dir()
@@ -2177,7 +2264,8 @@ def test_settings_matcher_registers_every_gated_tool():
     gated = [MS365 + n for n in ("outlook_send_mail", "outlook_send_draft", "outlook_forward_mail",
                                  "teams_send_chat_message", "teams_send_channel_message",
                                  "teams_reply_channel_message", "outlook_update_draft")]
-    gated += [HUBSPOT + n for n in ("manage_blog_post", "manage_landing_page", "manage_website_page")]
+    gated += [HUBSPOT + n for n in ("manage_blog_post", "manage_landing_page", "manage_website_page",
+                                    "manage_social_posts")]
     gated += ["mcp__netlify__project-updater"]
     for t in gated:
         assert covered(t), "%s is gated in the script but not selected by the settings matcher" % t

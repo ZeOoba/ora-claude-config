@@ -47,7 +47,13 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            website-page PUBLISH/REMOVE/RESTORE/NAV_* with an explicit mode="PREVIEW" writes
            nothing and passes. Override: allow-hubspot-cms-write (scope hubspot-cms-write,
            10 min, multi-use: a page edit is several calls ending in a publish).
-  Gates 1b/1c/1d/1e/1f/3 match on the tool-name SUFFIX after the last "__", so a reinstalled
+  GATE 3b — HubSpot manage_social_posts (public social channels, 2026-11-08): previews
+           (confirmed absent/false), a minimal confirmed DRAFT create (no broadcastGuid, no
+           publishAt) and a minimal CANCEL pass; anything else confirmed (PUBLISH_NOW,
+           SCHEDULE, publishAt, UPDATE, unknown action) needs allow-hubspot-social-publish
+           (scope hubspot-social-publish, 5 min, SINGLE-USE). Unknown keys and non-bool
+           `confirmed` fail closed.
+  Gates 1b/1c/1d/1e/1f/3/3b match on the tool-name SUFFIX after the last "__", so a reinstalled
   connector with a new id stays gated. They fail CLOSED on any anomaly once a gated tool is
   named, including a payload too malformed to parse. This gate covers Claude Code sessions
   and the CC/MCP scheduled fleet only; hooks do not run inside Cowork (LAMS) sessions.
@@ -444,6 +450,11 @@ WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
 # content needs explicit permission). Multi-use on purpose: a page edit is several calls that
 # end in a publish, and each call would otherwise need its own approval.
 HUBSPOT_CMS_WRITE = Tier("allow-hubspot-cms-write", "hubspot-cms-write", 600)
+# HubSpot social posts (Gate 3b, 2026-11-08): a broadcast to an external network is ONE call and
+# cannot be pulled back, so it gets its own short, single-use tier -- a CMS editing token must not
+# carry it (adversarial review C8: one cms-write token authorized unlimited broadcasts).
+HUBSPOT_SOCIAL_PUBLISH = Tier("allow-hubspot-social-publish", "hubspot-social-publish", 300,
+                              single_use=True)
 
 # Mutating shell ops; if one of these co-occurs with a site-path marker in a Bash
 # command, treat it as a write into the oxfordra.net tree (Gate 2). Read-only verbs
@@ -895,6 +906,14 @@ def check_mcp(tool_name, session_id, tool_input=None):
             raise
         except Exception:
             block_shape(tool_name, session_id)
+    # Gate 3b: same fail-closed wrapper, its own try.
+    if short == _HUBSPOT_SOCIAL:
+        try:
+            _check_social_post(tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
     # Gate 1d: same fail-closed wrapper, its own try so a bug in one check cannot mask the other.
     if short in _MS365_CALENDAR:
         try:
@@ -982,6 +1001,41 @@ _HUBSPOT_CMS_READS = {
 # Operations that take mode="PREVIEW", which the connector documents as writing nothing.
 _HUBSPOT_PREVIEWABLE = frozenset(("PUBLISH", "REMOVE", "REMOVE_SECTION", "RESTORE_REVISION",
                                   "NAV_SET_ITEM", "NAV_REPLACE_MENU", "NAV_REMOVE_ITEM"))
+
+
+# Gate 3b (audit finding confidentiality-guard-misses-hubspot-social-posts, 2026-11-08).
+# Schema read 2026-11-08 from the live connector (additionalProperties:false). The connector
+# writes nothing unless confirmed=true; a confirmed CREATE in DRAFT mode (the default) and a
+# CANCEL (scheduled -> draft) make nothing public. Everything else confirmed -- PUBLISH_NOW,
+# SCHEDULE, a publishAt, ANY UPDATE (the target may already be scheduled, so an edit can go
+# live), an unknown action -- needs the single-use hubspot-social-publish token (a broadcast
+# cannot be recalled; a multi-use CMS editing token must not carry it).
+_HUBSPOT_SOCIAL = "manage_social_posts"
+_SOCIAL_KEYS = frozenset(("action", "broadcastGuid", "channelId", "confirmed", "content", "fileIds",
+                          "mediaUrl", "mode", "publishAt", "title"))
+
+
+def _check_social_post(tool_name, tool_input, session_id):
+    if not isinstance(tool_input, dict) or set(tool_input) - _SOCIAL_KEYS:
+        block_shape(tool_name, session_id)
+    confirmed = tool_input.get("confirmed")
+    if confirmed is not None and not isinstance(confirmed, bool):
+        block_shape(tool_name, session_id)
+    action, mode = tool_input.get("action"), tool_input.get("mode")
+    if not isinstance(action, str) or (mode is not None and not isinstance(mode, str)):
+        block_shape(tool_name, session_id)
+    if confirmed is not True:
+        return  # preview: the connector writes nothing
+    # Only the MINIMAL inert shapes pass (review C3a): a CANCEL with nothing but its id, and a new
+    # DRAFT that names no existing post and carries no schedule.
+    if action == "CANCEL" and set(tool_input) <= {"action", "broadcastGuid", "confirmed"}:
+        return
+    if action == "CREATE" and mode in (None, "DRAFT") and "publishAt" not in tool_input \
+            and "broadcastGuid" not in tool_input:
+        return
+    if not override_active(session_id, HUBSPOT_SOCIAL_PUBLISH):
+        block("HubSpot social post %s%s -- public social channel" % (action[:20],
+              (" " + mode[:20]) if mode else ""), HUBSPOT_SOCIAL_PUBLISH, session_id)
 
 
 def _nonblank(value):
