@@ -33,6 +33,12 @@ ever ADDS files or escalates to FULL, never removes):
   3. An ALWAYS_RUN file is not among the discovered tests -> FULL (the cheap guard set
      silently shrinking must not shrink the gate with it).
   4. ALWAYS_RUN files are selected.
+  4b. Path classes (PATH_CLASS_ADDS): a changed path matching a class pattern selects
+     that class's tests. This is for tests that scan a whole tree by glob and never
+     name the individual file, which rules 6-8 cannot see. If a mapped test is not
+     among the discovered tests -> FULL (same reasoning as rule 3; checked only when
+     the class is hit, and the selector's own ALWAYS_RUN test asserts every mapped
+     file exists, so a rename fails on the very next push of any kind).
   5. A changed path that IS a discovered test file is selected.
   6. Naming convention: a changed file `<dir>/<name>.<ext>` selects every test whose
      normalised stem is `test-<name>` or starts with `test-<name>-` (`_` and `-` are
@@ -52,12 +58,14 @@ ever ADDS files or escalates to FULL, never removes):
 
 KNOWN, ACCEPTED LIMITS of the light tier (why CI's full run stays authoritative): a
 dependency that is not named in text anywhere (dynamic discovery, globbing a whole
-directory, reading a live state file by a computed path) is invisible to rules 6-8, and
+directory, reading a live state file by a computed path) is invisible to rules 6-8
+unless a PATH_CLASS_ADDS entry maps it, and
 tests run against the pushing checkout's WORKING TREE, not the pushed commit (unchanged
 from the full tier). Both are covered by the full suite in CI before merge, EXCEPT tests
 that ENV-SKIP in CI (they need gitignored live files); those are covered only by FULL
 runs in the main checkout, which is why rule 2 escalates on "confidential" paths.
 """
+import fnmatch
 import os
 import re
 from collections import namedtuple
@@ -109,6 +117,40 @@ GENERIC_BASENAMES = frozenset((
     "skill.md", "readme.md", "__init__.py", "index.md", "index.html", "index.js",
     "config.json", "manifest.json", "state.json", "notes.md",
 ))
+# Rule 4b. Pattern -> tests, matched SEGMENT BY SEGMENT (fnmatch per "/" segment, same
+# segment count, case-insensitive), so "*" never crosses a directory. Add a class here
+# whenever a test globs a tree instead of naming its files.
+#
+# scheduled-tasks/<id>/*.md -- the cross-spec lints. Each iterates the live
+# scheduled-tasks/*/ spec tree, so a SKILL.md push (keyed only by <id>, rule 7) reached
+# them only when the test happened to name that id: verified 2026-11-08 on origin/main,
+# a push of scheduled-tasks/ora-am-brief/SKILL.md went LIGHT (33/173 tests) without the
+# send-contract lint; for ora-pm-ledger (10/173) two of the three were absent.
+# Measured runtimes 2026-11-08: 4s / 18s / 3s.
+#   * test_send_contract_spec_lint.py -- no spec retries send-via-outlook.ps1 exit 5/6
+#     (R-05; a retry routes around Hard Invariant 1 or double-sends).
+#   * test_scheduled_task_run_guard.py -- fleet conformance of the double-fire run guard
+#     (block-sentinel) wiring in every live spec. It falls back to the first *.md when a
+#     task folder has no SKILL.md, hence "*.md" rather than "SKILL.md".
+#   * test_task_spec_command_paths.py -- spec command lines use forward-slash paths
+#     (an unquoted backslash is an escape in the Bash tool).
+# Deliberately NOT here:
+#   * test-doctrine-integrity-probe.py -- excluded for COST (58s), not because it is
+#     unrelated: test_guard_liveness_real_no_orphans concatenates every live SKILL.md,
+#     and commit-provenance-guard's only invocation point is
+#     scheduled-tasks/ora-weekly-hygiene/SKILL.md, so dropping that line orphans a guard.
+#     Rule 7 currently selects it for that spec only because the test happens to mention
+#     "ora-weekly-hygiene" for an unrelated check (incidental, not a mapping). The CI
+#     full run is the backstop for that spec and for every other spec's guard wiring.
+#   * test_send_contract_suite.py -- it runs scheduled-tasks/_shared/test-*.ps1, not the
+#     specs, and names those files itself.
+PATH_CLASS_ADDS = {
+    "scheduled-tasks/*/*.md": (
+        "maintenance/_tests/test_send_contract_spec_lint.py",
+        "maintenance/_tests/test_scheduled_task_run_guard.py",
+        "maintenance/_tests/test_task_spec_command_paths.py",
+    ),
+}
 MIN_STEM_KEY_LEN = 6
 # Where importer closure (rule 8) looks: non-test code under these trees.
 CLOSURE_ROOTS = ("hooks/", "maintenance/")
@@ -154,6 +196,24 @@ def _name_matches(test_rel, changed_rel):
     return got == want or got.startswith(want + "-")
 
 
+def matches_class(path, pattern):
+    """Rule 4b: segment-exact, case-insensitive glob match ("*" stays inside one segment)."""
+    got = _norm(path).lower().split("/")
+    want = pattern.lower().split("/")
+    return len(got) == len(want) and all(fnmatch.fnmatchcase(g, w) for g, w in zip(got, want))
+
+
+def class_adds(changed):
+    """{test: [why, ...]} for every PATH_CLASS_ADDS class hit by a changed path."""
+    out = {}
+    for pattern, adds in PATH_CLASS_ADDS.items():
+        hits = [p for p in changed if matches_class(p, pattern)]
+        if hits:
+            for a in adds:
+                out.setdefault(a, []).append("path class %s: %s" % (pattern, hits[0]))
+    return out
+
+
 def is_full_trigger(path):
     path = _norm(path)
     return (path in FULL_TRIGGER_FILES
@@ -191,6 +251,10 @@ def select_tests(changed_paths, test_files, read_text, closure_files=()):
     missing = [a for a in ALWAYS_RUN if a not in test_files]
     if missing:
         return full("always-run test(s) not discovered: " + ", ".join(missing))
+    by_class = class_adds(changed)
+    missing = sorted(a for a in by_class if a not in test_files)
+    if missing:
+        return full("path-class test(s) not discovered: " + ", ".join(missing))
 
     reasons = {}
 
@@ -201,6 +265,9 @@ def select_tests(changed_paths, test_files, read_text, closure_files=()):
 
     for a in ALWAYS_RUN:
         add(a, "always-run")
+    for a, whys in by_class.items():
+        for why in whys:
+            add(a, why)
 
     texts = {}
     unreadable = set()
