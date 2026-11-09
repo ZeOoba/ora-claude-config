@@ -252,7 +252,79 @@ def _looks_like_code_reference(raw_value):
     return bool(_DOTTED_IDENT_RE.match(v)) and not any(c.isdigit() for c in v)
 
 
-def _value_is_reference(value, trailing=""):
+# ENV-VAR-NAME discriminator (2026-11-09). A prose/log line naming WHICH env var holds a
+# secret -- `JWS secret = SOME_ENV_VAR_NAME),` in the memory event_log -- tripped the
+# widened name matcher and blocked the pre-push scan. An UNQUOTED UPPER_SNAKE identifier
+# is a name, not a value. Every guard below cuts in the SAFE (keep-the-finding) direction:
+#   * UPPER_SNAKE only: >=1 underscore, no lowercase, no leading/trailing/double `_`.
+#     Real keys are mixed-case (AWS secret key) or lowercase; an all-caps alnum token
+#     with NO underscore (base32/hex) still fires.
+#   * each segment is LETTERS then <=4 trailing digits (S3, OAUTH2, X509), or a pure-digit
+#     segment of <=4 -- a letter AFTER a digit, or a long digit run, is entropy and fires.
+#   * length <=64 (env names are short; long values are suspect).
+#   * UNQUOTED only -- a QUOTED upper-snake literal on the value side is a hardcoded
+#     value in code, not a name (regression test carries the shape).
+#   * the match must END the token: the routed value class stops at `/`, `+`, `=`, `;`,
+#     `)` ..., so a symbol-bearing secret could be truncated to an UPPER_SNAKE-looking
+#     prefix. Only whitespace / end of text may follow, optionally after <=4 closing
+#     delimiters (`),` in the event_log). A delimiter followed by MORE token characters
+#     keeps the finding (REFUTE 2026-11-09, C3: `;k9x` / `)k9x` tails were suppressed).
+#   * SPACED separator only: whitespace on BOTH sides of the `=`/`:` (prose `secret = X`,
+#     code `TOKEN = OTHER_CONST`). Every machine-config assignment form -- `.env`, shell
+#     `export`, YAML `key: v`, JSON `"k": v`, CLI `--flag=v` -- has no space before the
+#     separator and keeps firing; that is where generated secrets actually live.
+#   * no known credential prefix (AKIA/ASIA..., GHP_, XOX., NFP_, NTN_, SBP_, SK_...).
+# ACCEPTED residual (REFUTE 2026-11-09, C1 restated): an UNQUOTED value written in the
+# SPACED form whose shape is UPPER_SNAKE is suppressed whether it is a name or a secret.
+# That covers a human-chosen upper-snake passphrase AND a machine-generated secret
+# printed as `_`-joined all-caps groups (measured on random synthetic groups: ~1-10% of
+# A-Z0-9 / base32 / hex groupings fit; 100% of pure A-Z groupings). No mainstream issuer
+# found emits that shape. The spaced unquoted form is NOT confined to prose: it is the
+# normal syntax of INI / configparser files, Java `.properties`, Makefile `VAR = value`,
+# `.gitconfig`, and `.npmrc` / `pip.conf`. An UPPER_SNAKE-shaped secret written in any of
+# those files IS SUPPRESSED by this rule (in source code the same form is an identifier).
+# A path-type gate that keeps those file types firing is an open follow-up decision.
+# Quoting the value, an unspaced separator, or a digit-interleaved group fires.
+_ENV_NAME_RE = re.compile(r"[A-Z]+[0-9]{0,4}(?:_(?:[A-Z]+[0-9]{0,4}|[0-9]{1,4}))+")
+_ENV_NAME_MAX = 64
+_ENV_NAME_END_RE = re.compile(r"^[,;)\]}>|`]{0,4}(?:\s|$)")
+# scan_text passes this many chars of trailing context; a `$` inside it is a REAL end of
+# text only because the delimiter run (<=4) is shorter than the window.
+_TRAILING_WINDOW = 32
+_SPACED_SEP_RE = re.compile(r"\s[:=]\s")
+_KNOWN_SECRET_PREFIXES = (
+    "AKIA", "ASIA", "AGPA", "AIDA", "AROA", "ANPA", "ANVA", "AIPA", "ABIA", "ACCA",
+    "GHP_", "GHO_", "GHU_", "GHS_", "GHR_", "GITHUB_PAT_", "GLPAT", "XOXB", "XOXP",
+    "XOXA", "XOXS", "XAPP", "NFP_", "NTN_", "SBP_", "SK_", "PK_", "RK_", "AK_",
+)
+
+
+def _looks_like_env_var_name(raw_value, trailing="", matched=""):
+    v = raw_value.strip()
+    sep = _SEP_SPLIT_RE.search(matched or "")
+    # whitespace on BOTH sides of the first separator (sep.start() == 0 cannot happen for
+    # a routed match, whose name side is non-empty; guarded so -1 never wraps around)
+    if not sep or sep.start() == 0 or not _SPACED_SEP_RE.match(matched, sep.start() - 1):
+        return False
+    if not v or len(v) > _ENV_NAME_MAX or not _ENV_NAME_RE.fullmatch(v):
+        return False
+    if not _ENV_NAME_END_RE.match(trailing or ""):
+        return False
+    if v.startswith(_KNOWN_SECRET_PREFIXES):
+        return False
+    # belt-and-braces: no prefix-shaped label may recognize it either (case-folded)
+    for label, rx in SECRET_PATTERNS:
+        if label in _ROUTED_LABELS or label == "password assignment":
+            continue
+        if rx.search(v) or rx.search(v.lower()):
+            return False
+    return True
+
+
+_ROUTED_LABELS = ("secret/token assignment", "generic API key assignment")
+
+
+def _value_is_reference(value, trailing="", matched=""):
     """True when THIS match's own value is an env lookup / template / placeholder / code
     reference rather than a credential. `trailing` is the source text immediately AFTER
     the match, used only to spot a function call -- the routed value class cannot contain
@@ -274,7 +346,8 @@ def _value_is_reference(value, trailing=""):
     return bool(_REFERENCE_VALUE_RE.match(v)
                 or _PLACEHOLDER_SHAPE2_RE.match(v)
                 or (_PLACEHOLDER_WORD_RE.match(v) and not any(c.isdigit() for c in v))
-                or _looks_like_code_reference(v))
+                or _looks_like_code_reference(v)
+                or _looks_like_env_var_name(v, trailing, matched))
 
 
 def scan_text(text):
@@ -305,7 +378,9 @@ def scan_text(text):
             # own match and is judged on its own.
             # Prefix-shaped credentials (nfp_/sk-ant-/ghp_/AKIA) carry their own labels
             # and never route through here, so a real key is unaffected either way.
-            if all(_value_is_reference(_match_value(m.group(0)), text[m.end():m.end() + 2])
+            if all(_value_is_reference(_match_value(m.group(0)),
+                                       text[m.end():m.end() + _TRAILING_WINDOW],
+                                       m.group(0))
                    for m in rx.finditer(text)):
                 continue
         found.add(label)
