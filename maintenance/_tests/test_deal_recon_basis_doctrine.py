@@ -78,6 +78,16 @@ FORBIDDEN = {
 GOVERNOR = "DSCR >= 1.25x; LTV <= 40% portfolio aggregate and a 65% per-property refi ceiling"
 
 
+def pursue_on_upside(text):
+    """Clauses that put PURSUE and value-add/upside together. The exact-wording negative scans
+    let a REWORDED upside route to PURSUE through (REFUTE on fix/vdr-pursue-floor: 'strong
+    value-add upside -> PURSUE-eligible' and 'a compelling value-add story may still be called
+    PURSUE' both passed). After the 2026-11-08 decision no clause may pair the two at all."""
+    clauses = re.split(r"[.;:,]", text)
+    return [c.strip() for c in clauses
+            if re.search(r"PURSUE", c) and re.search(r"value-add|upside", c, re.I)]
+
+
 def forbidden_hits(line):
     stripped = line
     for rx in ALLOWED_NUMERIC:
@@ -89,14 +99,18 @@ REC_MAPPING = {
     "at/above replacement + no value-add path -> PASS": re.compile(
         r"basis at/above replacement with NO credible value-add path to ORA[’']s >8% "
         r"stabilized yield-on-cost " + ARROW + r" PASS;"),
-    "fair (short of floor) + value-add path -> NEEDS MORE": re.compile(
-        r"\*fair\* basis \(below replacement but short of the vintage-ramp floor\) WITH a "
-        r"credible value-add path " + ARROW + r" NEEDS MORE"),
-    "clears floor or clear upside -> PURSUE-eligible": re.compile(
-        r"basis that clears the vintage-ramp floor, or clear value-add upside " + ARROW +
-        r" PURSUE-eligible\."),
-    "no PURSUE on fair basis without upside": re.compile(
-        r"do NOT call PURSUE on a fair-basis deal with no upside path"),
+    # Decision 2026-11-08 (Gabriel): a floor miss caps the call at NEEDS MORE regardless of
+    # upside -- value-add upside is no longer an alternative route to PURSUE.
+    "clears floor -> PURSUE-eligible": re.compile(
+        r"basis that clears the vintage-ramp floor " + ARROW + r" PURSUE-eligible;"),
+    "floor miss -> NEEDS MORE at most, regardless of upside": re.compile(
+        r"basis that misses the vintage-ramp floor " + ARROW +
+        r" NEEDS MORE at most, regardless of value-add upside"),
+    "floor is necessary; upside never substitutes": re.compile(
+        r"Clearing the floor is necessary for PURSUE; value-add upside never substitutes for it\."),
+    "floor miss caps but does not kill": re.compile(
+        r"A floor miss caps the call but is not an automatic kill: do NOT hard-kill on basis "
+        r"alone when a real value-add path exists\."),
 }
 
 # Workflow: the same floor, stated identically at each of the three prompt sites.
@@ -112,12 +126,18 @@ WF_SYNTH_MAPPING = {
     "at/above replacement + no value-add path -> PASS": re.compile(
         r"basis at/above MARKET-SPECIFIC replacement AND no credible value-add path to >8% "
         r"stabilized yield-on-cost -> PASS;"),
-    "fair (short of floor) + value-add path -> NEEDS_MORE": re.compile(
-        r"merely-fair basis \(below replacement but short of the vintage-ramp floor\) WITH a "
-        r"credible value-add path -> NEEDS_MORE"),
-    "all-in basis clears floor or clear upside -> PURSUE": re.compile(
-        re.escape(ALL_IN_WF) + r" that clears the " + WF_FLOOR.pattern +
-        r" OR clear value-add upside -> PURSUE\."),
+    "all-in basis clears floor -> PURSUE": re.compile(
+        re.escape(ALL_IN_WF) + r" that clears the " + WF_FLOOR.pattern + r" -> PURSUE,"),
+    "floor miss -> NEEDS_MORE at most, regardless of upside": re.compile(
+        r"all-in basis that misses the vintage-ramp floor -> NEEDS_MORE at most, regardless of "
+        r"value-add upside"),
+    "floor is necessary; upside never substitutes": re.compile(
+        r"Clearing the floor is NECESSARY for PURSUE; value-add upside never substitutes for it\."),
+}
+# Recon + synthesis state the cap (the comps-basis lens only judges basis; it issues no verdict).
+WF_CAP_SITES = {
+    "recon dispatch": "a floor miss caps the recommendation at NEEDS_MORE regardless of value-add upside",
+    "synthesis": "A floor miss caps the verdict but is not an automatic kill",
 }
 
 _results = []
@@ -184,6 +204,12 @@ def main():
         check("agent: Recommendation maps %s" % name, rx.search(rec) is not None, ascii(rec))
     check("agent: Recommendation drops bare below-replacement PURSUE trigger",
           "below-replacement or clear value-add upside" not in rec, ascii(rec))
+    check("agent: Recommendation drops value-add upside as a PURSUE route",
+          re.search(r"or clear value-add upside", rec, re.I) is None, ascii(rec))
+    check("agent: Recommendation drops the fair-basis + value-add -> NEEDS MORE sub-rule",
+          "*fair* basis" not in rec, ascii(rec))
+    hits = pursue_on_upside(rec)
+    check("agent: no Recommendation clause pairs PURSUE with value-add/upside", not hits, ascii(hits))
 
     # 5b. Negative scans: nothing on the basis / recommendation lines may state a second,
     #     wrong threshold, numerator, denominator or verdict next to the bound clauses.
@@ -200,6 +226,8 @@ def main():
         check("workflow: %s absent" % name, m is None, ascii(m.group(0)) if m else "")
     check("workflow: no bare below-replacement PURSUE trigger",
           re.search(r"below-replacement\s+OR\s+clear value-add upside", wf, re.I) is None)
+    check("workflow: value-add upside is not an alternative PURSUE route anywhere",
+          re.search(r"OR clear value-add upside", wf, re.I) is None)
     for name, marker in WF_SITES.items():
         ln = site_line(wf_lines, marker) or ""
         check("workflow[%s]: exactly one prompt line" % name, bool(ln), marker)
@@ -209,8 +237,13 @@ def main():
         check("workflow[%s]: no stray threshold or wrong-doctrine phrasing" % name, not hits, ascii(hits))
         check("workflow[%s]: binds the full vintage-ramp floor clause" % name,
               WF_FLOOR.search(ln) is not None, ascii(ln[:400]))
-        check("workflow[%s]: a floor miss is a flag, not a kill" % name,
-              "floor miss is a flag, not an automatic kill" in ln, ascii(ln[:300]))
+        check("workflow[%s]: a floor miss is not an automatic kill" % name,
+              "not an automatic kill" in ln, ascii(ln[:300]))
+        hits = pursue_on_upside(ln)
+        check("workflow[%s]: no clause pairs PURSUE with value-add/upside" % name, not hits, ascii(hits))
+        if name in WF_CAP_SITES:
+            check("workflow[%s]: a floor miss caps at NEEDS_MORE" % name,
+                  WF_CAP_SITES[name] in ln, ascii(ln[:300]))
     synth = site_line(wf_lines, WF_SITES["synthesis"]) or ""
     for name, rx in WF_SYNTH_MAPPING.items():
         check("workflow[synthesis]: maps %s" % name, rx.search(synth) is not None, ascii(synth[:600]))
