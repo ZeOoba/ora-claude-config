@@ -1293,9 +1293,13 @@ _settings = os.path.join(os.path.dirname(HOOK_DIR), "settings.json")
 try:
     with open(_settings, encoding="utf-8") as f:
         _entries = json.load(f).get("hooks", {}).get("PreToolUse", [])
+    # The pre.confidentiality-guard-egress-tools row (cc-audit-army 2026-11-09, HIGH 1+2) routes
+    # the action-aware classify_extra surfaces and is pinned in test-egress-tool-coverage.py /
+    # test-matcher-coverage.py; this check stays about the MCP_SEND_SURFACES matcher alone.
     _live = [e.get("matcher", "") for e in _entries
              if any("confidentiality-guard.py" in (h.get("command") or "") for h in e.get("hooks", []))
-             and e.get("matcher", "") != "Edit|Write|MultiEdit"]
+             and e.get("matcher", "") != "Edit|Write|MultiEdit"
+             and not e.get("matcher", "").startswith("PowerShell|Artifact|")]
 except Exception:
     _live = None
 if _live:

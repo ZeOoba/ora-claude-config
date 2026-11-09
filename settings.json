@@ -265,6 +265,33 @@
         ]
       },
       {
+        "matcher": "PowerShell|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__excel__(?!read_|get_|validate_).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/ora-autonomy-gate.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell|NotebookEdit|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/override-mint-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "PowerShell|Artifact|ArtifactData|ArtifactComments|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__[0-9a-f-]{36}__(batch|update|create)|mcp__.*(claude-in-chrome|Claude_Browser)__(form_input|computer|javascript_tool|navigate|browser_batch|upload_image|file_upload)|mcp__excel__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe \"C:/Users/Owner/.claude/hooks/confidentiality-guard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "mcp__Desktop_Commander__write_file|mcp__Desktop_Commander__edit_block|mcp__plugin_desktop-commander_desktop-commander__write_file|mcp__plugin_desktop-commander_desktop-commander__edit_block",
         "hooks": [
           {
@@ -283,7 +310,7 @@
         ]
       },
       {
-        "matcher": "NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf|run_in_terminal)|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -292,7 +319,7 @@
         ]
       },
       {
-        "matcher": "NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "NotebookEdit|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf|run_in_terminal)|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -301,7 +328,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf)",
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|mcp__excel__.*|mcp__.*(write_file|edit_block|move_file|start_process|interact_with_process|write_pdf|run_in_terminal)|PowerShell",
         "hooks": [
           {
             "type": "command",

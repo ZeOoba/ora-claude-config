@@ -118,13 +118,16 @@ test files or on ascii-only-guard.py itself; non-.py targets are never gated.
 
 R-06 (2026-10-19): sensitive-file-guard joined GUARD_CHAIN (before ascii-only-guard,
 which stays last). It has no session_kind dependency (same regex as the inline
-blocker) and fails open. override-mint-guard was ALSO wired in by PR 338 but is now
-TEMPORARILY UNWIRED from both GUARD_CHAIN and BASH_GUARD_CHAIN: override-mint-guard.py
-stays in the repo, UNWIRED, pending the session_kind scan-budget fix (follow-up PR),
-because session_kind can misclassify a real interactive Desktop session as scheduled
-under load and would then block override-token writes. Re-add it to both chains and
-flip tests M11/M12 back once that fix lands. The MCP delete gate (mcp-delete-guard.py)
-is NOT dispatched here: it is MCP-only and has its own settings.json entry.
+blocker) and fails open. override-mint-guard was ALSO wired in by PR 338, unwired by
+PR 342 because session_kind could misclassify a real interactive Desktop session as
+scheduled under load, and RE-WIRED into both chains 2026-11-09 (cc-audit-army HIGH 4)
+once that scan-budget fix (#406, OI-396) merged. Tests M11/M12 assert membership again.
+The MCP delete gate (mcp-delete-guard.py) is NOT dispatched here: it is MCP-only and has
+its own settings.json entry.
+
+PERMISSION-DECISION MERGE (2026-11-09, cc-audit-army HIGH 3): emit_stdout merges
+permissionDecision by severity (deny > ask > allow), not first-emitter-wins. See
+emit_stdout for why arrival order was a live bypass.
 """
 import io
 import importlib.util
@@ -164,8 +167,10 @@ GUARD_CHAIN = [
     # .env/credentials blocker. Live coverage today: Edit/Write/MultiEdit only (via this
     # dispatcher). NotebookEdit + DC write_file/edit_block/move_file/write_pdf need the
     # deferred Task 7 settings.json entry (R-06); audit M65 stays OPEN until it lands.
-    # override-mint-guard is deliberately NOT wired here (temporarily unwired, pending
-    # the session_kind scan-budget fix); see the module docstring.
+    "override-mint-guard",  # R-06, re-wired 2026-11-09 (cc-audit-army HIGH 4) now that
+    # the session_kind scan-budget fix (#406) has merged. No override-token writes from a
+    # scheduled/headless session. Stateless; fails open; session_kind runs only on a
+    # positive override/session-store path match, so ordinary calls pay nothing.
     "ascii-only-guard",  # 2026-09-30 -- non-ASCII into a .py whose module
     # docstring declares ASCII-only. LAST on purpose (style rail, not security).
     # DC write_file/edit_block twins need their OWN settings.json entry.
@@ -203,8 +208,7 @@ BASH_GUARD_CHAIN = [
     # only when they would discard uncommitted work
     "memory-orphan-link-guard",
     "commit-hygiene-guard",
-    # override-mint-guard is deliberately NOT wired here (temporarily unwired, pending
-    # the session_kind scan-budget fix); see the module docstring.
+    "override-mint-guard",  # R-06, re-wired 2026-11-09 (cc-audit-army HIGH 4, #406 merged)
     "winpath-guard",  # 2026-10-23 -- blocks unquoted X:\ paths and "\$" in
     # double-quoted Windows paths (bash silently corrupts both)
     "rewrite-advisory-guard",  # 2026-10-28 -- ADVISORY ONLY (additionalContext, never
@@ -418,6 +422,9 @@ def _dispatch(chain, raw, label, ids, records):
     return 0
 
 
+_DECISION_RANK = {"allow": 0, "ask": 1, "deny": 2}
+
+
 def emit_stdout(chunks):
     """Emit ONE valid JSON object for the harness, or nothing.
 
@@ -445,6 +452,14 @@ def emit_stdout(chunks):
         sys.stdout.write(chunks[0])
         return
     msgs, ctxs, merged = [], [], {}
+    # permissionDecision merges by SEVERITY, never by arrival order (cc-audit-army
+    # 2026-11-09, HIGH 3). The old first-emitter-wins rule let shared-checkout-guard's
+    # warn-only 'allow' (chain position 4) silently cancel a later 'deny' from
+    # eos-claude-md-guard / memory-index-guard / rules-md-guard -- the exact files those
+    # guards exist to protect. The strictest decision wins and carries its own reason;
+    # several decisions at the winning level surface every reason. An unrecognised value
+    # ranks below every known one, so a malformed emitter can never outrank a real deny.
+    decision, reasons = None, []
     for c in chunks:
         try:
             obj = json.loads(c)
@@ -456,9 +471,25 @@ def emit_stdout(chunks):
             if k == "systemMessage":
                 if v:
                     msgs.append(str(v))
-            elif k == "hookSpecificOutput" and isinstance(v, dict):
+            elif k == "hookSpecificOutput":
+                if not isinstance(v, dict):
+                    # A malformed emitter must not poison the merge (REFUTE 2026-11-09: a list
+                    # here made setdefault raise -> exit 1 -> a later guard's deny was lost).
+                    continue
                 hso = merged.setdefault("hookSpecificOutput", {})
+                pd = v.get("permissionDecision")
+                if pd is not None:
+                    pd = pd.strip().lower() if isinstance(pd, str) else None
+                    rank = _DECISION_RANK.get(pd, -1)
+                    best = -2 if decision is None else _DECISION_RANK.get(decision, -1)
+                    why = v.get("permissionDecisionReason")
+                    if rank > best:
+                        decision, reasons = pd, ([str(why)] if why else [])
+                    elif rank == best and why and str(why) not in reasons:
+                        reasons.append(str(why))
                 for hk, hv in v.items():
+                    if hk in ("permissionDecision", "permissionDecisionReason"):
+                        continue  # merged by severity above
                     if hk == "additionalContext":
                         if hv:
                             ctxs.append(str(hv))
@@ -472,6 +503,13 @@ def emit_stdout(chunks):
                         hso.setdefault(hk, hv)
             else:
                 merged.setdefault(k, v)
+    if decision is None or decision not in _DECISION_RANK:
+        decision = None  # nothing valid was emitted: emit no decision rather than garbage
+    if decision is not None:
+        hso = merged.setdefault("hookSpecificOutput", {})
+        hso["permissionDecision"] = decision
+        if reasons:
+            hso["permissionDecisionReason"] = "\n\n".join(reasons)
     if msgs:
         merged["systemMessage"] = "\n\n".join(msgs)
     if ctxs:
