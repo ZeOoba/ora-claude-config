@@ -31,6 +31,8 @@ def _json(p):
 
 
 TARGET = "refs/heads/backup/live-primary"
+GOOD_SCAN = ("def scan_compressed(rng, terms):\n    return [], [], False\n\n"
+             "def main():\n    c_hits, c_leaks, c_bad = scan_compressed(None, [])\n    return 0\n")
 HDR = "To https://github.com/x/y.git\n"
 
 
@@ -62,6 +64,9 @@ class ClassifyPushTest(unittest.TestCase):
         gate = "*\tf00:%s\t[new branch]\n" % TARGET
         self.assertEqual(plb.classify_push(1, gate + "error: failed to push\n", TARGET), "BLOCKED_OR_FAILED")
         self.assertEqual(plb.classify_push(0, gate, TARGET), "BLOCKED_OR_FAILED")
+
+    def test_up_to_date_line_with_nonzero_rc_is_not_success(self):
+        self.assertEqual(plb.classify_push(1, porcelain("=", "[up to date]"), TARGET), "BLOCKED_OR_FAILED")
 
     def test_rc_zero_with_rejected_line_is_not_success(self):
         self.assertEqual(plb.classify_push(0, porcelain("!", "[rejected] (stale info)"), TARGET), "LEASE_REJECTED")
@@ -107,7 +112,7 @@ class GatePreconditionTest(unittest.TestCase):
 
     def _good(self):
         self._write("githooks/pre-push", '#!/bin/sh\npython "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"\n')
-        self._write("hooks/git-prepush-confidential-scan.py", "def scan_compressed(rng, terms):\n    pass\n\nhits = scan_compressed(r, t)\n")
+        self._write("hooks/git-prepush-confidential-scan.py", GOOD_SCAN)
 
     def test_ok(self):
         self._good()
@@ -141,6 +146,49 @@ class GatePreconditionTest(unittest.TestCase):
         self._write("hooks/git-prepush-confidential-scan.py", "def scan_compressed(rng, terms):\n    pass\n")
         ok, why = plb.gate_precondition(self.root, self.hooks)
         self.assertFalse(ok)
+
+    def test_hook_naming_scan_only_in_a_comment(self):
+        # REFUTE 2026-11-08: substring match accepted this
+        self._good()
+        self._write("githooks/pre-push", "#!/bin/sh\nexit 0\n# git-prepush-confidential-scan.py\n")
+        self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0])
+
+    def test_hook_exits_or_execs_before_scan(self):
+        self._good()
+        for early in ("exit 0", "exec true"):
+            self._write("githooks/pre-push", '#!/bin/sh\n%s\npython "$ROOT/hooks/git-prepush-confidential-scan.py"\n' % early)
+            self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0], early)
+
+    def test_real_shim_shape_accepted(self):
+        # the installed SHIM v2 (2026-11-08): conditional `|| exit` lines precede the scan
+        self._good()
+        self._write("githooks/pre-push", '#!/bin/sh\nROOT="$(git rev-parse --show-toplevel)"\n'
+                    'REFS="$(mktemp)" || exit 1\ntrap \'rm -f "$REFS"\' EXIT\ncat > "$REFS"\n'
+                    'python "$ROOT/hooks/git-prepush-doctrine-gate.py" "$@" </dev/null || exit $?\n'
+                    'python "$ROOT/hooks/git-prepush-hook-tests-gate.py" "$@" <"$REFS" || exit $?\n'
+                    'python "$ROOT/hooks/git-prepush-confidential-scan.py" "$@" <"$REFS"\n')
+        self.assertTrue(plb.gate_precondition(self.root, self.hooks)[0])
+
+    def test_scan_mentioning_compressed_only_in_docstring(self):
+        # REFUTE 2026-11-08: a count of 'scan_compressed(' matched the docstring
+        self._good()
+        self._write("hooks/git-prepush-confidential-scan.py",
+                    '"""see scan_compressed() below"""\ndef scan_compressed(rng, terms):\n    pass\n\n'
+                    'def main():\n    a, b, c = [], [], []\n    return 0\n')
+        self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0])
+
+    def test_scan_calling_compressed_outside_main(self):
+        self._good()
+        self._write("hooks/git-prepush-confidential-scan.py",
+                    "def scan_compressed(rng, terms):\n    pass\n\ndef helper():\n    scan_compressed(1, 2)\n\n"
+                    "def main():\n    return 0\n")
+        self.assertFalse(plb.gate_precondition(self.root, self.hooks)[0])
+
+    def test_real_scans_classified_correctly(self):
+        # this checkout's (post-#427) scan passes; the live branch's pre-#427 scan (no
+        # scan_compressed at all) is the refusal case, covered by test_scan_without_compressed_scan
+        root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.assertTrue(plb.scan_main_calls_compressed(_read(os.path.join(root, "hooks", "git-prepush-confidential-scan.py"))))
 
     def test_scan_file_missing(self):
         self._good()
@@ -194,9 +242,27 @@ class OffboxVerdictTest(unittest.TestCase):
         self.assertEqual((v["verdict"], v["rc"]), ("CONTAINED", 0))
 
     def test_pending_within_grace(self):
-        v = plb.offbox_verdict(pending_times=[self.NOW - 3600, self.NOW - 7200], now=self.NOW, grace_hours=26, failed_marker=None)
+        v = plb.offbox_verdict(pending_times=[self.NOW - 3600, self.NOW - 7200], now=self.NOW, grace_hours=26,
+                               failed_marker=None, ok_stamp_age_hours=5.0)
         self.assertEqual((v["verdict"], v["rc"]), ("PENDING_WITHIN_GRACE", 0))
         self.assertEqual(v["pending_count"], 2)
+
+    def test_pending_within_grace_but_backup_stale_or_never_ran(self):
+        # a rebase resets committer time; the ok stamp's age is the independent signal
+        for age in (None, 60.0):
+            v = plb.offbox_verdict(pending_times=[self.NOW - 3600], now=self.NOW, grace_hours=26,
+                                   failed_marker=None, ok_stamp_age_hours=age, stamp_max_hours=48)
+            self.assertEqual((v["verdict"], v["rc"]), ("NOT_OFFBOX", 1), age)
+
+    def test_stale_stamp_alone_is_fine_when_nothing_pending(self):
+        v = plb.offbox_verdict(pending_times=[], now=self.NOW, grace_hours=26, failed_marker=None,
+                               ok_stamp_age_hours=500.0)
+        self.assertEqual(v["rc"], 0)
+
+    def test_all_future_dated_pending_clamps_to_zero_not_negative(self):
+        v = plb.offbox_verdict(pending_times=[self.NOW + 99999], now=self.NOW, grace_hours=26,
+                               failed_marker=None, ok_stamp_age_hours=1.0)
+        self.assertEqual(v["oldest_pending_hours"], 0.0)
 
     def test_not_offbox_past_grace_keys_on_oldest(self):
         v = plb.offbox_verdict(pending_times=[self.NOW - 3600, self.NOW - 30 * 3600], now=self.NOW, grace_hours=26, failed_marker=None)
@@ -216,6 +282,36 @@ class OffboxVerdictTest(unittest.TestCase):
     def test_unreadable_failed_marker_is_a_problem_not_a_pass(self):
         v = plb.offbox_verdict(pending_times=[], now=self.NOW, grace_hours=26, failed_marker={"_unreadable": True})
         self.assertEqual(v["rc"], 1)
+
+
+class CliSurfaceTest(unittest.TestCase):
+    def test_target_is_fixed_not_an_option(self):
+        # REFUTE 2026-11-08: --target main force-rewrote remote main in a scratch repo
+        self.assertEqual(plb.TARGET_REF, "refs/heads/backup/live-primary")
+        import io
+        import contextlib
+        buf = io.StringIO()
+        d = tempfile.mkdtemp(prefix="plb-cli-")
+        self.addCleanup(shutil.rmtree, d, True)
+        with contextlib.redirect_stdout(buf):
+            rc = plb.main(["--check", "--repo", d, "--target", "main"])
+        self.assertEqual(rc, 6)
+        self.assertTrue(buf.getvalue().strip().splitlines()[-1].startswith("RESULT_JSON="))
+
+    def test_non_ascii_detail_cannot_break_result_line(self):
+        # REFUTE 2026-11-08: em-dash in gate stderr + cp1252 stdout crashed print()
+        import io
+        raw = io.BytesIO()
+        cp = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
+        old = sys.stdout
+        sys.stdout = cp
+        try:
+            plb._safe_stdout()
+            print("[BLOCKED] pre-push BLOCKED — �")
+            cp.flush()
+        finally:
+            sys.stdout = old
+        self.assertIn(b"BLOCKED", raw.getvalue())
 
 
 class BeaconsIgnoredTest(unittest.TestCase):
