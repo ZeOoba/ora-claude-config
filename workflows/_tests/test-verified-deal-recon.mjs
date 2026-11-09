@@ -54,6 +54,7 @@ function standardCanned(overrides = {}) {
     'verify:demand-leaseup': null, // simulate a dead verifier agent
     synthesis: {
       verdict: 'NEEDS_MORE', oneLineThesis: 'confirm Phase I', snapshot: 'S', basisRead: 'below replacement',
+      basisClearsFloor: 'NO',
       killRisks: ['env'], preMortem: 'REC found post-close', openItems: ['Phase I'], confidence: 'medium',
     },
   };
@@ -96,6 +97,14 @@ console.log('Test 1: happy path dispatch shape (Recon -> 3 Verify -> Synthesize)
   check('Synthesis PURSUE rule keys on clearing the vintage-ramp floor, not any below-replacement basis',
     synth[0] && /clears the vintage-ramp floor \(65% at\/below 1995 -> 60% at\/above 2005/.test(synth[0].prompt)
       && !/below-replacement OR/i.test(synth[0].prompt) && !/25\s*%/.test(synth[0].prompt));
+  // Decision 2026-11-08 (Gabriel): missing the floor caps the deal at NEEDS_MORE regardless of
+  // upside. Value-add upside is no longer an alternative route to PURSUE.
+  check('Synthesis prompt no longer offers value-add upside as an alternative route to PURSUE',
+    synth[0] && !/OR clear value-add upside/i.test(synth[0].prompt) && !/OR[^.;]{0,40}value-add[^.;]{0,40}-> PURSUE/i.test(synth[0].prompt));
+  check('Synthesis prompt states a floor miss caps the verdict at NEEDS_MORE regardless of upside',
+    synth[0] && /misses the vintage-ramp floor[^.]*NEEDS_MORE[^.]*regardless of (any )?value-add upside/i.test(synth[0].prompt));
+  check('Recon prompt does not invite PURSUE on a floor miss with value-add',
+    recon[0] && /floor miss caps the recommendation at NEEDS_MORE/i.test(recon[0].prompt));
 
   check('phases fired Recon, Verify, Synthesize in order', JSON.stringify(phases) === JSON.stringify(['Recon', 'Verify', 'Synthesize']));
 
@@ -103,7 +112,59 @@ console.log('Test 1: happy path dispatch shape (Recon -> 3 Verify -> Synthesize)
   check('anyFlip true when a surviving verifier flips', result.anyFlip === true);
   check('reconSoloVerdict reflects the recon-only recommendation', result.reconSoloVerdict === 'PURSUE');
   check('final brief is the synthesis output verbatim', result.brief && result.brief.verdict === 'NEEDS_MORE');
+  check('no cap recorded when the synthesis is not PURSUE', result.verdictCap === null);
   check('property field is the brief\'s first line only', result.property === PROPERTY.split('\n')[0]);
+}
+
+// --- Test 1b: deterministic floor cap on the synthesized verdict ---
+// The prompt is advisory; the cap is enforced in code so a synthesizer that still says PURSUE on
+// a floor miss (or without establishing the floor) cannot reach Gabriel as PURSUE.
+console.log('Test 1b: PURSUE without a cleared vintage-ramp floor is capped at NEEDS_MORE');
+{
+  const synthWith = (verdict, basisClearsFloor) => standardCanned({
+    synthesis: {
+      verdict, oneLineThesis: 'value-add story', snapshot: 'S', basisRead: 'fair, short of floor',
+      ...(basisClearsFloor === undefined ? {} : { basisClearsFloor }),
+      killRisks: [], preMortem: 'paid up for upside', openItems: ['rent comps'], confidence: 'medium',
+    },
+  });
+  for (const floor of ['NO', 'UNKNOWN', undefined]) {
+    const { result } = await runWorkflow(SCRIPT, PROPERTY, synthWith('PURSUE', floor));
+    const tag = 'basisClearsFloor=' + JSON.stringify(floor);
+    check(tag + ': PURSUE capped to NEEDS_MORE', result.brief && result.brief.verdict === 'NEEDS_MORE');
+    check(tag + ': cap is recorded (from/to/reason)', !!result.verdictCap && result.verdictCap.from === 'PURSUE'
+      && result.verdictCap.to === 'NEEDS_MORE' && /floor/i.test(result.verdictCap.reason || ''));
+    check(tag + ': ledger row draft carries the capped verdict', typeof result.ledgerRowDraft === 'string'
+      && result.ledgerRowDraft.includes('| NEEDS_MORE |') && !result.ledgerRowDraft.includes('| PURSUE |'));
+    check(tag + ': cap opens an item to re-test basis against the floor', result.brief && result.brief.openItems.some((i) => /floor/i.test(i)));
+  }
+  {
+    const { result } = await runWorkflow(SCRIPT, PROPERTY, synthWith('PURSUE', 'YES'));
+    check('basisClearsFloor=YES: PURSUE stands', result.brief && result.brief.verdict === 'PURSUE');
+    check('basisClearsFloor=YES: no cap recorded', result.verdictCap === null);
+  }
+  for (const v of ['PASS', 'NEEDS_MORE']) {
+    const { result } = await runWorkflow(SCRIPT, PROPERTY, synthWith(v, 'NO'));
+    check(v + ' on a floor miss is left untouched (cap only lowers PURSUE)', result.brief && result.brief.verdict === v && result.verdictCap === null);
+  }
+  {
+    const { calls } = await runWorkflow(SCRIPT, PROPERTY, standardCanned());
+    const synth = calls.find((c) => c.label === 'synthesis');
+    check('Synthesis prompt asks for basisClearsFloor', !!synth && /basisClearsFloor/.test(synth.prompt));
+  }
+  {
+    const src = readFileSync(SCRIPT, 'utf8');
+    check('BRIEF_SCHEMA requires basisClearsFloor (YES/NO/UNKNOWN)',
+      /basisClearsFloor:\{type:'string', enum:\['YES','NO','UNKNOWN'\]\}/.test(src)
+        && /required:\[[^\]]*'basisClearsFloor'[^\]]*\]/.test(src.slice(src.indexOf('const BRIEF_SCHEMA'))));
+  }
+  {
+    // the original synthesis object must not be mutated (it is the agent's raw output)
+    const raw = { verdict: 'PURSUE', oneLineThesis: 't', snapshot: 'S', basisRead: 'b', basisClearsFloor: 'NO',
+      killRisks: [], preMortem: 'p', openItems: [], confidence: 'low' };
+    const { result } = await runWorkflow(SCRIPT, PROPERTY, standardCanned({ synthesis: raw }));
+    check('raw synthesis object not mutated by the cap', raw.verdict === 'PURSUE' && raw.openItems.length === 0 && result.brief !== raw);
+  }
 }
 
 // --- Test 2: args as {property: "..."} object form ---
