@@ -3853,6 +3853,27 @@ def test_shipped_ratified_allowlist_is_well_formed_unit():
     print("  PASS test_shipped_ratified_allowlist_is_well_formed_unit")
 
 
+def test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e():
+    """Deployed at ~/.claude/maintenance/_shared/, the allowlist sits inside a scan root and
+    quotes the exact finding reason it exempts. The probe must not flag its own allowlist
+    (refute 2026-11-09: 39 self-findings, exit 1, would have blocked every push)."""
+    shipped = os.path.join(HERE, "_shared", "governor-drift-ratified-lines.json")
+    with _fixture_home() as home:
+        dest = os.path.join(home, ".claude", "maintenance", "_shared")
+        os.makedirs(dest, exist_ok=True)
+        shutil.copy(shipped, os.path.join(dest, "governor-drift-ratified-lines.json"))
+        r = run_probe(home=home)
+        assert r.returncode == 0, (
+            "deployed allowlist must not trip the probe; got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
+            % (r.returncode, r.stdout, r.stderr))
+        # and the same content under any OTHER name in that root still flags (skip is by name)
+        shutil.copy(shipped, os.path.join(dest, "copy-of-allowlist.json"))
+        r = run_probe(home=home)
+        assert r.returncode == 1 and "copy-of-allowlist.json" in r.stdout, (
+            "a renamed copy must still be scanned; got %d\n%s" % (r.returncode, r.stdout))
+    print("  PASS test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -4007,6 +4028,7 @@ def main():
     test_ratified_line_allowlist_exempts_only_exact_line_e2e()
     test_ratified_line_allowlist_missing_and_malformed_e2e()
     test_shipped_ratified_allowlist_is_well_formed_unit()
+    test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 

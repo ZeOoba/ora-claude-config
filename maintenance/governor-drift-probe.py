@@ -2340,7 +2340,11 @@ def main():
     # Governor-tooling scripts legitimately mention 1.75 / wrong values to detect/restore/
     # test them -> skip them (mirrors self_path).
     skip_names = {"governor-drift-probe.py", "restore-skill-governor.py",
-                  "test-governor-drift-probe.py"}
+                  "test-governor-drift-probe.py",
+                  # the ratified-lines allowlist quotes the finding reason it exempts
+                  # ("LTV governor 65% != canonical 40%") and ratified excerpts; deployed at
+                  # ~/.claude/maintenance/_shared/ it sits inside a scan root (refute 2026-11-09)
+                  os.path.basename(RATIFIED_LINES_PATH)}
     # Append-only history logs NARRATE past/incident values (a deal's "65% LTV financing",
     # a [SPECULATIVE] audit note) that are not live governor declarations -- they legitimately
     # quote off-canonical numbers and would false-positive forever. The LIVING governor lives in
