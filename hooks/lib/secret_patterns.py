@@ -316,7 +316,12 @@ def scan_text(text):
 # is_exempt_path() needs -- scanning it as one blob makes the gate unusable, because a test
 # fixture anywhere in the pushed history would block every push forever. Splitting on the
 # diff header restores per-file attribution.
-_DIFF_HEADER_RE = re.compile(r"^diff --git a/(.+?) b/(.+?)$", re.M)
+# A merge commit scanned with `git log -p --cc` (2026-11-08, prepush-scan-skips-merge-commit-
+# diffs) emits `diff --cc <path>` (or `diff --combined <path>`) headers instead. Each must open
+# its own section: otherwise the merge's hunks are folded into the PREVIOUS file's section and
+# silently dropped whenever that file is an exempt test path.
+_DIFF_HEADER_RE = re.compile(
+    r"^diff (?:--git a/(.+?) b/(.+?)|--(?:cc|combined) (.+?))$", re.M)
 
 
 def scan_diff(diff_text):
@@ -336,7 +341,7 @@ def scan_diff(diff_text):
 
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(diff_text)
-        path = m.group(2)  # b/<path> -- the post-image name
+        path = m.group(2) or m.group(3)  # b/<path> post-image name, or the combined-diff path
         if is_exempt_path(path):
             continue
         labels = scan_text(diff_text[m.start():end])
