@@ -190,12 +190,21 @@ def _maybe_lock(log, lock_held):
         yield locked
 
 
+class MalformedEntryError(ValueError):
+    """The ENTRY itself is malformed -- retrying or spooling cannot help, so this is the
+    ONE error that skips the retry/spool net. A dedicated class (2026-11-08 audit
+    event-log-unicodedecodeerror-is-valueerror): the net used to exempt every ValueError,
+    and UnicodeDecodeError is a ValueError, so a log carrying one undecodable byte made
+    main() raise with the entry neither appended nor spooled. Still a ValueError subclass
+    so existing callers catching ValueError from insert_newest keep working."""
+
+
 def insert_newest(content, entry):
     """Insert `entry` (must start '## ') above the first existing '## ' entry,
     skipping YAML frontmatter so a '## ' inside it is never used as the anchor.
     No existing entries -> append at end. Pure function."""
     if not entry.startswith("## "):
-        raise ValueError("entry must start with a dated '## ' header")
+        raise MalformedEntryError("entry must start with a dated '## ' header")
     entry = entry.rstrip()
     body_start = 0
     if content.startswith("---\n"):
@@ -451,25 +460,26 @@ def _inplace_insert(log, entry, allow_duplicate=False, lock_held=False):
 
 
 def _insert_or_inplace(log, entry, try_inplace, allow_duplicate=False, lock_held=False):
-    """Try the atomic (os.replace) insert; if it fails (not a malformed-entry
-    ValueError) and `try_inplace` is set, fall back to _inplace_insert. Returns
+    """Try the atomic (os.replace) insert; if it fails (not a MalformedEntryError)
+    and `try_inplace` is set, fall back to _inplace_insert. Returns
     True if written, False if recognized as a content-identical duplicate and
     correctly left unwritten (see _atomic_insert) -- both are successful,
     exception-free outcomes; only the caller needs to tell them apart. A
-    ValueError from either path propagates immediately (malformed entry --
-    retrying or falling back cannot help). If both paths fail, raises the
+    MalformedEntryError from either path propagates immediately (retrying or
+    falling back cannot help); any other ValueError -- notably a UnicodeDecodeError
+    reading the log -- is an ordinary failure that retries and, in main(), spools. If both paths fail, raises the
     ATOMIC path's exception, since that's the one callers already log
     per-attempt."""
     try:
         return _atomic_insert(log, entry, allow_duplicate, lock_held)
-    except ValueError:
+    except MalformedEntryError:
         raise
     except Exception as atomic_exc:
         if not try_inplace:
             raise
         try:
             return _inplace_insert(log, entry, allow_duplicate, lock_held)
-        except ValueError:
+        except MalformedEntryError:
             raise
         except Exception:
             raise atomic_exc
@@ -838,8 +848,8 @@ def main(argv=None):
                         print("appended: %s" % header)
                         warn_if_uncommitted_backlog(a.log)
                         return 0
-        except ValueError:
-            raise
+        except MalformedEntryError:
+            raise  # NOT ValueError: a UnicodeDecodeError reading the log must retry + spool
         except Exception as e:
             sys.stderr.write("attempt %d: %s — retrying\n" % (attempt + 1, e))
         time.sleep(0.25 * (attempt + 1))
