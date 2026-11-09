@@ -277,10 +277,20 @@ def scan_text(text, terms):
 # archive cannot switch off the scan of the others. Cost of that choice, accepted deliberately: a
 # push adding an encrypted zip or a zip with an unsupported method (e.g. Deflate64) always blocks;
 # the only way past is a human's `--no-verify`. Do not downgrade this to a warning.
-# RESIDUAL: other binary formats (PDF streams, images, xz/bz2/7z) and UTF-16 text are not decoded;
-# content introduced only by a merge commit's own resolution is not shown by `git log -p` or
-# `git log --raw` without -m/--cc (the plain diff scan has the same gap); history already on the
-# remote is not rescanned; zip entries absent from the central directory are not read.
+# UTF-16 (audit E6, 2026-11-08): every decompressed member / stream is ALSO decoded as UTF-16
+# when it carries a BOM or is >30% NUL bytes (see _text_views) -- utf-8-with-ignore keeps only the
+# ASCII half of each UTF-16 code unit, interleaved with NULs, so a term never matched.
+# MERGES (audit prepush-scan-skips-merge-commit-diffs + E6, 2026-11-08): both this blob walk and
+# main()'s `git log -p` run with `--cc`, so a merge commit contributes its dense combined diff --
+# the paths/hunks whose result differs from EVERY parent, i.e. exactly the content a conflict
+# resolution ("evil merge") introduced. Hunks a merge takes verbatim from one parent are omitted by
+# --cc on purpose: that content lives in the parent's own commit, which is either inside the pushed
+# range (scanned there) or already on the remote.
+# A bare (non-archived) UTF-16 file is "Binary files differ" to `git log -p` too, so the same
+# blob walk scans its UTF-16 views (REFUTE 2026-11-08).
+# RESIDUAL: other binary formats (PDF streams, images, xz/bz2/7z) and BOM-less UTF-16 under 30%
+# NUL bytes (CJK-heavy text) or UTF-32 are not decoded; history already on the remote is not
+# rescanned; zip entries absent from the central directory are not read.
 GZIP_MAGIC = b"\x1f\x8b"
 ZIP_MAGIC = b"PK\x03\x04"
 COMPRESSED_MAX_BYTES = 256 * 1024 * 1024  # decompressed bytes per compressed blob
@@ -295,8 +305,11 @@ class UnscannableBlob(Exception):
 def _range_blobs(rng, cwd=None):
     """[(path, blob_sha)] for every blob added or modified anywhere in `rng` (every commit, not
     just the tip). RAISES UnscannableBlob on a git failure (the caller blocks)."""
-    p = subprocess.run(["git", "log", "--raw", "-z", "--no-abbrev", "--no-renames", "--format=",
-                        rng], capture_output=True, cwd=cwd)
+    # --cc: a merge commit lists the paths its resolution changed relative to EVERY parent, in
+    # combined raw form (one leading ':' per parent: N+1 modes, N+1 shas, status). Without it a
+    # blob introduced only by a merge resolution was never enumerated (audit E6).
+    p = subprocess.run(["git", "log", "--raw", "--cc", "-z", "--no-abbrev", "--no-renames",
+                        "--format=", rng], capture_output=True, cwd=cwd)
     if p.returncode != 0:
         raise UnscannableBlob("`git log --raw %s` failed" % rng)
     fields = p.stdout.decode("utf-8", "surrogateescape").split("\0")
@@ -309,10 +322,12 @@ def _range_blobs(rng, cwd=None):
             continue
         path = fields[i + 1] if i + 1 < len(fields) else ""
         i += 2
-        parts = meta.split()
-        if len(parts) < 5:
-            continue
-        new_mode, new_sha = parts[1], parts[3]
+        nparents = len(meta) - len(meta.lstrip(":"))
+        parts = meta.lstrip(":").split()
+        if len(parts) < 2 * nparents + 3:
+            raise UnscannableBlob("unparseable `git log --raw` record")
+        # result mode/sha are the LAST of the N+1 modes and of the N+1 shas
+        new_mode, new_sha = parts[nparents], parts[2 * nparents + 1]
         if set(new_sha) == {ZERO_RE} or new_mode in ("160000", "120000"):
             continue  # deletion, submodule, symlink
         if (path, new_sha) not in seen:
@@ -366,6 +381,28 @@ def _is_compressed(blob):
     return blob[:2] == GZIP_MAGIC or _is_zip(blob)
 
 
+UTF16_NUL_RATIO = 0.30
+
+
+def _text_views(data):
+    """Text views of one decompressed buffer: utf-8 (errors ignored) always, plus UTF-16 LE and
+    BE when the buffer carries a UTF-16 BOM or is more than 30% NUL bytes. Decoding both byte
+    orders (rather than guessing one) costs one extra pass and cannot pick the wrong order."""
+    views = [data.decode("utf-8", "ignore")]
+    if not data:
+        return views
+    bom = data[:2] in (b"\xff\xfe", b"\xfe\xff")
+    if bom or data.count(b"\x00") > UTF16_NUL_RATIO * len(data):
+        body = data[2:] if bom else data
+        for enc in ("utf-16-le", "utf-16-be"):
+            # U+0000 -> '"' (REFUTE round 2): a NUL code unit is not whitespace, so the
+            # `password assignment` value class [^\s"']{6,} ran straight through NUL padding
+            # -- sc.exe-shaped `password=` + NULs + `DisplayName=` read as a 6+ char password.
+            # A quote ends a value the way the NUL ends the C string; a real value stays whole.
+            views.append(body.decode(enc, "ignore").replace("\x00", '"'))
+    return views
+
+
 def _decompress_texts(blob, budget, depth=0):
     """Every text view of a gzip / zip blob: the raw blob, each member, and a decompressed tar
     stream as a whole. `budget` is a one-item list of decompressed bytes still allowed for THIS
@@ -386,7 +423,7 @@ def _decompress_texts(blob, budget, depth=0):
     def _expand(data):
         if _is_compressed(data):
             return _decompress_texts(data, budget, depth + 1)
-        return [data.decode("utf-8", "ignore")]
+        return _text_views(data)
 
     out = [blob.decode("utf-8", "ignore")]  # names, gzip FNAME, prefix / trailer bytes
     try:
@@ -394,7 +431,7 @@ def _decompress_texts(blob, budget, depth=0):
             with gzip.GzipFile(fileobj=io.BytesIO(blob)) as gz:
                 data = gz.read(budget[0] + 1)  # bounded: a header's size can lie, the stream cannot
             _take(len(data))
-            out.append(data.decode("utf-8", "ignore"))  # whole stream: tar names, PAX, trailer
+            out.extend(_text_views(data))  # whole stream: tar names, PAX, trailer, UTF-16 text
             buf = io.BytesIO(data)
             if data[257:262] == b"ustar" or (len(data) >= 512 and tarfile.is_tarfile(buf)):
                 buf.seek(0)
@@ -448,14 +485,21 @@ def scan_compressed(rng, terms, cwd=None):
         for path, sha in blobs:
             paths_by_sha.setdefault(sha, []).append(path)
         for sha, blob in _iter_blobs(sorted(paths_by_sha), cwd):
-            if not _is_compressed(blob):
-                continue
             path = paths_by_sha[sha][0]
-            try:
-                texts = _decompress_texts(blob, [COMPRESSED_MAX_BYTES])
-            except UnscannableBlob as e:
-                unscannable.append("%s: %s" % (_shown(path), e))
-                continue
+            if not _is_compressed(blob):
+                # A bare UTF-16 file (BOM or NUL-heavy; Windows PowerShell 5.1's `>` and
+                # Out-File write UTF-16LE by default) is "Binary files differ" to `git log -p`,
+                # so only its UTF-16 views are scanned here -- the utf-8 view is the diff scan's
+                # (REFUTE 2026-11-08, E6 residual).
+                texts = _text_views(blob)[1:]
+                if not texts:
+                    continue
+            else:
+                try:
+                    texts = _decompress_texts(blob, [COMPRESSED_MAX_BYTES])
+                except UnscannableBlob as e:
+                    unscannable.append("%s: %s" % (_shown(path), e))
+                    continue
             hits, labels = set(), set()
             for text in texts:
                 if terms:
@@ -510,7 +554,9 @@ def main():
                              "first.\n" % local_ref)
             bad = True
             continue
-        p = subprocess.run(["git", "log", "-p", "--no-color", rng],
+        # --cc: a merge commit also shows its dense combined diff, so content introduced only
+        # by a conflict resolution is scanned (audit prepush-scan-skips-merge-commit-diffs).
+        p = subprocess.run(["git", "log", "-p", "--cc", "--no-color", rng],
                            capture_output=True)
         if p.returncode != 0:
             sys.stderr.write("pre-push BLOCKED (fail-closed): `git log -p %s` failed "
@@ -541,16 +587,16 @@ def main():
                              "history -- a force-push alone does not un-leak it.\n"
                              % (local_ref, rng, detail))
             bad = True
-        # Compressed blobs: invisible to `git log -p` (see scan_compressed).
+        # Compressed and UTF-16 blobs: invisible to `git log -p` (see scan_compressed).
         c_hits, c_leaks, c_bad = scan_compressed(rng, terms)
         if c_hits:
-            sys.stderr.write("pre-push BLOCKED: confidential term(s) inside COMPRESSED file(s) "
+            sys.stderr.write("pre-push BLOCKED: confidential term(s) inside COMPRESSED / UTF-16 file(s) "
                              "being pushed on %s (range %s): %s. Terms are not echoed.\n"
                              % (local_ref, rng, "; ".join("%s -> indices %s" % (p, i)
                                                           for p, i in c_hits)))
             bad = True
         if c_leaks:
-            sys.stderr.write("pre-push BLOCKED: credential-shaped string(s) inside COMPRESSED "
+            sys.stderr.write("pre-push BLOCKED: credential-shaped string(s) inside COMPRESSED / UTF-16 "
                              "file(s) being pushed on %s (range %s): %s. Values are not echoed.\n"
                              % (local_ref, rng, "; ".join("%s -> %s" % (p, ", ".join(l))
                                                           for p, l in c_leaks)))
