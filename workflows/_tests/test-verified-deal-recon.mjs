@@ -143,6 +143,21 @@ console.log('Test 1b: PURSUE without a cleared vintage-ramp floor is capped at N
     check('basisClearsFloor=YES: PURSUE stands', result.brief && result.brief.verdict === 'PURSUE');
     check('basisClearsFloor=YES: no cap recorded', result.verdictCap === null);
   }
+  for (const v of ['pursue', ' Pursue ']) {
+    const { result } = await runWorkflow(SCRIPT, PROPERTY, synthWith(v, 'NO'));
+    check('verdict ' + JSON.stringify(v) + ' (case/space variant) is still capped', result.brief && result.brief.verdict === 'NEEDS_MORE' && !!result.verdictCap);
+  }
+  {
+    const { result } = await runWorkflow(SCRIPT, PROPERTY, standardCanned({ synthesis: null }));
+    check('dead synthesis agent: no throw, brief/verdictCap/ledgerRowDraft null', result.brief === null && result.verdictCap === null && result.ledgerRowDraft === null);
+  }
+  {
+    const { calls } = await runWorkflow(SCRIPT, PROPERTY, standardCanned());
+    const synth = calls.find((c) => c.label === 'synthesis');
+    const rules = synth ? synth.prompt.slice(synth.prompt.indexOf('Apply ORA basis discipline'), synth.prompt.indexOf('=== RECON BRIEF')) : '';
+    const bad = rules.split(/[.;:,]/).filter((c) => /PURSUE/.test(c) && /value-add|upside/i.test(c));
+    check('no synthesis-rule clause pairs PURSUE with value-add/upside', rules.length > 0 && bad.length === 0, JSON.stringify(bad));
+  }
   for (const v of ['PASS', 'NEEDS_MORE']) {
     const { result } = await runWorkflow(SCRIPT, PROPERTY, synthWith(v, 'NO'));
     check(v + ' on a floor miss is left untouched (cap only lowers PURSUE)', result.brief && result.brief.verdict === v && result.verdictCap === null);
