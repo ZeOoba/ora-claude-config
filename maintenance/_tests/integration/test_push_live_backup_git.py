@@ -25,20 +25,21 @@ BRANCH = "live/primary-checkout"
 TARGET_REF = "refs/heads/backup/live-primary"
 PY = sys.executable.replace("\\", "/")
 
-SCAN_OK = (
+# The hook-tests gate stand-in: the shim runs it before the scan. It records that the hook
+# ran (RAN) and blocks when a BLOCK file exists, so a gate block can be simulated without
+# a confidential term. The doctrine gate stand-in always passes. The confidentiality scan
+# is the REAL one from this checkout (the canary requires it to actually block).
+HOOK_TESTS_STUB = (
     "import os, sys\n"
-    "def scan_compressed(rng, terms):\n    return []\n"
-    "def main():\n"
-    "    sys.stdin.read()\n"
-    "    scan_compressed(None, None)\n"
-    "    here = os.path.dirname(os.path.abspath(__file__))\n"
-    "    open(os.path.join(here, 'RAN'), 'a').write('x')\n"
-    "    if os.path.exists(os.path.join(here, 'BLOCK')):\n"
-    "        print('confidential-scan: BLOCKED (stand-in) \\u2014 non-ascii')\n"
-    "        return 1\n"
-    "    return 0\n"
-    "sys.exit(main())\n"
+    "here = os.path.dirname(os.path.abspath(__file__))\n"
+    "sys.stdin.read()\n"
+    "open(os.path.join(here, 'RAN'), 'a').write('x')\n"
+    "if os.path.exists(os.path.join(here, 'BLOCK')):\n"
+    "    print('hook-tests-gate: BLOCKED (stand-in) \u2014 non-ascii')\n"
+    "    sys.exit(1)\n"
 )
+DOCTRINE_STUB = "import sys\nsys.exit(0)\n"
+REAL_HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "hooks")
 SCAN_OLD = "import sys\nsys.stdin.read()\nsys.exit(0)\n"   # the live branch's pre-#427 shape
 
 
@@ -64,16 +65,26 @@ class PushLiveBackupGitTest(unittest.TestCase):
         run(self.repo, "config", "user.email", "t@t")
         run(self.repo, "config", "commit.gpgsign", "false")
         run(self.repo, "remote", "add", "origin", self.remote)
-        os.makedirs(os.path.join(self.repo, "hooks"))
-        self.scan = os.path.join(self.repo, "hooks", "git-prepush-confidential-scan.py")
-        self._write_scan(SCAN_OK)
+        hooks = os.path.join(self.repo, "hooks")
+        os.makedirs(os.path.join(hooks, "lib"))
+        self.scan = os.path.join(hooks, "git-prepush-confidential-scan.py")
+        shutil.copy(os.path.join(REAL_HOOKS, "git-prepush-confidential-scan.py"), self.scan)
+        shutil.copy(os.path.join(REAL_HOOKS, "lib", "secret_patterns.py"), os.path.join(hooks, "lib"))
+        with open(os.path.join(hooks, "git-prepush-hook-tests-gate.py"), "w", newline="\n", encoding="utf-8") as fh:
+            fh.write(HOOK_TESTS_STUB)
+        with open(os.path.join(hooks, "git-prepush-doctrine-gate.py"), "w", newline="\n", encoding="utf-8") as fh:
+            fh.write(DOCTRINE_STUB)
+        with open(os.path.join(hooks, "confidential-terms.json"), "w") as fh:
+            json.dump({"_doc": "test"}, fh)
+        with open(os.path.join(self.repo, ".gitignore"), "w") as fh:
+            fh.write("hooks/confidential-terms.json\n__pycache__/\nhooks/RAN\nhooks/BLOCK\n")
         self.commit("base")
         run(self.repo, "push", "-q", "origin", "main")  # fixture setup, before any hook is installed
         run(self.repo, "checkout", "-q", "-b", BRANCH)
+        # the EXACT allowlisted shim v2 -- the precondition refuses anything else
         hook = os.path.join(self.repo, ".git", "hooks", "pre-push")
         with open(hook, "w", newline="\n") as fh:
-            fh.write('#!/bin/sh\nROOT="$(git rev-parse --show-toplevel)"\n'
-                     'exec "%s" "$ROOT/hooks/git-prepush-confidential-scan.py" "$@"\n' % PY)
+            fh.write(plb.KNOWN_GOOD_SHIMS["v2 (installed 2026-11-08)"])
         os.chmod(hook, 0o755)
 
     # -- helpers
@@ -244,18 +255,12 @@ class PushLiveBackupGitTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.stamp()))
 
     def test_real_confidential_scan_blocks_a_term_inside_a_gz(self):
-        # The REAL #427 scan (this checkout's copy), not the stand-in: a planted roster term
-        # inside a gzip blob must block the backup push, with no remote ref created.
+        # The REAL #427 scan (installed by setUp): a planted roster term inside a gzip blob
+        # must block the backup push through the shim, with no remote ref created.
         import gzip
-        src_hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "hooks")
-        shutil.copy(os.path.join(src_hooks, "git-prepush-confidential-scan.py"), self.scan)
-        os.makedirs(os.path.join(self.repo, "hooks", "lib"), exist_ok=True)
-        shutil.copy(os.path.join(src_hooks, "lib", "secret_patterns.py"), os.path.join(self.repo, "hooks", "lib"))
         term = "zqplantedrosterterm" + "xq"
         with open(os.path.join(self.repo, "hooks", "confidential-terms.json"), "w") as fh:
             json.dump({"_doc": "test", "deal-x": {"active": True, "always": [term]}}, fh)
-        with open(os.path.join(self.repo, ".gitignore"), "w") as fh:
-            fh.write("hooks/confidential-terms.json\nhooks/lib/__pycache__/\n")
         self.commit("clean live work")
         rc, res = self.push()
         self.assertEqual((rc, res["verdict"]), (0, "PUSHED"), res)
