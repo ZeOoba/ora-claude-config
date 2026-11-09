@@ -311,6 +311,86 @@ expect("new labels appended AFTER the original 13 (callers report by index)",
            "generic API key assignment", "generic bearer token", "password assignment",
            "PEM private-key block"])
 
+# --- 2026-11-09: ENV-VAR-NAME reference rule (event_log false positive) ---------------
+# A prose/log line naming WHICH env var holds a secret (`secret = SOME_ENV_VAR_NAME`)
+# is a reference, not a credential. Fixtures are SYNTHETIC names, never the real one.
+SECRET_LABEL = "secret/token assignment"
+for _name in ("ORA_INTAKE_JWS_SIGNING_KEY", "OWNER_SUBMISSION_HMAC",
+              "OAUTH2_CLIENT_SECRET", "S3_BUCKET_SIGNING_SECRET", "X509_CERT_KEY_PATH"):
+    expect("env-var-name value %s is a reference, not a finding" % _name,
+           sp.scan_text("JWS secret = %s" % _name) == [])
+expect("event_log shape (spaces, trailing '),') does not flag",
+       sp.scan_text("owner-submission-intake, JWS secret = ORA_INTAKE_JWS_KEY_NAME),") == [])
+expect("env-var-name in backticks does not flag",
+       sp.scan_text("set `TOKEN = GITHUB_APP_PRIVATE_KEY` in CI") == [])
+expect("env-var-name via generic API key label does not flag",
+       sp.scan_text("FRED_API_KEY = FRED_KEY_FROM_VAULT_NAME") == [])
+expect("code constant reference (spaced, unquoted identifier) does not flag",
+       sp.scan_text("AUTH_TOKEN = DEFAULT_AUTH_TOKEN_NAME\n") == [])
+expect("env-var-name at exactly 64 chars does not flag",
+       sp.scan_text("SECRET = " + "AB_" * 21 + "C") == [])
+expect("env-var-name followed by <=4 closers then end of text does not flag",
+       sp.scan_text("JWS secret = SOME_ENV_VAR_NAME),") == [])
+# REFUTE 2026-11-09 C1: machine-config forms (no space BEFORE the separator) keep firing,
+# because that is where a generated `_`-grouped all-caps secret would actually live.
+for _form in ("SECRET=ABCD1234_EFGH5678_IJKL9012", "export TOKEN=JBSWY_DPEHP_KPXPQ_RSTUV",
+              "api_secret: DEADBEEF_CAFEBABE_FEED", "auth_token:QWERTY_ASDFGH_ZXCVBN",
+              "--secret=QWERTY_ASDFGH_ZXCVBN", "SECRET= QWERTY_ASDFGH_ZXCVBN",
+              "SECRET =QWERTY_ASDFGH_ZXCVBN"):
+    expect("unspaced/config assignment form still flags: %s" % _form.split("=")[0][:16],
+           SECRET_LABEL in sp.scan_text(_form))
+# REFUTE 2026-11-09 C3: a closing delimiter followed by MORE token chars is a truncated
+# secret, not the end of a name.
+for _tail in (";k9!x", ")k9x", "|k9x", ">k9x", "}k9x", ",k9x", "]k9x", "`k9x", "),k9x",
+              ")))))k9x", ")))))"):
+    expect("delimiter tail %r after an upper-snake prefix still flags" % _tail,
+           SECRET_LABEL in sp.scan_text("SECRET = QWERTZ_UIOPAS_DFGH" + _tail))
+# --- must STILL flag ---
+expect("all-caps alnum with NO underscore still flags",
+       SECRET_LABEL in sp.scan_text("secret=AB12CD34EF56GH78IJ90"))
+expect("mixed-case value with underscore still flags",
+       SECRET_LABEL in sp.scan_text("secret=Ab12_Cd34_Ef56_Gh78"))
+expect("lowercase underscore value still flags",
+       SECRET_LABEL in sp.scan_text("secret=abcd_efgh_ijkl_mnop"))
+expect("all-caps underscore value LONGER than 64 chars still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=" + "AB_" * 21 + "CD"))
+expect("leading-underscore value still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=_ABCDEF_GHIJKL"))
+expect("trailing-underscore value still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=ABCDEF_GHIJKL_"))
+expect("double-underscore value still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=ABCDEF__GHIJKL"))
+expect("interleaved-entropy segment (letter after digit) still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=AB12CD34EF_56GH78IJ"))
+expect("long pure-digit segment still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=PIN_83920174"))
+expect("quoted all-caps underscore literal still flags (hardcoded value, not a name)",
+       SECRET_LABEL in sp.scan_text('JWT_SECRET = "MY_SUPER_SECRET_KEY"'))
+expect("value that continues past the match ('/', '+') still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=ABCDEF_GHIJKL/MNOP+QRST"))
+expect("value that continues past the match ('=' padding) still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=ABCDEF_GHIJKL=="))
+expect("known AWS key-id prefix with underscore still flags",
+       SECRET_LABEL in sp.scan_text("SECRET=AKIA_IOSFODNN_EXAMPLE"))
+expect("known GitHub prefix uppercased still flags",
+       SECRET_LABEL in sp.scan_text("TOKEN=GHP_ABCDEFGHIJKLMNOP"))
+expect("one real value among env-name references still flags (per-match)",
+       SECRET_LABEL in sp.scan_text("A_SECRET=SOME_ENV_NAME B_TOKEN=Zx9Kq2Lm8Np4Rt6"))
+# Same shape guards in the SPACED form, so each guard is exercised on its own (the
+# unspaced cases above would also fire on the spacing rule alone).
+for _v in ("AB12CD34EF56GH78IJ90", "Ab12_Cd34_Ef56_Gh78", "abcd_efgh_ijkl_mnop",
+           "AB_" * 21 + "CD", "_ABCDEF_GHIJKL", "ABCDEF_GHIJKL_", "ABCDEF__GHIJKL",
+           "AB12CD34EF_56GH78IJ", "PIN_83920174", '"MY_SUPER_SECRET_KEY"',
+           "ABCDEF_GHIJKL/MNOP+QRST", "ABCDEF_GHIJKL==", "AKIA_IOSFODNN_EXAMPLE",
+           "GHP_ABCDEFGHIJKLMNOP"):
+    # NOT listed: a spaced, unquoted `_`-grouped all-caps value whose groups are
+    # letters-then-<=4-digits (e.g. ABCD1234_EFGH...) -- the ACCEPTED residual documented
+    # at _looks_like_env_var_name; the unspaced/config form of it fires (asserted above).
+    expect("spaced form still flags: %s" % _v[:14],
+           SECRET_LABEL in sp.scan_text("SECRET = " + _v))
+expect("prefix-shaped labels unaffected: AKIA key still caught",
+       "AWS access key ID" in sp.scan_text("SECRET=AKIAIOSFODNN7EXAMPLE"))
+
 npass = sum(1 for ok, _ in results if ok)
 print("secret-patterns tests: %d/%d pass" % (npass, len(results)))
 sys.exit(0 if npass == len(results) else 1)
