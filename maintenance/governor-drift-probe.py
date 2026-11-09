@@ -1426,6 +1426,72 @@ def _refi_member_value_spans(low):
             dscr_veto.append(mm.span(1))
     return ltv_noveto, ltv_veto, dscr_veto
 
+# --- AU v4.44/v4.45 per-property refi-LOAN-basis members (2026-11-09) -----------------------
+# ora-skills#228 (Gabriel in-turn rulings 2026-11-08) restated the per-property DSCR floor as DSCR
+# measured on a loan SIZED TO the ratified per-property 65% LTV: "DSCR at a loan sized to 65% LTV",
+# "a 65%-LTV loan", "the 65%-LTV DSCR", "DSCR at 65% LTV", and the constants restatement "65%
+# per-property". None matches an existing refi construct, so the bare-proximity LTV pass read the
+# ratified 65 as "LTV governor 65% != canonical 40%" -- 43 false positives across
+# acquisition-underwriting, deal-comparison, model-bulk-edit and portfolio-growth (2026-11-09).
+#
+# Same safety pattern as every suppressor above (detection over silence):
+#   * VALUE-LOCKED: the regexes match the literal ratified 65 only. Any other figure in these
+#     shapes never matches and stays fully checked (test_v445_refi_loan_basis_value_locked_unit).
+#   * MEMBER-SCOPED: only the 65's own digit span is returned; every other value on the line stays
+#     visible to the normal passes.
+#   * WEAKEST-PASS-ONLY: consumed solely by the bare-proximity LTV fallback; comparator, anchor,
+#     FROMTO and reverse-order passes stay armed, so "LTV ceiling 65%" still flags.
+#   * CLAUSE-BOUNDED WINDOW VETO (_loan_basis_declared_as_ceiling): an aggregate/portfolio subject
+#     or an acquisition/buy-box/hard-ceiling/LTV-governor declaration within 50 chars before / 30
+#     after the value, inside its own clause, means the 65 is being asserted AS the aggregate/acquisition ceiling, so it flags. This does
+#     NOT reuse _governor_declared_nearby: that helper vetoes on bare "floor", and every real
+#     loan-basis line is ABOUT the DSCR floor ("DSCR floor tested at a 65%-LTV loan"), so it would
+#     re-arm all 43 false positives. Skill names that merely contain a veto word
+#     ("acquisition-underwriting", "portfolio-growth") are masked before the clause check.
+RE_LOAN_BASIS_65 = (
+    re.compile(r"\b(65)\s*%[\s\-*]*ltv\b\**[\s\-]+(?:loan|dscr|basis|distribution)\b", re.I),
+    re.compile(r"\bloan\s+sized\s+to\s+\**\s*(65)\s*%", re.I),
+    re.compile(r"\bdscr\s+at\s+(?:a\s+)?(65)\s*%[\s\-*]*ltv\b", re.I),
+    re.compile(r"\b(65)\s*%\s+per[\s\-]?propert(?:y|ies)\b", re.I),
+)
+LOAN_BASIS_VETO_BEFORE = 50
+LOAN_BASIS_VETO_AFTER = 30
+_LOAN_BASIS_NAME_MASK = re.compile(r"acquisition-underwriting|portfolio-growth", re.I)
+_LOAN_BASIS_CEILING_DECL = re.compile(
+    r"\baggregate\b|\bportfolio\b|\bacquisition\b|\bbuy[\s\-]box\b"
+    r"|\bhard\s+(?:filter|screen|ceiling|cap)\b|\bltv\s+(?:governor|ceiling|cap|max(?:imum)?)\b",
+    re.I)
+
+
+def _loan_basis_65_spans(low):
+    """Digit-group spans of the ratified 65 stated as the per-property DSCR floor's loan basis."""
+    spans = []
+    for rx in RE_LOAN_BASIS_65:
+        for mm in rx.finditer(low):
+            spans.append(mm.span(1))
+    return spans
+
+
+def _loan_basis_declared_as_ceiling(low, vs):
+    """True when the clause containing index `vs` declares an aggregate/portfolio/acquisition LTV
+    ceiling -- the loan-basis 65 is then being asserted AS that ceiling and must flag. Skill names
+    are masked (same length) so their embedded veto words do not trip the check."""
+    masked = _LOAN_BASIS_NAME_MASK.sub(lambda mm: " " * len(mm.group(0)), low)
+    lo = 0
+    for cm in RE_CLAUSE_END.finditer(masked[:vs]):
+        lo = cm.end()
+    m = RE_CLAUSE_END.search(masked, vs)
+    hi = m.start() if m else len(masked)
+    # Window, clipped to the clause. Whole-clause was too wide on the real tree: the skills' long
+    # verdict-block clauses name the SEPARATE "portfolio-ltv governor" 170-250 chars after the
+    # loan-basis 65, and "a specific acquisition" ~75 chars after it. A real declaration puts its
+    # subject right on the value ("Aggregate LTV governor is now a 65%-LTV loan": ~30 before;
+    # "a 65%-LTV loan is the aggregate governor": ~20 after).
+    lo = max(lo, vs - LOAN_BASIS_VETO_BEFORE)
+    hi = min(hi, vs + LOAN_BASIS_VETO_AFTER)
+    return _LOAN_BASIS_CEILING_DECL.search(masked, lo, hi) is not None
+
+
 def _in_spans(vs, ve, spans):
     """True when the value span [vs, ve) is fully contained in one of `spans`."""
     return any(s <= vs and ve <= e for (s, e) in spans)
@@ -1801,6 +1867,8 @@ def scan_line(raw):
     # bare-proximity LTV fallback below -- every explicit-declaration pass stays armed.
     perprop_paired_veto = _perprop_portfolio_paired_veto_spans(low) if is_gov else []
     refi_ltv_veto = refi_ltv_veto + perprop_paired_veto
+    # AU v4.44/v4.45 per-property loan-basis 65 members (2026-11-09) -- bare-proximity pass only.
+    loan_basis_65 = _loan_basis_65_spans(low) if is_gov else []
     # Bug-fix/audit-changelog SCALING-MULTIPLIER spans (2026-08-22): DSCR values that are an
     # approximate inflation/scaling factor on a COMPUTED figure in a changelog narrative
     # ("inflating computed DSCR ~1.6x"), not a declared governor threshold. See
@@ -2077,6 +2145,12 @@ def scan_line(raw):
                             continue
                         if _in_spans(pvs, pve, refi_ltv_noveto):
                             continue
+                        # skip the ratified 65 stated as the per-property DSCR floor's LOAN basis
+                        # (AU v4.44/v4.45 wording) unless its clause declares it the aggregate/
+                        # acquisition ceiling -- see RE_LOAN_BASIS_65.
+                        if (_in_spans(pvs, pve, loan_basis_65)
+                                and not _loan_basis_declared_as_ceiling(low, pvs)):
+                            continue
                         if (_in_spans(pvs, pve, refi_ltv_veto)
                                 and not _governor_declared_nearby(low, pvs, pve)):
                             continue
@@ -2351,7 +2425,7 @@ def main():
                 or _is_test_file(path) or _is_eval_harness_run_log(path)
                 or _is_skill_version_changelog(path) or is_data_json)
 
-    def _scan_file(path, where, read):
+    def _scan_file(path, where, read, dedupe=None):
         """`path` drives every rule (exemptions above, code/governor-code routing); `where` is
         what a finding cites (the path, or path@ref for a committed-ref read); read() returns the
         file's text with universal newlines already applied."""
@@ -2377,6 +2451,15 @@ def main():
         else:
             for i, raw in enumerate(_lines(read()), 1):
                 for reason in scan_line(raw):
+                    # Committed-ref reads scan the same path at several refs (local main and
+                    # origin/main); when local main lags, the blobs differ and line numbers shift,
+                    # so one drift was reported once PER REF. Dedupe on (path, reason, line text);
+                    # the first ref read wins. Filesystem reads pass dedupe=None.
+                    if dedupe is not None:
+                        key = (path, reason, raw.strip())
+                        if key in dedupe:
+                            continue
+                        dedupe.add(key)
                     findings.append((where, i, reason, raw.strip()[:120]))
 
     def _read_fs(path):
@@ -2390,10 +2473,11 @@ def main():
         if isinstance(exts, GitRefTree):
             # committed content only (see GitRefTree) -- never another session's working tree
             try:
+                ref_seen = set()
                 for path, ref, text in iter_git_ref_files(root, exts):
                     if _exempt(path):
                         continue
-                    _scan_file(path, "%s@%s" % (path, ref), lambda t=text: t)
+                    _scan_file(path, "%s@%s" % (path, ref), lambda t=text: t, dedupe=ref_seen)
                     scanned += 1
             except Exception as e:
                 # fail loud per I5 -- an unreadable committed tree is a probe error, not a skip
