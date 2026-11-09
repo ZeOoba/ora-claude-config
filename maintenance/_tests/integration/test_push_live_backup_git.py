@@ -28,13 +28,16 @@ PY = sys.executable.replace("\\", "/")
 SCAN_OK = (
     "import os, sys\n"
     "def scan_compressed(rng, terms):\n    return []\n"
-    "sys.stdin.read()\n"
-    "scan_compressed(None, None)\n"
-    "here = os.path.dirname(os.path.abspath(__file__))\n"
-    "open(os.path.join(here, 'RAN'), 'a').write('x')\n"
-    "if os.path.exists(os.path.join(here, 'BLOCK')):\n"
-    "    print('confidential-scan: BLOCKED (stand-in)')\n"
-    "    sys.exit(1)\n"
+    "def main():\n"
+    "    sys.stdin.read()\n"
+    "    scan_compressed(None, None)\n"
+    "    here = os.path.dirname(os.path.abspath(__file__))\n"
+    "    open(os.path.join(here, 'RAN'), 'a').write('x')\n"
+    "    if os.path.exists(os.path.join(here, 'BLOCK')):\n"
+    "        print('confidential-scan: BLOCKED (stand-in) \\u2014 non-ascii')\n"
+    "        return 1\n"
+    "    return 0\n"
+    "sys.exit(main())\n"
 )
 SCAN_OLD = "import sys\nsys.stdin.read()\nsys.exit(0)\n"   # the live branch's pre-#427 shape
 
@@ -65,7 +68,7 @@ class PushLiveBackupGitTest(unittest.TestCase):
         self.scan = os.path.join(self.repo, "hooks", "git-prepush-confidential-scan.py")
         self._write_scan(SCAN_OK)
         self.commit("base")
-        run(self.repo, "push", "-q", "--no-verify", "origin", "main")  # fixture setup only, before any hook exists
+        run(self.repo, "push", "-q", "origin", "main")  # fixture setup, before any hook is installed
         run(self.repo, "checkout", "-q", "-b", BRANCH)
         hook = os.path.join(self.repo, ".git", "hooks", "pre-push")
         with open(hook, "w", newline="\n") as fh:
@@ -222,7 +225,52 @@ class PushLiveBackupGitTest(unittest.TestCase):
         self.assertEqual(self.remote_tip(), first)
         self.assertTrue(os.path.exists(self.marker()))
 
+    def test_success_requires_the_remote_reread(self):
+        # REFUTE 2026-11-08: removing the post-push ls-remote verification passed every test
+        self.commit("live work")
+        real = plb.remote_ref_sha
+        calls = {"n": 0}
+
+        def lying(repo, remote, ref, timeout=120):
+            calls["n"] += 1
+            return real(repo, remote, ref, timeout) if calls["n"] == 1 else "e" * 40
+        plb.remote_ref_sha = lying
+        try:
+            rc, res = self.push()
+        finally:
+            plb.remote_ref_sha = real
+        self.assertEqual((rc, res["verdict"]), (5, "PUSHED_UNVERIFIED"), res)
+        self.assertTrue(os.path.exists(self.marker()))
+        self.assertFalse(os.path.exists(self.stamp()))
+
+    def test_real_confidential_scan_blocks_a_term_inside_a_gz(self):
+        # The REAL #427 scan (this checkout's copy), not the stand-in: a planted roster term
+        # inside a gzip blob must block the backup push, with no remote ref created.
+        import gzip
+        src_hooks = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(HERE))), "hooks")
+        shutil.copy(os.path.join(src_hooks, "git-prepush-confidential-scan.py"), self.scan)
+        os.makedirs(os.path.join(self.repo, "hooks", "lib"), exist_ok=True)
+        shutil.copy(os.path.join(src_hooks, "lib", "secret_patterns.py"), os.path.join(self.repo, "hooks", "lib"))
+        term = "zqplantedrosterterm" + "xq"
+        with open(os.path.join(self.repo, "hooks", "confidential-terms.json"), "w") as fh:
+            json.dump({"_doc": "test", "deal-x": {"active": True, "always": [term]}}, fh)
+        with open(os.path.join(self.repo, ".gitignore"), "w") as fh:
+            fh.write("hooks/confidential-terms.json\nhooks/lib/__pycache__/\n")
+        self.commit("clean live work")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (0, "PUSHED"), res)
+        with gzip.open(os.path.join(self.repo, "audit.jsonl.gz"), "wt") as fh:
+            fh.write('{"tool":"x","text":"%s"}\n' % term)
+        self.commit("transcript archive")
+        rc, res = self.push()
+        self.assertEqual((rc, res["verdict"]), (1, "BLOCKED_OR_FAILED"), res)
+        self.assertIn("COMPRESSED", res.get("detail", ""))
+        self.assertNotIn(term, json.dumps(res))
+        self.assertTrue(os.path.exists(self.marker()))
+        self.assertNotEqual(self.remote_tip(), run(self.repo, "rev-parse", "HEAD"))
+
     def test_check_grace_and_not_offbox(self):
+        self.assertEqual(self.push()[0], 0)        # a recent successful backup on record
         self.commit("fresh")
         rc, res = self.check()
         self.assertEqual((rc, res["verdict"]), (0, "PENDING_WITHIN_GRACE"), res)
