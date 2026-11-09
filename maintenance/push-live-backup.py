@@ -323,10 +323,16 @@ def canary_scan(scan_path, timeout=120):
 
         # (b) starved stdin: with the opt-in set, zero ref lines must block too (REFUTE r3)
         rc0, out0 = scan("")
-        if rc0 == 0 or "zero ref lines" not in out0:
+        if rc0 == 0:
             return False, ("confidential-scan CANARY FAILED: %s allowed a push with ZERO ref lines under "
-                           "%s=1 (exit %s) -- this scan predates the starved-stdin guard: %s"
-                           % (scan_path, REQUIRE_REFS_ENV, rc0, out0.strip()[-300:]))
+                           "%s=1 (exit 0) -- this scan predates the starved-stdin guard: %s"
+                           % (scan_path, REQUIRE_REFS_ENV, out0.strip()[-300:]))
+        if "zero ref lines" not in out0:
+            # Blocked, but for another reason (e.g. terms file unreadable, pattern import
+            # failed): fail-closed, yet it proves nothing about the starved-stdin guard.
+            return False, ("confidential-scan CANARY FAILED: %s blocked the ZERO-ref-line probe for "
+                           "another reason (exit %s), so the starved-stdin guard is unproven: %s"
+                           % (scan_path, rc0, out0.strip()[-300:]))
         # (a) a credential inside a .gz on a brand-new remote ref
         rc, out = scan(stdin)
         if rc != 0 and "COMPRESSED" in out:
