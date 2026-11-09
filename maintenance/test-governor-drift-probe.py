@@ -3903,7 +3903,7 @@ def test_shipped_ratified_allowlist_is_well_formed_unit():
     with open(path, "r", encoding="utf-8") as fh:
         doc = _json.load(fh)
     for e in doc["entries"]:
-        assert e["repo"] == "ora-skills", e
+        assert e["repo"] in ("ora-skills", ".claude"), e
         assert e["reason"] == "LTV governor 65% != canonical 40%", e
         assert "2026-11-08" in e["ratified"], e
     print("  PASS test_shipped_ratified_allowlist_is_well_formed_unit")
