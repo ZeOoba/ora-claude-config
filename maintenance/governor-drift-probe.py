@@ -1443,7 +1443,8 @@ def _refi_member_value_spans(low):
 #     FROMTO and reverse-order passes stay armed, so "LTV ceiling 65%" still flags.
 #   * CLAUSE-BOUNDED WINDOW VETO (_loan_basis_declared_as_ceiling): an aggregate/portfolio subject
 #     or an acquisition/buy-box/hard-ceiling/LTV-governor declaration within 50 chars before / 30
-#     after the value, inside its own clause, means the 65 is being asserted AS the aggregate/acquisition ceiling, so it flags. This does
+#     after the value (not clause-clipped) means the 65 is being asserted AS the ceiling, so it
+#     flags. This does
 #     NOT reuse _governor_declared_nearby: that helper vetoes on bare "floor", and every real
 #     loan-basis line is ABOUT the DSCR floor ("DSCR floor tested at a 65%-LTV loan"), so it would
 #     re-arm all 43 false positives. Skill names that merely contain a veto word
@@ -1452,43 +1453,67 @@ RE_LOAN_BASIS_65 = (
     re.compile(r"\b(65)\s*%[\s\-*]*ltv\b\**[\s\-]+(?:loan|dscr|basis|distribution)\b", re.I),
     re.compile(r"\bloan\s+sized\s+to\s+\**\s*(65)\s*%", re.I),
     re.compile(r"\bdscr\s+at\s+(?:a\s+)?(65)\s*%[\s\-*]*ltv\b", re.I),
-    re.compile(r"\b(65)\s*%\s+per[\s\-]?propert(?:y|ies)\b", re.I),
 )
+# The all-canonical constants triple "(DSCR 1.25x; 65% per-property; 40% aggregate)" (either LTV
+# order) -- the changelog restatement "no governor constant changed". Every member is canonical and
+# the separators are bare ;/, so a drift cannot ride it ("LTV 65% per-property (replacing the 40%
+# aggregate)" does not match). NO veto: the restatement legitimately sits beside "governor
+# constants unchanged". A loose "65% per-property" shape was REMOVED after the 2026-11-09 refute
+# pass ("Governor change: DSCR 1.25x, LTV 65% per-property ..." must flag).
+RE_CANON_GOVERNOR_TRIPLE = re.compile(
+    r"\bdscr\s*" + re.escape(CANON_DSCR) + r"\s*[x×]\s*[;/,]\s*(?:"
+    r"(65)\s*%\s*per[\s\-]?property\s*[;/,]\s*" + re.escape(CANON_LTV) + r"\s*%\s*aggregate\b"
+    r"|" + re.escape(CANON_LTV) + r"\s*%\s*aggregate\s*[;/,]\s*(65)\s*%\s*per[\s\-]?property\b)",
+    re.I)
 LOAN_BASIS_VETO_BEFORE = 50
 LOAN_BASIS_VETO_AFTER = 30
 _LOAN_BASIS_NAME_MASK = re.compile(r"acquisition-underwriting|portfolio-growth", re.I)
+# Veto vocabulary. Bare "governor(s)", "leverage" and "max/maximum" were added after the 2026-11-09
+# refute pass: "Going forward the governor is a 65%-LTV loan", "the firm's leverage governor moves
+# to a 65%-LTV loan basis" and "Maximum leverage is a 65%-LTV loan" all went silent without them.
 _LOAN_BASIS_CEILING_DECL = re.compile(
-    r"\baggregate\b|\bportfolio\b|\bacquisition\b|\bbuy[\s\-]box\b"
-    r"|\bhard\s+(?:filter|screen|ceiling|cap)\b|\bltv\s+(?:governor|ceiling|cap|max(?:imum)?)\b",
+    r"\baggregate\b|\bportfolio\b|\bacquisition\b|\bbuy[\s\-]box\b|\bgovernors?\b|\bleverage\b"
+    r"|\bmax(?:imum)?\b|\bhard\s+(?:filter|screen|ceiling|cap)\b|\bltv\s+(?:ceiling|cap)\b",
     re.I)
 
 
 def _loan_basis_65_spans(low):
-    """Digit-group spans of the ratified 65 stated as the per-property DSCR floor's loan basis."""
+    """Digit-group spans of the ratified 65 stated as the per-property DSCR floor's loan basis.
+    Returns (vetoable, unconditional): the canonical triple's member needs no veto."""
     spans = []
     for rx in RE_LOAN_BASIS_65:
         for mm in rx.finditer(low):
             spans.append(mm.span(1))
-    return spans
+    triple = []
+    for mm in RE_CANON_GOVERNOR_TRIPLE.finditer(low):
+        triple.append(mm.span(1) if mm.group(1) else mm.span(2))
+    return spans, triple
+
+
+_WORD_TAIL = re.compile(r"\w*")
 
 
 def _loan_basis_declared_as_ceiling(low, vs):
-    """True when the clause containing index `vs` declares an aggregate/portfolio/acquisition LTV
-    ceiling -- the loan-basis 65 is then being asserted AS that ceiling and must flag. Skill names
-    are masked (same length) so their embedded veto words do not trip the check."""
+    """True when a governor/aggregate/portfolio/acquisition/leverage/max declaration sits within
+    LOAN_BASIS_VETO_BEFORE chars before or LOAN_BASIS_VETO_AFTER chars after the value -- the
+    loan-basis 65 is then being asserted AS that ceiling and must flag.
+    Deliberately NOT clause-clipped (refute pass 2026-11-09): a subject in a header or the
+    previous clause ("Raise the LTV governor. Going forward every deal is sized as a 65%-LTV
+    loan.", "Portfolio governors: DSCR 1.25x; LTV a 65%-LTV loan basis.") must still veto. The
+    after-window is extended to the end of the word it lands in, so "portfolio" cut at "po" still
+    matches. Widening a veto only adds detection. Skill names are masked (same length) so their
+    embedded veto words do not trip it. Real-tree margin: the skills name the SEPARATE
+    "portfolio-ltv governor" 170-250 chars from the loan-basis 65 (outside the window)."""
     masked = _LOAN_BASIS_NAME_MASK.sub(lambda mm: " " * len(mm.group(0)), low)
-    lo = 0
-    for cm in RE_CLAUSE_END.finditer(masked[:vs]):
-        lo = cm.end()
-    m = RE_CLAUSE_END.search(masked, vs)
-    hi = m.start() if m else len(masked)
-    # Window, clipped to the clause. Whole-clause was too wide on the real tree: the skills' long
-    # verdict-block clauses name the SEPARATE "portfolio-ltv governor" 170-250 chars after the
-    # loan-basis 65, and "a specific acquisition" ~75 chars after it. A real declaration puts its
-    # subject right on the value ("Aggregate LTV governor is now a 65%-LTV loan": ~30 before;
-    # "a 65%-LTV loan is the aggregate governor": ~20 after).
-    lo = max(lo, vs - LOAN_BASIS_VETO_BEFORE)
-    hi = min(hi, vs + LOAN_BASIS_VETO_AFTER)
+    # The all-canonical triple carries only canonical values, so its "aggregate" can never be the
+    # thing declaring a 65 ceiling; blank it (same length) so a loan-basis 65 just after a
+    # "(DSCR 1.25x; 65% per-property; 40% aggregate)" restatement is not vetoed by it
+    # (deal-comparison/SKILL.md v1.8 changelog: "... 40% aggregate). A rescale of the DSCR bands
+    # to the 65%-LTV distribution ...").
+    masked = RE_CANON_GOVERNOR_TRIPLE.sub(lambda mm: " " * len(mm.group(0)), masked)
+    lo = max(0, vs - LOAN_BASIS_VETO_BEFORE)
+    hi = min(len(masked), vs + LOAN_BASIS_VETO_AFTER)
+    hi = _WORD_TAIL.match(masked, hi).end()
     return _LOAN_BASIS_CEILING_DECL.search(masked, lo, hi) is not None
 
 
@@ -1868,7 +1893,7 @@ def scan_line(raw):
     perprop_paired_veto = _perprop_portfolio_paired_veto_spans(low) if is_gov else []
     refi_ltv_veto = refi_ltv_veto + perprop_paired_veto
     # AU v4.44/v4.45 per-property loan-basis 65 members (2026-11-09) -- bare-proximity pass only.
-    loan_basis_65 = _loan_basis_65_spans(low) if is_gov else []
+    loan_basis_65, canon_triple_65 = _loan_basis_65_spans(low) if is_gov else ([], [])
     # Bug-fix/audit-changelog SCALING-MULTIPLIER spans (2026-08-22): DSCR values that are an
     # approximate inflation/scaling factor on a COMPUTED figure in a changelog narrative
     # ("inflating computed DSCR ~1.6x"), not a declared governor threshold. See
@@ -2150,6 +2175,8 @@ def scan_line(raw):
                         # acquisition ceiling -- see RE_LOAN_BASIS_65.
                         if (_in_spans(pvs, pve, loan_basis_65)
                                 and not _loan_basis_declared_as_ceiling(low, pvs)):
+                            continue
+                        if _in_spans(pvs, pve, canon_triple_65):
                             continue
                         if (_in_spans(pvs, pve, refi_ltv_veto)
                                 and not _governor_declared_nearby(low, pvs, pve)):
@@ -2449,14 +2476,19 @@ def main():
             # an unreadable one was an exit-2 probe error (I5) -- preserved.
             read()
         else:
+            occ = {}
             for i, raw in enumerate(_lines(read()), 1):
                 for reason in scan_line(raw):
                     # Committed-ref reads scan the same path at several refs (local main and
                     # origin/main); when local main lags, the blobs differ and line numbers shift,
-                    # so one drift was reported once PER REF. Dedupe on (path, reason, line text);
-                    # the first ref read wins. Filesystem reads pass dedupe=None.
+                    # so one drift was reported once PER REF. Dedupe on (path, reason, line text,
+                    # occurrence index within this file) -- the index keeps two identical drift
+                    # lines in ONE file as two findings (refute pass 2026-11-09). The first ref
+                    # read wins. Filesystem reads pass dedupe=None.
                     if dedupe is not None:
-                        key = (path, reason, raw.strip())
+                        base = (path, reason, raw.strip())
+                        occ[base] = occ.get(base, 0) + 1
+                        key = base + (occ[base],)
                         if key in dedupe:
                             continue
                         dedupe.add(key)
