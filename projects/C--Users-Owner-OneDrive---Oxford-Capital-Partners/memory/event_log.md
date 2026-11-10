@@ -5,12 +5,18 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-11-02T20:57:47.389Z
+  modified: 2026-11-10T17:27:35.192Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-11-10 -- OI-321 CLOSED (critical-date alerts now ack-after-send, per-tier dedup)
+
+- Closed by Gabriel in-turn ("Yes, close it"). Fix: ora-pm [#55](https://github.com/ZeOoba/ora-pm/pull/55) merged 2026-11-09T15:59Z; migration `0019` applied (`db-migrate.yml` success x2); ack-aware `ping-crons.ps1` live ~15:40Z; spec PR ora-claude-config [#441](https://github.com/ZeOoba/ora-claude-config/pull/441) merged. Row + section moved to [open-items-tracker-history.md#OI-321](open-items-tracker-history.md#OI-321).
+- Context: ora-pm Supabase project had been paused 2026-10-12 → 2026-11-09 (every cron 1016; no critical-date digests for four weeks). Restored by Gabriel 2026-11-09; first post-restore run 09:49 ET SEND OK. No catch-up send needed (old Worker recorded nothing during the outage).
+- Residual: first live `/ack` on the next scheduled critical-dates run not yet observed.
 
 ## 2026-11-02 -- acquisition-underwriting-eval-harness v1.3 (post-#199, 82a83b5e) reimport confirmed
 
