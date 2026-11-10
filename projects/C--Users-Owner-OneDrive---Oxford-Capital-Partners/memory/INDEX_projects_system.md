@@ -90,3 +90,14 @@ metadata:
 - **⛔ [Automation Audit Rev 30 10-07](project_automation_audit_rev30_2026-10-07.md)** — nothing clearly dead; fleet 16/86 enabled (the 7 "never run" were recreated 10-06, not late); first remediation tranche done 10-08, guarded config edits held for Gabriel; D1/D3/D4/D5 settled, D2 pending
 - **⛔ [Automation Audit Rev 32 10-20](project_automation_audit_rev32_2026-10-20.md)** — fleet 26/95, six tasks added since R31; backup push healthy; Fable still dispatched after retirement (gate recovery closed at Rev 33)
 - **⛔ [Automation Audit Rev 31 10-13](project_automation_audit_rev31_2026-10-13.md)** — nothing delete-grade; fleet 19/88; 56 skips = one outage burst; pm-monthly-billing never ran; backup push 18d stale (closed at Rev 32)
+
+## Relocated from the root index 2026-11-10 (root past its 21,500-byte runway marker; pointers moved, not deleted — status notes appended where the hook had gone stale)
+
+- [Open items OI-357..364, standalone](open-items-2026-09-28-triage.md) — filed 09-28 outside the tracker; not yet merged into it
+- **[Regression root-cause audit 08-28](project_regression_root_cause_audit_2026-08-28.md)** — 6-repo fix→refix pattern, 3 shared mechanisms (no-source-of-truth · heuristic-not-structure · no-real-failure-gate), report-only, [artifact](https://claude.ai/code/artifact/24cabf38-d976-4312-819e-691492696132)
+- **PLANNED, awaiting Gabriel:** [artifact-content top-5](project_artifact_content_top5_plan_2026-07-18.md) · [setup-improvement top-5](project_setup_improvement_top5_plan_2026-07-18.md) + [Plan 2 design](project_plan2_effect_verification_design_2026-07-18.md)
+- **⛔ [Doctrine guard alarm 10-30](project_doctrine_guard_alarm_2026-10-30.md)** — governor probe flagged CHANGELOG.md:52 (likely false positive); 7 repo-first cache violations incl. loi-generation; 1 backup-coverage ACTION — 11-10: governor-drift alarm CLEARED 10-30 (event_log); repo-first/backup items not re-checked
+- **⛔ [LAMS fleet dark, ora-cowork-heartbeat disabled 10-30](project_lams_fleet_dark_cowork_heartbeat_disabled_2026-10-30.md)** — 27/27 LAMS recurring disabled, no resume queued, not a bounded pause; dead-man producer among them — awaiting Gabriel — **11-10: LAMS dark state was RULED DELIBERATE by Gabriel 10-30 (event_log); not awaiting a decision**
+- **⛔ [Automation Audit Rev 29 10-02](project_automation_audit_rev29_2026-10-02.md)** — superseded by Rev 33 (10-28); earlier pass. Fleet 8/87 enabled then, unexplained; CLAUDE.md 2w from FAIL; backup push failing; audit-skill copies drift
+- **[R28 plugins/connectors 09-30](project_automation_audit_rev28_plugins_connectors_2026-09-30.md)** — Desktop Commander KEEP (19,310 calls); Notion trial lapses ~10-02; send/CMS guard gap; chains Rev 27
+- [Governor-LTV remediation PR #233](project_governor_ltv_remediation_2026-07-24.md) — 11 shipped; OPEN: debt-scoring ltv gap + silent-refusal reload path
