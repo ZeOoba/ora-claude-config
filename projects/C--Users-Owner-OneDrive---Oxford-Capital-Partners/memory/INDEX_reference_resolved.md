@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 0fc18634-d92f-4211-8be2-5903fcf2975f
-  modified: 2026-09-12T21:57:59.014Z
+  modified: 2026-11-10T00:00:00.000Z
 ---
 
 # ORA Memory Index — Reference (resolved / closed)
@@ -38,3 +38,9 @@ metadata:
 - **[automation-health-monitor repo copy is NOT live 08-16](reference_automation_health_monitor_repo_copy_is_not_live_2026-08-16.md)** — ora-skills copy is v1.5/137 lines, LIVE Scheduled\ copy is v1.24/353 lines; ENTIRE file differs. Edit the Scheduled\ copy. Also: scheduled-task registries store NO description field, so there is no desync risk there (contradicts the older general note)
 - [check-open-items ignores its path arg](reference_check_open_items_ignores_path_arg.md) — takes NO args, always reads the canonical tracker while PRINTING the path you passed
 - [OI-140 CLI-arg fix — COMMITTED fe14d91 (PR #136), OI-140 closed 09-19](reference_oi140_check_open_items_duplicate_ids_cli_fix_2026-08-13.md) — the fix for the line above: check-open-items-duplicate-ids.py now REJECTS any CLI arg (exit 2) instead of silently checking the canonical tracker
+
+## Relocated from the root index 2026-11-10 (root past its 21,500-byte runway marker; pointers moved, not deleted — status notes appended where the hook had gone stale)
+
+- **[Notion free-block quota — RESOLVED 09-30: upgraded to Plus, live create verified](reference_notion_free_block_quota_exhausted_2026-09-12.md)** — [OI-288](open-items-tracker-history.md#OI-288) CLOSED. 21+3 pages backfilled 09-18 (Daily Briefs/Inbox Pre-Briefs/EOD Ledgers/Doctrine checks/financial sweep/skill audit/Rate History), each marked [BACKFILLED] with source cited
+- **[governor-drift-probe DSCR-changelog-scaling-multiplier fix + duplicate-session finding, 08-22](project_governor_drift_probe_dscr_scaling_multiplier_fix_2026-08-22.md)** — landed `ecf7b42`; also caught 3+ parallel sessions independently fixing the identical bug — flag for Gabriel
+- **⛔ [ora-pm outage 10-28](project_ora_pm_outage_2026-10-28.md)** — Supabase host NXDOMAIN + GitHub Actions billing refusal; check before 11-01 billing — **RESOLVED 11-09: Supabase restored by Gabriel; Actions billing block cleared by 11-01 (event_log 11-02, 11-10)**

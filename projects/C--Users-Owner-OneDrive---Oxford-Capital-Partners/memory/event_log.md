@@ -5,12 +5,23 @@ metadata:
   node_type: memory
   type: log
   originSessionId: 8ffab475-017d-4acd-9f70-f4496936d089
-  modified: 2026-11-10T17:27:35.192Z
+  modified: 2026-11-10T18:47:55.509Z
 ---
 
 # ORA Event Log (append-only, newest first)
 
 Renamed/expanded 2026-06-03 from reference_optimization_log.md. Living docs (firm/projects/tech/etc.) hold current state; their history accumulates HERE.
+
+## 2026-11-10 -- Memory consolidation: MEMORY.md runway restored; projects.md brought current
+
+- **MEMORY.md 21,726 B -> 18,347 B** by relocating 13 pointers, not deleting them. Closed, superseded and dated entries moved to sub-indexes under a "Relocated from the root index 2026-11-10" section: 8 to INDEX_projects_system.md, 3 to INDEX_reference_resolved.md, 2 to INDEX_reference.md. Status notes were appended where a hook had gone stale (LAMS dark ruled deliberate 10-30; ora-pm outage resolved 11-09; governor-drift alarm cleared 10-30). No topic file moved, so no inbound refs needed repair. All sub-indexes stay under 21.5 KB.
+- **projects.md** re-verified against the Notion Acquisition Pipeline Tracker (21 rows), Outlook, gh and this log. The 2026-08-24 body is archived verbatim at `_archive/projects_snapshot_2026-08-24_archived_2026-11-10.md`.
+- New in projects.md:
+  - 754 Old State revived 11-10. Eric's email: price cut $25K, rescind the earlier termination, study period to 11-27. The termination itself is UNVERIFIED and Notion has not been updated.
+  - Passes recorded: Kinsman 08-24 (Notion Stage still reads Candidate), 808 Rhoads 09-19, four 08-13 passes.
+  - Ops sections refreshed: sourcing engine (Chicago-Cook 11th cluster, #431); ora-pm (Supabase pause/restore, OI-321, tenant statements #59); Command Center repo now PUBLIC.
+- **Marked UNVERIFIED:** 511 and 8625 Troost LOIs (sent or not), 4484 Robertson (since 09-21), Waukee zoning call, 2040 S Hamilton and 275 Old County Line (still no tracker row), Raytown and 1900 N Broadway disposition activity, CC operationalization, lease pipeline, Eric's naming-standard sign-off.
+- Probe: `memory-integrity-probe.py` OK. The runway warning and the projects.md stale-window warning are cleared. The OI-288 append-only pointer warning remains, as designed.
 
 ## 2026-11-10 -- OI-321 CLOSED (critical-date alerts now ack-after-send, per-tier dedup)
 
