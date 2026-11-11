@@ -1,375 +1,524 @@
 # ora-claude-config
 
-**This is a config/backup repository, not an application.** It is the private GitHub
-mirror (`ZeOoba/ora-claude-config`) of the `~/.claude` Claude Code configuration
-directory that drives Oxford Realty Advisors' ("ORA") Claude Code automation — hooks,
-skills, scheduled tasks, agents, commands, and workflows. It exists so that config,
-skills, and hooks survive a lost/wiped machine, are diffable and code-reviewable like
-any other source, and have a durable audit trail (git history) independent of the
-live filesystem. Nothing here runs on its own — it is read and executed by Claude Code
-itself (or by Windows Task Scheduler / GitHub Actions for the few off-fleet jobs noted
-below) on the machine where `~/.claude` lives.
+> Version-controlled backup of the `~/.claude` Claude Code configuration that runs Oxford Realty Advisors' (ORA) automation: hook guards, maintenance probes, scheduled-task specs, agents, commands, skills, workflows and the memory system.
 
-> Point-in-time doc, verified against `origin/main` on 2026-10-03; counts in §3 re-run on
-> 2026-10-06 with `git ls-tree origin/main` at `11cce1d` (only the memory count had moved). Treat every count and path as directional:
-> re-verify against `git ls-files`, `docs/system-inventory.md` (overwritten by
-> `ora-weekly-hygiene` Block H — check its own "Generated" stamp before trusting it),
-> and `python maintenance/fleet-status.py --summary` for live fleet state.
+**This is a config backup, not an application.** Nothing here builds, ships or deploys. The
+files are read and executed by Claude Code itself (and, for a few off-fleet jobs, by Windows
+Task Scheduler and GitHub Actions) on the machine where `~/.claude` lives. The repo exists so
+that the configuration survives a lost machine, can be diffed and code-reviewed like source,
+and has an audit trail in git history that does not depend on the live filesystem.
+
+> [!NOTE]
+> **Point-in-time document.** Every count and path below was verified with `git ls-files`
+> against `origin/main` at `6865c3c0` on **2026-11-10**. Treat counts as directional and
+> re-verify before relying on one: `git ls-files`, [`docs/system-inventory.md`](docs/system-inventory.md)
+> (weekly overwrite; check its "Generated" stamp), and `python maintenance/fleet-status.py --summary`
+> for live fleet state.
+
+> [!IMPORTANT]
+> **This repository is public.** Anything committed here is world-readable, including history.
+> See [Backup scope and the opt-in model](#backup-scope-and-the-opt-in-model) and
+> [Confidentiality](#confidentiality) before opting in a new path.
 
 ---
 
-## 1. What this repo is
+## Contents
 
-`~/.claude` on the operating machine (`C:\Users\Owner\.claude`) is simultaneously (a)
-Claude Code's live working directory — where it reads config and writes session/runtime
-state every time it runs — and (b) a git checkout of this repository. There is no
-separate build/deploy step that produces one from the other. A `.gitignore` with a
-**default-deny** policy (`/*` ignored, then explicit `!/path` opt-ins) decides which
-top-level entries are versioned. Most of the directory is disposable runtime state that
-never reaches GitHub (`cache/`, `sessions/`, `shell-snapshots/`, `worktrees/`,
-`telemetry/`, `history.jsonl`, `.credentials.json`, `backups/`, `jobs/`, `daemon/`, …);
-only named machinery — the actual configuration surface — is opted in and pushed.
+- [What this repo is](#what-this-repo-is)
+- [Architecture](#architecture)
+  - [Guard pipeline](#guard-pipeline)
+  - [Backup flow](#backup-flow)
+  - [Detail diagrams](#detail-diagrams)
+- [Repository layout](#repository-layout)
+- [Hooks and guards reference](#hooks-and-guards-reference)
+- [Maintenance and scheduled tasks](#maintenance-and-scheduled-tasks)
+- [Backup scope and the opt-in model](#backup-scope-and-the-opt-in-model)
+- [Pre-push gates and CI](#pre-push-gates-and-ci)
+- [Restoring on a new machine](#restoring-on-a-new-machine)
+- [Conventions](#conventions)
+- [Confidentiality](#confidentiality)
+- [Known caveats](#known-caveats)
+- [Further documentation](#further-documentation)
 
-The primary checkout is a **shared, single-writer** working tree that several concurrent
-sessions write into, and it does not necessarily sit on `main`. Drift between it and
-`origin/main` is detected by `maintenance/live-branch-drift-probe.py` /
-`cross-repo-wip-scan.py` and reconciled by the `ora-checkout-merge-forward` scheduled task
-(`maintenance/checkout-merge-forward.py`, which never leaves a conflicted state). Edits are
-expected to happen in an isolated `git worktree`, gated by
-`maintenance/preflight-shared-checkout.py`.
+---
 
-## 2. How the pieces relate
+## What this repo is
 
-```mermaid
-flowchart TB
-    subgraph SESSION["A Claude Code session on this machine"]
-        CFG["settings.json<br/>hook wiring, permissions,<br/>model / plugin config"]
-        HOOKS["hooks/<br/>41 top-level hook scripts: 2 PreToolUse dispatcher chains,<br/>direct PreToolUse / PostToolUse / Session* / Stop /<br/>UserPromptSubmit entries, 3 native git pre-push gates"]
-        SKILLS["skills/ + agents/ + commands/ + workflows/<br/>procedures the session can invoke"]
-        SCHED["scheduled-tasks/&lt;id&gt;/SKILL.md<br/>CC/MCP fleet task specs"]
-        MAINT["maintenance/<br/>fleet, health and integrity probes"]
-        CFG -->|registers| HOOKS
-        CFG -->|exposes| SKILLS
-        HOOKS -->|pre-push doctrine gate launches<br/>doctrine-integrity-probe.py| MAINT
-    end
+`~/.claude` on the operating machine is two things at once:
 
-    CCREG(("CC/MCP scheduler registry<br/>claude-code-sessions/…/scheduled-tasks.json<br/>fires only while the Desktop app is open"))
-    LAMS(("LAMS/Cowork registry<br/>local-agent-mode-sessions/…/scheduled-tasks.json<br/>specs in OneDrive, NOT in this repo"))
-    WINTASKS(("Windows Task Scheduler (off-fleet)<br/>8 task XMLs in maintenance/windows-task-xml/"))
-    DEADMAN(("GitHub Actions<br/>fleet-deadman.yml<br/>daily off-box dead-man"))
-    SCHED -.read by.-> CCREG
-    MAINT -.->|"fleet-status.py reads both"| CCREG
-    MAINT -.-> LAMS
-    WINTASKS -.->|"heartbeat publish"| DEADMAN
+1. **Claude Code's live working directory**, where it reads config and writes session and
+   runtime state on every run; and
+2. **a git checkout of this repository.**
 
-    LOCALDIR[("Live directory on disk<br/>C:\Users\Owner\.claude<br/>mostly untracked runtime state")]
-    LOCALDIR ==contains==> SESSION
-    LOCALDIR -.->|"git commit / push<br/>opt-in files only, through the pre-push gates"| REPO[("This repo:<br/>GitHub ZeOoba/ora-claude-config<br/>PRIVATE backup mirror, not a deploy target")]
-    REPO -.->|"git clone<br/>disaster recovery"| LOCALDIR
-```
-<!-- diagram-verified: 2026-10-28 -->
+There is no build step between the two. A **default-deny** `.gitignore` (`/*` ignored, then
+explicit `!/path` opt-ins) decides which entries are versioned. Most of the directory is
+runtime state that never reaches GitHub (`cache/`, `sessions/`, `shell-snapshots/`,
+`worktrees/`, `telemetry/`, `history.jsonl`, `.credentials.json`, `backups/`, `jobs/`, ...).
+Only named configuration machinery is opted in.
 
-**Reading the diagram:** everything in the top box happens inside one live Claude Code
-session. `settings.json` wires the hooks and exposes the skills/agents/commands/workflows
-a session can call; the hooks then guard every tool call and lifecycle event that follows
-(detail in §4a). `HOOKS -> MAINT` is load-bearing, not illustrative:
-`hooks/git-prepush-doctrine-gate.py` launches `maintenance/doctrine-integrity-probe.py`
-during the pre-push chain. `scheduled-tasks/*/SKILL.md` are the specs of the **CC/MCP**
-fleet, read by the Claude Desktop scheduler (registry under `AppData/Roaming/Claude/` or
-the packaged-app `LocalCache` mirror, located via `maintenance/_shared/scheduler-stores.json`);
-the second, **LAMS/Cowork** fleet keeps its specs in OneDrive, outside this repo (§4b).
-Windows Task Scheduler runs a handful of off-fleet jobs, and `fleet-deadman.yml` is the one
-check that runs off this machine entirely. Cadences are deliberately not drawn: the live
-registries are the authority. The live directory is upstream of GitHub — nothing deploys
-*from* GitHub back into a running session automatically (§4c).
+The primary checkout is a **shared, single-writer** tree that several concurrent sessions
+write into, and it is not necessarily on `main`. Edits are expected to happen in an isolated
+`git worktree`, gated by `maintenance/preflight-shared-checkout.py`. Drift between the live
+checkout and `origin/main` is detected by `maintenance/live-branch-drift-probe.py` and
+`maintenance/cross-repo-wip-scan.py`, and reconciled by the `ora-checkout-merge-forward`
+scheduled task (`maintenance/checkout-merge-forward.py`, which never leaves a conflicted tree).
 
-## 3. Directory structure
-
-Verified against `git ls-files` at `origin/main` (2026-10-03; counts re-run 2026-10-06 at
-`11cce1d`) and the files' own headers.
-
-| Path | What it actually contains |
+| This repo **is** | This repo **is not** |
 |---|---|
-| `CLAUDE.md` | The global operating prompt (identity, hard invariants, routing canon, Engineering OS) loaded into every session. |
-| `settings.json` | Hook wiring, permissions (`defaultMode: bypassPermissions`, with `allow`/`deny` lists), `env`, `model`, `statusLine`, `worktree`, `enabledPlugins` (`superpowers`, `pr-review-toolkit`), `extraKnownMarketplaces`, `skillOverrides`, and UI preferences. |
-| `hooks/` | 41 top-level hook scripts (§4a), plus `lib/` (19 shared modules: commit/provenance parsing, override tokens, secret patterns, guard telemetry, session liveness, site/deploy tiers, …), `bin/netlify-guard-global.js` (machine-wide netlify CLI shim for Hard Invariant 2), `tests/` (61 `test-*.py` suites plus `tests/lib/`), and `archive/` (retired hook artifacts). `hooks/confidential-terms.json` (the confidential-deal roster) lives in this folder on disk but is **not tracked**. |
-| `commands/` | 13 slash-command definitions — the Engineering-OS lanes (`build`, `debug`, `refactor`, `research`, `ship`, `plan`) and session utilities (`heavy`, `ram`, `solo`, `handoff`, `open-sessions`, `cleardisk`, `cleardisk-sessions`). |
-| `agents/` | 17 custom sub-agent definitions (`adversarial-reviewer`, `comms-qc-reviewer`, `dd-package-sweep`, `deal-flow-triage`, `deal-recon`, `estoppel-reconciler`, `insurance-declaration-checker`, `lease-abstract-verifier`, `noi-opportunity-scout`, `open-items-triage`, `portfolio-anomaly-scout`, `psa-redline-checker`, `repro-isolator`, `security-auditor`, `site-qc-reviewer`, `tax-appeal-scout`, `underwriting-checker`). |
-| `skills/` | 8 ORA-authored skills (`adversarial-merge-gate`, `branch-catchup`, `county-parcel-screen`, `county-sales-monitor`, `evidence-dossier-drafting`, `external-artifact-intake`, `ora-setup-audit`, `security-and-hardening`), some with `references/`, `scripts/` or `workflows/` subfolders, plus two `_archive_*` folders of retired skills. **Not** the full skill catalog — most `anthropic-skills:*` skills are Cowork-synced runtime content; ORA-built skill source lives in `ZeOoba/ora-skills`. |
-| `maintenance/` | 91 top-level scripts/configs (Python probes, PowerShell engines, three onboarding `.cmd` launchers) and 96 `test-*`/`test_*` files across `maintenance/`, `_tests/`, `tests/` and `headless/`. Subfolders: `_shared/` (store discovery, fleet-pause helpers, acknowledgement allowlists, `scheduler-stores.json`), `_state/` (tracked probe state), `_applied/`, `_archive/`, `headless/` (Windows-Task-Scheduler twins of selected fleet checks, in parallel burn-in per `headless/CUTOVER.md`), `windows-task-xml/` (exported definitions of the 8 off-fleet Windows tasks). |
-| `scheduled-tasks/` | One folder per CC/MCP task spec: 65 task folders, 28 dated `_archive_*` folders of retired/completed specs, one `_draft-*` folder, and `_shared/` (the Outlook COM send helper `send-via-outlook.ps1`, `outlook-sent-probe.ps1`, the double-fire `block-sentinel.py`, and their docs/tests). **Mostly** only `SKILL.md` is tracked; a short allow-list of task engines and references is also tracked (`ora-task-integrity-guard/guard.ps1` + `membership-guard.ps1`, `ora-pm-ledger/*_snapshot_diff.py` etc., `ora-appsec-sweep/suppressions.md`, `ora-renewal-hubspot-reconcile/read_rent_roll.py`). Runtime state, logs and `.bak` files are not. |
-| `_scheduled_tasks_backup/` | A derived mirror of task `SKILL.md` specs (139 task folders + one archive folder), written by `scheduled-tasks/ora-task-integrity-guard/guard.ps1` (§4b). Canonical specs are authoritative; this mirror is used only to restore a canonical spec that has gone **absent**. |
-| `workflows/` | 3 multi-agent `Workflow` scripts (`cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`), `README-cc-self-audit.md`, and a `_tests/` prompt-snapshot rig. |
-| `mcp-servers/` | 2 self-authored, single-file, read-only MCP servers: `fred/` (St. Louis Fed FRED API) and `census/` (U.S. Census Bureau Data API). |
-| `obsidian-fleet-mirror/` | Scripts that render live fleet state into the Obsidian vault (`write-fleet.ps1`, run every 60 s by the `ClaudeFleetMirror` Windows task via `run-hidden.vbs`); the rendered state files are untracked. |
-| `prompts/` | Standing prompt templates for recurring autonomous runs, their extract/verify helpers, and an `_archive/`. |
-| `docs/` | `system-inventory.md` (weekly overwrite snapshot), `MIGRATION_RUNBOOK.md` (cold-start/restore), `diagrams/` (six standalone Mermaid `.mmd` detail diagrams, §4), `authority-registry.md`, `review-lenses.md`, dated build reports/specs, `plans/`, `agent-references/`, and `superpowers/` (8 design specs + 19 implementation plans for the Engineering-OS and remediation work). |
-| `.github/workflows/` | 2 workflows: `fleet-deadman.yml` (scheduled off-box dead-man, §4b) and `claude-ci-fix.yml` (event-driven auto-fix responder on failed PR checks, change-requested reviews, or `@claude` / CodeRabbit comments; `@claude` fires only for the repo owner, actions are SHA-pinned, and the workflow token is `contents: read` — pushes use the Claude GitHub App token). |
-| `projects/…/memory/` | The ORA memory system — only `projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/` is tracked (421 files at 2026-10-06 and growing daily: `MEMORY.md` index, `event_log.md`, `open-items-tracker.md`, dated feedback/project/reference notes). Session transcripts (`.jsonl`) are **not** tracked. |
-| `_archive/` | Superseded config, a retired plugin bundle, pre-trim snapshots, and the applied hooks-audit `settings.json` proposal (`2026-10-18_settings-proposed-fold/`, formerly `_proposed/`) — files are moved here rather than deleted. |
-| `confidential-repos.json` | A small roster naming which *other* ORA repos require confidentiality gating on code-review tooling, plus the rule text — see §5; contents not enumerated here. |
-| `keybindings.json`, `.gitattributes`, `daily-setup-audit-prompt.md` | Small standalone config/reference files, individually opted in. |
+| A durable, reviewable backup of hooks, probes, specs and memory | Runnable or deployable software |
+| The source the live `~/.claude` checkout merges forward from | A deploy pipeline: nothing flows from GitHub into a running session automatically |
+| Guarded by three local pre-push gates plus a CI test suite | The full skill catalog (most skills live in `ZeOoba/ora-skills` or are Cowork-synced) |
 
-Everything else on disk (`cache/`, `sessions/`, `worktrees/`, `telemetry/`,
-`.credentials.json`, `backups/`, `jobs/`, `daemon/`, `shell-snapshots/`, `session-env/`,
-`session-context.md`, `handoffs/`, `plans/`, `tasks/`, `ide/`, `paste-cache/`,
-`artifacts/`, `downloads/`, `history.jsonl`, …) is intentionally absent from GitHub —
-secret, machine-specific, confidential, or freely regenerable.
+---
 
-## 4. Architecture
+## Architecture
 
-The inline diagrams below are the overview. Six standalone detail diagrams (verified
-2026-10-06, each citing its source `file:line` in a `%%` header) live in `docs/diagrams/`:
+### Guard pipeline
 
-| File | Covers |
-|---|---|
-| `01_hook_lifecycle.mmd` | All six hook events, dispatcher internals (fail-closed on a missing guard, in-process then subprocess fallback, telemetry), direct matchers incl. `workbook-write-guard`, PostToolUse marker stores; `posttooluse-dispatcher` shown as unwired |
-| `02_prepush_gates.mmd` | Untracked pre-push shim, push callers, per-gate override-ability / fail-closed; no test workflow in Actions |
-| `03_claim_preflight_flow.mmd` | Preflight verdicts and exit codes, claim TTLs, the two claim stores, claim-lock, release |
-| `04_scheduled_fleets.mmd` | Both fleets, task-output sinks, heartbeat/dead-man chain, `system-inventory.md` freshness |
-| `05_event_log_memory_writers.mmd` | Event-log appender (spool / in-place fallback), rollover, memory direct edits, commit sweep, OI allocator |
-| `06_backup_and_landing.mmd` | Worktree landing, backup leg, merge-forward refusal conditions, missing offsite copy of untracked state |
+`settings.json` wires hooks on six events (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+`SessionStart`, `Stop`, `SessionEnd`), 31 hook entries in all. The entries are rendered from a
+single table, [`hooks/wiring/settings-wiring.toml`](hooks/wiring/settings-wiring.toml), and
+`python maintenance/render-settings-wiring.py --check` fails on any difference.
 
-### 4a. Hook gate chain
-
-`settings.json` wires hooks on six events. The PreToolUse layer is consolidated into
-`hooks/pretooluse-dispatcher.py`, which runs two **separate** ordered chains in one
-process: the default chain for `Edit|Write|MultiEdit`, and `--chain bash` for `Bash`.
-Tools outside those matchers (NotebookEdit, Desktop Commander writes, Excel, Outlook/Teams/
-Notion/SharePoint/HubSpot write tools, the scheduled-tasks MCP) are covered by direct
+The PreToolUse layer is consolidated into `hooks/pretooluse-dispatcher.py`, which runs one of
+two **separate, ordered** chains in a single process: the default `editwrite` chain for
+`Edit|Write|MultiEdit`, and `--chain bash` for `Bash`. Tools outside those matchers
+(NotebookEdit, PowerShell, Desktop Commander, Excel, Outlook/Teams/Notion/SharePoint/HubSpot
+write tools, MCP delete-shaped tools, the scheduled-tasks MCP) are covered by direct
 `settings.json` entries instead.
 
 ```mermaid
 flowchart LR
     CALL["Tool call"] --> M{"settings.json<br/>PreToolUse matcher"}
-    M -->|"Edit / Write / MultiEdit"| DEW["pretooluse-dispatcher.py<br/>(default chain)"]
-    M -->|"Bash"| DB["pretooluse-dispatcher.py<br/>--chain bash"]
-    M -->|"NotebookEdit, MCP write tools"| DIRECT["Direct entries:<br/>ora-autonomy-gate, confidentiality-guard,<br/>config-write-guard, lint-config-guard,<br/>workbook-write-guard, registry-write-guard,<br/>memory-index-guard, ascii-only-guard,<br/>mcp-delete-guard, sensitive-file-guard,<br/>scheduled-task-update-preguard"]
-    M -->|"Edit / Write"| INLINE["Inline sensitive-file blocker<br/>(credentials / .env / password paths)"]
+    M -->|"Edit / Write / MultiEdit"| DEW["pretooluse-dispatcher.py<br/>editwrite chain, 13 guards"]
+    M -->|"Bash"| DB["pretooluse-dispatcher.py<br/>--chain bash, 16 guards"]
+    M -->|"Edit / Write"| INLINE["Inline sensitive-file blocker<br/>credentials / .env paths"]
+    M -->|"NotebookEdit, PowerShell,<br/>MCP write and delete tools"| DIRECT["Direct entries<br/>autonomy, confidentiality, config, lint,<br/>workbook, registry, memory-index, ascii,<br/>override-mint, sensitive-file, mcp-delete,<br/>scheduled-task preguard"]
 
-    subgraph EW["Edit/Write chain (in order)"]
+    subgraph EW["editwrite chain, in order"]
         direction TB
-        E1["ora-autonomy-gate"] --> E2["confidentiality-guard"] --> E3["eos-plan-gate"] --> E4["shared-checkout-guard"] --> E5["registry-write-guard"] --> E6["config-write-guard"] --> E7["eos-claude-md-guard"] --> E8["memory-index-guard"] --> E9["rules-md-guard"] --> E10["lint-config-guard"] --> E11["sensitive-file-guard"] --> E12["ascii-only-guard"]
+        E1["ora-autonomy-gate"] --> E2["confidentiality-guard"] --> E3["eos-plan-gate"] --> E4["shared-checkout-guard"] --> E5["registry-write-guard"] --> E6["config-write-guard"] --> E7["eos-claude-md-guard"] --> E8["memory-index-guard"] --> E9["rules-md-guard"] --> E10["lint-config-guard"] --> E11["sensitive-file-guard"] --> E12["override-mint-guard"] --> E13["ascii-only-guard"]
     end
 
-    subgraph BC["Bash chain (in order)"]
+    subgraph BC["bash chain, in order"]
         direction TB
-        B1["ora-autonomy-gate"] --> B2["confidentiality-guard"] --> B3["config-write-guard"] --> B4["lint-config-guard"] --> B5["workbook-write-guard"] --> B6["eos-evidence-gate"] --> B7["eos-review-gate"] --> B8["commit-provenance-guard"] --> B9["worktree-isolation-guard"] --> B10["destructive-git-guard"] --> B11["memory-orphan-link-guard"] --> B12["commit-hygiene-guard"] --> B13["winpath-guard"] --> B14["pipe-mask-guard"]
+        B1["ora-autonomy-gate"] --> B2["confidentiality-guard"] --> B3["config-write-guard"] --> B4["lint-config-guard"] --> B5["workbook-write-guard"] --> B6["eos-evidence-gate"] --> B7["eos-review-gate"] --> B8["commit-provenance-guard"] --> B9["worktree-isolation-guard"] --> B10["destructive-git-guard"] --> B11["memory-orphan-link-guard"] --> B12["commit-hygiene-guard"] --> B13["override-mint-guard"] --> B14["winpath-guard"] --> B15["rewrite-advisory-guard"] --> B16["pipe-mask-guard"]
     end
 
     DEW --> E1
     DB --> B1
-    E11 --> RES{"Any guard exit 2?"}
-    B12 --> RES
+    E13 --> RES{"Any guard<br/>exit 2 or deny?"}
+    B16 --> RES
     DIRECT --> RES
     INLINE --> RES
     RES -->|"yes: first block wins,<br/>chain short-circuits"| BLOCK["Tool call refused"]
     RES -->|"no"| RUN["Tool runs, then PostToolUse hooks"]
 ```
-<!-- diagram-verified: 2026-10-28 -->
+<!-- diagram-verified: 2026-11-10 -->
 
-Dispatcher semantics (from its own header): guard order is load-bearing and mirrors
-`settings.json`; each guard runs in-process and, if it cannot load or raises, is re-run as
-a subprocess; the first exit 2 blocks and short-circuits; a guard script **missing** from
-disk fails the whole chain **closed**; malformed input is passed through so each guard
-applies its own policy (`confidentiality-guard.py` fails closed by design). Per-guard
-telemetry goes to `hooks/_state/guard-telemetry.jsonl` (no command text or paths), read
-with `hooks/guard-telemetry-summary.py`. `python hooks/pretooluse-dispatcher.py --selfcheck`
-verifies both chains.
+**Dispatcher semantics** (from the dispatcher's own header):
 
-| Hook | Event / wiring | Purpose (from the file header) |
-|---|---|---|
-| `ora-autonomy-gate` | PreToolUse (both chains + direct) | Preserves the human gates for external sends and oxfordra.net deploys under `bypassPermissions`. |
-| `confidentiality-guard` | PreToolUse (both chains + direct) | Fail-closed egress guard against confidential deal identifiers in outbound tools. |
-| `config-write-guard` | PreToolUse (both chains + direct) | Hard write-gate on the governance layer (hooks, settings, CLAUDE.md, etc.) plus claim-lock. |
-| `lint-config-guard` | PreToolUse (both chains + direct) | Fail-closed guard on edits to existing oxford-command-center lint/format/typecheck configs. |
-| `workbook-write-guard` | PreToolUse (Bash chain + direct) | Write-gate on the ORA Master Workbook. |
-| `registry-write-guard` | PreToolUse (Edit/Write chain + Desktop Commander) | Blocks hand-edits of scheduled-task registry JSON. |
-| `memory-index-guard` | PreToolUse (Edit/Write chain + Desktop Commander) | Write-time checks on the `MEMORY.md` index. |
-| `eos-plan-gate`, `eos-claude-md-guard`, `rules-md-guard`, `shared-checkout-guard`, `ascii-only-guard` | PreToolUse (Edit/Write chain) | Plan-before-sprawl gate; CLAUDE.md doctrine guard; `rules.md` dated-header guard; shared-checkout warning; ASCII-only rail for declared files. |
-| `eos-evidence-gate`, `eos-review-gate`, `commit-provenance-guard`, `worktree-isolation-guard`, `destructive-git-guard`, `memory-orphan-link-guard`, `commit-hygiene-guard` | PreToolUse (Bash chain) | Commit-time gates: evidence (non-blocking), review for blast-radius/financial code, no sweeping another live session's WIP, blast-radius commits must come from a worktree, no discarding uncommitted work, no orphan memory-index links, commit hygiene (warn-only). |
-| `scheduled-task-update-preguard` / `-postguard` | Pre/PostToolUse on `update_scheduled_task` | Hand-edit warning; dropped-frontmatter-key warning. |
-| `commit-provenance-recorder`, `memory-nag-correction`, `eos-plan-marker`, `eos-gate-sentinel`, `fleet-session-hook` | PostToolUse | Records which session wrote which file; memory-index nag correction; plan marker; test-ran marker; Obsidian live-activity mirror. |
-| `engineering-router` | UserPromptSubmit | Non-blocking Engineering-OS lane suggester. |
-| `repo-freshness`, `active-work-broadcast`, `fleet-session-hook` | SessionStart | oxford-command-center freshness; broadcast live cross-session claims; activity mirror. (SessionStart also `cat`s the untracked `session-context.md`.) |
-| `fleet-session-hook`, `eos-telemetry` | Stop / SessionEnd | Activity mirror; reliability telemetry. |
-| `git-prepush-doctrine-gate`, `git-prepush-hook-tests-gate`, `git-prepush-confidential-scan` | Native git `pre-push` (not `settings.json`) | See below. |
-| `posttooluse-dispatcher` | PostToolUse (Bash, timeout 360) | Single Bash PostToolUse entry; runs `eos-gate-sentinel` and `ora-skills/tools/catch_up_main.py --hook` (the latter only on `gh pr merge`), each under its original matcher, with `chain: "post"` guard telemetry. |
+- Guard order is load-bearing and is mirrored in `hooks/wiring/settings-wiring.toml`.
+- Each guard runs in-process; if it cannot load or raises, it is re-run as a subprocess.
+- The first exit 2 blocks and short-circuits the chain.
+- A guard script **missing** from disk fails the whole chain **closed**; an unknown `--chain`
+  name also blocks rather than guessing.
+- `permissionDecision` outputs are merged by severity (deny > ask > allow), not by arrival order.
+- `pipe-mask-guard` must stay last in the bash chain: it is the only guard that emits a command
+  rewrite, and only a chain that reached the end unblocked may emit one.
+- Per-guard telemetry goes to `hooks/_state/guard-telemetry.jsonl` (no command text or paths;
+  kill switch `ORA_GUARD_TELEMETRY=0`), summarised by `hooks/guard-telemetry-summary.py`.
 
-The former inline oxfordra.net post-deploy HTTP check and inline Netlify-MCP post-call
-check were removed when the hooks-audit proposal was applied (see
-`_archive/2026-10-18_settings-proposed-fold/APPLY.md`).
+Verify both chains at any time:
 
-**Pre-push chain.** A native `.git/hooks/pre-push` shim (untracked; clones do not carry
-`.git/hooks` — re-install per each gate's header and `docs/MIGRATION_RUNBOOK.md`) runs
-three gates in order:
+```sh
+python hooks/pretooluse-dispatcher.py --selfcheck        # every guard file present, prints order
+python maintenance/render-settings-wiring.py --check     # settings.json matches the wiring table
+```
+
+### Backup flow
 
 ```mermaid
 flowchart LR
-    PUSH["git push"] --> G1["git-prepush-doctrine-gate.py<br/>doctrine drift, via<br/>maintenance/doctrine-integrity-probe.py"]
-    G1 -->|pass| G2["git-prepush-hook-tests-gate.py<br/>runs every test file in hooks/tests,<br/>maintenance, maintenance/_tests"]
-    G2 -->|pass| G3["git-prepush-confidential-scan.py<br/>scans the full diff of every commit<br/>new to the remote; fail-closed"]
-    G3 -->|pass| REMOTE["origin"]
-    G1 -->|block| STOP["push refused"]
-    G2 -->|block| STOP
-    G3 -->|block| STOP
+    subgraph DISK["~/.claude on the operating machine"]
+        RT["Runtime state<br/>sessions, cache, credentials,<br/>session-context.md, confidential-terms.json"]
+        TR["Opt-in tracked tree<br/>CLAUDE.md, settings.json, hooks/, maintenance/,<br/>scheduled-tasks/, memory/, docs/ ..."]
+    end
+    GI[".gitignore<br/>default-deny + explicit opt-ins"]
+    GI -->|"excludes"| RT
+    GI -->|"admits"| TR
+    TR -->|"edits in a git worktree<br/>preflight-shared-checkout.py"| WT["Worktree branch"]
+    WT -->|"git push via<br/>safe-push.py / verify-push.py"| GATES["3 local pre-push gates"]
+    GATES --> GH[("GitHub<br/>ZeOoba/ora-claude-config")]
+    GH -->|"PR"| CI["full-test-suite.yml<br/>authoritative test gate"]
+    GH -->|"ora-checkout-merge-forward<br/>never left conflicted"| TR
+    GH -.->|"git clone + out-of-band secrets<br/>disaster recovery"| DISK
 ```
-<!-- diagram-verified: 2026-10-03 -->
+<!-- diagram-verified: 2026-11-10 -->
 
-The confidentiality scan covers the commit range being pushed (remote ref..local, or
-`origin/<default>..local` for a brand-new branch) — not the whole history on every push —
-and reports deal-relative indices only, never the terms. The `ora-prepush-gate-sweep`
-scheduled task runs the same three gates weekly without pushing.
+Settled memory changes are committed locally by the `ora-memory-commit-sweep` task (it never
+pushes); the heartbeat push job carries a backup leg that pushes `main` (fast-forward only,
+else a clean merge, aborting on any conflict). Both still pass through the pre-push gates.
 
-### 4b. Dual scheduled-task fleet
+### Detail diagrams
 
-Two scheduler registries are live, both fired by the Claude Desktop app and only while it
-is open. `maintenance/fleet-status.py` reads both and tags each task by fleet; store roots
-and ratified fleet floors are single-sourced in `maintenance/_shared/scheduler-stores.json`.
-Tasks are registered only through the supervised `create_scheduled_task` /
-`update_scheduled_task` MCP tools — `hooks/registry-write-guard.py` blocks registry JSON
-hand-edits.
+Six standalone Mermaid diagrams, each citing its sources in a `%%` header, live in
+[`docs/diagrams/`](docs/diagrams/):
+
+| File | Covers |
+|---|---|
+| [`01_hook_lifecycle.mmd`](docs/diagrams/01_hook_lifecycle.mmd) | All six hook events, dispatcher internals, direct matchers, PostToolUse marker stores |
+| [`02_prepush_gates.mmd`](docs/diagrams/02_prepush_gates.mmd) | Untracked pre-push shim, push callers, per-gate override and fail-closed behaviour |
+| [`03_claim_preflight_flow.mmd`](docs/diagrams/03_claim_preflight_flow.mmd) | Preflight verdicts and exit codes, claim TTLs, claim stores, release |
+| [`04_scheduled_fleets.mmd`](docs/diagrams/04_scheduled_fleets.mmd) | Both scheduler fleets, output sinks, heartbeat / dead-man chain |
+| [`05_event_log_memory_writers.mmd`](docs/diagrams/05_event_log_memory_writers.mmd) | Event-log appender, rollover, memory edits, commit sweep, open-item allocator |
+| [`06_backup_and_landing.mmd`](docs/diagrams/06_backup_and_landing.mmd) | Worktree landing, backup leg, merge-forward refusal conditions |
+
+---
+
+## Repository layout
+
+Tracked-file counts from `git ls-files` on **2026-11-10** (1,654 tracked files in total).
+
+| Path | Purpose | Tracked files |
+|---|---|---:|
+| `CLAUDE.md` | Global operating prompt loaded into every session (identity, invariants, routing, Engineering OS) | 1 |
+| `settings.json` | Hook wiring, permissions (`allow` / `deny`, `defaultMode`), env, model, status line, plugins, skill overrides | 1 |
+| [`hooks/`](hooks/) | 42 hook scripts + `mcp-delete-allowlist.json`; `lib/` (24 shared modules), `tests/` (75 test files + 7 test-lib files), `wiring/settings-wiring.toml`, `bin/netlify-guard-global.js` (machine-wide Netlify CLI shim), `archive/` | ~155 |
+| [`maintenance/`](maintenance/) | 105 top-level probes, engines and launchers (82 `.py`, 16 `.ps1`, 3 onboarding `.cmd`, misc) + 56 top-level tests; `_shared/`, `_state/`, `_tests/`, `headless/`, `ora-live/`, `windows-task-xml/` (8 task exports), `_applied/`, `_archive/` (243) | ~545 |
+| [`scheduled-tasks/`](scheduled-tasks/) | CC/MCP fleet specs: 71 active task folders (`SKILL.md` + a short per-file allow-list of engines), 28 `_archive_*` folders, 1 `_draft-*`, `_shared/` (Outlook COM send path, double-fire sentinel, send-contract tests) | ~186 |
+| `_scheduled_tasks_backup/` | Derived mirror of task specs (139 task folders + 1 archive) written by `ora-task-integrity-guard`; used only to restore a canonical spec that has gone absent | ~147 |
+| `projects/<workspace>/memory/` | The ORA memory system: `MEMORY.md` index, `event_log.md`, open-items tracker, dated feedback / project / reference notes. Only this one project's `memory/` is tracked; transcripts are not | ~432 |
+| [`docs/`](docs/) | Runbook, system inventory, authority registry, review lenses, `diagrams/`, `superpowers/` (9 specs, 24 plans), dated build reports | ~49 |
+| [`agents/`](agents/) | Custom sub-agent definitions | 22 |
+| [`commands/`](commands/) | Slash commands: Engineering-OS lanes and session utilities | 13 |
+| [`skills/`](skills/) | 9 ORA-authored skills + 2 `_archive_*` folders (not the full catalog) | ~51 |
+| [`workflows/`](workflows/) | 3 multi-agent Workflow scripts + `_tests/` prompt-snapshot rig | 10 |
+| [`prompts/`](prompts/) | Standing prompt templates, extract/verify helpers, `_archive/` | 9 |
+| [`.github/workflows/`](.github/workflows/) | `full-test-suite.yml`, `fleet-deadman.yml`, `claude-ci-fix.yml` | 3 |
+| [`mcp-servers/`](mcp-servers/) | Two single-file, read-only MCP servers: `fred/` and `census/` | 2 |
+| [`obsidian-fleet-mirror/`](obsidian-fleet-mirror/) | Renders live fleet state into the Obsidian vault (scripts only; rendered state untracked) | 4 |
+| `_archive/` | Superseded config and applied proposals; files are moved here rather than deleted | ~18 |
+| Root files | `.gitignore`, `.gitattributes`, `README.md`, `confidential-repos.json`, `keybindings.json`, `daily-setup-audit-prompt.md` | 6 |
+
+<details>
+<summary><strong>Agents (22)</strong></summary>
+
+`adversarial-reviewer`, `comms-qc-reviewer`, `dd-package-sweep`, `deal-flow-triage`,
+`deal-recon`, `estoppel-reconciler`, `insurance-declaration-checker`,
+`lease-abstract-verifier`, `listing-channel-scout`, `listing-poster`,
+`listing-syndication-auditor`, `mfg-investment-scout`, `noi-opportunity-scout`,
+`open-items-triage`, `portfolio-anomaly-scout`, `psa-redline-checker`, `repro-isolator`,
+`security-auditor`, `site-qc-reviewer`, `tax-appeal-scout`, `underwriting-checker`,
+`vacancy-listing-packager`.
+
+</details>
+
+<details>
+<summary><strong>Commands (13) and skills (9)</strong></summary>
+
+**Commands.** Engineering-OS lanes: `build`, `debug`, `refactor`, `research`, `ship`, `plan`.
+Session utilities: `heavy`, `ram`, `solo`, `handoff`, `open-sessions`, `cleardisk`,
+`cleardisk-sessions`.
+
+**Skills.** `adversarial-merge-gate`, `branch-catchup`, `county-parcel-screen`,
+`county-sales-monitor`, `evidence-dossier-drafting`, `external-artifact-intake`,
+`ora-setup-audit`, `security-and-hardening`, `xlsx-warehouse-importer`. ORA-built skill source
+otherwise lives in `ZeOoba/ora-skills`.
+
+**Workflows.** `cc-audit-army.js`, `cc-eval-plan-premortem.js`, `verified-deal-recon.js`
+(see [`workflows/README-cc-self-audit.md`](workflows/README-cc-self-audit.md)).
+
+</details>
+
+---
+
+## Hooks and guards reference
+
+42 Python hook scripts live at the top of `hooks/`. Guard posture is stated in each file's
+header; most guards **fail open** on internal error (a bug must never brick tool use), while
+the egress and governance gates noted below **fail closed**.
+
+| Group | Hooks | Wiring | Posture |
+|---|---|---|---|
+| Dispatchers | `pretooluse-dispatcher`, `posttooluse-dispatcher` | PreToolUse (Edit/Write, Bash); PostToolUse (Bash) | Missing guard file fails closed |
+| Egress and safety | `ora-autonomy-gate`, `confidentiality-guard`, `sensitive-file-guard`, `override-mint-guard`, `mcp-delete-guard` | Both chains and direct entries | Autonomy and confidentiality gates fail closed |
+| Governance write gates | `config-write-guard`, `registry-write-guard`, `lint-config-guard`, `workbook-write-guard`, `eos-claude-md-guard`, `rules-md-guard`, `memory-index-guard`, `scheduled-task-update-preguard`, `scheduled-task-update-postguard` | Chains and direct entries | Mixed; see headers |
+| Commit-time and Engineering OS | `eos-plan-gate`, `eos-evidence-gate`, `eos-review-gate`, `commit-provenance-guard`, `worktree-isolation-guard`, `destructive-git-guard`, `memory-orphan-link-guard`, `commit-hygiene-guard`, `shared-checkout-guard` | Mostly the bash chain | Review gate fails closed; evidence, hygiene and shared-checkout are warn-only |
+| Shell hygiene | `winpath-guard`, `rewrite-advisory-guard`, `pipe-mask-guard`, `ascii-only-guard` | Bash chain; ASCII rail on Edit/Write and Desktop Commander | Advisory guard never blocks; pipe-mask rewrites |
+| Lifecycle and markers | `commit-provenance-recorder`, `memory-nag-correction`, `eos-plan-marker`, `eos-gate-sentinel`, `fleet-session-hook`, `engineering-router`, `repo-freshness`, `active-work-broadcast`, `eos-telemetry` | PostToolUse, UserPromptSubmit, SessionStart, Stop, SessionEnd | Non-blocking |
+| Pre-push gates | `git-prepush-doctrine-gate`, `git-prepush-hook-tests-gate`, `git-prepush-confidential-scan` | Native git `pre-push` shim, not `settings.json` | Fail closed |
+| Utility | `guard-telemetry-summary` | Run by hand | Read-only |
+
+<details>
+<summary><strong>Per-hook detail</strong></summary>
+
+| Hook | What it does (from the file header) |
+|---|---|
+| `ora-autonomy-gate` | Preserves the human gates for external sends and production site deploys under `bypassPermissions` |
+| `confidentiality-guard` | Fail-closed egress guard against confidential deal identifiers in outbound tools |
+| `sensitive-file-guard` | Python port of the inline `.env` / credentials blocker |
+| `override-mint-guard` | Blocks override-token writes from scheduled or headless sessions |
+| `mcp-delete-guard` | Stands in for the missing permission prompt on delete-shaped MCP tools (allow-list in `mcp-delete-allowlist.json`) |
+| `config-write-guard` | Write gate on the governance layer (hooks, settings, `CLAUDE.md`, ...) plus claim-lock |
+| `registry-write-guard` | Blocks hand edits of scheduled-task registry JSON |
+| `lint-config-guard` | Guards edits to existing lint / format / typecheck configs in a sibling repo |
+| `workbook-write-guard` | Write gate on the master workbook |
+| `eos-claude-md-guard`, `rules-md-guard`, `memory-index-guard` | Doctrine-file guards: `CLAUDE.md`, `rules.md` dated headers, `MEMORY.md` index |
+| `scheduled-task-update-preguard` / `-postguard` | Hand-edit warning and dropped-frontmatter-key warning on `update_scheduled_task` |
+| `eos-plan-gate` | Denies the 4th+ code edit in a session with no plan marker |
+| `eos-evidence-gate` | Pre-commit reminder when no test or gate ran this session (never blocks) |
+| `eos-review-gate` | Requires a recorded review for blast-radius and financial code |
+| `commit-provenance-guard` | Stops a commit from sweeping another live session's work |
+| `worktree-isolation-guard` | Blast-radius commits must come from a worktree |
+| `destructive-git-guard` | Blocks `checkout --`, `reset --hard`, `clean -f` only when they would discard uncommitted work |
+| `memory-orphan-link-guard` | No orphan links into the memory index |
+| `commit-hygiene-guard` | Two commit-time hygiene checks (warn-only) |
+| `shared-checkout-guard` | Warns on edits into a dirty shared main checkout |
+| `winpath-guard` | Blocks unquoted `X:\` paths and `\$` inside double-quoted Windows paths |
+| `rewrite-advisory-guard` | Nudges `sed -i` / `perl -i` / `python -c` file writes toward the Edit tool; never blocks |
+| `pipe-mask-guard` | Prepends `set -o pipefail` when an evidence command (push, commit, test, gate) sits in a non-last pipeline stage; must stay last |
+| `ascii-only-guard` | Keeps `.py` files that declare ASCII-only free of non-ASCII |
+| `commit-provenance-recorder` | Records which session wrote which file |
+| `memory-nag-correction` | Memory-index nag correction after writes |
+| `eos-plan-marker`, `eos-gate-sentinel` | Plan-approved marker; `gate-green` marker when a test runs |
+| `fleet-session-hook` | Live-activity mirror for the Obsidian fleet view |
+| `engineering-router` | Non-blocking Engineering-OS lane suggester |
+| `repo-freshness` | Surfaces a sibling repo's HEAD vs `origin/main` at session start |
+| `active-work-broadcast` | Broadcasts live cross-session claims at session start |
+| `eos-telemetry` | Reliability telemetry at session end |
+
+</details>
+
+Shared logic lives in [`hooks/lib/`](hooks/lib/) (override tokens, secret patterns, session
+kind and liveness, commit/provenance parsing, guard telemetry, pre-push test selection, deploy
+tiers, wiring renderer, ...). Override tokens are per-session files under
+`hooks/sessions/<id>/overrides/` (gitignored), valid for 60 minutes, and minted only after an
+explicit in-turn human confirmation.
+
+---
+
+## Maintenance and scheduled tasks
+
+**`maintenance/`** holds the probes and engines that keep the setup honest. Representative
+entry points:
+
+| Area | Scripts |
+|---|---|
+| Fleet health | `fleet-status.py --summary`, `setup-self-audit.py`, `registry-membership-probe.py`, `task-folder-registration-probe.py`, `spec-liveness-probe.py`, `phantom-dispatch-probe.py` |
+| Doctrine and drift | `doctrine-integrity-probe.py`, `governor-drift-probe.py`, `buybox-drift-probe.py`, `diagram-freshness-probe.py`, `connector-drift-probe.py`, `model-currency-probe.py` |
+| Git and landing | `preflight-shared-checkout.py`, `checkout-merge-forward.py`, `safe-push.py`, `verify-push.py`, `live-branch-drift-probe.py`, `cross-repo-wip-scan.py`, `commit-own-edit.py` |
+| Backup coverage | `scrub-before-optin.py`, `task-folder-backup-completeness-probe.py`, `reference-backup-coverage-probe.py`, `backup-session-context.py`, `push-live-backup.py` |
+| Heartbeat and dead-man | `emit-fleet-heartbeat.py`, `publish-fleet-heartbeat.py`, `push-fleet-heartbeat.ps1`, `fleet-deadman.ps1` |
+| Memory | `append-event-log.py`, `rollover-event-log.py`, `memory-commit-sweep.py`, `memory-integrity-probe.py`, `allocate-oi-id.py` |
+| Windows backbone | `register-windows-backbone.ps1` (restores the 8 Task Scheduler jobs exported in `windows-task-xml/`), `headless/` (Task Scheduler twins of selected fleet checks; see [`CUTOVER.md`](maintenance/headless/CUTOVER.md)), `ora-live/` (scrubbed backup of a sibling supervisor; see its [README](maintenance/ora-live/README.md)) |
+
+**Scheduled tasks** run on two scheduler registries, both fired by the Claude Desktop app and
+only while it is open:
 
 ```mermaid
 flowchart TB
-    subgraph DESKTOP["Claude Desktop app (fires only while open)"]
-        CC["CC/MCP fleet<br/>registry: claude-code-sessions/…/scheduled-tasks.json<br/>written by the scheduled-tasks MCP"]
-        LM["LAMS/Cowork fleet<br/>registry: local-agent-mode-sessions/…/scheduled-tasks.json<br/>written by Cowork sessions"]
+    subgraph DESKTOP["Claude Desktop app, fires only while open"]
+        CC["CC/MCP fleet registry"]
+        LM["LAMS/Cowork fleet registry"]
     end
-    CCSPEC["~/.claude/scheduled-tasks/&lt;id&gt;/SKILL.md<br/>tracked in this repo"]
-    LMSPEC["OneDrive Documents/Claude/Scheduled/&lt;id&gt;/<br/>NOT in this repo; OneDrive versioning"]
-    CC -->|filePath| CCSPEC
-    LM -->|filePath| LMSPEC
-
-    GUARD["ora-task-integrity-guard (CC task)<br/>guard.ps1 + membership-guard.ps1"]
-    GOV["OneDrive Claude_Workspace/<br/>00_Governance/Scheduled (mirror)"]
-    BAK["~/.claude/_scheduled_tasks_backup/ (mirror)"]
-    GUARD -->|reads registries| CC
-    GUARD -->|reads registries| LM
-    GUARD -->|refresh mirrors from canonical| GOV
-    GUARD -->|refresh mirrors from canonical| BAK
-    BAK -.restore only if canonical is ABSENT.-> CCSPEC
-
-    STATUS["maintenance/fleet-status.py<br/>+ registry / folder / freshness probes"]
-    STATUS -.reads.-> CC
-    STATUS -.reads.-> LM
-
+    CC -->|"filePath"| CCSPEC["scheduled-tasks/&lt;id&gt;/SKILL.md<br/>tracked here"]
+    LM -->|"filePath"| LMSPEC["Cowork specs in OneDrive<br/>NOT in this repo"]
+    GUARD["ora-task-integrity-guard<br/>guard.ps1 + membership-guard.ps1"] -->|"refresh mirror"| BAK["_scheduled_tasks_backup/"]
+    BAK -.->|"restore only if canonical is absent"| CCSPEC
+    STATUS["maintenance/fleet-status.py"] -.->|"reads"| CC
+    STATUS -.->|"reads"| LM
     subgraph OFF["Off-fleet: Windows Task Scheduler"]
-        HBP["ORA Fleet Heartbeat Push<br/>push-fleet-heartbeat.ps1"]
-        LDM["ORA Fleet Dead-Man<br/>fleet-deadman.ps1 (local backstop)"]
-        OTHER["ClaudeFleetMirror, Stuck-Session Watchdog,<br/>Nightly Disk Clean, Desktop Wake-and-Launch,<br/>PM Crons, Command Center Mirror Deploy"]
+        HBP["ORA Fleet Heartbeat Push"]
     end
-    HBP -->|emit-fleet-heartbeat.py| HB["maintenance/_state/fleet-heartbeat.json<br/>counts + registry hashes"]
-    HB -->|publish-fleet-heartbeat.py<br/>GitHub API, no git push| BR["deadman-heartbeat branch"]
-    BR --> GHA["fleet-deadman.yml<br/>daily cron, off-box"]
-    GHA -->|stale, late, below floor,<br/>or registry missing| ISSUE["GitHub issue opened / commented"]
+    HBP -->|"heartbeat via GitHub API"| GHA["fleet-deadman.yml<br/>daily, off-box"]
+    GHA -->|"stale, below floor, or registry missing"| ISSUE["GitHub issue"]
 ```
-<!-- diagram-verified: 2026-10-03 -->
+<!-- diagram-verified: 2026-11-10 -->
 
-`guard.ps1`'s write policy (from its header): canonical specs are authoritative, the two
-mirrors are derived, canonical is written **only when absent**, nothing is deleted, and
-content identity is a CR-normalized SHA-256 (never mtime). Scheduled-task email goes out
-only through the Outlook COM helper in `scheduled-tasks/_shared/send-via-outlook.ps1`,
-under the routing canon in `CLAUDE.md`. Selected checks are also being run as headless
-Windows tasks in parallel burn-in (`maintenance/headless/CUTOVER.md`); none of the in-fleet
-twins is retired.
+- Tasks are registered only through the supervised `create_scheduled_task` /
+  `update_scheduled_task` MCP tools; `registry-write-guard` blocks registry JSON hand edits.
+- Store roots and fleet floors are single-sourced in `maintenance/_shared/scheduler-stores.json`;
+  `fleet-deadman.yml` reads the floors from there at run time and fails closed if it cannot.
+- The integrity guard treats canonical specs as authoritative, writes canonical **only when
+  absent**, deletes nothing, and compares content by CR-normalized SHA-256.
+- Scheduled-task email goes out only through `scheduled-tasks/_shared/send-via-outlook.ps1`.
+- Live task counts, crons and enablement are never hand-maintained here: read the registries
+  with `fleet-status.py`.
 
-### 4c. Repo layout and backup flow
+---
+
+## Backup scope and the opt-in model
+
+The [`.gitignore`](.gitignore) is **fail-closed**: `/*` ignores everything at the root, and each
+versioned entry is named with an explicit `!/path` line. Inside opted-in directories, further
+rules keep runtime state out (`_state/` files, logs, `*.bak`, `*.xlsx`, telemetry, override
+tokens, `hooks/sessions/`, `hooks/confidential-terms.json`).
+
+Two narrower patterns matter:
+
+- **`scheduled-tasks/`** tracks only `*/SKILL.md` (and archived `SKILL.md`s), plus a
+  **per-file allow-list** of durable engines. `scheduled-tasks/_shared/` is never opted in as
+  a directory because it also holds live credentials and send logs; each durable file there is
+  named individually, and no glob may be able to match `*.dat`.
+- **`projects/`** opts in exactly one project's `memory/` folder; everything else under
+  `projects/` (including session transcripts) stays ignored.
+
+**Adding a new path** (scrub before opt-in):
+
+1. Run `python maintenance/scrub-before-optin.py <path>`. It scans for active confidential
+   terms and common credential shapes and reports index-only results. Exit 1 means read the
+   report first.
+2. Add the narrowest possible `!/...` line, with a dated comment explaining why.
+3. Commit from a worktree; the pre-push confidential scan re-checks the full diff.
+
+`doctrine-integrity-probe.py` surfaces untracked backup-coverage gaps, and
+`task-folder-backup-completeness-probe.py` flags substantive files inside task folders that
+`.gitignore` would silently hide.
+
+---
+
+## Pre-push gates and CI
+
+A native `.git/hooks/pre-push` shim (untracked: clones do not carry `.git/hooks`) runs three
+tracked gates in order. The shim's exact text is in the header of
+`hooks/git-prepush-confidential-scan.py`.
 
 ```mermaid
 flowchart LR
-    subgraph DISK["C:\Users\Owner\.claude (live, shared checkout)"]
-        RT["Runtime state<br/>sessions, cache, credentials,<br/>session-context.md, confidential-terms.json"]
-        TR["Opt-in tracked tree<br/>CLAUDE.md, settings.json, hooks/, agents/,<br/>commands/, skills/, workflows/, maintenance/,<br/>scheduled-tasks/, memory/, docs/ …"]
-    end
-    GI[".gitignore<br/>default-deny /* + !/opt-ins"]
-    GI -->|excludes| RT
-    GI -->|admits| TR
-    TR -->|"session work in a git worktree<br/>(preflight-shared-checkout.py)"| WT["worktree branch"]
-    WT -->|"commit, then push via<br/>safe-push.py / verify-push.py"| GATES["pre-push gates (§4a)"]
-    TR -->|"ora-memory-commit-sweep<br/>commits settled memory/ changes<br/>(local only, never pushes)"| LOCALC["local commits on whatever<br/>branch is checked out"]
-    MAINWT["worktree that has main checked out"] -->|"push-fleet-heartbeat.ps1 backup leg<br/>(ff-only, else clean merge;<br/>aborts on any conflict)"| GATES
-    GATES --> GH[("GitHub ZeOoba/ora-claude-config<br/>main + PR branches")]
-    GH -->|"ora-checkout-merge-forward<br/>merge-forward, never left conflicted"| TR
-    GH -.->|"git clone into ~/.claude<br/>+ restore secrets per MIGRATION_RUNBOOK"| DISK
+    PUSH["git push"] --> G1["1. git-prepush-doctrine-gate.py<br/>doctrine-integrity-probe on the<br/>commit being pushed"]
+    G1 -->|"pass"| G2["2. git-prepush-hook-tests-gate.py<br/>LIGHT tier on feature branches,<br/>FULL tier for main"]
+    G2 -->|"pass"| G3["3. git-prepush-confidential-scan.py<br/>full diff of every new commit,<br/>terms + credential patterns"]
+    G3 -->|"pass"| REMOTE["origin"]
+    G1 -->|"block"| STOP["Push refused"]
+    G2 -->|"block"| STOP
+    G3 -->|"block"| STOP
 ```
-<!-- diagram-verified: 2026-10-03 -->
+<!-- diagram-verified: 2026-11-10 -->
 
-Nothing deploys from GitHub into a running session: a clone only becomes "live" when it
-is placed at `~/.claude` and Claude Code is pointed at it. Before a new top-level directory
-is opted in, `maintenance/scrub-before-optin.py` checks it; `doctrine-integrity-probe.py`
-surfaces untracked backup-coverage gaps, and
-`maintenance/task-folder-backup-completeness-probe.py` flags substantive files inside
-CC/MCP task folders that `.gitignore` would silently hide.
+| Gate | Checks | Override |
+|---|---|---|
+| Doctrine drift | Materializes the pushed commit in a scratch worktree and runs `maintenance/doctrine-integrity-probe.py` against it | Per-session `allow-doctrine-drift` token; every use is logged |
+| Hook tests | **LIGHT** (non-`main` refs): only tests the pushed diff touches plus an always-run set. **FULL**: every test file; forced for `main`, hand runs, `--full`, or whenever the selector cannot prove a light pick is sound (logic in `hooks/lib/prepush_test_selection.py`) | Per-session `allow-hook-test-failure` token |
+| Confidential scan | `git log -p` over the pushed range only (`remote..local`, or `origin/<default>..local` for a new branch), decompressing `.gz` / `.tgz` / `.zip` blobs; reports deal-relative indices, never terms | None. Fails closed on an unreadable terms file, git failure or unresolvable baseline |
 
-## 5. What this repo is NOT
+**CI.** [`full-test-suite.yml`](.github/workflows/full-test-suite.yml) runs
+`python hooks/git-prepush-hook-tests-gate.py --full` on `windows-latest` for every non-draft
+PR, for every PR merge commit on `main`, weekly, and on demand. It is the authoritative test
+gate: a PR merges only when it is green (a merge-procedure rule; `main` has no required status
+check). CI sets no session id, so no override token can pass a red run. Tests that need
+gitignored live files (notably the confidential-terms roster) declare `CANNOT RUN:` and skip.
 
-- **Not runnable software.** There is no build step and no deployable service. The
-  `.py`/`.js`/`.ps1` files are hooks, probes, engines and workflow scripts that only act
-  when Claude Code, Windows Task Scheduler, or a `.cmd` launcher invokes them on the
-  machine where `~/.claude` lives.
-- **Not a source-to-deploy pipeline.** The two GitHub workflows monitor the fleet
-  heartbeat and respond to PR review/CI events; neither builds or ships a product.
-- **How it is actually used:** cloned to (or already living at) `~/.claude` — on Windows
-  specifically `C:\Users\Owner\.claude`, since hook paths in `settings.json` are hardcoded
-  to that profile and interpreter. Restoring a machine means `git clone` into that path,
-  re-installing the native pre-push shim, then separately recovering the secrets and live
-  state this repo deliberately excludes (`.credentials.json`, `hooks/confidential-terms.json`,
-  the out-of-repo secret files and environment variables the runbook lists, the live
-  scheduler registries, `session-context.md`) — see
-  `docs/MIGRATION_RUNBOOK.md`. Verify health with
-  `python maintenance/fleet-status.py --summary`, `doctrine-integrity-probe.py`,
-  `governor-drift-probe.py` and `python hooks/pretooluse-dispatcher.py --selfcheck`.
-
-## 6. Confidentiality note
-
-This is a **PRIVATE** GitHub repository (`ZeOoba/ora-claude-config`). Even so:
-
-- **`confidential-repos.json`** — a roster of other repos that require confidentiality
-  gating (e.g. blocking certain cloud code-review tooling on them). Its contents are not
-  enumerated in this README by design.
-- **`hooks/confidential-terms.json`** — the live roster of active confidential deal
-  terms. It resides in `hooks/` on disk but is git-ignored; it never reaches this repo's
-  history. Tests that need it declare `CANNOT RUN:` (an ENV-SKIP, not a failure) in a
-  worktree where it is absent.
-- **`session-context.md`** — the other home of that roster; untracked by design and
-  backed up only locally, scrubbed, by `maintenance/backup-session-context.py`.
-- Every push is scanned by `hooks/git-prepush-confidential-scan.py` across the full diff
-  of every commit new to the remote, fail-closed, before anything leaves the machine.
-- Deal-specific content, tenant PII, and credentials are never described in specifics in
-  this repo's documentation (including this README) — only by reference to the file or
-  mechanism that holds them.
+The other workflows: [`fleet-deadman.yml`](.github/workflows/fleet-deadman.yml) (daily
+off-box dead-man; opens one issue per failure class) and
+[`claude-ci-fix.yml`](.github/workflows/claude-ci-fix.yml) (auto-fix responder on failed
+checks, change-requested reviews, or `@claude` comments from the repo owner; actions are
+SHA-pinned and the workflow token is `contents: read`). The `ora-prepush-gate-sweep` task runs
+the same three gates weekly without pushing.
 
 ---
 
-## 7. Known caveats
+## Restoring on a new machine
+
+The full procedure, with its history and known holds, is [`docs/MIGRATION_RUNBOOK.md`](docs/MIGRATION_RUNBOOK.md)
+(written for the 2026-06 migration; re-verify each step against live state). The parts that can
+be verified from this repo:
+
+1. **Use the same profile path.** `settings.json` and `hooks/wiring/settings-wiring.toml`
+   hardcode the home directory (`C:/Users/Owner/...`) and the Python 3.13 interpreter path.
+   If the profile directory differs, every hook fails at the first session.
+2. **Clone into `~/.claude`.** `git clone https://github.com/ZeOoba/ora-claude-config.git`
+   into the home directory's `.claude` folder.
+3. **Restore what the repo deliberately excludes**, out of band and never through git:
+   `.credentials.json`, `hooks/confidential-terms.json`, `session-context.md`, the secret files
+   and environment variables listed in the runbook, and the live scheduler registries.
+4. **Re-create the pre-push shim** from the header of `hooks/git-prepush-confidential-scan.py`.
+5. **Restore the Windows backbone tasks:**
+   `powershell -NoProfile -ExecutionPolicy Bypass -File maintenance/register-windows-backbone.ps1`
+   (use `-DryRun` first).
+6. **Re-register scheduled tasks** through `create_scheduled_task` in a supervised session on
+   each surface; never splice registry JSON.
+7. **Verify:**
+
+   ```sh
+   python hooks/pretooluse-dispatcher.py --selfcheck
+   python maintenance/render-settings-wiring.py --check --live
+   python maintenance/fleet-status.py --summary
+   python maintenance/setup-self-audit.py
+   ```
+
+   `setup-self-audit.py` reports CRITICAL on a missing pre-push shim or missing Windows tasks.
+
+---
+
+## Conventions
+
+- **Never delete; archive.** Retired files move to an `_archive/` or dated `_archive_*` folder.
+- **Edit in a worktree.** Gate shared-checkout edits with
+  `python maintenance/preflight-shared-checkout.py --repo <checkout> --paths <files> --since <sha>`
+  (exit 0 = go, anything else = stop).
+- **Guard order is load-bearing.** Add a guard to the dispatcher chain *and* the wiring table;
+  `--selfcheck` and `render-settings-wiring.py --check` must both pass.
+- **Tests live beside the code**: `hooks/tests/test-<hook>.py`, `maintenance/test-<script>.py`,
+  `maintenance/_tests/`. Many scripts declare themselves ASCII-only in their docstring, which
+  `ascii-only-guard` enforces.
+- **Dated comments** on every `.gitignore` opt-in and every non-obvious guard change.
+- **Permissions posture is deliberate.** `settings.json` runs `defaultMode: bypassPermissions`,
+  so the `allow` list documents intent rather than gating. The real controls are the `deny`
+  list, the hook chains and the hard invariants in `CLAUDE.md`. When adding a risky capability,
+  add a `deny` pattern or a guard hook, never only an `allow` entry. Deny rules bind Claude's
+  own tool calls, not scripts that hooks or scheduled tasks run.
+- **Diagram stamps.** Each Mermaid block carries a `diagram-verified` date, checked by
+  `maintenance/diagram-freshness-probe.py`.
+
+---
+
+## Confidentiality
+
+- `hooks/confidential-terms.json` (the confidential-deal roster) lives in `hooks/` on disk but
+  is gitignored and never reaches history. Tests that need it skip with `CANNOT RUN:` in a
+  checkout where it is absent.
+- `session-context.md` is the roster's other home; it is untracked and backed up only locally,
+  scrubbed, by `maintenance/backup-session-context.py`.
+- `confidential-repos.json` names which other repos require confidentiality gating on
+  code-review tooling. Its contents are not enumerated here by design.
+- Every push is scanned by `git-prepush-confidential-scan.py`, fail-closed, before anything
+  leaves the machine.
+- Deal specifics, tenant PII and credentials are never described in this repo's
+  documentation, only the file or mechanism that holds them.
+
+---
+
+## Known caveats
 
 - The live checkout routinely carries uncommitted changes from other in-flight sessions
-  (task-spec mirrors, memory appends, probe state). That is normal fleet churn, not drift
-  to fix. Confirm a file is yours before committing it (the provenance hooks enforce this),
-  and edit in an isolated worktree.
-- `skills/` here is intentionally small (8 skills). Do not treat it as the full catalog;
-  cross-check `docs/system-inventory.md` and `ZeOoba/ora-skills`.
-- Live task counts, crons and enablement are never hand-maintained here; read the
-  registries via `fleet-status.py`. `docs/system-inventory.md` is only as current as its
-  last `ora-weekly-hygiene` run.
-- The fleet-floor tripwires live in one place: `maintenance/_shared/scheduler-stores.json`
-  (`fleetFloors`). `fleet-deadman.yml` reads them from there at run time (since 2026-11-05)
-  and fails closed if it cannot; `maintenance/test-fleet-deadman-workflow.py` pins that
-  parity. Its alarms open one GitHub issue per failure class (`FLEET DEAD-MAN [<class>]: ...`).
-- The permission posture is deliberate, not an oversight. `settings.json` runs
-  `defaultMode: bypassPermissions` with `skipDangerousModePermissionPrompt`, so the `allow`
-  list is not an effective gate (it mostly documents intent). The real controls are the
-  `deny` list (destructive shell and PowerShell patterns, force-push, `reset --hard`, the
-  Netlify updater MCP tools), the PreToolUse hook chains in section 4a (notably
-  `ora-autonomy-gate`, which keeps the human gates for external sends and oxfordra.net
-  deploys), and the hard invariants in `CLAUDE.md`. `deny` rules and hooks only cover what
-  they pattern-match, so when adding a risky capability add a `deny` pattern or a guard
-  hook, never just an `allow` entry. Deny rules bind Claude's own tool calls, not scripts
-  that hooks or scheduled tasks run.
+  (spec mirrors, memory appends, probe state). That is normal churn, not drift. Confirm a
+  file is yours before committing it; the provenance hooks enforce this.
+- `skills/` is intentionally small. Cross-check `docs/system-inventory.md` and
+  `ZeOoba/ora-skills` for the catalog.
+- `docs/system-inventory.md` is only as current as its last `ora-weekly-hygiene` run.
+- The Cowork fleet's specs are outside this repo (OneDrive versioning only).
+- Some older docs and file headers still describe this repository as private; it is public as
+  of 2026-11-10.
 
 ---
 
-*This README is itself an opt-in (`.gitignore` `!/README.md`) — if it stops appearing
-on GitHub after a `.gitignore` edit, that opt-in was the thing that broke. Its
-`diagram-verified` stamps are checked by `maintenance/diagram-freshness-probe.py`.*
+## Further documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/MIGRATION_RUNBOOK.md`](docs/MIGRATION_RUNBOOK.md) | Cold-start and machine-migration procedure |
+| [`docs/system-inventory.md`](docs/system-inventory.md) | Generated weekly snapshot of the setup |
+| [`docs/authority-registry.md`](docs/authority-registry.md) | Which file is authoritative for which fact |
+| [`docs/review-lenses.md`](docs/review-lenses.md) | Standing lenses to hand a dispatched reviewer or refute agent |
+| [`docs/diagrams/`](docs/diagrams/) | Six detail diagrams |
+| [`docs/superpowers/`](docs/superpowers/) | Engineering-OS and remediation specs and plans |
+| [`maintenance/headless/CUTOVER.md`](maintenance/headless/CUTOVER.md) | Headless Task Scheduler burn-in |
+| [`workflows/README-cc-self-audit.md`](workflows/README-cc-self-audit.md) | Self-audit workflow usage |
+| [`obsidian-fleet-mirror/README.md`](obsidian-fleet-mirror/README.md) | Obsidian fleet mirror |
+
+---
+
+<sub>This README is itself an opt-in (`.gitignore` `!/README.md`): if it stops appearing on
+GitHub after a `.gitignore` edit, that opt-in is what broke. Its `diagram-verified` stamps are
+checked by `maintenance/diagram-freshness-probe.py`.</sub>
