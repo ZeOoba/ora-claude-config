@@ -579,6 +579,13 @@ def _write_context_only_fixture():
 _CTX_FIXTURE_PATH = _write_context_only_fixture()
 
 
+def _tid(term):
+    """Mirror of confidentiality-guard.term_id (pinned against it below): block messages carry
+    this id, never the term or label (egress audit 2026-11-12, M43)."""
+    import hashlib
+    return hashlib.sha256(("ora-confidential-term:" + term.lower()).encode("utf-8")).hexdigest()[:10]
+
+
 def run_ctx(payload_obj, tool_name_override=None):
     """Like run(), but always points the guard subprocess at the context-only fixture,
     independent of ACTIVE_TERMS_FILE -- isolates this section from the rest of the suite."""
@@ -594,8 +601,10 @@ def run_ctx(payload_obj, tool_name_override=None):
 #    context loop fired, not the always loop.
 code, err = run_ctx(write_payload(SITE, "Regional overview: %s identified near %s parcel" % (CTX_CONTEXT, CTX_TRIGGER)))
 expect("BLOCK context-only (Phase C): context+trigger, no always-term", 2, code, err)
-expect("BLOCK context-only (Phase C): reason names the context term (proves context loop fired)",
-       True, CTX_CONTEXT in err and CTX_ALWAYS not in err, err)
+expect("BLOCK context-only (Phase C): reason cites the context term's id (proves context loop fired)",
+       True, _tid(CTX_CONTEXT) in err and _tid(CTX_ALWAYS) not in err, err)
+expect("BLOCK context-only (Phase C): reason never echoes the term itself (M43)",
+       True, CTX_CONTEXT.lower() not in err.lower(), err)
 
 # 2) NEGATIVE -- context term alone, no trigger, no always-term. Must ALLOW: proves
 #    context_requires_any is genuinely required, not decorative.
@@ -700,8 +709,8 @@ with tempfile.TemporaryDirectory() as td:
     # guard also blocks everything with exit 2, just because terms are unreadable everywhere.
     # Require the block reason to name the fixture deal, not a generic unreadable-file error,
     # so this assertion actually discriminates "fallback worked" from "still fail-closed-broken".
-    expect("load_terms: block reason names the fixture deal (proves fallback, not blanket fail-closed)",
-           True, "Worktree Fallback Test Deal" in err and "unreadable" not in err, err)
+    expect("load_terms: block reason cites the fixture term id (proves fallback, not blanket fail-closed)",
+           True, _tid("Wraith Fallback Corp") in err and "unreadable" not in err, err)
 
     code, err = run_in_worktree(write_payload(SITE, "Columbus industrial market update Q2 2026"))
     expect("load_terms: falls back to main worktree's terms file (allows clean egress)", 0, code, err)
@@ -751,9 +760,10 @@ with tempfile.TemporaryDirectory() as td2:
     iso_err = p.stderr.decode("utf-8", "replace")
     expect("site_markers import failure: still recognizes the site path as an egress "
            "surface via the hardcoded fallback (blocks the hit)", 2, p.returncode, iso_err)
-    expect("site_markers import failure: block reason names the fixture deal (proves the "
+    expect("site_markers import failure: block reason cites the fixture term id (proves the "
            "fallback SITE_MARKERS worked, not a generic/unrelated block)",
-           True, "Grommet Fallback Industries" in iso_err, iso_err)
+           True, _tid("Grommet Fallback Industries") in iso_err
+           and "public website repo" in iso_err, iso_err)
 
 # --- stdin decode: must be explicit UTF-8, not sys.stdin's own (locale-dependent) encoding
 # 2026-07-17: eos-claude-md-guard.py had this exact bug -- a harness-spawned hook process
@@ -1214,6 +1224,7 @@ PROPOSED_MATCHER = (
     "|mcp__.*__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
     "aeo_prompts|social_posts).*"
     "|mcp__.*notion-(send-message-to-session|spawn-session).*"
+    "|mcp__.*notion-calendar-(create-events|update-events).*"
 )
 NOTION_LIVE = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__"
 _CLASSIFY_UNIVERSE = sorted(set(SEND_TOOLS) | set(READ_ONLY_TOOLS) | {
@@ -1221,6 +1232,8 @@ _CLASSIFY_UNIVERSE = sorted(set(SEND_TOOLS) | set(READ_ONLY_TOOLS) | {
     NOTION_LIVE + "notion-create-comment", NOTION_LIVE + "notion-move-pages",
     NOTION_LIVE + "notion-duplicate-page", NOTION_LIVE + "notion-update-data-source",
     NOTION_LIVE + "notion-fetch", NOTION_LIVE + "notion-search",
+    NOTION_LIVE + "notion-calendar-create-events", NOTION_LIVE + "notion-calendar-update-events",
+    NOTION_LIVE + "notion-calendar-list-events",
     M365 + "outlook_create_filter", M365 + "outlook_create_label", M365 + "outlook_trash_thread",
     M365 + "sharepoint_rename_item", M365 + "sharepoint_create_folder", M365 + "sharepoint_move_item",
 })
@@ -1235,6 +1248,8 @@ _classify = getattr(_guard_mod, "classify_tool", lambda _t: None)
 # guard branch go unrouted with the suite green). (1) Every guard pattern appears verbatim as a
 # matcher alternative. (2) Tool names are generated from each pattern's own alternatives, with a
 # server prefix and suffix drift, and every generated name the guard classifies must be routed.
+expect_eq("test _tid mirrors guard term_id (M43)", _tid("Example Term"),
+          getattr(_guard_mod, "term_id", lambda t: None)("Example Term"))
 _surfaces = getattr(_guard_mod, "MCP_SEND_SURFACES", ())
 expect_eq("guard exposes MCP_SEND_SURFACES", True, len(_surfaces) >= 8)
 for _rx, _lbl in _surfaces:
