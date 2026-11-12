@@ -9,6 +9,8 @@ work to lose:
   * `git switch -f|--force|--discard-changes`
   * `git reset --hard`                  -> any dirty tracked file
   * `git clean -f` (not `-n`)           -> anything `git clean -n` would remove
+    (ignored paths are exempt as build output, EXCEPT in the claude-home config repo and
+    for any ignored path whose name is sensitive -- see _protected_ignored, audit M01)
 
 WHY (2026-09-22, /insights remediation): a stray `git checkout --` reverted reviewed
 correctness fixes mid-session and they had to be rewritten. CLAUDE.md invariant 6
@@ -29,6 +31,7 @@ Stdlib only. ASCII-only. Windows (`python`).
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -36,6 +39,13 @@ HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 GUARD_NAME = "destructive-git-guard"
 OVERRIDE_BASENAME = "allow-destructive-git"
 GIT_TIMEOUT = 8
+# AUDIT M01 (2026-11-12). `git clean -fdX/-fdx` used to pass whenever every path it would
+# remove was git-ignored ("build output"). In the claude-home repo (~/.claude) the .gitignore is
+# DEFAULT-DENY, so the ignored set IS the live untracked state: hooks/confidential-terms.json
+# (the fail-closed egress roster), .credentials.json, session state. There, no ignored path is
+# exempt. Everywhere else an ignored path whose NAME matches the sensitive-file regex (same as
+# sensitive-file-guard.py) or is the roster file is never treated as build output either.
+SENSITIVE_IGNORED_RE = re.compile(r"(credentials|\.env|password|confidential-terms)", re.I)
 
 _parse = None
 _override_tokens = None
@@ -169,7 +179,10 @@ def at_risk(repo, kind, spec):
     if not lines:
         return lines
     # Ignored files (build output, node_modules, logs) are not uncommitted work: drop
-    # them so routine `clean -fdx/-fdX` passes (review MED-2, 2026-09-22).
+    # them so routine `clean -fdx/-fdX` passes (review MED-2, 2026-09-22) -- EXCEPT in the
+    # default-deny claude-home repo, where every ignored path is live state (audit M01).
+    if _is_claude_home_repo(repo):
+        return lines
     prefix = "Would remove "
     paths = [ln[len(prefix):] for ln in lines if ln.startswith(prefix)]
     try:
@@ -185,7 +198,41 @@ def at_risk(repo, kind, spec):
     except Exception:
         return lines
     return [ln for ln in lines
-            if not (ln.startswith(prefix) and ln[len(prefix):].rstrip("/") in ignored)]
+            if not (ln.startswith(prefix) and ln[len(prefix):].rstrip("/") in ignored
+                    and not _protected_ignored(ln[len(prefix):]))]
+
+
+def _norm(p):
+    return os.path.normcase(os.path.realpath(p)).rstrip("\/")
+
+
+def _is_claude_home_repo(repo):
+    """True when `repo`'s worktree root is the claude-home config repo: ~/.claude, or the
+    tree this hook layer is installed in. Unknown -> True only if `repo` itself is one of
+    them (the cheap, no-git comparison), so a git failure never widens the exemption."""
+    homes = set()
+    try:
+        homes.add(_norm(os.path.join(os.path.expanduser("~"), ".claude")))
+    except Exception:
+        pass
+    try:
+        homes.add(_norm(os.path.dirname(HOOKS_DIR)))
+    except Exception:
+        pass
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    cands = [repo] + (top[:1] if top else [])
+    for c in cands:
+        try:
+            if _norm(c) in homes:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _protected_ignored(path):
+    """An ignored path that `git clean -X/-x` must NOT be allowed to drop silently."""
+    return bool(SENSITIVE_IGNORED_RE.search(os.path.basename(path.rstrip("/")) or path))
 
 
 def _resolve_dir(p, here):

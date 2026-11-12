@@ -51,7 +51,7 @@ def untracked(d, name="new.txt"):
         f.write("x\n")
 
 
-def run(cmd, cwd, via="script", session="dgg-test-session"):
+def run(cmd, cwd, via="script", session="dgg-test-session", env=None):
     payload = json.dumps({"tool_name": "Bash", "tool_input": {"command": cmd},
                           "cwd": cwd, "session_id": session})
     if via == "script":
@@ -65,20 +65,66 @@ def run(cmd, cwd, via="script", session="dgg-test-session"):
             "rc,o,e,mode=m.run_guard('destructive-git-guard', sys.stdin.buffer.read()); "
             "sys.stderr.write(e+'|mode='+mode); sys.exit(rc)") % DISPATCHER]
     r = subprocess.run(argv, input=payload.encode(), capture_output=True, cwd=cwd,
-                       env=dict(os.environ), timeout=60)
+                       env=env or dict(os.environ), timeout=60)
     err = r.stderr.decode("utf-8", "replace")
     if via == "dispatcher" and "|mode=inprocess" not in err:
         FAILS.append("dispatcher did not run guard in-process: " + err[-200:])
     return r.returncode, err
 
 
-def check(name, cmd, cwd, expect_block, vias=("script",)):
+def check(name, cmd, cwd, expect_block, vias=("script",), env=None):
     for via in vias:
-        rc, err = run(cmd, cwd, via)
+        rc, err = run(cmd, cwd, via, env=env)
         blocked = rc == 2 and "destructive-git-guard" in err
         if blocked != expect_block:
             FAILS.append("%s [%s]: expected %s, rc=%s err=%s" % (
                 name, via, "BLOCK" if expect_block else "ALLOW", rc, err[-300:]))
+
+
+def claude_home_checks():
+    """AUDIT M01 (2026-11-12): ~/.claude is a DEFAULT-DENY repo -- its ignored files are the
+    live untracked state (the confidential roster, .credentials.json, session state), not
+    build output. `git clean -fdX/-fdx` there must block on ANY ignored path, however it is
+    named, and however the repo is addressed (cwd, `cd`, `git -C`)."""
+    home = tempfile.mkdtemp(prefix="dgg-home-")
+    ch = os.path.join(home, ".claude")
+    os.makedirs(os.path.join(ch, "hooks"))
+    git(ch, "init", "-q")
+    git(ch, "config", "user.email", "t@t")
+    git(ch, "config", "user.name", "t")
+    git(ch, "config", "core.autocrlf", "false")
+    with open(os.path.join(ch, ".gitignore"), "w") as f:
+        f.write("/*\n!/.gitignore\n!/hooks/\nhooks/confidential-terms.json\n")
+    with open(os.path.join(ch, "hooks", "guard.py"), "w") as f:
+        f.write("x = 1\n")
+    git(ch, "add", "-A")
+    git(ch, "commit", "-qm", "init")
+    # Synthetic stand-ins only -- no real roster or credential content.
+    with open(os.path.join(ch, "hooks", "confidential-terms.json"), "w") as f:
+        f.write('{"_meta": {"purpose": "synthetic fixture"}}\n')
+    with open(os.path.join(ch, "session-state.json"), "w") as f:
+        f.write("{}\n")
+    env = dict(os.environ, USERPROFILE=home, HOME=home)
+    fwd = ch.replace("\\", "/")
+    try:
+        check("claude-home clean -fdX (roster ignored)", "git clean -fdX", ch, True,
+              ("script", "dispatcher"), env=env)
+        check("claude-home clean -fdx", "git clean -fdx", ch, True, env=env)
+        # cwd = the (non-repo) home dir: probing must follow -C / cd, not the session cwd.
+        # (Not %TEMP%: the dispatcher's `python -c` puts cwd on sys.path, and a large TEMP
+        # makes every import crawl.)
+        check("claude-home git -C clean -fdX", "git -C %s clean -fdX" % fwd,
+              home, True, ("script", "dispatcher"), env=env)
+        check("claude-home cd && clean -fdX", "cd %s && git clean -fdX" % fwd,
+              home, True, env=env)
+        os.remove(os.path.join(ch, "hooks", "confidential-terms.json"))
+        check("claude-home clean -fdX of a non-sensitive ignored file still blocks",
+              "git clean -fdX", ch, True, env=env)
+        os.remove(os.path.join(ch, "session-state.json"))
+        check("claude-home clean -fdX with nothing to remove", "git clean -fdX", ch, False,
+              env=env)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 def main():
@@ -154,6 +200,22 @@ def main():
         check("clean -fdx ignored only", "git clean -fdx", d, False)
         untracked(d)
         check("clean -fdx ignored + untracked", "git clean -fdx", d, True)
+
+        # AUDIT M01 (2026-11-12): an ignored file whose NAME is sensitive (.env, credentials,
+        # password, confidential-terms.json) is never "just build output" -- in ANY repo.
+        os.remove(os.path.join(d, "new.txt"))
+        with open(os.path.join(d, ".gitignore"), "w") as f:
+            f.write("*.log\n.env\n")
+        git(d, "add", ".gitignore")
+        git(d, "commit", "-qm", "ignore env")
+        with open(os.path.join(d, ".env"), "w") as f:
+            f.write("SYNTHETIC=1\n")
+        check("clean -fdX ignored .env (sensitive name)", "git clean -fdX", d, True,
+              ("script", "dispatcher"))
+        check("clean -fdx ignored .env (sensitive name)", "git clean -fdx", d, True)
+        os.remove(os.path.join(d, ".env"))
+        check("clean -fdX ignored build output still allowed", "git clean -fdX", d, False)
+        claude_home_checks()
 
         # --- override token (60 min, multi-use) lets it through
         tokdir = tempfile.mkdtemp(prefix="dgg-sess-")

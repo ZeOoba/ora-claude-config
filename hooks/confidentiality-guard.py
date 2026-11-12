@@ -8,6 +8,8 @@ confidential-terms.json) from crossing any EXTERNAL egress boundary:
   * mirror / build output             (.../dist/, paths containing 'mirror')
   * /outputs/ artifacts               (.pptx .docx .pdf .html .htm .csv)
   * Notion create/update tool calls   (mcp__*notion-(create|update|append|duplicate|move|comment)*)
+  * Notion Calendar event writes      (mcp__*notion-calendar-(create|update)-events, 2026-11-12)
+  * WebFetch URLs / WebSearch queries (only a roster hit blocks, 2026-11-12)
   * Outlook send/draft/forward calls  (mcp__*OUTLOOK_(SEND|CREATE_DRAFT|SEND_DRAFT|FORWARD|REPLY)*)
   * live M365 / HubSpot send surfaces (outlook mail + calendar, Teams, SharePoint uploads,
                                        HubSpot content writes -- MCP_SEND_SURFACES, 2026-09-30)
@@ -50,6 +52,7 @@ CONFIDENTIAL_TERMS_FILE_OVERRIDE is set. Still fail-closed if the file is unread
 places (2026-07-12, mirrors the same fix in git-prepush-confidential-scan.py).
 """
 import sys, os, json, re, datetime, subprocess, base64, html, io, zipfile, unicodedata, functools, time, glob
+import hashlib
 
 HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
 LIB_DIR = os.path.join(HOOK_DIR, "lib")
@@ -106,7 +109,11 @@ OUTLOOK_SEND = re.compile(r"outlook_(send|create_draft|send_draft|forward|reply)
 #       (audit finding 2026-11-08; every call is scanned, previews included)
 #   Notion notion-send-message-to-session / notion-spawn-session ........ message / initial_message
 #       text goes to a Notion Custom Agent (NOTION_WRITE predates these and misses them)
+#   Notion notion-calendar-create-events / notion-calendar-update-events ........ an invite with
+#       attendees IS a send (summary, description, location, RSVP comment reach every attendee);
+#       the "calendar-" infix defeated NOTION_WRITE (egress audit 2026-11-12, M02)
 #   EXCLUDED
+#   Notion notion-calendar-cancel-events ........ ids only; routed to mcp-delete-guard
 #   Notion notion-upload-skill ........ payload is ids + a checksum; the archive bytes go by an
 #       out-of-band PUT (a Bash curl, which EGRESS_BASH scans as command text only)
 #   outlook_email_search / calendar_search / find_available_time, teams_list_*, chat_message_search,
@@ -142,6 +149,7 @@ HUBSPOT_WRITE = re.compile(
     r"__manage_(crm_objects|blog_post|landing_page|website_page|campaign_objects|segment|"
     r"aeo_prompts|social_posts)")
 NOTION_AGENT = re.compile(r"notion-(send-message-to-session|spawn-session)")
+NOTION_CALENDAR = re.compile(r"notion-calendar-(create-events|update-events)")
 
 # Order is the old if/elif order (Notion, then Outlook) followed by the new surfaces; the first match
 # names the surface in the block message. Every one scans the WHOLE tool_input.
@@ -154,6 +162,7 @@ MCP_SEND_SURFACES = (
     (SHAREPOINT_WRITE, "SharePoint content write"),
     (HUBSPOT_WRITE, "HubSpot write"),
     (NOTION_AGENT, "Notion agent message"),
+    (NOTION_CALENDAR, "Notion Calendar invite/update"),
 )
 FILE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
 
@@ -202,6 +211,12 @@ ARTIFACT_COMMENT_READ_ACTIONS = frozenset(("read", "watch", "resolve"))
 # existing local file is read and scanned (schemas vary: path, paths, file_path, imagePath...).
 FILE_CARRYING = re.compile(r"(upload_image|file_upload)$")
 EXCEL_READ = re.compile(r"^mcp__excel__(read_|get_|validate_)")
+# WebFetch / WebSearch (egress audit 2026-11-12, M06). The URL is requested from a third-party
+# host and the query goes to a search provider, so a deal name in either leaves the machine.
+# Scanned: WebFetch `url` (raw AND percent/plus-decoded) and WebSearch `query` plus its domain
+# filters. NOT scanned: WebFetch `prompt` -- it instructs the model that summarizes the fetched
+# page and is never sent to the fetched host. Only a roster hit blocks; ordinary research passes.
+WEB_TOOLS = {"WebFetch": ("url",), "WebSearch": ("query", "allowed_domains", "blocked_domains")}
 # Local files an egress call uploads are read with this cap per call (shares the decode budget).
 FILE_READ_MAX_FILES = 200
 
@@ -235,6 +250,9 @@ def classify_extra(tool, ti, cwd=None):
         return None if act in ARTIFACT_DATA_READ_ACTIONS else "Artifact database write"
     if tool == "ArtifactComments":
         return None if act in ARTIFACT_COMMENT_READ_ACTIONS else "Artifact comment"
+    if tool in WEB_TOOLS:
+        web_scan_text(tool, ti)  # raises on a non-string field -> main() blocks
+        return "web %s (%s)" % ("fetch URL" if tool == "WebFetch" else "search query", tool)
     if DOCS_WRITE.match(tool):
         return "Claude Docs write (%s)" % tool
     m = BROWSER_TOOL.match(tool)
@@ -249,6 +267,87 @@ def classify_extra(tool, ti, cwd=None):
         path = resolve_against(path, cwd)
         return ("Excel write into %s" % path_egress_surface(path)) if path_egress_surface(path) else None
     return None
+
+
+def web_scan_text(tool, ti):
+    """The outbound part of a WebFetch / WebSearch call, raw and URL-decoded. RAISES on a field
+    that is not a string (or, for the domain filters, a list of strings)."""
+    from urllib.parse import unquote_plus
+    parts = []
+    for field in WEB_TOOLS[tool]:
+        value = ti.get(field)
+        if value is None:
+            continue
+        values = value if field.endswith("_domains") and isinstance(value, list) else [value]
+        for v in values:
+            if not isinstance(v, str):
+                raise ValueError("%s %s is not a string" % (tool, field))
+            parts.append(v)
+            # Decode until stable (bounded): a double-encoded %2520 must not hide a term.
+            decoded = v
+            for _ in range(4):
+                nxt = unquote_plus(decoded)
+                if nxt == decoded:
+                    break
+                decoded = nxt
+            if decoded != v:
+                parts.append(decoded)
+            # URL slugs join words with - _ . / ~ (REFUTE 2026-11-12: "deal-name" in a path
+            # passed); a separator-folded view lets a multi-word term match.
+            folded = _URL_SEPS.sub(" ", decoded)
+            if folded != decoded:
+                parts.append(folded)
+    return "\n".join(parts)
+
+
+_URL_SEPS = re.compile(r"[-_./~=&?#:+,;|‐-―]+")
+# Term-side folding for WEB_TOOLS (REFUTE 2026-11-12, C3 round 2): folding only the URL left a
+# punctuated term ("Quorb-Lex Commons", "O'Varrow Yards", "St. Ames") unmatched by its own slug.
+# Both sides fold to lowercase words separated by single spaces; an apostrophe is tried both
+# dropped (ovarrow) and as a separator (o varrow). A folded term with fewer than 4 letters/digits
+# is not used (it would match everywhere); the unfolded term still is. Context ANCHORS are kept
+# whatever their length: an anchor only gates its context terms, so a short one cannot over-match
+# on its own, and dropping it would silently disarm the group on this pass.
+# ACCEPTED (REFUTE 2026-11-12): folding numeric terms over-matches on web tools -- a price term
+# "4,250,000" folds to "4 250 000", which a URL like ".../4-250-000-sqft" also folds to. That
+# over-blocks (the safe direction) and is accepted rather than special-cased.
+_APOS = re.compile("['‘’`ʼ]")
+_NON_WORD = re.compile(r"[\W_]+", re.UNICODE)
+_FOLD_MIN_ALNUM = 4
+
+
+def _web_folds(s):
+    low = s.lower()
+    out = []
+    for v in (_APOS.sub(" ", low), _APOS.sub("", low)):
+        f = _NON_WORD.sub(" ", v).strip()
+        if f and f not in out:
+            out.append(f)
+    return out
+
+
+def web_folded_text(text):
+    return "\n".join(_web_folds(text))
+
+
+def web_folded_terms(terms):
+    """The roster with every term / anchor folded like web_folded_text. Labels and the active
+    flag are kept, so hit_ref() still numbers the entry correctly."""
+    out = {}
+    for key, deal in (terms.items() if isinstance(terms, dict) else ()):
+        if key.startswith("_") or not isinstance(deal, dict):
+            continue
+        nd = {"label": deal.get("label", key), "active": deal.get("active", True)}
+        for field in ("always", "context", "context_requires_any"):
+            vals = []
+            for t in _str_terms(deal, field):
+                for f in _web_folds(t):
+                    if f not in vals and (field == "context_requires_any"
+                                          or sum(ch.isalnum() for ch in f) >= _FOLD_MIN_ALNUM):
+                        vals.append(f)
+            nd[field] = vals
+        out[key] = nd
+    return out
 
 
 def _resolve_local(path, base):
@@ -318,6 +417,8 @@ def artifact_upload_refs(ti, cwd):
 def extra_scan_text(tool, ti, cwd):
     """Everything a classify_extra surface sends, as one string. RAISES when part of it cannot be
     read; main() blocks on that (fail closed)."""
+    if tool in WEB_TOOLS:
+        return web_scan_text(tool, ti)
     views = [mcp_scan_text(ti)]
     budget = [SCAN_MAX_DECODED_BYTES]
     if tool == "Artifact":
@@ -942,6 +1043,36 @@ STALE_STATE_FILE = os.path.join(STATE_DIR, "roster-staleness.json")
 def block(reason):
     sys.stderr.write("BLOCKED (confidentiality, fail-closed): %s\n" % reason)
     sys.exit(2)
+
+
+# Block messages never echo the matched term or the deal label (egress audit 2026-11-12, M43):
+# stderr lands in the transcript, logs and any relayed summary, so naming the identifier there
+# spreads it. The message carries the roster entry number and a short term id instead. The id is
+# a domain-separated SHA-256 prefix of the lowercased term: stable, so an operator holding the
+# roster can map it back (compute term_id() over the entry's terms), but not reversible. It is
+# NOT salted -- someone who already suspects a name can confirm a guess; that is accepted, since
+# the goal is not to spread the name, not to hide it from someone who already has it.
+_NEXT_STEP = ("Next step: remove the deal reference (or replace it with a generic description) "
+              "and retry; if this deal has closed, declassify it per rules.md 7b first.")
+
+
+def term_id(term):
+    return hashlib.sha256(("ora-confidential-term:" + term.lower()).encode("utf-8")).hexdigest()[:10]
+
+
+def hit_ref(terms, hit):
+    """'roster entry #N, term-id XXXX' for a find_hit() result -- never the term or label."""
+    label, term = hit
+    n = "?"
+    idx = 0
+    for k, deal in (terms.items() if isinstance(terms, dict) else ()):
+        if k.startswith("_"):
+            continue
+        idx += 1
+        if isinstance(deal, dict) and deal.get("active", True) and deal.get("label", k) == label:
+            n = str(idx)
+            break
+    return "roster entry #%s, term-id %s" % (n, term_id(term))
 
 
 def _read_stdin_text():
@@ -1619,6 +1750,7 @@ def main():
         # classified, so fail closed for them (legacy tools keep the whole-payload wrap below).
         if (_mcp_suffix(tool, _DC_WRITE_SUFFIXES + ("move_file",)) or is_shell_tool(tool)
                 and tool != "Bash") or tool in ("Artifact", "ArtifactData", "ArtifactComments") \
+                or tool in WEB_TOOLS \
                 or (isinstance(tool, str) and (DOCS_WRITE.match(tool) or BROWSER_TOOL.match(tool)
                                                or tool.startswith("mcp__excel__"))):
             block("%s tool_input is not an object; cannot verify egress safety." % tool)
@@ -1669,9 +1801,10 @@ def main():
                         except Exception as e:
                             block("edit seam scan failed (%s); cannot verify egress safety." % type(e).__name__)
                         if hit:
-                            block("'%s' identifier ('%s') would be formed where this edit joins the "
-                                  "existing text of %s. This deal must not reach any external surface "
-                                  "until closing." % (hit[0], hit[1], surface))
+                            block("a confidential deal identifier (%s) would be formed where this "
+                                  "edit joins the existing text of %s. This deal must not reach any "
+                                  "external surface until closing.\n%s"
+                                  % (hit_ref(terms, hit), surface, _NEXT_STEP))
                     extracted = True
             if not scan_text and not extracted:
                 # egress write we cannot read -> fail closed
@@ -1743,13 +1876,23 @@ def main():
     # --- Enforce -----------------------------------------------------------------------
     try:
         hit = find_hit(scan_text, terms)
+        if not hit and tool in WEB_TOOLS:
+            hit = find_hit(web_folded_text(scan_text), web_folded_terms(terms))
+            if hit:  # cite the ORIGINAL term's id, so term_id() over the roster maps it back
+                for key, deal in terms.items():
+                    if (not key.startswith("_") and isinstance(deal, dict)
+                            and deal.get("label", key) == hit[0]):
+                        for t in _str_terms(deal, "always") + _str_terms(deal, "context"):
+                            if hit[1] in _web_folds(t):
+                                hit = (hit[0], t)
+                                break
     except Exception as e:
         block("egress scan failed (%s); cannot verify egress safety." % type(e).__name__)
     if hit:
-        label, term = hit
-        block("'%s' identifier ('%s') would cross egress surface [%s]. "
+        block("a confidential deal identifier (%s) would cross egress surface [%s]. "
               "This deal must not reach any external surface until closing. "
-              "Keep it on internal/local paths only." % (label, term, surface))
+              "Keep it on internal/local paths only.\n%s"
+              % (hit_ref(terms, hit), surface, _NEXT_STEP))
 
     # Clean egress. Before allowing, check roster FRESHNESS -- this no-hit path is the exact failure
     # mode a stale roster hides: a NEW confidential deal that should be on the list but isn't produces
