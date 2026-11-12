@@ -154,6 +154,15 @@ obsidian-fleet-mirror/session-state.d/
 !/scheduled-tasks/_shared/send-contract-harness.ps1
 !/scheduled-tasks/_shared/test-send-contract-legacy.ps1
 !/scheduled-tasks/_shared/test-send-contract-keyed.ps1
+# (2026-11-12) Snapshot guard shared by ora-cc-snapshot-refresh and ora-lease-snapshot-refresh
+# v2.0 (portfolio.json untracked in oxford-command-center). Load-bearing for both; per-file, no glob.
+!/scheduled-tasks/_shared/snapshot-guard.py
+!/scheduled-tasks/_shared/test-snapshot-guard.py
+# Verbatim retired v1.x sections both v2.0 specs cite (worktree, auto-commit, auto-push).
+!/scheduled-tasks/ora-cc-snapshot-refresh/_archive/
+!/scheduled-tasks/ora-cc-snapshot-refresh/_archive/2026-11-12_retired-sections.md
+!/scheduled-tasks/ora-lease-snapshot-refresh/_archive/
+!/scheduled-tasks/ora-lease-snapshot-refresh/_archive/2026-11-12_retired-sections.md
 
 # 2c) Memory (projects/.../memory/) — versioned 2026-07-15 for durability, same rationale
 #     as 2b: this /* default-deny (introduced in the SAME 2026-07-12 commit as 2b) never
