@@ -44,8 +44,15 @@ def _mkfile(tmpdir, name, content):
     return p
 
 
-def run_cli(args):
-    return subprocess.run([sys.executable, str(SCRIPT)] + args,
+_ROSTER_DIR = tempfile.mkdtemp(prefix="sbo_roster_")
+SYNTH_TERMS = os.path.join(_ROSTER_DIR, "terms.json")
+with open(SYNTH_TERMS, "w", encoding="utf-8") as _f:
+    json.dump({"synthetic_deal": {"active": True, "always": ["zebraquartz portfolio"]}}, _f)
+
+
+def run_cli(args, terms=True):
+    extra = ["--terms", SYNTH_TERMS] if terms and args else []
+    return subprocess.run([sys.executable, str(SCRIPT)] + extra + args,
                           capture_output=True, text=True)
 
 
@@ -192,6 +199,49 @@ try:
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
 
+# --- 2026-11-12 (egress audit M32): an absent roster is NOT clean ---------------------
+tmp = tempfile.mkdtemp(prefix="sbo_noroster_")
+try:
+    _mkfile(tmp, "ok.md", "fine\n")
+    absent = os.path.join(tmp, "absent.json")
+    r = subprocess.run([sys.executable, str(SCRIPT), "--terms", absent, tmp],
+                       capture_output=True, text=True)
+    expect("absent roster: CLI exits non-zero", r.returncode == 2, "rc=%s" % r.returncode)
+    expect("absent roster: CLI says TERM SCAN NOT RUN", "TERM SCAN NOT RUN" in r.stdout, r.stdout)
+    expect("absent roster: CLI never prints SCRUB CLEAN", "SCRUB CLEAN" not in r.stdout, r.stdout)
+    rep_ = sbo.scrub_report([tmp], terms_path=absent)
+    expect("absent roster: scrub_report marks term_scan_ran False",
+           rep_["term_scan_ran"] is False, rep_)
+    _bad = os.path.join(tmp, "bad.json")
+    with open(_bad, "w") as f:
+        f.write("{not json")
+    r = subprocess.run([sys.executable, str(SCRIPT), "--terms", _bad, tmp],
+                       capture_output=True, text=True)
+    expect("unparseable roster: CLI exits 2 with TERM SCAN NOT RUN",
+           r.returncode == 2 and "TERM SCAN NOT RUN" in r.stdout, r.stdout)
+    rep_ = sbo.scrub_report([tmp], terms_path=SYNTH_TERMS)
+    expect("present roster: scrub_report marks term_scan_ran True", rep_["term_scan_ran"] is True,
+           rep_)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+# --- 2026-11-12 (egress audit M32): undecodable files are reported, not silently skipped ---
+tmp = tempfile.mkdtemp(prefix="sbo_skip_")
+try:
+    _mkfile(tmp, "ok.md", "fine\n")
+    undecodable = os.path.join(tmp, "blob.bin")
+    with open(undecodable, "wb") as f:
+        f.write(b"\x81\x8d\x8f\x90\x9d")  # invalid UTF-8, odd-length UTF-16, cp1252-undefined
+    rep_ = sbo.scrub_report([tmp], terms_path=SYNTH_TERMS)
+    expect("undecodable file listed in skipped",
+           [os.path.basename(str(x)) for x in rep_["skipped"]] == ["blob.bin"], rep_)
+    r = run_cli([tmp])
+    expect("undecodable file named in the CLI report", "blob.bin" in r.stdout, r.stdout)
+    expect("CLI report says how many files were NOT scanned", "NOT scanned" in r.stdout, r.stdout)
+finally:
+    shutil.rmtree(tmp, ignore_errors=True)
+
+shutil.rmtree(_ROSTER_DIR, ignore_errors=True)
 passed = sum(1 for ok, _ in results if ok)
 print("\nscrub-before-optin tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
