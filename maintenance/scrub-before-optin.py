@@ -24,13 +24,26 @@ confidential term or secret value):
      a HELPER for the human doing the opt-in review, not a hard gate.
 
 Usage:
-  python scrub-before-optin.py <file-or-directory> [<file-or-directory> ...]
+  python scrub-before-optin.py [--terms <roster.json>] <file-or-directory> [...]
 Exit 0 = clean (or no scannable files found). Exit 1 = at least one hit
 (confidential term or secret pattern) — read the report before opting in.
+Exit 2 = TERM SCAN NOT RUN: the confidential roster could not be read (absent,
+unparseable, not an object), so "no confidential hits" would be meaningless.
+Never reported as clean (egress audit 2026-11-12, M32).
+
+Roster resolution: --terms if given (used exactly, no fallback); else this
+checkout's hooks/confidential-terms.json; else the MAIN worktree's copy (the
+roster is gitignored, so a linked worktree never has one) -- the same two-step
+as confidentiality-guard.py and git-prepush-confidential-scan.py.
+
+Files that cannot be read or decoded are LISTED as "NOT scanned" in the report
+(they used to be skipped silently). They do not change the exit code: a binary
+blob is common in an opt-in candidate, and the human reviewer decides.
 """
 import importlib.util
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -74,12 +87,41 @@ def iter_scannable_files(paths):
                     yield Path(root) / name
 
 
+def _main_worktree_terms():
+    """hooks/confidential-terms.json in the MAIN worktree (via git-common-dir), or None."""
+    try:
+        r = subprocess.run(["git", "-C", str(HERE), "rev-parse", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=5)
+    except Exception:
+        return None
+    out = (r.stdout or "").strip()
+    if r.returncode != 0 or not out:
+        return None
+    common = Path(out) if os.path.isabs(out) else (HERE / out)
+    cand = common.resolve().parent / "hooks" / "confidential-terms.json"
+    try:
+        if cand.resolve() == TERMS_JSON.resolve():
+            return None
+    except Exception:
+        pass
+    return cand
+
+
+def resolve_terms_path(terms_path=None):
+    """Explicit path as given; else this checkout's roster, falling back to the main worktree's."""
+    if terms_path:
+        return Path(terms_path)
+    if TERMS_JSON.is_file():
+        return TERMS_JSON
+    return _main_worktree_terms() or TERMS_JSON
+
+
 def load_active_term_seqs(terms_path=None):
     """(term_seqs, shape_warnings) via doctrine-integrity-probe.py's own
     matching functions -- term_seqs is [(deal_idx, term_idx, word-tuple)] for
     ACTIVE deals only. Returns ([], []) if the terms file is absent/malformed
     (fail-open, matching the probe's own posture; a warning explains why)."""
-    raw, err = dip.read_optional(terms_path or TERMS_JSON)
+    raw, err = dip.read_optional(resolve_terms_path(terms_path))
     if raw is None:
         return [], ["confidential-term scan skipped (fail-open): %s" % err]
     try:
@@ -152,23 +194,35 @@ def scan_file_for_secrets(path):
     return hits
 
 
-def scrub(paths, terms_path=None):
-    """Runs both scans over every scannable file under `paths`. Returns
-    (term_hits, secret_hits, warnings):
-      term_hits   -- [(file, [deal_idx, ...]), ...] for files with a term hit
-      secret_hits -- [(file, [(line_no, label), ...]), ...] for files with a secret hit
-      warnings    -- shape/skip warnings (terms file issues, etc.)
+def scrub_report(paths, terms_path=None):
+    """Both scans over every scannable file under `paths`, as a dict:
+      term_hits     -- [(file, [deal_idx, ...]), ...] for files with a term hit
+      secret_hits   -- [(file, [(line_no, label), ...]), ...] for files with a secret hit
+      warnings      -- shape/skip warnings (terms file issues, etc.)
+      term_scan_ran -- False when the roster could not be read: NO term scan happened
+      skipped       -- files that could not be read/decoded (scanned for nothing)
     Pure function -- no printing, no exit."""
     term_seqs, warnings = load_active_term_seqs(terms_path)
-    term_hits, secret_hits = [], []
+    ran = not any(w.startswith("confidential-term scan skipped") for w in warnings)
+    term_hits, secret_hits, skipped = [], [], []
     for f in iter_scannable_files(paths):
         deal_idxs = scan_file_for_terms(f, term_seqs)
+        if deal_idxs is None:
+            skipped.append(f)
+            continue
         if deal_idxs:
             term_hits.append((f, deal_idxs))
         secrets = scan_file_for_secrets(f)
         if secrets:
             secret_hits.append((f, secrets))
-    return term_hits, secret_hits, warnings
+    return {"term_hits": term_hits, "secret_hits": secret_hits, "warnings": warnings,
+            "term_scan_ran": ran, "skipped": skipped}
+
+
+def scrub(paths, terms_path=None):
+    """(term_hits, secret_hits, warnings) -- the original 3-tuple view of scrub_report()."""
+    r = scrub_report(paths, terms_path)
+    return r["term_hits"], r["secret_hits"], r["warnings"]
 
 
 def main(argv=None):
@@ -177,16 +231,38 @@ def main(argv=None):
             _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except Exception:
             pass
-    argv = sys.argv[1:] if argv is None else argv
+    argv = list(sys.argv[1:] if argv is None else argv)
+    terms_path = None
+    if "--terms" in argv:
+        i = argv.index("--terms")
+        if i + 1 >= len(argv):
+            print("usage: python scrub-before-optin.py [--terms <roster.json>] <path> [...]")
+            return 1
+        terms_path = argv[i + 1]
+        del argv[i:i + 2]
     if not argv:
-        print("usage: python scrub-before-optin.py <file-or-directory> [...]")
+        print("usage: python scrub-before-optin.py [--terms <roster.json>] <path> [...]")
         return 1
-    term_hits, secret_hits, warnings = scrub(argv)
+    rep = scrub_report(argv, terms_path)
+    term_hits, secret_hits, warnings = rep["term_hits"], rep["secret_hits"], rep["warnings"]
     for w in warnings:
         print("[WARN] %s" % w)
+    for f in rep["skipped"]:
+        print("[SKIPPED] %s -- unreadable or undecodable, NOT scanned; review it by hand" % f)
+    unscanned = ("; %d file(s) NOT scanned (listed above)" % len(rep["skipped"])
+                 if rep["skipped"] else "")
+    if not rep["term_scan_ran"]:
+        print("TERM SCAN NOT RUN -- the confidential roster could not be read, so this tree was "
+              "NOT checked for confidential deal terms. %d secret-pattern hit file(s)%s.\n"
+              "Next step: run from the main ~/.claude checkout, or pass --terms <roster.json>; "
+              "do not opt this path in on this result." % (len(secret_hits), unscanned))
+        for f, hits in secret_hits:
+            for ln_no, label in hits:
+                print("  [SECRET-PATTERN] %s:%d -- %s (value withheld)" % (f, ln_no, label))
+        return 2
     if not term_hits and not secret_hits:
         print("SCRUB CLEAN -- 0 confidential-term hits, 0 secret-pattern hits, "
-              "%d warning(s)" % len(warnings))
+              "%d warning(s)%s" % (len(warnings), unscanned))
         return 0
     print("SCRUB FOUND ISSUES -- review before opting this path into git tracking:")
     for f, deal_idxs in term_hits:
@@ -195,8 +271,8 @@ def main(argv=None):
     for f, hits in secret_hits:
         for ln_no, label in hits:
             print("  [SECRET-PATTERN] %s:%d -- %s (value withheld)" % (f, ln_no, label))
-    print("\n%d file(s) with confidential-term hits, %d file(s) with secret-pattern hits"
-          % (len(term_hits), len(secret_hits)))
+    print("\n%d file(s) with confidential-term hits, %d file(s) with secret-pattern hits%s"
+          % (len(term_hits), len(secret_hits), unscanned))
     return 1
 
 
