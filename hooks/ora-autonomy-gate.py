@@ -53,7 +53,15 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            SCHEDULE, publishAt, UPDATE, unknown action) needs allow-hubspot-social-publish
            (scope hubspot-social-publish, 5 min, SINGLE-USE). Unknown keys and non-bool
            `confirmed` fail closed.
-  Gates 1b/1c/1d/1e/1f/3/3b match on the tool-name SUFFIX after the last "__", so a reinstalled
+  GATE 1g — Notion Calendar notion-calendar-create-events / notion-calendar-update-events
+           (egress audit 2026-11-12, M02; Gate 1d parity). create: any attendee or resource
+           address, or any stray address outside the prose fields, that is not one plain
+           @oxfordra.net address needs an external-send token naming it; no external address ->
+           pass. update (UPDATE or RSVP): always gated, existing attendees are invisible to the
+           hook; the token names `event:<eventId>` for every update in the call (plus any external
+           attendee). Unknown keys and malformed shapes fail closed. cancel-events is ids-only and
+           belongs to mcp-delete-guard. Override: allow-external-send (same tier as GATE 1).
+  Gates 1b/1c/1d/1e/1f/1g/3/3b match on the tool-name SUFFIX after the last "__", so a reinstalled
   connector with a new id stays gated. They fail CLOSED on any anomaly once a gated tool is
   named, including a payload too malformed to parse. This gate covers Claude Code sessions
   and the CC/MCP scheduled fleet only; hooks do not run inside Cowork (LAMS) sessions.
@@ -948,6 +956,14 @@ def check_mcp(tool_name, session_id, tool_input=None):
             raise
         except Exception:
             block_shape(tool_name, session_id)
+    # Gate 1g: same fail-closed wrapper, its own try.
+    if short in _NOTION_CALENDAR:
+        try:
+            _check_notion_calendar(short, tool_name, tool_input, session_id)
+        except SystemExit:
+            raise
+        except Exception:
+            block_shape(tool_name, session_id)
     # Gate 1f: same fail-closed wrapper, its own try.
     if short == _MS365_TEAMS_CREATE:
         try:
@@ -1363,6 +1379,114 @@ def _check_calendar(short, tool_name, tool_input, session_id):
             reason = "Outlook auto-reply to external senders (externalAudience=%r)" % audience
             hint = ("An omitted externalAudience is not \"none\"; name the audience in "
                     "`recipients:` exactly: %s\n" % external[0])
+    if not override_active(session_id, EXTERNAL_SEND, external):
+        block("%s: %s" % (reason, ", ".join(external)), EXTERNAL_SEND, session_id, extra=hint)
+
+
+# Gate 1g (egress audit 2026-11-12, M02). Keys verified 2026-11-12 against the live Notion
+# connector schemas (additionalProperties:false at every level). Prose fields are skipped by the
+# stray-address scan, as for Outlook (an address typed into a description is not a recipient).
+_NOTION_CALENDAR = frozenset(("notion-calendar-create-events", "notion-calendar-update-events"))
+_NCAL_TOP_CREATE = frozenset(("timeZone", "events", "instructions_version", "skill"))
+_NCAL_TOP_UPDATE = frozenset(("timeZone", "updates", "instructions_version", "skill"))
+_NCAL_EVENT_KEYS = frozenset(("summary", "description", "location", "period", "attendees",
+                              "resources", "calendar", "disableConferencing", "recurrenceRules"))
+_NCAL_UPDATE_FIELDS = frozenset(("summary", "description", "location", "period", "attendees",
+                                 "resources", "addConferencing", "recurrenceRules"))
+_NCAL_PERSON_KEYS = frozenset(("email", "displayName", "isOptional"))
+_NCAL_PROSE = frozenset(("summary", "description", "displayName", "eventSummary", "comment"))
+
+
+def _ncal_people(event):
+    """Every attendee / resource email in one event or update body; None on a bad shape."""
+    found = []
+    for key in ("attendees", "resources"):
+        entries = event.get(key)
+        if entries is None:
+            continue
+        if not isinstance(entries, list):
+            return None
+        for entry in entries:
+            if not isinstance(entry, dict) or set(entry) - _NCAL_PERSON_KEYS:
+                return None
+            email = entry.get("email")
+            if email is None and key == "resources":
+                continue  # a resource may be named without an address (schema: email optional)
+            if not isinstance(email, str):
+                return None
+            found.append(email)
+    return found
+
+
+def _ncal_stray(value):
+    """Address-bearing strings outside the prose fields (same rule as _stray_addresses)."""
+    found = []
+    if isinstance(value, str):
+        folded = unicodedata.normalize("NFKC", value)
+        if "@" in folded and not _INTERNAL_ADDRESS.fullmatch(folded):
+            found.append(folded)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            if k in _NCAL_PROSE:
+                continue
+            found += _ncal_stray(k) + _ncal_stray(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            found += _ncal_stray(v)
+    return found
+
+
+def _check_notion_calendar(short, tool_name, tool_input, session_id):
+    """GATE 1g -- see the module docstring."""
+    if not isinstance(tool_input, dict):
+        block_shape(tool_name, session_id)
+    external = []
+    if short == "notion-calendar-create-events":
+        events = tool_input.get("events")
+        if set(tool_input) - _NCAL_TOP_CREATE or not isinstance(events, list):
+            block_shape(tool_name, session_id)
+        for ev in events:
+            if not isinstance(ev, dict) or set(ev) - _NCAL_EVENT_KEYS:
+                block_shape(tool_name, session_id)
+            people = _ncal_people(ev)
+            if people is None:
+                block_shape(tool_name, session_id)
+            external += [a for a in people if not _INTERNAL_ADDRESS.fullmatch(a)]
+            external += _ncal_stray(ev)
+        external = _dedupe(external)
+        if not external:
+            return  # no attendee, or internal only: no invite leaves the firm
+        reason = "Notion Calendar invitation to external attendee(s) (%s)" % short
+        hint = ""
+    else:
+        updates = tool_input.get("updates")
+        if set(tool_input) - _NCAL_TOP_UPDATE or not isinstance(updates, list) or not updates:
+            block_shape(tool_name, session_id)
+        events = []
+        for u in updates:
+            if not isinstance(u, dict):
+                block_shape(tool_name, session_id)
+            kind = u.get("updateType")
+            ev = u.get("event")
+            body = u.get("update") if kind == "UPDATE" else u.get("rsvp")
+            allowed = {"updateType", "event", "update" if kind == "UPDATE" else "rsvp"}
+            if kind not in ("UPDATE", "RSVP") or set(u) - allowed or not isinstance(ev, dict)                     or not isinstance(body, dict) or not _nonblank(ev.get("eventId"))                     or set(ev) - {"calendar", "eventId", "eventSummary"}:
+                block_shape(tool_name, session_id)
+            if kind == "UPDATE":
+                if set(body) - _NCAL_UPDATE_FIELDS:
+                    block_shape(tool_name, session_id)
+                people = _ncal_people(body)
+                if people is None:
+                    block_shape(tool_name, session_id)
+                external += [a for a in people if not _INTERNAL_ADDRESS.fullmatch(a)]
+            elif set(body) - {"responseStatus", "comment"}:
+                block_shape(tool_name, session_id)
+            external += _ncal_stray(body) + _ncal_stray(ev)
+            events.append("event:" + ev["eventId"].strip())
+        external = _dedupe(events + external)
+        reason = ("%s notifies the event's attendees or organizer (existing attendees are not in "
+                  "the input)" % short)
+        hint = "Name every event in `recipients:` exactly: %s\n" % ", ".join(events)
     if not override_active(session_id, EXTERNAL_SEND, external):
         block("%s: %s" % (reason, ", ".join(external)), EXTERNAL_SEND, session_id, extra=hint)
 

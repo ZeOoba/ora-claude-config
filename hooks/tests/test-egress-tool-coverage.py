@@ -18,6 +18,15 @@ the guards) rather than by matcher text:
       (deny > ask > allow), so a warn-only guard's 'allow' can never cancel a later deny.
   H4  override-mint-guard is wired into both dispatcher chains (and the wiring table).
 
+Egress audit 2026-11-12 (ora-claude-config @ 6865c3c0):
+  N1  (M02) Notion Calendar create/update events reach confidentiality-guard (whole payload
+      scanned) and ora-autonomy-gate (an external attendee is an external send; an update
+      always needs a token, like Outlook update_event).
+  N2  (M05) pretooluse-dispatcher fails CLOSED when a FAIL_CLOSED guard
+      (confidentiality-guard) cannot run on either path; other guards keep failing open.
+  N3  (M06) WebFetch URLs and WebSearch queries are scanned; only a roster hit blocks.
+  N4  (M43) the block message never echoes the matched term or the deal label.
+
 Every term below is a clearly fake placeholder fed through CONFIDENTIAL_TERMS_FILE_OVERRIDE;
 no real deal identifier appears in this file. BLOCK == exit 2, ALLOW == exit 0.
 
@@ -68,6 +77,15 @@ def _terms_file():
                       "roster_last_verified": datetime.date.today().isoformat()},
             "synthetic_egress_deal": {"active": True, "label": "Synthetic Egress Deal (fixture)",
                                       "always": [TERM, "Project Nightingale"],
+                                      "context": [], "context_requires_any": []},
+            # Punctuated synthetic terms (REFUTE 2026-11-12, C3): a URL slug drops or swaps the
+            # term's own - ' . characters, so the term side must be folded too.
+            # No "label": hit_ref / the fold mapping must fall back to the roster key.
+            "synthetic_unlabeled_deal": {"active": True, "always": ["Vexmoor-Tal Landing"],
+                                         "context": [], "context_requires_any": []},
+            "synthetic_punct_deal": {"active": True, "label": "Synthetic Punct Deal (fixture)",
+                                     "always": ["Quorb-Lex Commons", "O'Varrow Yards",
+                                                "Blorvik St. Ames"],
                                       "context": [], "context_requires_any": []},
         }, f)
     return path
@@ -446,6 +464,204 @@ def test_refute_autonomy():
            {"filepath": "C:/Users/Owner/website-canonical/data.xlsx", "sheet_name": "S"}, 0)
 
 
+# ------------------------------------------------------------------ N1 Notion Calendar (M02)
+NOTION = "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__"
+NCAL_CREATE = NOTION + "notion-calendar-create-events"
+NCAL_UPDATE = NOTION + "notion-calendar-update-events"
+_PERIOD = {"type": "DATE_TIME", "start": {"dateTime": "2026-12-01T10:00:00Z"},
+           "end": {"dateTime": "2026-12-01T11:00:00Z"}}
+_CAL = {"accountId": "acct", "calendarId": "cal"}
+
+
+def _ncal_create(summary="Site walk", attendees=None, **extra):
+    ev = {"summary": summary, "period": _PERIOD}
+    if attendees is not None:
+        ev["attendees"] = [{"email": a} for a in attendees]
+    ev.update(extra)
+    return {"timeZone": "America/New_York", "events": [ev]}
+
+
+def _ncal_update(update=None, rsvp=None):
+    u = {"event": {"calendar": _CAL, "eventId": "evt-1"}}
+    if rsvp is not None:
+        u.update(updateType="RSVP", rsvp=rsvp)
+    else:
+        u.update(updateType="UPDATE", update=update or {"summary": "moved"})
+    return {"timeZone": "America/New_York", "updates": [u]}
+
+
+def test_notion_calendar():
+    expect("N1a Notion Calendar create with term in summary", CONF, NCAL_CREATE,
+           _ncal_create(summary="Tour of " + TERM), 2)
+    expect("N1b Notion Calendar create with term in description", CONF, NCAL_CREATE,
+           _ncal_create(description="re " + TERM), 2)
+    expect("N1c Notion Calendar create clean", CONF, NCAL_CREATE, _ncal_create(), 0)
+    expect("N1d Notion Calendar update with term", CONF, NCAL_UPDATE,
+           _ncal_update({"description": TERM}), 2)
+    expect("N1e Notion Calendar RSVP comment with term", CONF, NCAL_UPDATE,
+           _ncal_update(rsvp={"responseStatus": "accepted", "comment": TERM}), 2)
+    expect("N1f Notion Calendar update clean", CONF, NCAL_UPDATE, _ncal_update(), 0)
+    # Autonomy gate: an external attendee is an external send (Outlook create_event parity).
+    expect("N1g create with external attendee", AUTO, NCAL_CREATE,
+           _ncal_create(attendees=["broker@example.com"]), 2)
+    expect("N1h create with internal attendee only", AUTO, NCAL_CREATE,
+           _ncal_create(attendees=["ggoldberg@oxfordra.net"]), 0)
+    expect("N1i create with no attendees", AUTO, NCAL_CREATE, _ncal_create(), 0)
+    expect("N1j create with lookalike internal domain", AUTO, NCAL_CREATE,
+           _ncal_create(attendees=["x@oxfordra.net.evil.com"]), 2)
+    expect("N1k create with an external address in location", AUTO, NCAL_CREATE,
+           _ncal_create(location="dial in: bridge@example.com"), 2)
+    expect("N1l create with an external resource email", AUTO, NCAL_CREATE,
+           _ncal_create(resources=[{"email": "room@example.com", "isOptional": False}]), 2)
+    expect("N1m update always gated (existing attendees invisible)", AUTO, NCAL_UPDATE,
+           _ncal_update(), 2)
+    expect("N1n RSVP always gated (mails the organizer)", AUTO, NCAL_UPDATE,
+           _ncal_update(rsvp={"responseStatus": "accepted"}), 2)
+    expect("N1o malformed create (events not a list) fails closed", AUTO, NCAL_CREATE,
+           {"timeZone": "UTC", "events": "x"}, 2)
+    expect("N1p unknown event key fails closed", AUTO, NCAL_CREATE,
+           _ncal_create(notifyAll=True), 2)
+    expect("N1q cancel-events is not the autonomy gate's (mcp-delete-guard owns it)", AUTO,
+           NOTION + "notion-calendar-cancel-events", {"cancellations": []}, 0)
+
+
+def test_notion_calendar_token():
+    """A token naming the external attendee lets exactly that create through."""
+    tokdir = os.path.join(TMP, "ncal-sessions")
+    sess = "egress-ncal-" + uuid.uuid4().hex[:8]
+    od = os.path.join(tokdir, sess, "overrides")
+    os.makedirs(od)
+    with open(os.path.join(od, "allow-external-send"), "w") as f:
+        f.write("scope: external-send\nsession: %s\nreason: test\nrecipients: broker@example.com\n"
+                % sess)
+    payload = {"tool_name": NCAL_CREATE, "tool_input": _ncal_create(attendees=["broker@example.com"]),
+               "cwd": TMP, "session_id": sess}
+    env = dict(os.environ, ORA_OVERRIDE_SESSIONS_DIR=tokdir)
+    p = subprocess.run([sys.executable, AUTO], input=json.dumps(payload).encode("utf-8"),
+                       capture_output=True, env=env, timeout=120)
+    check("N1r external-send token naming the attendee -> allow", p.returncode == 0,
+          p.stderr.decode("utf-8", "replace"))
+
+
+# ------------------------------------------------------------------ N2 dispatcher fail-closed (M05)
+def _both_paths_fail(disp, sub_rc=None):
+    def _inproc(name, raw):
+        raise RuntimeError("synthetic in-process failure")
+
+    def _sub(name, raw):
+        if sub_rc is None:
+            raise OSError("synthetic subprocess failure")
+        return sub_rc, "", "Traceback (synthetic crash)\n"
+    disp._run_inprocess = _inproc
+    disp._run_subprocess = _sub
+
+
+def test_dispatcher_fail_closed():
+    disp = _load_dispatcher()
+    check("N2a FAIL_CLOSED contains confidentiality-guard",
+          "confidentiality-guard" in getattr(disp, "FAIL_CLOSED", ()))
+    _both_paths_fail(disp)
+    with redirect_stderr(io.StringIO()) as err:
+        rc, _o, _e, mode = disp.run_guard("confidentiality-guard", b"{}")
+    check("N2b confidentiality-guard failing both paths -> rc 2 (fail closed)",
+          rc == 2 and mode == "failclosed", "rc=%s mode=%s %s" % (rc, mode, err.getvalue()))
+    with redirect_stderr(io.StringIO()):
+        rc, _o, _e, mode = disp.run_guard("destructive-git-guard", b"{}")
+    check("N2c a non-FAIL_CLOSED guard failing both paths keeps failing open",
+          rc == 0 and mode == "failed", "rc=%s mode=%s" % (rc, mode))
+    disp = _load_dispatcher()
+    _both_paths_fail(disp, sub_rc=1)
+    with redirect_stderr(io.StringIO()):
+        rc, _o, _e, mode = disp.run_guard("confidentiality-guard", b"{}")
+    check("N2d confidentiality-guard subprocess CRASH (rc 1) after in-process failure -> rc 2",
+          rc == 2 and mode == "failclosed", "rc=%s mode=%s" % (rc, mode))
+    with redirect_stderr(io.StringIO()):
+        rc, _o, _e, mode = disp.run_guard("destructive-git-guard", b"{}")
+    check("N2e non-FAIL_CLOSED guard subprocess rc 1 is relayed unchanged (non-blocking)",
+          rc == 1 and mode == "subprocess", "rc=%s mode=%s" % (rc, mode))
+    disp = _load_dispatcher()
+    _both_paths_fail(disp)
+    real_stdin = sys.stdin
+    try:
+        sys.stdin = io.TextIOWrapper(io.BytesIO(b'{"tool_name":"Bash","tool_input":{}}'))
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()) as err:
+            rc = disp._dispatch(["confidentiality-guard"], b"{}", "custom", ("", ""), [])
+    finally:
+        sys.stdin = real_stdin
+    check("N2f chain run: confidentiality-guard unrunnable -> chain blocks (2)", rc == 2,
+          "rc=%s %s" % (rc, err.getvalue()))
+    check("N2g the block message names the guard and says it failed closed",
+          "confidentiality-guard" in err.getvalue() and "fail" in err.getvalue().lower(),
+          err.getvalue())
+
+
+# ------------------------------------------------------------------ N3 WebFetch / WebSearch (M06)
+def test_web_tools():
+    expect("N3a WebFetch URL carrying the term", CONF, "WebFetch",
+           {"url": "https://example.invalid/?q=" + TERM, "prompt": "summarize"}, 2)
+    expect("N3a2 WebFetch URL carrying the term percent-encoded", CONF, "WebFetch",
+           {"url": "https://example.invalid/?q=" + TERM.replace(" ", "%20")}, 2)
+    expect("N3a3 WebFetch URL carrying the term plus-encoded", CONF, "WebFetch",
+           {"url": "https://example.invalid/?q=" + TERM.replace(" ", "+")}, 2)
+    expect("N3a4 WebFetch URL carrying the term as a hyphenated slug", CONF, "WebFetch",
+           {"url": "https://example.invalid/" + TERM.lower().replace(" ", "-")}, 2)
+    expect("N3a5 WebFetch URL carrying the term as an underscore/dot slug", CONF, "WebFetch",
+           {"url": "https://example.invalid/" + TERM.replace(" ", "_") + "/" + TERM.replace(" ", ".")}, 2)
+    expect("N3a6 WebFetch URL carrying the term double-percent-encoded", CONF, "WebFetch",
+           {"url": "https://example.invalid/?q=" + TERM.replace(" ", "%2520")}, 2)
+    for slug in ("quorb-lex-commons", "quorb_lex_commons", "Quorb-Lex-Commons", "ovarrow-yards", "o-varrow-yards", "blorvik-st-ames", "blorvik-st.-ames"):
+        expect("N3a7 WebFetch slug of a punctuated term: %s" % slug, CONF, "WebFetch",
+               {"url": "https://example.invalid/listing/" + slug}, 2)
+    for sep in (",", ";", "|", "‐"):
+        expect("N3a8 WebFetch URL with %s between term words" % ascii(sep), CONF, "WebFetch",
+               {"url": "https://example.invalid/?q=" + TERM.replace(" ", sep)}, 2)
+    expect("N3a9 WebSearch query with a punctuated term spelled without punctuation", CONF,
+           "WebSearch", {"query": "ovarrow yards industrial sale"}, 2)
+    expect("N3a10 WebFetch URL sharing only one word of a punctuated term", CONF, "WebFetch",
+           {"url": "https://example.invalid/commons-park/yards"}, 0)
+    expect("N3b WebFetch clean URL", CONF, "WebFetch",
+           {"url": "https://example.invalid/industrial-market", "prompt": "summarize"}, 0)
+    expect("N3c WebFetch prompt naming the term but a clean URL (prompt is not sent to the site)",
+           CONF, "WebFetch", {"url": "https://example.invalid/x", "prompt": "find " + TERM}, 0)
+    expect("N3d WebSearch query carrying the term", CONF, "WebSearch", {"query": TERM + " sale"}, 2)
+    expect("N3e WebSearch clean query", CONF, "WebSearch",
+           {"query": "Columbus industrial vacancy 2026"}, 0)
+    expect("N3f WebSearch allowed_domains carrying the term", CONF, "WebSearch",
+           {"query": "x", "allowed_domains": [TERM]}, 2)
+    expect("N3g WebFetch non-string url fails closed", CONF, "WebFetch", {"url": [TERM]}, 2)
+    expect("N3h WebSearch non-string query fails closed", CONF, "WebSearch", {"query": {"q": 1}}, 2)
+
+
+# ------------------------------------------------------------------ N4 block message (M43)
+def test_block_message_redacted():
+    rc, err = run(CONF, "WebSearch", {"query": TERM})
+    if rc != 2:
+        rc, err = run(CONF, "Write", {"file_path": SITE_FILE, "content": TERM})
+    check("N4a blocked", rc == 2, err)
+    check("N4b block message does not echo the matched term", TERM.lower() not in err.lower(), err)
+    check("N4c block message does not echo the deal label", "Synthetic Egress Deal" not in err, err)
+    check("N4d block message carries a term id", "term-id" in err, err)
+    check("N4e block message carries a next step", "Next step" in err, err)
+    conf = _load_conf()
+    tid = conf.term_id("Zephyr Corp Portfolio")
+    check("N4f term id is stable and short", tid == conf.term_id("Zephyr Corp Portfolio")
+          and 8 <= len(tid) <= 16 and TERM.lower() not in tid, tid)
+    check("N4g term id in the message matches term_id()", tid in err, (tid, err))
+    rc, err = run(CONF, "WebFetch", {"url": "https://example.invalid/ovarrow-yards"})
+    check("N4h a folded web hit cites the ORIGINAL term's id",
+          rc == 2 and conf.term_id("O'Varrow Yards") in err, err)
+    rc, err = run(CONF, "WebFetch", {"url": "https://example.invalid/vexmoor-tal_landing"})
+    check("N4i a folded web hit on an UNLABELED roster entry cites the original term's id",
+          rc == 2 and conf.term_id("Vexmoor-Tal Landing") in err and "#2" in err, err)
+
+
+def _load_conf():
+    spec = importlib.util.spec_from_file_location("_conf_under_test", CONF)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 # ------------------------------------------------------------------ H4 override-mint wiring
 def test_override_mint_wired():
     disp = _load_dispatcher()
@@ -471,6 +687,11 @@ def main():
         test_refute_dispatcher()
         test_refute_conf_guard()
         test_refute_autonomy()
+        test_notion_calendar()
+        test_notion_calendar_token()
+        test_dispatcher_fail_closed()
+        test_web_tools()
+        test_block_message_redacted()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     if FAILS:

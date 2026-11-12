@@ -23,8 +23,10 @@ than the latency it saves. That is unacceptable for security-gate code, so:
     ONE guard is re-run as a SUBPROCESS -- exactly today's behavior -- and its
     real exit code is honored. Degradation is per-guard and costs only latency.
   * A guard that fails BOTH paths is reported on stderr and treated as
-    fail-open, matching what every one of these guards already does on
-    malformed input (verified: all return 0, never 1, on garbage stdin).
+    fail-open, matching what most of these guards already do on malformed
+    input -- EXCEPT a guard in FAIL_CLOSED (egress audit 2026-11-12, M05),
+    whose own doctrine refuses to fail open: it BLOCKS (rc 2) instead, and so
+    does a subprocess fallback that CRASHES (rc not 0/2) for such a guard.
   * The first guard to return 2 wins and short-circuits, preserving the
     settings.json ordering semantics exactly.
 
@@ -218,6 +220,19 @@ BASH_GUARD_CHAIN = [
     # block may emit one. test-pipe-mask-guard.py asserts the position.
 ]
 
+# Guards whose OWN doctrine is fail-closed (egress audit 2026-11-12, M05). When one of these
+# cannot run on either path -- in-process raised AND the subprocess fallback raised (OSError,
+# 60 s timeout) or crashed (rc not 0/2, i.e. an uncaught exception = exit 1, which PreToolUse
+# treats as non-blocking) -- the dispatcher BLOCKS instead of silently skipping it.
+#   confidentiality-guard  FAIL-CLOSED module doctrine (Invariant 3); refuses even to time out
+#                          open (_SCAN_SECONDS), so a dispatcher-level skip contradicted it.
+#   ora-autonomy-gate      fails closed on every unparseable payload and every anomaly once a
+#                          gated tool is named (Invariants 1/2).
+# NOT here: lint-config-guard (its fail-closed is scoped to stat errors on existing lint configs)
+# and every guard documented fail-open BY CONSTRUCTION. Adding a guard here means a broken copy of
+# it bricks every call on its chain -- add only guards whose doctrine already accepts that.
+FAIL_CLOSED = frozenset(("confidentiality-guard", "ora-autonomy-gate"))
+
 # --chain <name> selects which chain to run. Default stays the Edit/Write chain
 # so the existing settings.json entry (which passes no argument) is unaffected.
 CHAINS = {
@@ -316,11 +331,26 @@ def run_guard(name, raw):
         print("dispatcher: %s in-process failed (%s: %s); using subprocess"
               % (name, type(e).__name__, e), file=sys.stderr)
     try:
-        return _run_subprocess(name, raw) + ("subprocess",)
+        rc, out, err = _run_subprocess(name, raw)
     except Exception as e:  # noqa: BLE001
+        if name in FAIL_CLOSED:
+            return _fail_closed(name, "%s: %s" % (type(e).__name__, e))
         print("dispatcher: %s FAILED BOTH PATHS (%s: %s) -- guard did not run, "
               "failing open" % (name, type(e).__name__, e), file=sys.stderr)
         return 0, "", "", "failed"
+    if name in FAIL_CLOSED and rc not in (0, 2):
+        # The fallback ran but crashed (exit 1 = uncaught exception): no decision was made.
+        return _fail_closed(name, "subprocess exited %s" % rc, err)
+    return rc, out, err, "subprocess"
+
+
+def _fail_closed(name, why, err=""):
+    """(2, '', stderr, 'failclosed') for a FAIL_CLOSED guard that could not decide."""
+    msg = ("BLOCKED (pretooluse-dispatcher): %s could not run on either path (%s), and it is a "
+           "FAIL-CLOSED guard, so this call is refused rather than let through unchecked.\n"
+           "Next step: run `python hooks/pretooluse-dispatcher.py --selfcheck` and fix the "
+           "guard; do not bypass it.\n" % (name, why))
+    return 2, "", (err or "") + msg, "failclosed"
 
 
 def _chain_label(chain):
@@ -351,7 +381,7 @@ def _flush(records):
 
 
 _MODE_TO_PATH = {"inprocess": "inprocess", "subprocess": "subprocess",
-                 "failed": "failopen"}
+                 "failed": "failopen", "failclosed": "failclosed"}
 
 
 def main(chain=None, label=None):
