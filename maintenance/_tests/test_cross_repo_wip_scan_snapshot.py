@@ -238,4 +238,54 @@ with tempfile.TemporaryDirectory() as td:
     expect("merge-only older blob at same stamp: stale (reverted_to_older)",
            r.get("snapshot_stale") is True and r.get("snapshot_reverted_to_older") is True, repr(r))
 
+# (2026-11-12) post-#565 shape: origin/main no longer tracks the snapshot and data/ is
+# gitignored; the checkout pulled that, and the refresh task writes the file in place.
+# Freshness is then measured by age, not by comparison with a committed copy.
+import datetime as _dt  # noqa: E402
+
+
+def _untrack(repo):
+    with open(os.path.join(repo, ".gitignore"), "a", encoding="utf-8", newline="\n") as fh:
+        fh.write("/data/\n")
+    run(["git", "rm", "-q", "--cached", SNAP], repo)
+    run(["git", "add", ".gitignore"], repo)
+    run(["git", "commit", "-q", "-m", "untrack snapshot"], repo)
+
+
+def _iso(hours_ago):
+    t = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=hours_ago)
+    return t.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    _untrack(origin)
+    run(["git", "pull", "-q", "--ff-only", "origin", "main"], local)
+    _write_snap(local, _snap_doc(_iso(5)))
+    r = _scan_snap(local)
+    expect("untracked fresh (5h): not stale", r.get("snapshot_stale") is False, repr(r))
+    expect("untracked fresh: no snapshot_error", r.get("snapshot_error") is None, repr(r))
+    expect("untracked fresh: ref names the age rule", "untracked" in str(r.get("snapshot_ref")), repr(r))
+    _write_snap(local, _snap_doc(_iso(120)))
+    r = _scan_snap(local)
+    expect("untracked old (120h): stale", r.get("snapshot_stale") is True, repr(r))
+    expect("untracked old: lag hours ~120", 119 <= (r.get("snapshot_lag_hours") or 0) <= 121, repr(r))
+    rep = wipscan.format_report([r])
+    expect("untracked old: report points at the refresh tasks, not a pull",
+           "a pull cannot fix this" in rep and "ora-lease-snapshot-refresh" in rep
+           and "Advance the checkout" not in rep, rep)
+    expect("untracked old: freshness-only main exits 1",
+           _main_with(["--freshness-only"], [local]) == 1)
+
+# Absent on origin but NOT gitignored locally (e.g. ref unfetched / file deleted on main
+# without the ignore rule): unchanged behaviour -- unmeasurable, flagged as an error.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = snap_pair(td)
+    run(["git", "rm", "-q", SNAP], origin)
+    run(["git", "commit", "-q", "-m", "delete snapshot"], origin)
+    run(["git", "fetch", "-q", "origin"], local)
+    r = _scan_snap(local)
+    expect("absent-on-origin, still tracked locally: snapshot_error set",
+           r.get("snapshot_error") is not None and r.get("snapshot_stale") is True, repr(r))
+
 finish("cross-repo-wip-scan snapshot")
