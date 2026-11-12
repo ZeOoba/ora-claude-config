@@ -414,6 +414,31 @@ def _committed_blobs(repo_path, ref, rel_path):
     return blobs
 
 
+# Untracked snapshots (refreshed in place, never committed): stale when older than this.
+# ora-lease-snapshot-refresh runs every weekday and ora-cc-snapshot-refresh every Monday,
+# so the widest normal gap is Friday 07:40 to Monday 07:40 (72h); 96h leaves one missed run.
+UNTRACKED_SNAPSHOT_MAX_AGE_H = 96.0
+
+
+def _is_untracked_snapshot(repo_path, rel_path):
+    """True when rel_path is not in the index AND is gitignored (the post-#565 state)."""
+    rc, _ = _git(["--no-optional-locks", "ls-files", "--error-unmatch", "--", rel_path], repo_path)
+    if rc == 0:
+        return False
+    rc, _ = _git(["--no-optional-locks", "check-ignore", "-q", "--", rel_path], repo_path)
+    return rc == 0
+
+
+def _snapshot_age_freshness(out, local_dt, now=None):
+    """Age-based verdict for an untracked snapshot. Fills `out` and returns it."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    age_h = round((now - local_dt).total_seconds() / 3600.0, 1)
+    out["snapshot_ref"] = "age<=%sh (untracked)" % UNTRACKED_SNAPSHOT_MAX_AGE_H
+    out["snapshot_lag_hours"] = age_h
+    out["snapshot_stale"] = age_h > UNTRACKED_SNAPSHOT_MAX_AGE_H
+    return out
+
+
 def _snapshot_freshness(repo_path, rel_path, canonical):
     """Compare the working-tree snapshot readers open against origin/<canonical>'s
     committed copy. Read-only; never raises."""
@@ -441,6 +466,11 @@ def _snapshot_freshness(repo_path, rel_path, canonical):
 
     rc, origin_blob = _git(["--no-optional-locks", "rev-parse", "--verify", "--quiet",
                             "%s:%s" % (ref, rel_path)], repo_path)
+    if (rc != 0 or not origin_blob) and _is_untracked_snapshot(repo_path, rel_path):
+        # (2026-11-12) oxford-command-center PR #565 untracked the snapshot: there is no
+        # committed copy to compare against any more, and the refresh tasks write it in
+        # place. Measure freshness by age instead.
+        return _snapshot_age_freshness(out, local_dt)
     if rc != 0 or not origin_blob:
         out["snapshot_error"] = "%s:%s does not resolve (ref unfetched, or file absent on %s)" % (
             ref, rel_path, ref)
@@ -692,6 +722,12 @@ def format_report(results, freshness_only=False):
             if r.get("snapshot_error"):
                 lines.append("[ACTION] SNAPSHOT_STALE %s -- cannot determine snapshot freshness: "
                              "%s" % (r["path"], r["snapshot_error"]))
+            elif str(r.get("snapshot_ref") or "").startswith("age<="):
+                lines.append("[ACTION] SNAPSHOT_STALE %s -- untracked %s generatedAt %s is %.1fh old "
+                             "(limit %s); a pull cannot fix this -- check the ora-lease-snapshot-refresh "
+                             "and ora-cc-snapshot-refresh runs (refused, skipped or not firing)" % (
+                                 r["path"], r["snapshot_path"], r["snapshot_local_generated_at"],
+                                 r["snapshot_lag_hours"], r["snapshot_ref"]))
             elif r.get("snapshot_content_matches_origin") is False and not r.get("snapshot_lag_hours"):
                 lines.append("[ACTION] SNAPSHOT_STALE %s -- %s content differs from %s at the same "
                              "generatedAt %s; readers see bytes main has replaced" % (
