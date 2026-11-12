@@ -116,6 +116,7 @@
       "Bash(git push * -f*)",
       "Bash(git push * --force*)",
       "Bash(git clean*)",
+      "Bash(git -C * clean*)",
       "Bash(rm -r *)",
       "Bash(rm -R *)",
       "Bash(rm -fr *)",
