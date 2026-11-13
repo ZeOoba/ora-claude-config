@@ -255,6 +255,11 @@ def classify_extra(tool, ti, cwd=None):
         return "web %s (%s)" % ("fetch URL" if tool == "WebFetch" else "search query", tool)
     if DOCS_WRITE.match(tool):
         return "Claude Docs write (%s)" % tool
+    row = residual_row(tool)
+    if row:
+        return "%s (%s)" % (row[0], tool)
+    if WINDOWS_FILESYSTEM.search(tool):
+        return filesystem_surface(ti, cwd)
     m = BROWSER_TOOL.match(tool)
     if m:
         if m.group(2) == "computer" and act not in ("type", "key"):
@@ -282,22 +287,29 @@ def web_scan_text(tool, ti):
         for v in values:
             if not isinstance(v, str):
                 raise ValueError("%s %s is not a string" % (tool, field))
-            parts.append(v)
-            # Decode until stable (bounded): a double-encoded %2520 must not hide a term.
-            decoded = v
-            for _ in range(4):
-                nxt = unquote_plus(decoded)
-                if nxt == decoded:
-                    break
-                decoded = nxt
-            if decoded != v:
-                parts.append(decoded)
-            # URL slugs join words with - _ . / ~ (REFUTE 2026-11-12: "deal-name" in a path
-            # passed); a separator-folded view lets a multi-word term match.
-            folded = _URL_SEPS.sub(" ", decoded)
-            if folded != decoded:
-                parts.append(folded)
+            parts.extend(_url_views(v))
     return "\n".join(parts)
+
+
+def _url_views(v):
+    """`v` raw, fully percent/plus-decoded, and separator-folded (each view only when it differs)."""
+    from urllib.parse import unquote_plus
+    parts = [v]
+    # Decode until stable (bounded): a double-encoded %2520 must not hide a term.
+    decoded = v
+    for _ in range(4):
+        nxt = unquote_plus(decoded)
+        if nxt == decoded:
+            break
+        decoded = nxt
+    if decoded != v:
+        parts.append(decoded)
+    # URL slugs join words with - _ . / ~ (REFUTE 2026-11-12: "deal-name" in a path
+    # passed); a separator-folded view lets a multi-word term match.
+    folded = _URL_SEPS.sub(" ", decoded)
+    if folded != decoded:
+        parts.append(folded)
+    return parts
 
 
 _URL_SEPS = re.compile(r"[-_./~=&?#:+,;|‐-―]+")
@@ -419,6 +431,10 @@ def extra_scan_text(tool, ti, cwd):
     read; main() blocks on that (fail closed)."""
     if tool in WEB_TOOLS:
         return web_scan_text(tool, ti)
+    if residual_row(tool):
+        return residual_scan_text(tool, ti, cwd)
+    if WINDOWS_FILESYSTEM.search(tool):
+        return filesystem_scan_text(ti, cwd)
     views = [mcp_scan_text(ti)]
     budget = [SCAN_MAX_DECODED_BYTES]
     if tool == "Artifact":
@@ -492,6 +508,203 @@ def dc_write_as_native(tool, ti, terms, cwd=None):
             tail = fh.read()[-width:]
         content = tail + content
     return "Write", {"file_path": path, "content": content}
+
+
+# ------------------------------------------------------------------------------------------------
+# RESIDUAL EGRESS (follow-up to #452, 2026-11-12)
+#
+# #452's snapshot test (test-matcher-coverage.py W1) listed these as RESIDUAL: write-shaped MCP
+# tools whose free text reaches a third party, a native app, or a remote sandbox, and which the
+# guard never classified. Each is now a whole-payload surface: mcp_scan_text(tool_input) plus the
+# WEB_TOOLS views of every string (percent/plus-decoded, separator-folded), matched against the
+# raw roster AND the term-side folded roster -- the same treatment #452 gave WebFetch/WebSearch,
+# because several of these carry URLs or search queries. Only a roster hit blocks.
+#
+# Patterns are anchored at ^mcp__ (no native tool can collide) and end-anchored on the suffix.
+# `reads_files`: string values naming an existing local file are read and scanned too (uploads).
+# The settings matcher row pre.confidentiality-guard-egress-tools carries one alternative per row
+# (test-matcher-coverage W1 proves both matcher models route every snapshot name here).
+# ------------------------------------------------------------------------------------------------
+RESIDUAL_SURFACES = (
+    (re.compile(r"^mcp__.*__create_file$"), "Drive file create", True),
+    (re.compile(r"^mcp__.*__create_firefly_board$"), "design-service board create", False),
+    (re.compile(r"^mcp__.*__(asset_add_file|asset_initialize_file_upload|"
+                r"asset_finalize_file_upload|fill_text)$"), "design-asset upload/text", True),
+    (re.compile(r"^mcp__.*__document_merge_data_[a-z_]+$"), "document merge data", False),
+    # Remote executors: everything in the payload runs or is sent off-machine, so the WHOLE
+    # payload is scanned (not just an EGRESS_BASH-shaped command). ora-autonomy-gate Gate 1h
+    # additionally requires an external-send token for the ones that can send or execute.
+    (re.compile(r"^mcp__.*__(COMPOSIO|RUBE)_\w*(EXECUTE|REMOTE_BASH|REMOTE_WORKBENCH|SCHEDULE)"
+                r"[\w-]*$", re.I), "remote tool executor / sandbox / schedule", False),
+    (re.compile(r"^mcp__.*__RUBE_CREATE_UPDATE_RECIPE$"), "remote recipe", False),
+    (re.compile(r"^mcp__.*__gmail_create_draft(-[0-9a-f]+)?$"), "Gmail draft", False),
+    (re.compile(r"^mcp__.*__(qbo_sales_create_invoice|qbo_sales_update_invoice|"
+                r"quickbooks-profile-info-update|quickbooks-transaction-import)$"),
+     "QuickBooks Online write", False),
+    (re.compile(r"^mcp__.*__(call-actor|apify-slash-rag-web-browser)$"),
+     "third-party scraper input", False),
+    # Keystrokes / clipboard into native apps: the frontmost app (possibly a mail client) is not
+    # in the payload, so typed text is treated as outbound -- parity with browser `type`.
+    (re.compile(r"^mcp__.*Windows-MCP__(Type|MultiEdit|Clipboard|Process|Scrape)$"),
+     "Windows-MCP input / fetch", False),
+    (re.compile(r"^mcp__.*computer-use__(type|computer_batch|write_clipboard|teach_batch)$"),
+     "native keystrokes / clipboard", False),
+    (re.compile(r"^mcp__.*__memory_(write|feedback)$"), "third-party memory service", False),
+    (re.compile(r"^mcp__.*__(submit_feedback|give_feedback_to_desktop_commander)$"),
+     "vendor feedback", False),
+    (re.compile(r"^mcp__.*claude-in-chrome__shortcuts_execute$"), "browser shortcut run", False),
+    (re.compile(r"^mcp__.*Claude_Browser__preview_start$"), "browser preview URL", False),
+    (re.compile(r"^mcp__.*__(microsoft_docs_search|microsoft_docs_fetch|"
+                r"microsoft_code_sample_search|query-docs)$"), "third-party docs query", False),
+)
+# Windows-MCP PowerShell runs a real command line: remapped onto the native PowerShell shape so
+# the existing shell egress scan applies unchanged (is_shell_tool / EGRESS_BASH are NOT edited).
+WINDOWS_POWERSHELL = re.compile(r"^mcp__.*Windows-MCP__PowerShell$")
+# Local file operations: egress only when a path lands on an egress surface (path_egress_surface),
+# exactly like Desktop Commander. edit_file is remapped onto native MultiEdit (seam simulation).
+WINDOWS_FILESYSTEM = re.compile(r"^mcp__.*Windows-MCP__FileSystem$")
+_FS_PATH_FIELDS = ("path", "file_path", "source", "src", "destination", "dest", "target",
+                   "new_path", "output_path")
+
+
+def residual_row(tool):
+    if not isinstance(tool, str):
+        return None
+    for rx, label, reads in RESIDUAL_SURFACES:
+        if rx.search(tool):
+            return label, reads
+    return None
+
+
+def residual_name_surface(tool):
+    """Name-level: is `tool` one of the RESIDUAL family (whole-payload, path-conditional, or
+    remapped)? Used by the non-dict fail-closed check and the coverage probe."""
+    return bool(residual_row(tool) or (isinstance(tool, str) and (
+        WINDOWS_POWERSHELL.search(tool) or WINDOWS_FILESYSTEM.search(tool)
+        or _mcp_suffix(tool, ("edit_file",)))))
+
+
+def residual_scan_text(tool, ti, cwd):
+    """Everything a RESIDUAL surface sends. RAISES when part of it cannot be read."""
+    views = [mcp_scan_text(ti), "\n".join(_keys(ti))]
+    for v in list(_strings(ti)) + list(_keys(ti)):
+        _check_deadline()
+        views.extend(_url_views(v)[1:])
+    _label, reads = residual_row(tool)
+    if reads:
+        refs = [v for v in _strings(ti) if _looks_local_file(v, cwd)]
+        views.extend(local_file_texts(refs, cwd, [SCAN_MAX_DECODED_BYTES]))
+    return "\n".join(v for v in views if v)
+
+
+def _keys(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if isinstance(k, str):
+                yield k
+            yield from _keys(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _keys(v)
+
+
+def _absolute_tool_path(v, field):
+    """A local-file MCP tool's path as the TOOL will see it. `~` is expanded (the servers do);
+    a relative path RAISES -- it resolves against the server's own cwd, which the hook cannot
+    know (REFUTE round 1, D3), so it fails closed rather than checking the wrong file."""
+    if not isinstance(v, str) or not v.strip():
+        raise ValueError("path field %r is not a non-empty string" % field)
+    v = os.path.expanduser(v)
+    if not os.path.isabs(v):
+        raise ValueError("path field %r is relative; use an absolute path" % field)
+    return v
+
+
+_FS_DEST_FIELDS = ("destination", "dest", "target", "new_path", "output_path")
+
+
+def fs_candidate_paths(ti, cwd):
+    """[(field, absolute path)] for every path-like field of a Windows-MCP FileSystem call.
+    RAISES on a non-string or relative path."""
+    out = []
+    for field in _FS_PATH_FIELDS:
+        v = ti.get(field)
+        if v is None:
+            continue
+        out.append((field, _absolute_tool_path(v, field)))
+    return out
+
+
+def filesystem_surface(ti, cwd):
+    """Surface label when ANY path field lands on an egress surface (decoy defense), else None."""
+    for _field, p in fs_candidate_paths(ti, cwd):
+        surf = path_egress_surface(p)
+        if surf:
+            return "Windows-MCP FileSystem into %s" % surf
+    return None
+
+
+def filesystem_scan_text(ti, cwd):
+    """The payload, plus the bytes of every SOURCE path -- every path field that is not a
+    destination field, whatever its own classification (REFUTE round 1, D1: a .pdf / .html /
+    /outputs/ source is itself "egress-shaped" and was skipped). When a destination is named, the
+    call copies/moves, so a source that cannot be found RAISES (the guard and the tool may be
+    resolving it differently) instead of being skipped."""
+    cands = fs_candidate_paths(ti, cwd)
+    moving = any(f in _FS_DEST_FIELDS for f, _ in cands)
+    if moving and not any(f not in _FS_DEST_FIELDS for f, _ in cands):
+        # A copy/move naming its source in a field this hook does not list (REFUTE round 2).
+        raise ValueError("destination given but no recognised source field")
+    srcs = []
+    for field, p in cands:
+        if field in _FS_DEST_FIELDS:
+            continue
+        if _exists(p):
+            srcs.append(p)
+        elif moving:
+            raise ValueError("copy/move source %r not found" % field)
+    if moving:
+        # A source named in a field this hook does not list, beside a clean listed one (REFUTE
+        # round 3): read every string value that names an existing local file, as uploads do.
+        dests = {p for f, p in cands if f in _FS_DEST_FIELDS}
+        for v in _strings(ti):
+            v = os.path.expanduser(v) if v.startswith("~") else v
+            if v not in dests and v not in srcs and _looks_local_file(v, cwd):
+                srcs.append(v)
+    views = [mcp_scan_text(ti)]
+    views.extend(local_file_texts(srcs, cwd, [SCAN_MAX_DECODED_BYTES]))
+    return "\n".join(v for v in views if v)
+
+
+def edit_file_as_native(ti, cwd):
+    """Filesystem-MCP edit_file {path, edits:[{oldText,newText}]} as native MultiEdit, so the
+    egress-path test, content scan and seam simulation apply. Every path field is a candidate and
+    the tool honors `path` only, so ANY other path field present RAISES (REFUTE round 1, D2: a
+    decoy file_path pointed the seam check at a missing file). `~` is expanded, a relative path
+    RAISES, and an egress target that does not exist RAISES (edit_file cannot create a file, so a
+    missing target means the hook is looking at the wrong one). dryRun:true writes nothing ->
+    returns None. RAISES on any shape it cannot map -- main() blocks."""
+    extra = [f for f in _DC_PATH_FIELDS if f != "path" and ti.get(f) is not None]
+    if extra:
+        raise ValueError("unexpected path field(s) %s beside path" % extra)
+    path = _absolute_tool_path(ti.get("path"), "path")
+    if ti.get("dryRun") is True:
+        return None
+    if path_egress_surface(path) and not _exists(path):
+        raise ValueError("edit target on an egress surface does not exist")
+    raw = ti.get("edits")
+    if not isinstance(raw, list):
+        raise ValueError("edits is not a list")
+    edits = []
+    for ed in raw:
+        if not isinstance(ed, dict):
+            raise ValueError("edit is not an object")
+        old = ed.get("oldText", ed.get("old_string"))
+        new = ed.get("newText", ed.get("new_string"))
+        if not isinstance(old, str) or not isinstance(new, str):
+            raise ValueError("edit oldText/newText is not a string")
+        edits.append({"old_string": old, "new_string": new})
+    return "MultiEdit", {"file_path": path, "edits": edits}
 
 
 # What the recipient sees is not always the raw payload string: an HTML body is rendered (an empty
@@ -1750,7 +1963,7 @@ def main():
         # classified, so fail closed for them (legacy tools keep the whole-payload wrap below).
         if (_mcp_suffix(tool, _DC_WRITE_SUFFIXES + ("move_file",)) or is_shell_tool(tool)
                 and tool != "Bash") or tool in ("Artifact", "ArtifactData", "ArtifactComments") \
-                or tool in WEB_TOOLS \
+                or tool in WEB_TOOLS or residual_name_surface(tool) \
                 or (isinstance(tool, str) and (DOCS_WRITE.match(tool) or BROWSER_TOOL.match(tool)
                                                or tool.startswith("mcp__excel__"))):
             block("%s tool_input is not an object; cannot verify egress safety." % tool)
@@ -1767,6 +1980,19 @@ def main():
         except Exception as e:
             block("Desktop Commander write could not be classified (%s); cannot verify egress "
                   "safety." % e)
+
+    # RESIDUAL remaps (follow-up to #452): Filesystem-MCP edit_file -> native MultiEdit; Windows-MCP
+    # PowerShell -> the native PowerShell shell path (is_shell_tool / EGRESS_BASH unchanged).
+    if _mcp_suffix(tool, ("edit_file",)):
+        try:
+            mapped = edit_file_as_native(ti, data.get("cwd"))
+        except Exception as e:
+            block("edit_file could not be classified (%s); cannot verify egress safety." % e)
+        if mapped is None:
+            sys.exit(0)  # dryRun: true -- returns a diff, writes nothing
+        tool, ti = mapped
+    elif isinstance(tool, str) and WINDOWS_POWERSHELL.search(tool):
+        tool, ti = "PowerShell", {"command": ti.get("command")}
 
     # File-writing tools: only egress when the target path is an external surface.
     if tool in ("Write", "Edit", "MultiEdit", "NotebookEdit"):
@@ -1876,7 +2102,7 @@ def main():
     # --- Enforce -----------------------------------------------------------------------
     try:
         hit = find_hit(scan_text, terms)
-        if not hit and tool in WEB_TOOLS:
+        if not hit and (tool in WEB_TOOLS or residual_row(tool)):
             hit = find_hit(web_folded_text(scan_text), web_folded_terms(terms))
             if hit:  # cite the ORIGINAL term's id, so term_id() over the roster maps it back
                 for key, deal in terms.items():
