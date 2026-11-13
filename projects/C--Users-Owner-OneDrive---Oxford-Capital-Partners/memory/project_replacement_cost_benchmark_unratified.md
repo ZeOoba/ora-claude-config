@@ -15,9 +15,9 @@ metadata:
 
 ## The two things worth remembering
 
-**1. ORA buys at ~35–40% of TRUE all-in replacement cost — a ~64% discount.** The long-standing "25–30% discount" language was **an artifact of an understated denominator, never the strategy.** Say the real number in IC memos and lender packages; it is far stronger and wholly defensible.
+**1. ORA buys at [ramp complement — private RCT file] of TRUE all-in replacement cost — a deep discount.** The long-standing "25–30% discount" language was **an artifact of an understated denominator, never the strategy.** Say the real number in IC memos and lender packages; it is far stronger and wholly defensible.
 
-**2. The floor % and the denominator are a MATCHED PAIR.** Never change one without re-solving the other. Leaving the old 30% floor against RCT v03 would have set the Columbus floor at $160.76/SF — a price at which *every* buy-box candidate clears. **A floor that passes everything is not a floor.**
+**2. The floor % and the denominator are a MATCHED PAIR.** Never change one without re-solving the other. Leaving the old 30% floor against RCT v03 would have set the Columbus floor at [RCT-private] — a price at which *every* buy-box candidate clears. **A floor that passes everything is not a floor.**
 
 ## Why (the history, so it isn't re-litigated)
 
