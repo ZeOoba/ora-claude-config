@@ -53,6 +53,14 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            SCHEDULE, publishAt, UPDATE, unknown action) needs allow-hubspot-social-publish
            (scope hubspot-social-publish, 5 min, SINGLE-USE). Unknown keys and non-bool
            `confirmed` fail closed.
+  GATE 1h — generic remote executors (follow-up to #452, 2026-11-12): Composio / Rube
+           MULTI_EXECUTE_TOOL, REMOTE_BASH_TOOL, REMOTE_WORKBENCH, RUBE_EXECUTE_RECIPE and
+           RUBE_MANAGE_RECIPE_SCHEDULE (any name in that family) can send
+           mail, post messages or run arbitrary code off-machine, and their payload names no
+           verifiable recipient. Every call needs an external-send token naming
+           `executor:<TOOL>` (e.g. executor:COMPOSIO_MULTI_EXECUTE_TOOL), single-use.
+           RUBE_CREATE_UPDATE_RECIPE stores a recipe and is NOT gated here (confidentiality-guard
+           still scans it). Override: allow-external-send (same tier and binding as GATE 1).
   GATE 1g — Notion Calendar notion-calendar-create-events / notion-calendar-update-events
            (egress audit 2026-11-12, M02; Gate 1d parity). create: any attendee or resource
            address, or any stray address outside the prose fields, that is not one plain
@@ -921,6 +929,15 @@ def check_mcp(tool_name, session_id, tool_input=None):
     if "netlify" in lowered and not lowered.endswith("-reader"):
         if not override_active(session_id, WEBSITE_DEPLOY):
             block("Netlify MCP mutating call (%s)" % tool_name, WEBSITE_DEPLOY, session_id)
+    # Gate 1h: generic remote executors. Name-only decision (the payload cannot prove a recipient
+    # internal), so there is no shape to fail on; consume=True -- this is the sole enforcement point.
+    executor = tool_name.rsplit("__", 1)[-1].upper()
+    if _REMOTE_EXECUTOR.match(executor):
+        external = ["executor:" + executor]
+        if not override_active(session_id, EXTERNAL_SEND, external):
+            block("remote tool executor / sandbox call (%s) -- can send or run code off-machine"
+                  % executor, EXTERNAL_SEND, session_id,
+                  extra="Name the executor in `recipients:` exactly: %s\n" % external[0])
     # Gates 1b/1c/3. Once a payload names one of these tools, ANY anomaly fails closed, same
     # as Bash/file tools: an exception here would exit 1, which PreToolUse treats as
     # non-blocking, i.e. the send or publish would proceed.
@@ -974,6 +991,12 @@ def check_mcp(tool_name, session_id, tool_input=None):
             block_shape(tool_name, session_id)
 
 
+# Gate 1h (follow-up to #452). Matched against the UPPER-cased tool suffix. A family regex, not
+# an exact set, so a future name variant the unanchored matcher routes here (..._V2) is gated
+# too (REFUTE round 1, D7); RUBE_MANAGE_RECIPE_SCHEDULE runs a stored recipe off-machine (D4).
+# Same shape as confidentiality-guard's executor row in RESIDUAL_SURFACES.
+_REMOTE_EXECUTOR = re.compile(r"^(COMPOSIO|RUBE)_\w*(EXECUTE|REMOTE_BASH|REMOTE_WORKBENCH|"
+                              r"SCHEDULE)[\w-]*$")
 _MS365_EMAIL_SENDS = frozenset(("outlook_send_mail", "outlook_forward_mail", "outlook_send_draft"))
 _MS365_TEAMS_SENDS = frozenset(("teams_send_chat_message", "teams_send_channel_message",
                                 "teams_reply_channel_message"))
@@ -1514,6 +1537,14 @@ def _is_dc_file_tool(tool_name):
     return _mcp_suffix(tool_name, _DC_FILE_SUFFIXES)
 
 
+# Follow-up to #452: Windows-MCP PowerShell runs real command lines (gated like the PowerShell
+# tool, without editing _is_shell_tool); Windows-MCP FileSystem and Filesystem-MCP edit_file write
+# local files (gated like Desktop Commander: every path field, source included).
+_WIN_POWERSHELL = re.compile(r"^mcp__.*Windows-MCP__PowerShell$")
+_LOCAL_FILE_OPS = re.compile(r"^mcp__.*(Windows-MCP__FileSystem|__edit_file)$")
+_LOCAL_FILE_PATH_FIELDS = _DC_PATH_FIELDS + ("src", "dest", "target", "new_path")
+
+
 def _is_excel_write(tool_name):
     return isinstance(tool_name, str) and tool_name.startswith("mcp__excel__") \
         and not re.match(r"mcp__excel__(read_|get_|validate_)", tool_name)
@@ -1603,6 +1634,24 @@ def main():
         if not isinstance(tool_input, dict):
             block_shape(tool_name, session_id)
         for field in _DC_PATH_FIELDS:
+            path = tool_input.get(field)
+            if path is None:
+                continue
+            if not isinstance(path, str):
+                block_shape(tool_name, session_id)
+            check_file_write(_resolve_against(path, payload.get("cwd")), session_id)
+    elif isinstance(tool_name, str) and _WIN_POWERSHELL.search(tool_name):
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        command = tool_input.get("command", "")
+        command = "" if command is None else command
+        if not isinstance(command, str):
+            block_shape(tool_name, session_id)
+        check_bash(command, session_id)
+    elif isinstance(tool_name, str) and _LOCAL_FILE_OPS.search(tool_name):
+        if not isinstance(tool_input, dict):
+            block_shape(tool_name, session_id)
+        for field in _LOCAL_FILE_PATH_FIELDS:
             path = tool_input.get(field)
             if path is None:
                 continue
