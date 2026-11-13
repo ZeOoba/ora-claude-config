@@ -92,7 +92,7 @@ args = '--chain bash'
 [[row]]
 id = 'pre.ora-autonomy-gate'
 event = 'PreToolUse'
-matcher = 'NotebookEdit|mcp__.*netlify.*-updater|mcp__.*__(outlook_(send_mail|send_draft|update_draft|forward_mail|create_event|update_event|delete_event|respond_to_event|set_vacation|create_filter)|teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)|manage_(blog_post|landing_page|website_page|social_posts)|notion-calendar-(create-events|update-events))'
+matcher = 'NotebookEdit|mcp__.*netlify.*-updater|mcp__.*__(outlook_(send_mail|send_draft|update_draft|forward_mail|create_event|update_event|delete_event|respond_to_event|set_vacation|create_filter)|teams_(send_chat_message|send_channel_message|reply_channel_message|create_chat)|manage_(blog_post|landing_page|website_page|social_posts)|notion-calendar-(create-events|update-events)|COMPOSIO_(MULTI_EXECUTE_TOOL|REMOTE_BASH_TOOL|REMOTE_WORKBENCH)|RUBE_(MULTI_EXECUTE_TOOL|REMOTE_BASH_TOOL|REMOTE_WORKBENCH|EXECUTE_RECIPE|MANAGE_RECIPE_SCHEDULE))'
 kind = "py"
 script = 'ora-autonomy-gate.py'
 
@@ -113,9 +113,9 @@ script = 'confidentiality-guard.py'
 
 [[row]]
 id = 'pre.ora-autonomy-gate-egress-tools'
-note = 'cc-audit-army 2026-11-09 HIGH 1: shell-capable and file-writing tools beyond Bash/Edit/Write (Desktop Commander, terminal panel, PowerShell) reach check_bash / check_file_write. Disjoint from pre.ora-autonomy-gate so no tool runs the gate twice.'
+note = 'cc-audit-army 2026-11-09 HIGH 1: shell-capable and file-writing tools beyond Bash/Edit/Write (Desktop Commander, terminal panel, PowerShell) reach check_bash / check_file_write. Disjoint from pre.ora-autonomy-gate so no tool runs the gate twice. #452 follow-up 2026-11-12: Windows-MCP PowerShell/FileSystem and Filesystem-MCP edit_file.'
 event = 'PreToolUse'
-matcher = 'PowerShell|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__excel__(?!read_|get_|validate_).*'
+matcher = 'PowerShell|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file|edit_file)|mcp__.*Windows-MCP__(PowerShell|FileSystem)|mcp__excel__(?!read_|get_|validate_).*'
 kind = "py"
 script = 'ora-autonomy-gate.py'
 
@@ -129,9 +129,9 @@ script = 'override-mint-guard.py'
 
 [[row]]
 id = 'pre.confidentiality-guard-egress-tools'
-note = 'cc-audit-army 2026-11-09 HIGH 1+2 (+ egress audit 2026-11-12 M06: WebFetch/WebSearch, roster hits only): shell/DC tools plus the action-aware send surfaces (Artifact, ArtifactData, ArtifactComments, Claude Docs, browser input, Excel) -- classify_extra in the guard. Kept apart from pre.confidentiality-guard, whose matcher is pinned verbatim to MCP_SEND_SURFACES.'
+note = 'cc-audit-army 2026-11-09 HIGH 1+2 (+ egress audit 2026-11-12 M06: WebFetch/WebSearch, roster hits only): shell/DC tools plus the action-aware send surfaces (Artifact, ArtifactData, ArtifactComments, Claude Docs, browser input, Excel) -- classify_extra in the guard; #452 follow-up 2026-11-12: the RESIDUAL family (RESIDUAL_SURFACES, Windows-MCP, edit_file). Kept apart from pre.confidentiality-guard, whose matcher is pinned verbatim to MCP_SEND_SURFACES.'
 event = 'PreToolUse'
-matcher = 'PowerShell|Artifact|ArtifactData|ArtifactComments|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__[0-9a-f-]{36}__(batch|update|create)|mcp__.*(claude-in-chrome|Claude_Browser)__(form_input|computer|javascript_tool|navigate|browser_batch|upload_image|file_upload)|mcp__excel__.*|WebFetch|WebSearch'
+matcher = 'PowerShell|Artifact|ArtifactData|ArtifactComments|mcp__.*__(start_process|interact_with_process|run_in_terminal|write_file|edit_block|write_pdf|move_file)|mcp__[0-9a-f-]{36}__(batch|update|create)|mcp__.*(claude-in-chrome|Claude_Browser)__(form_input|computer|javascript_tool|navigate|browser_batch|upload_image|file_upload)|mcp__excel__.*|WebFetch|WebSearch|mcp__.*__(create_file|create_firefly_board|asset_add_file|asset_initialize_file_upload|asset_finalize_file_upload|fill_text|document_merge_data_[a-z_]+|COMPOSIO_(MULTI_EXECUTE_TOOL|REMOTE_BASH_TOOL|REMOTE_WORKBENCH)|RUBE_(MULTI_EXECUTE_TOOL|REMOTE_BASH_TOOL|REMOTE_WORKBENCH|EXECUTE_RECIPE|CREATE_UPDATE_RECIPE|MANAGE_RECIPE_SCHEDULE)|gmail_create_draft(-[0-9a-f]+)?|qbo_sales_create_invoice|qbo_sales_update_invoice|quickbooks-profile-info-update|quickbooks-transaction-import|call-actor|apify-slash-rag-web-browser|edit_file|memory_write|memory_feedback|submit_feedback|give_feedback_to_desktop_commander|microsoft_docs_search|microsoft_docs_fetch|microsoft_code_sample_search|query-docs)|mcp__.*Windows-MCP__(Type|MultiEdit|Clipboard|Process|Scrape|PowerShell|FileSystem)|mcp__.*computer-use__(type|computer_batch|write_clipboard|teach_batch)|mcp__.*claude-in-chrome__shortcuts_execute|mcp__.*Claude_Browser__preview_start'
 kind = "py"
 script = 'confidentiality-guard.py'
 
