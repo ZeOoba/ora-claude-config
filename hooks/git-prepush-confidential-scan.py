@@ -553,6 +553,10 @@ def main():
     if rct_needles is None:
         sys.stderr.write("pre-push note: RCT leak check skipped -- no private RCT table or "
                          "denylist on this machine (~/.ora-private/rct/).\n")
+    elif not _rct.table_loaded(_rct_sources):
+        sys.stderr.write("pre-push WARNING: RCT leak check is running on the superseded-values "
+                         "denylist ONLY -- the current private RCT table was not found, so the "
+                         "current figures are not checked.\n")
     # NOTE: there is deliberately NO `if not terms: return 0` early exit any more. It used
     # to short-circuit the whole hook whenever no deal was active -- which is the state
     # TODAY -- so a credential scan placed after it would have been dead on arrival. The
@@ -593,7 +597,11 @@ def main():
             continue
         # --cc: a merge commit also shows its dense combined diff, so content introduced only
         # by a conflict resolution is scanned (audit prepush-scan-skips-merge-commit-diffs).
-        p = subprocess.run(["git", "log", "-p", "--cc", "--no-color", rng],
+        # --no-abbrev-commit --pretty=medium: pinned so a host's log.abbrevCommit / format
+        # config cannot change the "commit <40hex>" header rct_leak_check keys commit-message
+        # scanning on (REFUTE 2026-11-13, C9). Same content for the terms/credential scans.
+        p = subprocess.run(["git", "log", "-p", "--cc", "--no-color", "--no-abbrev-commit",
+                            "--pretty=medium", rng],
                            capture_output=True)
         if p.returncode != 0:
             sys.stderr.write("pre-push BLOCKED (fail-closed): `git log -p %s` failed "

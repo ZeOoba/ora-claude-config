@@ -17,8 +17,9 @@ two optional files that live OUTSIDE the tracked tree:
                                 {"values": [numbers], "strings": [literal strings]} -- for
                                 superseded table versions still worth guarding
 Needles: every numeric value >= 10 in the table (underscore keys skipped, booleans skipped),
-formatted to two decimals (plus the one-decimal form when it ends in 0), and, when the table has
-a `vintageFloor`, the per-vintage basis floor LOW x (1 - floor%) for every year on the ramp. Never
+formatted to two decimals (plus the one-decimal form for a non-integer ending in 0), and, when
+the table has a `vintageFloor`, the per-vintage basis floor LOW x (1 - floor%) for every year on
+the ramp -- LOW rows only (psf.low and markets[*].low). A set but missing env path BLOCKS. Never
 publish a hash of any of these: a hash of a value that is already in public history confirms it.
 
 FAIL MODES.
@@ -91,19 +92,48 @@ def _ramp(vf):
 
 
 def _fmt(v):
+    """Two-decimal form, plus the one-decimal form for a non-integer ending in 0 (x.y0 ->
+    x.y). Integers get no short form: "230.0"-style needles match unrelated constants."""
     s = "%.2f" % v
     out = {s}
-    if s.endswith("0"):
+    if s.endswith("0") and not s.endswith(".00"):
         out.add(s[:-1])
+    return out
+
+
+def _lows(table):
+    """The LOW denominators: psf.low (the engine's fallback row) and every markets[*].low.
+    Basis floors are derived from these only -- floors of POINT/HIGH/hard costs/adders are not
+    figures anyone uses, and deriving them tripled the needle set into generic numbers
+    (REFUTE 2026-11-13, C6: 13 of 400 recent commits would have false-blocked)."""
+    out = []
+    psf = table.get("psf")
+    if isinstance(psf, dict) and isinstance(psf.get("low"), (int, float)) \
+            and not isinstance(psf.get("low"), bool):
+        out.append(float(psf["low"]))
+    markets = table.get("markets")
+    if isinstance(markets, dict):
+        for row in markets.values():
+            if isinstance(row, dict) and isinstance(row.get("low"), (int, float)) \
+                    and not isinstance(row.get("low"), bool):
+                out.append(float(row["low"]))
     return out
 
 
 def load_needles(table_path=None, denylist_path=None):
     """(needles, sources). needles is None when NO private source exists on this machine
-    (caller skips). Raises RctSourceError when a source exists but is unusable (caller blocks)."""
+    (caller skips). Raises RctSourceError when a source exists but is unusable, or when an
+    env override names a file that does not exist (caller blocks): a mistyped
+    ORA_RCT_TABLE_PATH must not silently drop the current table from the check while the
+    denylist alone keeps it looking armed (REFUTE 2026-11-13, C3)."""
+    for env_name in ("ORA_RCT_TABLE_PATH", "ORA_RCT_LEAK_DENYLIST"):
+        explicit = table_path if env_name == "ORA_RCT_TABLE_PATH" else denylist_path
+        if not explicit and os.environ.get(env_name) \
+                and not os.path.lexists(os.path.expanduser(os.environ[env_name])):
+            raise RctSourceError("%s points at a missing file" % env_name)
     table_path = _path(table_path, "ORA_RCT_TABLE_PATH", DEFAULT_TABLE)
     denylist_path = _path(denylist_path, "ORA_RCT_LEAK_DENYLIST", DEFAULT_DENYLIST)
-    sources, values, strings, ramp = [], [], [], []
+    sources, values, strings, ramp, lows = [], [], [], [], []
     if os.path.lexists(table_path):
         table = _read(table_path)
         if not isinstance(table, dict):
@@ -116,15 +146,20 @@ def load_needles(table_path=None, denylist_path=None):
         if not found:
             raise RctSourceError("%s: no RCT values found" % os.path.basename(table_path))
         values.extend(found)
+        lows = _lows(table)
         sources.append(table_path)
     if os.path.lexists(denylist_path):
         deny = _read(denylist_path)
         if not isinstance(deny, dict):
             raise RctSourceError("%s: not a JSON object" % os.path.basename(denylist_path))
+        raw_vals, raw_strs = deny.get("values", []), deny.get("strings", [])
+        if not isinstance(raw_vals, list) or not isinstance(raw_strs, list):
+            raise RctSourceError("%s: values/strings must be lists"
+                                 % os.path.basename(denylist_path))
         found = []
-        _numbers(deny.get("values", []), found)
+        _numbers(raw_vals, found)
         found = [v for v in found if v >= MIN_VALUE]
-        lits = [s for s in deny.get("strings", []) if isinstance(s, str) and s.strip()]
+        lits = [s for s in raw_strs if isinstance(s, str) and s.strip()]
         if not found and not lits:
             raise RctSourceError("%s: no values or strings" % os.path.basename(denylist_path))
         values.extend(found)
@@ -135,11 +170,18 @@ def load_needles(table_path=None, denylist_path=None):
     needles = set(strings)
     for v in values:
         needles |= _fmt(v)
+    for v in lows:
         for pct in ramp:
             floor = round(v * (1.0 - pct) + 1e-9, 2)
             if floor >= MIN_VALUE:
                 needles |= _fmt(floor)
     return sorted(needles), sources
+
+
+def table_loaded(sources):
+    """True when the CURRENT table (not just the denylist) is among the loaded sources."""
+    deny = _path(None, "ORA_RCT_LEAK_DENYLIST", DEFAULT_DENYLIST)
+    return any(os.path.normcase(s) != os.path.normcase(deny) for s in sources)
 
 
 def _matcher(needles):
@@ -166,7 +208,13 @@ def scan_diff(body, needles):
     m = _matcher(needles)
     hits = set()
     commit, path, width, in_msg = None, None, 0, False
-    for line in body.splitlines():
+    # split("\n"), NOT splitlines(): splitlines() also breaks on a bare CR, form feed,
+    # \x1c-\x1e, \x85 and U+2028 INSIDE one git line, so the tail of an added line lost its
+    # '+' prefix and slipped through (REFUTE 2026-11-13, C2: a file with bare-CR line endings
+    # pushed a figure with exit 0). Each git output line is one record; scan it whole.
+    for line in body.split("\n"):
+        if line.endswith("\r"):
+            line = line[:-1]
         if line.startswith("commit ") and re.fullmatch(r"commit [0-9a-f]{40}.*", line):
             commit, path, width, in_msg = line.split()[1], None, 0, True
             continue
