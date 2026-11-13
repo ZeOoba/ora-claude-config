@@ -633,7 +633,19 @@ def main():
                              % (local_ref, rng, detail))
             bad = True
         if rct_needles:
-            rct_paths = _rct.scan_diff(body, rct_needles)
+            # Its OWN `git log --text` pass (REFUTE round 2, N1): the shared body renders a file
+            # marked `-diff` in .gitattributes, or any text file with one NUL byte, as "Binary
+            # files differ", so an RCT figure added there was never seen. --text forces the
+            # content out. Kept separate so the terms / credential scans above are unchanged.
+            pt = subprocess.run(["git", "log", "-p", "--cc", "--text", "--no-color",
+                                 "--no-abbrev-commit", "--pretty=medium", rng],
+                                capture_output=True)
+            if pt.returncode != 0:
+                sys.stderr.write("pre-push BLOCKED (fail-closed): `git log --text %s` failed for "
+                                 "%s -- cannot check for RCT figures.\n" % (rng, local_ref))
+                bad = True
+                continue
+            rct_paths = _rct.scan_diff(pt.stdout.decode("utf-8", "ignore"), rct_needles)
             if rct_paths:
                 sys.stderr.write("pre-push BLOCKED: ratified RCT replacement-cost figure(s) from "
                                  "the private table ADDED on %s (range %s): %s. Figures are not "
