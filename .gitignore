@@ -359,3 +359,7 @@ audit.jsonl.gz
 # Same triage (cf2591ba) also tracked a dirty-tree snapshot tarball; #427's compressed
 # scan finds a credential-shaped string inside it. origin/main tracks no .tgz.
 *.tgz
+# (2026-11-13) Local-only contact mapping for third-party email addresses scrubbed from
+# tracked files (placeholders read "[contact Cxx: ..., see contacts.local.md]"). Holds the
+# real addresses, so it must never be tracked in this public repo, wherever it sits.
+contacts.local.md
