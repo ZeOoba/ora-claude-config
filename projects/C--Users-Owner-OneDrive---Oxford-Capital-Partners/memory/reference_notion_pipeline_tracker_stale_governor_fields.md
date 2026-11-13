@@ -45,8 +45,8 @@ in-turn authorization** (Hard Invariant 4 — governor-adjacent, so it needed hi
 
 ## What still needs a human
 - Both descriptions are now **blank**. Correct text must be typed in the Notion UI.
-- **Louisville RCT row — CLOSED 2026-08-11, and it is SOURCED, not a proxy: `Louisville KY |[RCT-private] |
- [RCT-private] |[RCT-private] |[RCT-private]`** (clears [RCT-private] at <=1995, [RCT-private] at >=2005). Added to
+- **Louisville RCT row — CLOSED 2026-08-11, and it is SOURCED, not a proxy: `Louisville KY | [RCT-private] |
+ [RCT-private] | [RCT-private] | [RCT-private]`** (clears [RCT-private] at the oldest vintage, [RCT-private] at the newest). Added to
   `acquisition-underwriting`, the `ora-deal-sourcing-scan` mirror, and this formula.
   ⚠️ **THE LESSON — I proxied when a sourced figure was already in the repo.** I first shipped a
   `[PROXY: Columbus]` row after failing to scrape C&W's flipbook (canvas-rendered, no text layer) and

@@ -20,7 +20,7 @@ Merged 2026-06-03 from reference_financial.md + reference_communication.md.
 - **DSCR ≥ 1.25× — hard acquisition governor** (corrected from 1.75 → 1.25 on 2026-06-03, G5).
 - **LTV ceiling: 40% portfolio-aggregate** self-imposed max (Hard Invariant 4). **Per-property refi-sizing ceiling: LESSER of 65% LTV and 1.25× DSCR** — a distinct, non-conflicting second-level governor (Gabriel-ratified 2026-07-11, reaffirmed in-turn 2026-07-16): a single property may refi to 65% LTV post-close while the portfolio in aggregate stays under the 40% ceiling. Primary text: `acquisition-underwriting/SKILL.md` (v3.8+, restated v4.0 :55/:117/:221/:343). Do not conflate the two — a per-property figure is not a portfolio-aggregate drift and vice versa.
 - Every deal model: NOI, Cap Rate, Yield on Cost, Levered/Unlevered IRR, Equity Multiple, DSCR.
-- Every acquisition: replacement-cost analysis against the ratified RCT v03 per-market band (basis floor computes at band LOW; vintage ramp 65%→60%).
+- Every acquisition: replacement-cost analysis against the ratified RCT v03 per-market band (basis floor computes at band LOW; vintage ramp per the private RCT file).
 - Rent comps denominated **$/SF NNN** unless otherwise specified.
 - All models include **sensitivity tables**.
 - **10-year** projection horizon, fully dynamic assumptions.

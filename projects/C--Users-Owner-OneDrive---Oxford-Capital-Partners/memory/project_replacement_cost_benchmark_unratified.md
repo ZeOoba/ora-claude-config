@@ -9,7 +9,7 @@ metadata:
 
 **RATIFIED 2026-07-14 (Gabriel, governor-level). THERE IS ONE BASIS DENOMINATOR: `RCT v03`.** It lives in the **`acquisition-underwriting`** skill ("Replacement Cost Table (RCT v03)" under UNDERWRITING CONVENTIONS) and is authoritative. **If you find a second denominator, it is a bug.**
 
-**RCT v03 LOW $/SF** (basis divides by LOW): Columbus[RCT-private] · Cincinnati[RCT-private] · Kansas City[RCT-private] · Indianapolis[RCT-private] · Madison[RCT-private] `[PROXY]` · Maryland[RCT-private] · Grand Rapids[RCT-private] `[PROXY, weakest]` · Richmond[RCT-private] `[PROXY]` · Des Moines[RCT-private] `[PROXY]`.
+**RCT v03 LOW $/SF** (basis divides by LOW): Columbus [RCT-private] · Cincinnati [RCT-private] · Kansas City [RCT-private] · Indianapolis [RCT-private] · Madison [RCT-private] `[PROXY]` · Maryland [RCT-private] · Grand Rapids [RCT-private] `[PROXY, weakest]` · Richmond [RCT-private] `[PROXY]` · Des Moines [RCT-private] `[PROXY]`.
 
 **Basis test:** `basis $/SF = (price × 1.02 closing + CapEx + lease-up carry) ÷ FUNCTIONAL SF`, clears if ≤ `RCT LOW × (1 − vintage floor)`. **Vintage floor = linear ramp** (oldYear/oldPct → newYear/newPct: private RCT file `vintageFloor`, ~/.ora-private/rct/). Unknown year built → default to the oldest-vintage floor (conservative).
 
