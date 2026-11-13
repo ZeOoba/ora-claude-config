@@ -363,3 +363,18 @@ audit.jsonl.gz
 # tracked files (placeholders read "[contact Cxx: ..., see contacts.local.md]"). Holds the
 # real addresses, so it must never be tracked in this public repo, wherever it sits.
 contacts.local.md
+# (2026-11-13) RCT replacement-cost table out of this PUBLIC repo (Gabriel's 2026-11-12 audit
+# ruling: keep the repo public, move the governor-level table out of source). Archive copies
+# that embedded the table were untracked (history NOT rewritten); their contents were moved to
+# C:/Users/Owner/.ora-private/ora-claude-config-archive/2026-11-13_rct-untrack/ (MANIFEST.txt
+# there lists every path and blob sha). Ignored here so a restored copy cannot be re-added.
+# Four other untracked copies sit under nested archived .gitignore files that override any
+# root rule, so they are not listed; for those, and for the figures anywhere else, the guard is
+# the pre-push RCT leak check (hooks/lib/rct_leak_check.py). The 2026-10-30_live-sync* paths
+# exist only on live/primary-checkout, where they are still tracked and need an untrack commit
+# (an ignore rule does not untrack a tracked file).
+/maintenance/_archive/2026-09-22_checkout-sync/skills/county-parcel-screen/SKILL.md
+/maintenance/_state/_archive/2026-10-30_live-sync-379-overlap/scheduled-tasks/ora-deal-sourcing-scan/SKILL.md
+/maintenance/_state/_archive/2026-10-30_live-sync-379-overlap/scheduled-tasks/ora-entry-market-scan/SKILL.md
+/maintenance/_state/_archive/2026-10-30_live-sync-overlap/scheduled-tasks/ora-deal-sourcing-scan/SKILL.md
+/maintenance/_state/_archive/2026-10-30_live-sync-overlap/scheduled-tasks/ora-entry-market-scan/SKILL.md
