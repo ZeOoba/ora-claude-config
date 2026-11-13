@@ -80,6 +80,17 @@ except Exception as _e:  # pragma: no cover - exercised via the import-failure t
     _sp = None
     _SP_ERR = str(_e)
 
+# RCT LEAK CHECK (2026-11-13, Gabriel's 2026-11-12 audit ruling: this repo stays public and the
+# ratified replacement-cost table moved out of source). Blocks a push whose ADDED lines or
+# commit messages carry an RCT figure, compared against a PRIVATE local copy outside the tree
+# (hooks/lib/rct_leak_check.py). No private copy on this machine -> the check is skipped and
+# says so; a private copy that exists but is broken -> blocked, like an unreadable terms file.
+try:
+    import rct_leak_check as _rct
+except Exception as _e:  # pragma: no cover
+    _rct = None
+    _RCT_ERR = str(_e)
+
 
 def _read_json(path):
     """Parsed JSON from path, or None on any read/parse error."""
@@ -528,6 +539,24 @@ def main():
         sys.stderr.write("pre-push BLOCKED (fail-closed): confidential-terms.json "
                          "unreadable — cannot prove the push is clean.\n")
         return 1
+    if _rct is None:
+        sys.stderr.write("pre-push BLOCKED (fail-closed): hooks/lib/rct_leak_check.py could "
+                         "not be imported (%s) -- cannot check for RCT figures.\n" % _RCT_ERR)
+        return 1
+    try:
+        rct_needles, _rct_sources = _rct.load_needles()
+    except _rct.RctSourceError as e:
+        sys.stderr.write("pre-push BLOCKED (fail-closed): the private RCT table/denylist exists "
+                         "but is unusable (%s) -- fix it or move it aside; an absent file skips "
+                         "the check, a broken one blocks.\n" % e)
+        return 1
+    if rct_needles is None:
+        sys.stderr.write("pre-push note: RCT leak check skipped -- no private RCT table or "
+                         "denylist on this machine (~/.ora-private/rct/).\n")
+    elif not _rct.table_loaded(_rct_sources):
+        sys.stderr.write("pre-push WARNING: RCT leak check is running on the superseded-values "
+                         "denylist ONLY -- the current private RCT table was not found, so the "
+                         "current figures are not checked.\n")
     # NOTE: there is deliberately NO `if not terms: return 0` early exit any more. It used
     # to short-circuit the whole hook whenever no deal was active -- which is the state
     # TODAY -- so a credential scan placed after it would have been dead on arrival. The
@@ -568,7 +597,11 @@ def main():
             continue
         # --cc: a merge commit also shows its dense combined diff, so content introduced only
         # by a conflict resolution is scanned (audit prepush-scan-skips-merge-commit-diffs).
-        p = subprocess.run(["git", "log", "-p", "--cc", "--no-color", rng],
+        # --no-abbrev-commit --pretty=medium: pinned so a host's log.abbrevCommit / format
+        # config cannot change the "commit <40hex>" header rct_leak_check keys commit-message
+        # scanning on (REFUTE 2026-11-13, C9). Same content for the terms/credential scans.
+        p = subprocess.run(["git", "log", "-p", "--cc", "--no-color", "--no-abbrev-commit",
+                            "--pretty=medium", rng],
                            capture_output=True)
         if p.returncode != 0:
             sys.stderr.write("pre-push BLOCKED (fail-closed): `git log -p %s` failed "
@@ -599,6 +632,28 @@ def main():
                              "history -- a force-push alone does not un-leak it.\n"
                              % (local_ref, rng, detail))
             bad = True
+        if rct_needles:
+            # Its OWN `git log --text` pass (REFUTE round 2, N1): the shared body renders a file
+            # marked `-diff` in .gitattributes, or any text file with one NUL byte, as "Binary
+            # files differ", so an RCT figure added there was never seen. --text forces the
+            # content out. Kept separate so the terms / credential scans above are unchanged.
+            pt = subprocess.run(["git", "log", "-p", "--cc", "--text", "--no-color",
+                                 "--no-abbrev-commit", "--pretty=medium", rng],
+                                capture_output=True)
+            if pt.returncode != 0:
+                sys.stderr.write("pre-push BLOCKED (fail-closed): `git log --text %s` failed for "
+                                 "%s -- cannot check for RCT figures.\n" % (rng, local_ref))
+                bad = True
+                continue
+            rct_paths = _rct.scan_diff(pt.stdout.decode("utf-8", "ignore"), rct_needles)
+            if rct_paths:
+                sys.stderr.write("pre-push BLOCKED: ratified RCT replacement-cost figure(s) from "
+                                 "the private table ADDED on %s (range %s): %s. Figures are not "
+                                 "echoed. This repo is PUBLIC: replace each with a pointer to the "
+                                 "private RCT file (~/.ora-private/rct/), and reword the commit "
+                                 "message if it is listed.\n"
+                                 % (local_ref, rng, "; ".join(rct_paths)))
+                bad = True
         # Compressed and UTF-16 blobs: invisible to `git log -p` (see scan_compressed).
         c_hits, c_leaks, c_bad = scan_compressed(rng, terms)
         if c_hits:
