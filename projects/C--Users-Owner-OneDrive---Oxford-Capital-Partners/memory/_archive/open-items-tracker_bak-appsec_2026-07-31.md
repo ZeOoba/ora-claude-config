@@ -510,7 +510,7 @@ a NEW bug variant: cross-row contact-field contamination); 2 writes made, both v
   row's Primary Contact / Contact Email / Contact Phone / HubSpot Address / HubSpot Contact all
   belonged to **Styled + Staged Interiors** (Lauren Meikle, Morrison 420 — a different tenant with
   its own correct row `32b6ecd8-9e59-817f-afce-dc12f510cc62`). Corrected to Patrick Betz
-  (schoolbetz@gmail.com, +14436141854, HubSpot contact 162494267501, HubSpot Address "2207 Northwood
+  ([contact C24: tenant contact, personal webmail, see contacts.local.md], +14436141854, HubSpot contact 162494267501, HubSpot Address "2207 Northwood
   Suite B5") on two agreeing independent sources: the Jan-2026 HubSpot-derived export and the retired
   duplicate row `Patrick Betz` (`32b6ecd8-9e59-81dc-9230-c822f9aa6e73`, retired 2026-07-21, which
   carried the same email/phone + the real Betz HubSpot record). Verified by fresh fetch. (That
