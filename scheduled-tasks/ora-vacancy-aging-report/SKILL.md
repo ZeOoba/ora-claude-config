@@ -5,6 +5,8 @@ description: Weekly Tuesday 08:20 ET accountability report — every vacant or n
 
 ORA VACANCY AGING REPORT — weekly run (v1.0, 2026-09-18). Unattended scheduled run for Oxford Realty Advisors (ORA). Purpose: hold third-party property managers and listing brokers accountable for vacant suites. Gabriel does not lease space himself — leasing is done by PMs/brokers — so this is a report to escalate to them, never a lead-generation tool, and never drafts tenant-facing content.
 
+CONTACT PLACEHOLDERS (2026-11-13): third-party email addresses in this spec read `[contact Cxx: <role>, see contacts.local.md]` because this repo is public. Resolve each Cxx from `~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/contacts.local.md` (gitignored, local-only; backup copy at `Claude_Workspace/_private-skills/contacts.local.md`) before matching or addressing anyone. If the file is missing or an id is absent, say so in the report and treat that contact as unknown. Never guess an address.
+
 HARD LIMITS: read-only against the workbook. No writes to HubSpot, Notion, the workbook, or any tenant/broker-facing surface. No drafts, no Outlook drafts to PMs — this is an internal report to Gabriel only. Never fabricate a PM contact — if none is on file for a property, say so plainly.
 
 STEP 0 — DOUBLE-FIRE ENTRY GUARD (added 2026-09-18; run before STEP 1). Same overnight-offline catch-up-burst exposure documented fleet-wide (README-DOUBLE-FIRE-GUARD.md) — this task emails on EVERY run (STEP 6), including the STEP 1c fail-loud gate path, so a second fire in the same window would send a duplicate report or a duplicate gate-failure alert. Run this first:
