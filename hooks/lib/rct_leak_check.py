@@ -34,7 +34,8 @@ prefixes included) and commit-message lines. Removed lines are the fix, not the 
 push that deletes the figures passes. Reports carry file paths only, never a figure.
 
 RESIDUAL (stated, not hidden): figures re-typed in another form ("$222", "222.2", words) are not
-caught; compressed / UTF-16 blobs are not decoded by this check (the confidential scan's
+caught; the caller feeds a `git log --text` body, so binary-RENDERED text (a `-diff` attribute,
+a stray NUL byte) is scanned, but compressed / UTF-16 blobs are not decoded by this check (the confidential scan's
 compressed walk covers roster terms and credentials only); history already on the remote is not
 rescanned. Stdlib only. ASCII-only.
 """
