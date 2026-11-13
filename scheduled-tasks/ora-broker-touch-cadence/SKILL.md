@@ -122,7 +122,7 @@ dropped from the run and reported in the Step 5 summary with its reason; it is n
 
 Why this exists: on 2026-09-02 and 2026-09-05 the task drafted John Hassler (Newmark Zimmer, Kansas
 City) TWICE under the identical subject "Kansas City industrial -- checking in", at two different
-addresses (jhassler@nzimmer.com and john.hassler@nmrkzimmer.com — alternate domains of the SAME firm
+addresses ([contact C19: Newmark Zimmer broker, see contacts.local.md] and [contact C20: Newmark Zimmer broker, see contacts.local.md] — alternate domains of the SAME firm
 after the Newmark/Zimmer rebrand). Address-level dedup did not catch it because the addresses differ.
 This is the same failure shape as the 2026-04-05 six-duplicate misfire.
 
@@ -337,7 +337,7 @@ CHANGELOG
       takes -BodyFile but SENDS and must never be used for drafts.
   (2) DUPLICATE DRAFTS. John Hassler (Newmark Zimmer, Kansas City) was drafted twice under the
       identical subject "Kansas City industrial -- checking in" at two alternate-domain addresses
-      (jhassler@nzimmer.com 2026-09-02, john.hassler@nmrkzimmer.com 2026-09-05) — address-level dedup
+      ([contact C19: Newmark Zimmer broker, see contacts.local.md] 2026-09-02, [contact C20: Newmark Zimmer broker, see contacts.local.md] 2026-09-05) — address-level dedup
       could not see it; the same failure shape as the 2026-04-05 six-duplicate misfire. New Step 2.5
       gate: normalise every candidate to PERSON + FIRM (alternate/legacy domains collapse to one firm
       token), check Drafts AND Sent Items over 30 days on that identity key, refuse anyone already
