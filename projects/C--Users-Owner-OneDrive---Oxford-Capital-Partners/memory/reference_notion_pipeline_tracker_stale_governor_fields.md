@@ -55,8 +55,8 @@ in-turn authorization** (Hard Invariant 4 — governor-adjacent, so it needed hi
   `~/.claude/scheduled-tasks/ora-deal-sourcing-scan/skills/cw-2025-construction-costs.json` the entire
   time — 45 markets, `small25`/`med25`/`large25` each. Louisville small25 = [RCT-private].
   **CHECK THAT FILE FIRST for any per-market hard cost, before proxying or scraping.**
-  Derivation (reproduces the table's own method): `b = ln(small25/med25) / ln(476400/109200)`, size
-  premium `(109200/40000)^b`, `POINT = small25 x premium x 1.30 x 1.0487`, `LOW = 0.90 x POINT`. Refute-
+  Derivation (reproduces the table's own method): `b = ln(small/med) / ln([C&W tier sizes])`, size
+  premium `([sizes])^b`, `POINT = small x premium x [RCT-private multipliers]`, `LOW = [RCT-private] x POINT`. Refute-
   tested against all 8 source metros behind the other 9 rows — reproduced every ratified POINT and LOW
   to the cent. **Resolved 2026-08-12 (Gabriel):** target-markets.json's Louisville `replacement_cost`
   block — wrong on both the number ([RCT-private], Indianapolis proxy) and its stated reason — was DELETED

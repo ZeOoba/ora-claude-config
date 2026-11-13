@@ -28,20 +28,20 @@ Three denominators were tried and two discarded **in one day**:
 
 **Direction of the error:** replacement understated → discounts computed too small → **ORA was too STRICT and passing on deals that clear doctrine.** Maryland ran the other way (RCT v02 priced it as the most expensive market at $165 when C&W shows Baltimore is mid-priced at [RCT-private]) → **the MD floor was too generous.**
 
-**Net after correction:** Maryland tightens ~23% · Grand Rapids loosens ~16% · Indianapolis ~7% looser · Columbus/KC/Madison tighten modestly · Richmond/Des Moines ~flat. Re-screen of the 2026-07-14 scan: **11 of 29 priced candidates clear.**
+**Net after correction:** Maryland tightens most · Grand Rapids loosens most · Indianapolis looser · Columbus/KC/Madison tighten modestly · Richmond/Des Moines ~flat. Re-screen of the 2026-07-14 scan: **11 of 29 priced candidates clear.**
 
 ## How RCT v03 is built (each step auditable)
 
 `POINT = C&W hard × shallow-bay size premium × soft/profit/financing × escalation`
 1. C&W hard, small tier — **SOURCED**, per metro
-2. Shallow-bay premium ~+43% at 40K SF — **SOURCED**, from C&W's *own* size curve (`size^−b`, b = 0.349–0.364 fitted per metro)
-3. Soft + developer profit + financing **×1.30 `[EST]`** ← **the one unsourced input.** Low end chosen deliberately so the floor is *harder* than truth, never softer.
-4. Escalation ×1.0487 — **SOURCED**, Turner BCI (lowest of three indices)
-5. Band ±10% ⇒ LOW = 0.90 × POINT. Coherence passes: every all-in exceeds hard cost at ~1.95×.
+2. Shallow-bay premium [RCT-private] — **SOURCED**, from C&W's *own* size curve (`size^−b`, b [RCT-private] fitted per metro)
+3. Soft + developer profit + financing **×[RCT-private] `[EST]`** ← **the one unsourced input.** Low end chosen deliberately so the floor is *harder* than truth, never softer.
+4. Escalation ×[RCT-private] — **SOURCED**, Turner BCI (lowest of three indices)
+5. Band ±[RCT-private] ⇒ LOW = [RCT-private] × POINT. Coherence passes: every all-in exceeds hard cost by a consistent multiple (private RCT file).
 
 ## Open
 
-- **The ×1.30 multiplier is the last `[EST]`.** **One email to a GC per core market** — *"all-in $/SF to build a 30–50K SF Class B/C shallow-bay shell"* — retires it, validates the shallow-bay premium, **and** settles the PEMB-vs-tilt-up delta in a single reply. Highest-leverage outstanding action in the whole basis chain.
+- **The soft/profit/financing multiplier ([RCT-private]) is the last `[EST]`.** **One email to a GC per core market** — *"all-in $/SF to build a 30–50K SF Class B/C shallow-bay shell"* — retires it, validates the shallow-bay premium, **and** settles the PEMB-vs-tilt-up delta in a single reply. Highest-leverage outstanding action in the whole basis chain.
 - **STALE consumers still carrying the old numbers** (wrong on denominator *and* floor): the **Ranking workbook** (all Basis/Combined/Expected scores predate v03), **`parcel-data-recovery`** (25/30 cliff + RCT v02 constants), and the platform engine **`config/replacement-cost.v1.json`** (flat $125/$137.50/$150).
 - Four **`[PROXY]`** markets (Madison←Milwaukee, Grand Rapids←Detroit, Richmond←Baltimore, Des Moines←Minneapolis) always trigger **DENOMINATOR-SENSITIVE**. Grand Rapids is weakest — Detroit is a high-cost union market, so its floor is likely too generous.
 

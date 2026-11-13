@@ -40,7 +40,7 @@ Post-backfill state: 6 blank (410 Winfield, 1604 Northwestern Pkwy, 1803 Commerc
 
 RCT v03 and its vintage ramp (private RCT file) were **ratified 2026-07-14**. The **2026-07-22** run computed every Louisville / Delmarva / Grand Rapids / Des Moines basis floor on **retired RCT v02 constants** ($118.50 Indiana proxy, $150.45 Maryland, $109.15 Grand Rapids, $107.04 Des Moines) with the **retired 30%/25% cliff** — eight days stale at execution.
 
-Pass/fail verdicts mostly survived; **Basis point scores did not**, and Basis is 25 of the 45 Economics points, so July's pipeline ranking was distorted. One verdict was materially wrong: **1700 Industrial Park Dr, Federalsburg MD** read T2 WATCH / Combined 55 under v02, and is **PASS-band / Combined 38** under v03 (Maryland tightened ~23%, the largest per-market move — max qualifying all-in [RCT-private] against the listing ask, which breaches once closing cost is added).
+Pass/fail verdicts mostly survived; **Basis point scores did not**, and Basis is 25 of the 45 Economics points, so July's pipeline ranking was distorted. One verdict was materially wrong: **1700 Industrial Park Dr, Federalsburg MD** read T2 WATCH / Combined 55 under v02, and is **PASS-band / Combined 38** under v03 (Maryland tightened the most of any market — max qualifying all-in [RCT-private] against the listing ask, which breaches once closing cost is added).
 
 **Root cause:** the task has no doctrine-version check. It reads the skill at run time but nothing asserts that the constants in use match the currently-ratified table.
 
