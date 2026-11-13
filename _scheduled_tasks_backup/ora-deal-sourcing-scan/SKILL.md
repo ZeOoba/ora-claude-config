@@ -910,8 +910,11 @@ the basis hard floor were still scoring 62-78 and landing in the pursue band. Ti
 now assigned by the gate; the score only RANKS candidates within a gate outcome.
 
 *** THE DENOMINATOR IS RCT v03. THERE IS ONLY ONE. IF YOU FIND A SECOND, IT IS A BUG. ***
-RCT v03 lives in the `acquisition-underwriting` skill ("Replacement Cost Table (RCT
-v03)" under UNDERWRITING CONVENTIONS) and is AUTHORITATIVE. Do NOT screen off
+The ratified RCT is defined by the `acquisition-underwriting` skill, and since v2.17 its
+FIGURES come from ONE place only: the private RCT file named in "RCT LOAD" below (the same
+file acquisition-underwriting and the oxford-command-center engine read). Never take a
+figure or a ramp % from the text of acquisition-underwriting or any other skill, even when
+the private file is unavailable — that is the fail-closed case, not a fallback. Do NOT screen off
 target-markets.json — its operative benchmark was RETIRED 2026-07-14. Do NOT use the
 old $140/$170/$150/$130 constants, the retired C&W-hard figures, or RCT v02.
 
@@ -926,8 +929,9 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
   RCT LOAD (v2.17 — run ONCE per run, before any basis test):
     Path: the environment variable ORA_RCT_TABLE_PATH if set, else
           C:\Users\Owner\.ora-private\rct\replacement-cost.json
-    (private, outside every repo; the same table acquisition-underwriting reads — if
-    acquisition-underwriting names a different private path, that path wins.)
+    (private, outside every repo; the same table acquisition-underwriting and the
+    oxford-command-center engine read. If ORA_RCT_TABLE_PATH is set but its file is
+    missing, that is the fail-closed case — do not fall back to the default path.)
     Read: `rctVersion`; `markets[<row>].low` (the denominator), `.point`, `.high`, `.proxy`;
     `vintageFloor` {oldYear, oldPct, newYear, newPct}. Rows are keyed by the cluster's own
     label (e.g. "Columbus OH"); the Maryland/Delmarva leg uses the "Mid-Atlantic" row and
@@ -936,7 +940,8 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
     State `rctVersion` and the private file's path in the digest header.
     FAIL CLOSED — if the file is missing, unreadable or unparseable, `vintageFloor` is absent,
     or a scanned cluster has no row: do NOT compute a basis verdict from memory, a prior
-    digest, Notion, a cached copy or any number elsewhere in this spec. Every priced candidate
+    digest, Notion, a cached copy, any number elsewhere in this spec, or the text of
+    `acquisition-underwriting` / any other skill or repo file. Every priced candidate
     in the affected cluster(s) gets Floor Result `N/A (RCT UNAVAILABLE)`, maximum tier T2
     WATCH, never T1 PURSUE; unpriced rows stay T1-PENDING-PRICE but with no "dies above"
     ask. The digest's FIRST line reads "RCT TABLE UNAVAILABLE — BASIS GATE NOT RUN (<cause>)"
@@ -956,8 +961,9 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
     [DENOMINATOR-SENSITIVE]   Chicago–Cook (in the C&W guide, NOT a proxy, but
                               acquisition-underwriting lists Chicago as always
                               DENOMINATOR-SENSITIVE — say so on any Chicago basis verdict)
-  (The table is no longer mirrored here, v2.17. acquisition-underwriting WINS on any
-  disagreement with the private file; report a disagreement in QUESTIONS FOR GABRIEL.)
+  (The table is no longer mirrored here, v2.17. The private file is the only numeric
+  source. If acquisition-underwriting's text shows a different version label or row set,
+  still screen off the private file and report the disagreement in QUESTIONS FOR GABRIEL.)
 
 WHY THE FLOOR IS THE PRIVATE FILE'S RAMP, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
   The floor % and the denominator are a MATCHED PAIR. The RCT is TRUE all-in
@@ -1471,7 +1477,7 @@ price-upon-request, that URL is NOT the provenance — the document or conversat
 fields, ratified by Gabriel 2026-08-12 over the simpler option of reusing `Purchase Price`:
   (a) `Purchase Price` feeds TWO formulas — `Price Per SF` (= Purchase Price / Total SF)
       and `Replacement Cost Ratio`. The latter is ALREADY KNOWN-BROKEN (still computing
-      against $95/SF, an RCT v01-era denominator, vs RCT v03's $228-254; flagged to
+      against $95/SF, an RCT v01-era denominator, far below RCT v03's LOW row; flagged to
       Gabriel 2026-08-11, unfixed pending his sign-off because it is governor-adjacent).
       A broker marketing figure written to `Purchase Price` would silently propagate into
       both, one of them wrong by ~2.5x, and would surface on six views as a deal price.

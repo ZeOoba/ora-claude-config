@@ -66,10 +66,13 @@ try:
     expect("psf block values become needles", "233.33" in needles)
     expect("cwHardPsf becomes a needle", "133.33" in needles)
     expect("whole-dollar value keeps 2 decimals", "230.00" in needles)
-    expect("trailing-zero short form also a needle", "230.0" in needles)
+    expect("integer gets NO one-decimal short form (C6: generic)", "230.0" not in needles)
     expect("old-vintage floor derived (222.22 x 0.30)", "66.67" in needles, sorted(needles)[:20])
     expect("new-vintage floor derived (222.22 x 0.40)", "88.89" in needles)
     expect("mid-ramp floor derived (1995: 65%% -> 222.22 x 0.35)", "77.78" in needles)
+    expect("psf.low floors derived (211.11 x 0.30)", "63.33" in needles)
+    expect("POINT values do NOT get floors (C6: 244.44 x 0.40)", "97.78" not in needles)
+    expect("hard-cost values do NOT get floors (C6: 133.33 x 0.30)", "40.00" not in needles)
     expect("underscore keys are not values", "999.99" not in needles)
     expect("booleans are not values", "1.00" not in needles and "0.00" not in needles)
     expect("ramp percentages themselves are not needles (too generic)", "0.70" not in needles)
@@ -77,7 +80,7 @@ try:
 
     needles, srcs = rlc.load_needles(table_path=table_path, denylist_path=deny_path)
     expect("denylist values join", "177.77" in needles)
-    expect("denylist values get floors too", "53.33" in needles)
+    expect("denylist values get NO floors (C6)", "53.33" not in needles)
     expect("denylist strings join verbatim", "SYNTH-MARKER-XYZ" in needles)
     expect("both sources listed", srcs == [table_path, deny_path])
 
@@ -86,9 +89,33 @@ try:
 
     # env overrides are what the pre-push hook uses
     os.environ["ORA_RCT_TABLE_PATH"] = table_path
-    os.environ["ORA_RCT_LEAK_DENYLIST"] = missing
+    os.environ.pop("ORA_RCT_LEAK_DENYLIST", None)
+    os.environ["ORA_RCT_LEAK_DENYLIST"] = deny_path
     needles, srcs = rlc.load_needles()
-    expect("env override ORA_RCT_TABLE_PATH honoured", srcs == [table_path])
+    expect("env override ORA_RCT_TABLE_PATH honoured", srcs == [table_path, deny_path])
+    expect("table_loaded true when the table is a source", rlc.table_loaded(srcs))
+    expect("table_loaded false for denylist only", not rlc.table_loaded([deny_path]))
+    os.environ["ORA_RCT_TABLE_PATH"] = missing
+    try:
+        rlc.load_needles()
+        expect("env path set but missing raises (C3: no silent table drop)", False)
+    except rlc.RctSourceError:
+        expect("env path set but missing raises (C3: no silent table drop)", True)
+    os.environ.pop("ORA_RCT_TABLE_PATH", None)
+    os.environ.pop("ORA_RCT_LEAK_DENYLIST", None)
+    strdeny = os.path.join(tmp, "strdeny.json")
+    with open(strdeny, "w", encoding="utf-8") as f:
+        json.dump({"strings": "abc"}, f)
+    try:
+        rlc.load_needles(table_path=missing, denylist_path=strdeny)
+        expect("non-list strings raises (C6)", False)
+    except rlc.RctSourceError:
+        expect("non-list strings raises (C6)", True)
+    short = os.path.join(tmp, "short.json")
+    with open(short, "w", encoding="utf-8") as f:
+        json.dump({"values": [244.40]}, f)
+    n2, _ = rlc.load_needles(table_path=missing, denylist_path=short)
+    expect("non-integer x.y0 keeps one-decimal form", "244.4" in n2 and "244.40" in n2)
 
     # --- fail closed on a PRESENT but broken source --------------------------------------
     bad = os.path.join(tmp, "bad.json")
@@ -194,6 +221,18 @@ try:
     ])
     expect("+++ header line is not content", rlc.scan_diff(header_trap, needles) == [])
 
+    # C2: in-line separators that str.splitlines() treats as line breaks
+    for label, sep in (("bare CR", "\r"), ("form feed", "\x0c"), ("U+2028", " "),
+                       ("x1c", "\x1c"), ("NEL", "\x85")):
+        d = header_trap.replace("+b", "+note" + sep + "cost $222.22")
+        expect("figure after %s inside an added line is caught" % label,
+               rlc.scan_diff(d, needles) == ["x.md"], rlc.scan_diff(d, needles))
+    d = header_trap.replace("+b", "+note\rcommit " + "a" * 40) + "\n+leak 222.22"
+    expect("CR + fake commit header cannot hide later added lines",
+           rlc.scan_diff(d, needles) == ["x.md"], rlc.scan_diff(d, needles))
+    d = header_trap.replace("+b", "+leak 222.22\r")
+    expect("CRLF added line still caught", rlc.scan_diff(d, needles) == ["x.md"])
+
     # --- wiring: the real pre-push scan blocks on it --------------------------------------
     def sh(args, cwd, env=None):
         return subprocess.run(args, cwd=cwd, capture_output=True, text=True, env=env)
@@ -221,9 +260,20 @@ try:
         json.dump({}, f)
     scan_copy = os.path.join(hooks_copy, "git-prepush-confidential-scan.py")
 
+    fake_home = os.path.join(tmp, "home")  # no .ora-private here: defaults resolve to absent
+    os.mkdir(fake_home)
+
     def push_scan(env_table, env_deny):
+        """env_* = a path to export, or None to leave the variable unset (default path,
+        which under fake_home does not exist)."""
         head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
-        env = dict(os.environ, ORA_RCT_TABLE_PATH=env_table, ORA_RCT_LEAK_DENYLIST=env_deny)
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("ORA_RCT_TABLE_PATH", "ORA_RCT_LEAK_DENYLIST")}
+        env.update(HOME=fake_home, USERPROFILE=fake_home)
+        if env_table:
+            env["ORA_RCT_TABLE_PATH"] = env_table
+        if env_deny:
+            env["ORA_RCT_LEAK_DENYLIST"] = env_deny
         return subprocess.run([sys.executable, scan_copy, "origin", origin], cwd=repo,
                               input="refs/heads/main %s refs/heads/main %s\n" % (head, base),
                               capture_output=True, text=True, env=env)
@@ -232,25 +282,52 @@ try:
     with open(os.path.join(repo, "a.md"), "w") as f:
         f.write("seed with a pointer\n")
     sh(["git", "commit", "-qam", "remove"], repo)
-    r = push_scan(table_path, missing)
+    r = push_scan(table_path, None)
     expect("push that only REMOVES a figure passes", r.returncode == 0, r.stderr[:300])
 
     with open(os.path.join(repo, "b.md"), "w") as f:
         f.write("new $222.22\n")
     sh(["git", "add", "-A"], repo)
     sh(["git", "commit", "-qm", "add"], repo)
-    r = push_scan(table_path, missing)
+    r = push_scan(table_path, None)
     expect("push that ADDS a figure is blocked", r.returncode == 1, r.stderr[:300])
     expect("block names the file", "b.md" in r.stderr, r.stderr[:300])
     expect("block never echoes the figure", "222.22" not in r.stderr, r.stderr[:300])
 
-    r = push_scan(missing, missing)
+    r = push_scan(None, None)
     expect("no private source -> scan skips the RCT check and allows", r.returncode == 0,
            r.stderr[:300])
     expect("skip is announced, not silent", "RCT leak check skipped" in r.stderr, r.stderr[:300])
 
-    r = push_scan(bad, missing)
+    r = push_scan(bad, None)
     expect("present-but-broken private source blocks (fail closed)", r.returncode == 1,
+           r.stderr[:300])
+
+    # C2 end to end: a bare-CR file must not get through
+    with open(os.path.join(repo, "c.md"), "wb") as f:
+        f.write(b"note\rcost $222.22\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "cr"], repo)
+    r = push_scan(table_path, None)
+    expect("bare-CR file carrying a figure is blocked end to end", r.returncode == 1
+           and "c.md" in r.stderr, r.stderr[:300])
+
+    # C9: log.abbrevCommit must not switch off commit-message scanning
+    sh(["git", "reset", "-q", "--hard", base], repo)
+    sh(["git", "config", "log.abbrevCommit", "true"], repo)
+    with open(os.path.join(repo, "d.md"), "w") as f:
+        f.write("clean\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "note 222.22"], repo)
+    r = push_scan(table_path, None)
+    expect("figure in a commit message blocked even with log.abbrevCommit=true",
+           r.returncode == 1 and "commit message" in r.stderr, r.stderr[:300])
+
+    # C3 end to end
+    r = push_scan(missing, deny_path)
+    expect("env table path set but missing -> blocks", r.returncode == 1, r.stderr[:300])
+    r = push_scan(None, deny_path)
+    expect("denylist only (no table) -> loud warning", "denylist ONLY" in r.stderr,
            r.stderr[:300])
 finally:
     shutil.rmtree(tmp, ignore_errors=True)
