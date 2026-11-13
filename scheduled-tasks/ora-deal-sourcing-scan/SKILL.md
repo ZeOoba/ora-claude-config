@@ -3,7 +3,17 @@ name: ora-deal-sourcing-scan
 description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.16, 2026-11-09).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.17, 2026-11-13).
+
+v2.17 — RCT TABLE READ FROM A PRIVATE FILE, NOT MIRRORED HERE (2026-11-13, Gabriel's
+2026-11-12 audit ruling: this repo stays PUBLIC, the ratified replacement-cost table moves out of
+source). NO RCT VALUE, SCORE, WEIGHT, GATE, FLOOR %, TIER RULE OR GOVERNOR CHANGED. The per-metro
+table and the vintage-floor ramp were deleted from this file; STEP 3A now loads both at run time
+from the private RCT file (see "RCT LOAD" in STEP 3A) and FAILS CLOSED when it cannot. Every other
+RCT-derived figure in this spec (worked examples, floors, rounded ranges, the soft-cost multiplier)
+was replaced with a pointer. NEVER write a figure from the private file back into this spec, its
+backup mirror, memory or any tracked file: the digest email and Notion may carry figures, the repo
+may not. The pre-push RCT leak check blocks a push that re-adds them.
 
 v2.16 — BROKERS `Markets` OPTION `Chicago IL` (2026-11-09, Gabriel in-turn). The Broker
 Relationships DB (48e43778) gained a `Chicago IL` option; STEP 5A's option list now names it,
@@ -181,13 +191,13 @@ been given a [PROXY: Columbus] figure while `target-markets.json` v1.8 carried a
 [PROXY: Indianapolis] one. BOTH WERE WRONG. Louisville is in the C&W 2025 guide, and the
 extract has been in THIS TASK'S OWN FOLDER all along:
   skills/cw-2025-construction-costs.json  (45 markets, small25/med25/large25 per market)
-Louisville small25 = $135.28 -> LOW $237.07 -> clears at $82.97/SF (<=1995), $94.83 (>=2005).
-That sourced row is now in acquisition-underwriting and is mirrored above; the [PROXY] tag
+Louisville's own small25 hard cost builds its RCT LOW row (figures: private RCT file, v2.17).
+That sourced row is now in acquisition-underwriting and the private RCT file; the [PROXY] tag
 is GONE and Louisville does NOT carry DENOMINATOR-SENSITIVE.
 CHECK THAT FILE FIRST for any per-market hard cost — it is faster and better-sourced than
 any proxy, and the C&W flipbook itself is canvas-rendered with no text layer, so scraping
 it fails. CLOSED 2026-08-12 (Gabriel): `target-markets.json`'s Louisville `replacement_cost` block —
-which carried hard $143.46 (Indianapolis proxy) and the false claim "Louisville is NOT in the
+which carried an Indianapolis-proxy hard cost and the false claim "Louisville is NOT in the
 C&W guide" — was DELETED. Louisville is the only cluster with no replacement_cost block, by
 decision. The other nine clusters KEEP theirs (Gabriel, 2026-08-12): their numbers are correct
 and match the C&W hard costs behind RCT v03, and the blocks carry provenance that exists
@@ -217,7 +227,8 @@ Jonlen interior photos exposed a taproom/arcade build-out that Step 2.5 zero-cre
 v2.3 — BASIS DENOMINATOR RECONCILED TO RCT v03 (Gabriel, 2026-07-14, governor-level):
 This scan had been running its own basis benchmark. It no longer does. THE FIRM HAS
 ONE DENOMINATOR: **RCT v03**, in `acquisition-underwriting`. Rebuilt from the C&W 2025
-guide (all-in, shallow-bay); the vintage ramp was recalibrated 30/25 -> 65/60 because
+guide (all-in, shallow-bay); the vintage ramp was recalibrated (old 30/25 cliff retired;
+current ramp in the private RCT file, v2.17) because
 the floor % and the denominator are a matched pair. Basis now includes the 2% closing
 cost doctrine requires. RETIRED, do not reintroduce: the C&W-hard "operative benchmark"
 (ratified and retired the same day), the old $140/$170/$150/$130 constants, and RCT v02.
@@ -906,9 +917,33 @@ old $140/$170/$150/$130 constants, the retired C&W-hard figures, or RCT v02.
 
 BASIS TEST (ratified by Gabriel 2026-07-14):
   basis $/SF = (price x 1.02 closing) / FUNCTIONAL SF     <- Step 2.5 SF, not marketed SF
-  CLEARS if  basis $/SF  <=  RCT v03 LOW x (1 - vintage floor)
-  Vintage floor = linear ramp: 65% at <=1995 -> 60% at >=2005 (-0.5%/yr).
-  Year built UNKNOWN -> default 1995 (the 65% floor; conservative). Flag it.
+  CLEARS if  basis $/SF  <=  RCT LOW x (1 - vintage floor)
+  Vintage floor = the linear ramp in the private RCT file's `vintageFloor` block (oldest-
+  vintage floor % at or before `oldYear`, newest-vintage floor % at or after `newYear`,
+  linear between). Year built UNKNOWN -> default to `oldYear` (the oldest-vintage, highest
+  floor; conservative). Flag it.
+
+  RCT LOAD (v2.17 — run ONCE per run, before any basis test):
+    Path: the environment variable ORA_RCT_TABLE_PATH if set, else
+          C:\Users\Owner\.ora-private\rct\replacement-cost.json
+    (private, outside every repo; the same table acquisition-underwriting reads — if
+    acquisition-underwriting names a different private path, that path wins.)
+    Read: `rctVersion`; `markets[<row>].low` (the denominator), `.point`, `.high`, `.proxy`;
+    `vintageFloor` {oldYear, oldPct, newYear, newPct}. Rows are keyed by the cluster's own
+    label (e.g. "Columbus OH"); the Maryland/Delmarva leg uses the "Mid-Atlantic" row and
+    Chicago–Greater Cook County uses the "Chicago Cook County IL" row.
+    Per-metro floors are computed each run: LOW x (1 - floor%) at each vintage.
+    State `rctVersion` and the private file's path in the digest header.
+    FAIL CLOSED — if the file is missing, unreadable or unparseable, `vintageFloor` is absent,
+    or a scanned cluster has no row: do NOT compute a basis verdict from memory, a prior
+    digest, Notion, a cached copy or any number elsewhere in this spec. Every priced candidate
+    in the affected cluster(s) gets Floor Result `N/A (RCT UNAVAILABLE)`, maximum tier T2
+    WATCH, never T1 PURSUE; unpriced rows stay T1-PENDING-PRICE but with no "dies above"
+    ask. The digest's FIRST line reads "RCT TABLE UNAVAILABLE — BASIS GATE NOT RUN (<cause>)"
+    and the same item opens QUESTIONS FOR GABRIEL. The rest of the scan (search, dedupe,
+    physical floors, scoring, Notion log, broker capture) still runs.
+    NEVER copy figures from that file into this spec, `_scheduled_tasks_backup/`, memory,
+    the event log or any other tracked file — ~/.claude is backed up to a PUBLIC repo.
 
   Note the 2% closing cost: doctrine defines basis as ALL-IN (price + closing + CapEx
   + lease-up carry). At scan time we cannot know CapEx or carry, so price x 1.02 is a
@@ -916,32 +951,24 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
   that clears by a thin margin. (The scan previously used bare price/SF, which
   flattered every candidate.)
 
-    METRO         RCT v03 LOW   clears at <=1995   clears at >=2005
-    Columbus         $229.65         $ 80.38            $ 91.86
-    Cincinnati       $251.46         $ 88.01            $100.58
-    Kansas City      $227.90         $ 79.77            $ 91.16
-    Indianapolis     $253.83         $ 88.84            $101.53
-    Maryland         $232.97         $ 81.54            $ 93.19
-    Madison          $229.08         $ 80.18            $ 91.63   [PROXY]
-    Grand Rapids     $253.11         $ 88.59            $101.24   [PROXY — WEAKEST]
-    Richmond         $232.97         $ 81.54            $ 93.19   [PROXY]
-    Des Moines       $231.66         $ 81.08            $ 92.66   [PROXY]
-    Louisville       $237.07         $ 82.97            $ 94.83
-    Chicago–Cook     $225.59         $ 78.96            $ 90.24   [DENOMINATOR-SENSITIVE]
-  (Chicago row v2.15: acquisition-underwriting RCT v03 LOW $225.59 / POINT $250.66, C&W 2025
-  small-tier hard $127.79 — in the guide, NOT a proxy; acquisition-underwriting lists Chicago
-  as always DENOMINATOR-SENSITIVE, so say so on any Chicago basis verdict.)
-  (Table mirrored for convenience. acquisition-underwriting WINS on any disagreement.)
+  ROW FLAGS (labels only; the figures are in the private RCT file):
+    [PROXY]                   Madison, Grand Rapids (WEAKEST), Richmond, Des Moines
+    [DENOMINATOR-SENSITIVE]   Chicago–Cook (in the C&W guide, NOT a proxy, but
+                              acquisition-underwriting lists Chicago as always
+                              DENOMINATOR-SENSITIVE — say so on any Chicago basis verdict)
+  (The table is no longer mirrored here, v2.17. acquisition-underwriting WINS on any
+  disagreement with the private file; report a disagreement in QUESTIONS FOR GABRIEL.)
 
-WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
-  The floor % and the denominator are a MATCHED PAIR. RCT v03 is TRUE all-in
-  shallow-bay replacement cost (~$230-254/SF LOW), roughly DOUBLE the understated
-  figure the old 25-30% floor was calibrated against. A 25% floor against RCT v03
-  would let a Columbus deal pay $172/SF and "clear" — every candidate in the buy-box
-  passes. A FLOOR THAT PASSES EVERYTHING IS NOT A FLOOR.
-  ORA's real, revealed strategy is to buy at ~35-40% OF TRUE REPLACEMENT COST — a
-  ~64% discount. The "25% discount" language was always an artifact of a wrong
-  denominator. Use the real number in the digest; it is a far stronger fact.
+WHY THE FLOOR IS THE PRIVATE FILE'S RAMP, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
+  The floor % and the denominator are a MATCHED PAIR. The RCT is TRUE all-in
+  shallow-bay replacement cost, roughly DOUBLE the understated figure the old 25-30%
+  floor was calibrated against. A 25% floor against the RCT would let a typical
+  cluster's deal "clear" at a price nearly every candidate in the buy-box meets.
+  A FLOOR THAT PASSES EVERYTHING IS NOT A FLOOR.
+  ORA's real, revealed strategy is to buy at a deep discount to TRUE replacement cost;
+  the ramp in the private file encodes it. The "25% discount" language was always an
+  artifact of a wrong denominator. Use the real number in the digest (private email);
+  it is a far stronger fact.
   *** METAL-BUILDING BASIS DISTORTION — READ THIS BEFORE CLEARING A PEMB ***
   The C&W benchmark measures ground-up build-to-suit DISTRIBUTION CENTERS, i.e.
   CONCRETE / TILT-UP product. A pre-engineered metal building costs materially LESS
@@ -1148,8 +1175,8 @@ from the C&W 2025 guide and ratified by Gabriel 2026-07-14. State in the digest 
 metro floor was applied, and state the discount as a share of TRUE replacement ("this
 deal buys at 34% of all-in replacement cost"), not as a vague "below replacement."
 Live caveats that must still be surfaced:
-- THE x1.30 SOFT/PROFIT/FINANCING MULTIPLIER IS AN [EST] — the only unsourced input in
-  RCT v03. It is deliberately set at the LOW end of the industry range, so the floor
+- THE SOFT/PROFIT/FINANCING MULTIPLIER IS AN [EST] — the only unsourced input in
+  the RCT (its value: private RCT file / acquisition-underwriting, v2.17). It is deliberately set at the LOW end of the industry range, so the floor
   is HARDER than truth, not softer. One GC quote per market retires it.
 - BASIS IS A GENEROUS PROXY AT SCAN TIME — price x 1.02 omits CapEx and lease-up carry,
   which doctrine includes. True basis is always worse than the scan's figure.
@@ -1158,15 +1185,15 @@ Live caveats that must still be surfaced:
   verdict in those four [PROXY]; a [PROXY] row reaches T1 only on a STEP 3A-2 COMP-TEST
   PASS (v2.9). GRAND RAPIDS IS THE WEAKEST: Detroit is a high-cost
   union market while RSMeans shows Grand Rapids well below the national average, so
-  its floor ($107.73) is probably TOO GENEROUS — flag Grand Rapids passes accordingly.
+  its floor is probably TOO GENEROUS — flag Grand Rapids passes accordingly.
 - NAME ANY DEAL WITHIN ~3% OF ITS FLOOR. The benchmark is March-2025 vintage and
   construction cost is reaccelerating (Turner +4.87% YoY, Mortenson +6.77%, AGC input
   PPI +8.4%), so a near-line deal could move on the next guide.
 DO NOT use an "all-in" (hard + soft + land) denominator. It was considered and
-REJECTED on ratification: at ~$230/SF Midwest it sets the floor near $172/SF, which
-essentially every Class B/C deal clears — a floor that passes everything is not a
-floor. The true all-in figure (~$200-240/SF) is an IC-MEMO NARRATIVE point — "we buy
-at 30-50% of true replacement" — and belongs in memos and lender packages, NOT in
+REJECTED on ratification: at Midwest all-in levels it sets a floor that essentially
+every Class B/C deal clears — a floor that passes everything is not a floor. The true
+all-in figure is an IC-MEMO NARRATIVE point — "we buy at a fraction of true
+replacement" — and belongs in memos and lender packages, NOT in
 the screen.
 
 PROVISIONAL / UNVERIFIED LISTINGS: a listing captured from a search-results INDEX
@@ -1394,7 +1421,7 @@ names not created in the digest's "Broker capture" section so the next run picks
 STEP 5B — CROSS-WRITE THE VERIFIED ASK TO THE ACQUISITION PIPELINE TRACKER
 (added 2026-08-12, Gabriel-directed in-turn. Closes a real 36-minute-fuse defect: on
 2026-08-11 this scan verified 4484 Robertson Road's published ask at $2,950,000
-($116.14/SF marketed vs a Madison floor of $80.18 — FAIL-BASIS) and emailed it, but
+($116.14/SF marketed, above the Madison basis floor — FAIL-BASIS) and emailed it, but
 nothing wrote it to the pipeline tracker. The tracker row was re-stamped 36 minutes
 LATER, still recording the ask as "NOT YET KNOWN — verified null" and still instructing
 the deal owner to ask the broker for a price on a call the next morning. Two ORA systems
