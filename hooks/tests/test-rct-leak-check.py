@@ -323,6 +323,27 @@ try:
     expect("figure in a commit message blocked even with log.abbrevCommit=true",
            r.returncode == 1 and "commit message" in r.stderr, r.stderr[:300])
 
+    # N1: a file git renders as binary must still be scanned
+    sh(["git", "reset", "-q", "--hard", base], repo)
+    sh(["git", "config", "--unset", "log.abbrevCommit"], repo)
+    with open(os.path.join(repo, ".gitattributes"), "w") as f:
+        f.write("*.md -diff\n")
+    with open(os.path.join(repo, "e.md"), "w") as f:
+        f.write("attr-binary $222.22\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "attr"], repo)
+    r = push_scan(table_path, None)
+    expect("figure in a -diff (binary-rendered) file is blocked", r.returncode == 1
+           and "e.md" in r.stderr, r.stderr[:300])
+    sh(["git", "reset", "-q", "--hard", base], repo)
+    with open(os.path.join(repo, "f.txt"), "wb") as f:
+        f.write(b"nul\x00here $222.22\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "nul"], repo)
+    r = push_scan(table_path, None)
+    expect("figure in a NUL-containing file is blocked", r.returncode == 1
+           and "f.txt" in r.stderr, r.stderr[:300])
+
     # C3 end to end
     r = push_scan(missing, deny_path)
     expect("env table path set but missing -> blocks", r.returncode == 1, r.stderr[:300])
