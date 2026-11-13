@@ -5,6 +5,8 @@ description: Monthly (2nd, 1:40 PM ET) broker relationship touch cadence — rea
 
 ORA Broker Relationship Touch Cadence (v1.3, Gabriel-ratified G4b 2026-07-16; v1.1/v1.2 fixes Gabriel-directed 2026-09-19; v1.3 buy-box text 2026-11-03)
 
+CONTACT PLACEHOLDERS (2026-11-13): third-party email addresses in this spec read `[contact Cxx: <role>, see contacts.local.md]` because this repo is public. Resolve each Cxx from `~/.claude/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/contacts.local.md` (gitignored, local-only; backup copy at `Claude_Workspace/_private-skills/contacts.local.md`) before matching or addressing anyone. If the file is missing or an id is absent, say so in the report and treat that contact as unknown. Never guess an address.
+
 AUTOMATION-BUDGET JUSTIFICATION: Serves ORA priority #1 (acquisition velocity) — opens the pocket-listing/relationship deal-flow channel that every existing sourcing task (ora-deal-sourcing-scan, ora-entry-market-scan) deliberately avoids, since those are on-market/public-listing scans only. Gabriel-ratified as ruling G4b on 2026-07-16. DRAFT-ONLY BY DESIGN — this task never sends an external communication; it exists specifically to stay inside Hard Invariant 1 while still opening the relationship channel.
 
 STEP 0 — DOUBLE-FIRE ENTRY GUARD (added v1.2 2026-09-19; fleet standard).
