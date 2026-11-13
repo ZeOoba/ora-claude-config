@@ -78,7 +78,7 @@ DATE-DERIVED FIELDS -- ONE FOUND, AND IT IS THE DANGEROUS KIND (checked live 202
       file since 2026-11-13, never in this public repo). No now()/today()/dateBetween
       anywhere in the expression.
       *** This field is GOVERNOR-ADJACENT. *** It is the RCT basis denominator --
-      ORA's "buy at ~35-40% of replacement cost" discipline is read directly off
+      ORA's buy-at-a-deep-discount-to-replacement-cost discipline is read directly off
       it. Excluding formulas by TYPE rather than by NAME would have silently
       blinded this detector to RCR movement, exactly as it would have blinded the
       Property Register sibling to 'LTV'. Exclusion is therefore BY NAME, and
