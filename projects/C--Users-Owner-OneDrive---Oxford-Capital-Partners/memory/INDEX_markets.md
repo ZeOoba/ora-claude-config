@@ -20,7 +20,7 @@ metadata:
 
 ## Markets & Deals
 - [Market Intelligence](markets.md) — cross-market snapshots, macro (FRED), replacement cost, comps
-- [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at ~35-40% of replacement
+- [Basis Denominator — RCT v03 (RATIFIED)](project_replacement_cost_benchmark_unratified.md) — the ONE denominator; ORA buys at a deep discount to replacement
 - **[Acquisition Buy Box & Scorecard v1.1 (RATIFIED)](acquisition-buy-box-v1.md)** — Rulings 1-5 + Amendments A-G, ratified 2026-06-09, + Amendment H small portfolios 2026-10-30; created 08-17 closing a gap where drift-check step 2c cited this key since 06-20 and it never existed
 - [Notion Pipeline Tracker stale governor fields](reference_notion_pipeline_tracker_stale_governor_fields.md) — RCR formula stale at $95/SF; DSCR text asserted a non-canonical floor; fixed 08-11
 - [Deal Decision Ledger](deal-decision-ledger.md) — one row per decided PASS/SKIP/DROP/PARK/CLOSE + buy-box rule validated

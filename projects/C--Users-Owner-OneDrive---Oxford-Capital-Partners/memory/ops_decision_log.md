@@ -222,7 +222,7 @@ used for the Columbus v04 screen). Before extending that to memory or other mark
 "THERE IS ONE BASIS DENOMINATOR: RCT v03 ... if you find a second denominator, it is a bug") and
 flagged as in conflict. Gabriel's recommendation on reconciliation, confirmed: revert to RCT v03,
 not carve out a screening-only exception. `20260727_AllMarkets-OffMarket-Master_v08.xlsx` ships
-Columbus on RCT v03 (Columbus LOW $229.65, conservative 35%-of-replacement threshold = $80.38/SF,
+Columbus on RCT v03 (Columbus LOW [RCT-private], conservative oldest-vintage threshold = [RCT-private],
 since Yr Built is unknown for the v04 source rows). v07 (the $150/SF build) is superseded, not
 deleted. **Do not re-litigate $150/SF for Columbus** without new information (e.g., a GC/lender
 quote specifically challenging RCT v03's Columbus figure) — treat the one-denominator rule as

@@ -22,7 +22,7 @@ The schema has THREE formula fields. One is calendar-derived and had to be exclu
 
 **⚠ The bulk-field guard is NOT a backstop here.** Measured on real data: only **3 of 20 rows drift per day = 15%**, far below the 50% `BULK_FIELD_RATIO`, and the guard verifiably stayed silent in the differential control. On a ~20-row table where only rows with a `Next Action Date` can drift, the guard is *structurally incapable* of firing on this field. Do not rely on it to catch a missed exclusion on small tables.
 
-**Two formulas are deliberately KEPT** (exclude by NAME, never by TYPE): `Price Per SF`, and **`Replacement Cost Ratio` — governor-adjacent**, the RCT basis denominator behind ORA's ~35–40%-of-replacement discipline (populated on 13 of 20 rows; see [[project_replacement_cost_benchmark_unratified]] and [[reference_notion_pipeline_tracker_stale_governor_fields]]). A type-based exclusion would have blinded the detector to it, exactly as it would have blinded Property Register to `LTV`.
+**Two formulas are deliberately KEPT** (exclude by NAME, never by TYPE): `Price Per SF`, and **`Replacement Cost Ratio` — governor-adjacent**, the RCT basis denominator behind ORA's deep-discount-to-replacement discipline (populated on 13 of 20 rows; see [[project_replacement_cost_benchmark_unratified]] and [[reference_notion_pipeline_tracker_stale_governor_fields]]). A type-based exclusion would have blinded the detector to it, exactly as it would have blinded Property Register to `LTV`.
 
 **Field-name codepoints were verified**: `0x23F0` + space + `Action Overdue`, with **no U+FE0F variation selector** — so the `"⏰ Action Overdue"` literal matches exactly. Worth re-checking if the exclusion ever appears to stop working.
 

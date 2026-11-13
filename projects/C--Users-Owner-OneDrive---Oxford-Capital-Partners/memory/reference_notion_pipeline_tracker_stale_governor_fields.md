@@ -13,7 +13,7 @@ in-turn authorization** (Hard Invariant 4 — governor-adjacent, so it needed hi
 
 ## What was wrong
 1. **`Replacement Cost Ratio`** (formula) computed against a flat **$95/SF**. That is RCT v01-era.
-   The ratified denominator is **RCT v03** (per-metro LOW $227.90–$253.83, ratified 2026-07-14), so
+   The ratified denominator is **RCT v03** (per-metro LOW [RCT-private]–[RCT-private], ratified 2026-07-14), so
    every value the field produced after that date was wrong by roughly **2.5x** — and it rendered as
    a plausible ratio, so it never looked broken.
 2. **`DSCR`** field description asserted a stale per-property hard floor — corrected from 1.75x → 1.25x. The ratified per-property governor is 1.25x.
@@ -45,21 +45,21 @@ in-turn authorization** (Hard Invariant 4 — governor-adjacent, so it needed hi
 
 ## What still needs a human
 - Both descriptions are now **blank**. Correct text must be typed in the Notion UI.
-- **Louisville RCT row — CLOSED 2026-08-11, and it is SOURCED, not a proxy: `Louisville KY | 237.07 |
-  263.41 | 289.75 | 135.28`** (clears $82.97/SF at <=1995, $94.83 at >=2005). Added to
+- **Louisville RCT row — CLOSED 2026-08-11, and it is SOURCED, not a proxy: `Louisville KY | [RCT-private] |
+ [RCT-private] | [RCT-private] | [RCT-private]`** (clears [RCT-private] at the oldest vintage, [RCT-private] at the newest). Added to
   `acquisition-underwriting`, the `ora-deal-sourcing-scan` mirror, and this formula.
   ⚠️ **THE LESSON — I proxied when a sourced figure was already in the repo.** I first shipped a
   `[PROXY: Columbus]` row after failing to scrape C&W's flipbook (canvas-rendered, no text layer) and
   after `target-markets.json` v1.8 asserted in writing that "Louisville is NOT in the C&W guide." **That
   assertion is false**, and the real per-market extract had been sitting at
   `~/.claude/scheduled-tasks/ora-deal-sourcing-scan/skills/cw-2025-construction-costs.json` the entire
-  time — 45 markets, `small25`/`med25`/`large25` each. Louisville small25 = $135.28.
+  time — 45 markets, `small25`/`med25`/`large25` each. Louisville small25 = [RCT-private].
   **CHECK THAT FILE FIRST for any per-market hard cost, before proxying or scraping.**
-  Derivation (reproduces the table's own method): `b = ln(small25/med25) / ln(476400/109200)`, size
-  premium `(109200/40000)^b`, `POINT = small25 x premium x 1.30 x 1.0487`, `LOW = 0.90 x POINT`. Refute-
+  Derivation (reproduces the table's own method): `b = ln(small/med) / ln([C&W tier sizes])`, size
+  premium `([sizes])^b`, `POINT = small x premium x [RCT-private multipliers]`, `LOW = [RCT-private] x POINT`. Refute-
   tested against all 8 source metros behind the other 9 rows — reproduced every ratified POINT and LOW
   to the cent. **Resolved 2026-08-12 (Gabriel):** target-markets.json's Louisville `replacement_cost`
-  block — wrong on both the number ($143.46, Indianapolis proxy) and its stated reason — was DELETED
+  block — wrong on both the number ([RCT-private], Indianapolis proxy) and its stated reason — was DELETED
   (backup: `target-markets.v1.8-pre-rc-delete-20260812.json.bak`). **The other nine clusters KEEP their
   blocks by decision** — their numbers are correct and match the C&W hard costs behind RCT v03, and they
   carry provenance found nowhere else (2024 comparatives, YoY %, land $/acre, small-bay extrapolations).
