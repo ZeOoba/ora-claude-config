@@ -483,7 +483,9 @@ def test_m365_sends_reach_confidentiality():
 #   INTERNAL   -- stays on this machine or inside the Claude/Anthropic session surface.
 #   GATED      -- covered by another gate that owns the decision (named).
 #   RESIDUAL   -- a REAL unrouted egress path, accepted for now and tracked as a follow-up. Do not
-#                 add to this class without saying so in the PR; prefer routing.
+#                 add to this class without saying so in the PR; prefer routing. EMPTY since the
+#                 #452 follow-up (2026-11-12) -- W7 pins it empty, so a new one is a deliberate
+#                 edit to W7, never a silent addition.
 # ---------------------------------------------------------------------------------------------
 WRITE_VERBS = frozenset((
     "create", "update", "send", "write", "edit", "multiedit", "upload", "post", "publish",
@@ -498,64 +500,28 @@ EXCLUDED = (
     # (regex over the FULL tool name, reason)
     (r"__copy_file$", "NO-TEXT: Drive server-side copy of an existing file by id"),
     (r"__qbo_payroll_get_company_last_payroll_run$", "READ"),
-    (r"__(qbo_sales_create_invoice|qbo_sales_update_invoice|quickbooks-profile-info-update|"
-     r"quickbooks-transaction-import)$",
-     "RESIDUAL: QuickBooks Online writes (third-party SaaS); QBO MCP is not an ORA data path "
-     "(QuickBooks Desktop only), follow-up: route or disconnect"),
-    (r"__(asset_add_file|asset_initialize_file_upload|asset_finalize_file_upload|fill_text)$",
-     "RESIDUAL: design-asset service upload / text-into-image; follow-up: route to "
-     "confidentiality-guard with file reads like Artifact"),
     (r"__(asset_add_file_check_status|asset_copy_assets|asset_create_folders)$",
      "NO-TEXT: ids / folder names inside the asset service"),
     (r"__(image_[a-z_]+|video_create_quick_cut)$",
      "NO-TEXT: transforms on already-uploaded media"),
-    (r"__(COMPOSIO_MULTI_EXECUTE_TOOL|RUBE_MULTI_EXECUTE_TOOL|RUBE_EXECUTE_RECIPE|"
-     r"RUBE_CREATE_UPDATE_RECIPE)$",
-     "RESIDUAL: generic remote tool executors (can send mail/messages); follow-up: route the "
-     "whole payload to confidentiality-guard"),
-    (r"__(COMPOSIO_MANAGE_CONNECTIONS|RUBE_MANAGE_CONNECTIONS|RUBE_MANAGE_RECIPE_SCHEDULE)$",
-     "NO-TEXT: connection / schedule management"),
-    (r"__gmail_create_draft-[0-9a-f]+$",
-     "RESIDUAL: Gmail draft text (Outlook is the sole send path); follow-up: route"),
+    (r"__(COMPOSIO_MANAGE_CONNECTIONS|RUBE_MANAGE_CONNECTIONS)$",
+     "NO-TEXT: connection management (RUBE_MANAGE_RECIPE_SCHEDULE is COVERED + Gate 1h)"),
     (r"__(get_message_volume|get_message_volume_history|chat_message_search|"
      r"OUTLOOK_GET_MESSAGE-[0-9a-f]+|get-design-import-job-status|"
      r"netlify-deploy-services-reader|get-actor-run)$", "READ"),
-    (r"__create_file$",
-     "RESIDUAL: Google Drive file create with content; an unanchored DOCS-connector matcher "
-     "alternative routes it but the guard does not classify it; follow-up: route + classify"),
-    (r"__create_firefly_board$", "RESIDUAL: design-service board create (name/prompt text); "
-     "follow-up: route + classify"),
-    (r"__(COMPOSIO_REMOTE_BASH_TOOL|RUBE_REMOTE_BASH_TOOL|COMPOSIO_REMOTE_WORKBENCH|"
-     r"RUBE_REMOTE_WORKBENCH)$",
-     "RESIDUAL: remote sandbox shell/workbench (can curl out); follow-up: route to the "
-     "EGRESS_BASH scan"),
     (r"__(outlook_email_search|read_clipboard|read_process_output|select_browser|"
      r"switch_browser)$", "READ"),
     (r"Desktop_Commander__kill_process$", "NO-TEXT: pid only"),
-    (r"__apify-slash-rag-web-browser$",
-     "RESIDUAL: search query sent to a third-party scraper (WebSearch parity); follow-up: route"),
-    (r"Windows-MCP__(Clipboard|FileSystem|MultiEdit|PowerShell|Process|Scrape)$",
-     "RESIDUAL: Windows-MCP shell / file edit / clipboard / fetch tools; its PowerShell is "
-     "routed by the bare 'PowerShell' matcher alternative (unanchored only) but the guard's "
-     "is_shell_tool matches the native PowerShell tool name exactly; follow-up: route + classify"),
-    (r"__(microsoft_docs_search|microsoft_docs_fetch|microsoft_code_sample_search|query-docs)$",
-     "RESIDUAL: free-text query to a third-party docs service (WebSearch parity); follow-up: "
-     "route + scan the query"),
-    (r"__document_merge_data_[a-z_]+$",
-     "RESIDUAL: merge data (free text) sent to a third-party document service; follow-up: route"),
     (r"__start_process-[0-9a-f]{32}$",
      "INTERNAL: snapshot-key artifact (plugin connector key carries a hash suffix); the real "
      "harness name mcp__plugin_desktop-commander_desktop-commander__start_process is covered "
      "(test-egress-tool-coverage C1)"),
-    (r"Claude_Browser__(preview_start|tabs_create)$",
-     "RESIDUAL: preview_start may open a URL (navigate is routed); tabs_create carries none"),
+    (r"Claude_Browser__tabs_create$", "NO-TEXT: opens a blank tab (preview_start is COVERED)"),
     (r"__(tabs_create_mcp|mouse_move|Move|set_pinned|set_unread)$", "NO-TEXT"),
     (r"__import-claude-design-from-url$",
      "NO-TEXT: content by reference only (a URL) -- confidentiality-guard EXCLUDED list"),
     (r"__(manage_aeo_recommendations|manage_onboarding|manage_saved_reports)$",
      "NO-TEXT: list/fetch/enum actions -- confidentiality-guard EXCLUDED list"),
-    (r"__(submit_feedback|give_feedback_to_desktop_commander|memory_feedback)$",
-     "RESIDUAL: free-text feedback to a vendor; follow-up: route"),
     (r"__netlify-deploy-services-updater$",
      "GATED: ora-autonomy-gate (Invariant 2, website-deploy token); deployed content is "
      "scanned by the build-time dist grep gate"),
@@ -565,23 +531,10 @@ EXCLUDED = (
     (r"__notion-upload-skill$",
      "NO-TEXT: ids + checksum; archive bytes go by an out-of-band PUT (EGRESS_BASH scans it)"),
     (r"^mcp__ccd_", "INTERNAL: Claude desktop app session/sidebar/view/settings controls"),
-    (r"__shortcuts_execute$",
-     "RESIDUAL: runs a saved Claude-in-Chrome shortcut in the browser; follow-up: route"),
-    (r"computer-use__(computer_batch|type|write_clipboard|teach_batch)$",
-     "RESIDUAL: keystrokes into native desktop apps (could be a mail client); the native "
-     "send still needs Gabriel; follow-up: scan typed text"),
-    (r"Windows-MCP__Type$", "RESIDUAL: keystrokes into native apps; follow-up: route"),
-    (r"__call-actor$", "RESIDUAL: Apify actor input sent to a third-party scraper; follow-up: "
-     "route"),
     (r"Desktop_Commander__(create_directory|set_config_value|start_search)$",
      "INTERNAL: local directory / DC config / local search"),
     (r"Filesystem__(copy_file_user_to_claude|create_directory)$",
      "INTERNAL: local file into the Claude session / local mkdir"),
-    (r"Filesystem__edit_file$",
-     "RESIDUAL: local file edit not seen by the path-based egress check (DC edit_block is); "
-     "follow-up: map onto the native Edit path"),
-    (r"Mnemoverse_Memory__memory_write$",
-     "RESIDUAL: third-party memory service write; follow-up: route"),
     (r"pdf-viewer__interact$", "INTERNAL: local PDF viewer"),
     (r"^mcp__scheduled-tasks__(create_scheduled_task|update_scheduled_task|run_scheduled_task)$",
      "INTERNAL: local scheduled-task registry (update has its own preguard)"),
@@ -626,7 +579,8 @@ def _load_conf_guard():
 
 # A probe input that makes every action-aware surface show its egress shape: a typed browser
 # action, a non-read Artifact action, an Excel write into an /outputs/ path.
-_PROBE_INPUT = {"action": "type", "filepath": "C:/probe/outputs/probe.xlsx"}
+_PROBE_INPUT = {"action": "type", "filepath": "C:/probe/outputs/probe.xlsx",
+                "path": "C:/probe/outputs/probe.txt"}
 
 
 def guard_classifies(conf, tool):
@@ -637,7 +591,8 @@ def guard_classifies(conf, tool):
     except Exception:
         return True  # classify raising = main() blocks = fail closed
     return bool(conf.is_shell_tool(tool)
-                or conf._mcp_suffix(tool, conf._DC_WRITE_SUFFIXES + ("move_file",)))
+                or conf._mcp_suffix(tool, conf._DC_WRITE_SUFFIXES + ("move_file",))
+                or conf.residual_name_surface(tool))
 
 
 def test_snapshot_write_tools_routed_or_excluded(settings=None, chains=None):
@@ -675,9 +630,13 @@ def test_snapshot_write_tools_routed_or_excluded(settings=None, chains=None):
                   "confidentiality-guard" in routed(settings, chains, n, anchored=a)
                   for a in (True, False)) for n in full), str(full))
     check("W5 the classify probe catches a routed-but-unclassified tool (self-test)",
-          not guard_classifies(conf, "mcp__45584658-e0ff-4b66-972a-09a41d9941d2__create_file")
+          not guard_classifies(conf, "mcp__45584658-e0ff-4b66-972a-09a41d9941d2__"
+                                     "synthetic_unclassified_write")
           and guard_classifies(conf, "mcp__c5f4869f-7d3a-4472-a66a-8e61315feb51__"
                                      "notion-calendar-create-events"))
+    residual = [rx for rx, why in EXCLUDED if why.startswith("RESIDUAL")]
+    check("W7 no RESIDUAL exclusions remain (every egress tool COVERED or excluded as "
+          "non-egress)", not residual, "residual=%s" % residual)
     check("W6 the word splitter sees PascalCase and executor names",
           write_shaped("mcp__x__MultiEdit") and write_shaped("mcp__x__COMPOSIO_REMOTE_BASH_TOOL")
           and write_shaped("mcp__local_Windows-MCP__FileSystem")

