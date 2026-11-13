@@ -73,8 +73,9 @@ DATE-DERIVED FIELDS -- ONE FOUND, AND IT IS THE DANGEROUS KIND (checked live 202
 
     KEPT -- 'Replacement Cost Ratio'
       A market-keyed ratio of two STATIC stored numbers (Purchase Price / Total SF)
-      over a per-market replacement-cost constant ($229.65 Columbus OH, $251.46
-      Cincinnati OH, ... $237.07 Louisville KY). No now()/today()/dateBetween
+      over a per-market replacement-cost constant (one RCT LOW figure per market,
+      Columbus OH through Louisville KY; the figures live only in the private RCT
+      file since 2026-11-13, never in this public repo). No now()/today()/dateBetween
       anywhere in the expression.
       *** This field is GOVERNOR-ADJACENT. *** It is the RCT basis denominator --
       ORA's "buy at ~35-40% of replacement cost" discipline is read directly off

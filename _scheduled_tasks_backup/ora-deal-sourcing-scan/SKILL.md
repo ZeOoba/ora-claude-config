@@ -1,9 +1,176 @@
 ---
 name: ora-deal-sourcing-scan
-description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's ten target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07 — no replacement task applies the scoring rubric or writes to the Deal Sourcing Log. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.5, 2026-08-11).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.17, 2026-11-13).
+
+v2.17 — RCT TABLE READ FROM A PRIVATE FILE, NOT MIRRORED HERE (2026-11-13, Gabriel's
+2026-11-12 audit ruling: this repo stays PUBLIC, the ratified replacement-cost table moves out of
+source). NO RCT VALUE, SCORE, WEIGHT, GATE, FLOOR %, TIER RULE OR GOVERNOR CHANGED. The per-metro
+table and the vintage-floor ramp were deleted from this file; STEP 3A now loads both at run time
+from the private RCT file (see "RCT LOAD" in STEP 3A) and FAILS CLOSED when it cannot. Every other
+RCT-derived figure in this spec (worked examples, floors, rounded ranges, the soft-cost multiplier)
+was replaced with a pointer. NEVER write a figure from the private file back into this spec, its
+backup mirror, memory or any tracked file: the digest email and Notion may carry figures, the repo
+may not. The pre-push RCT leak check blocks a push that re-adds them.
+
+v2.16 — BROKERS `Markets` OPTION `Chicago IL` (2026-11-09, Gabriel in-turn). The Broker
+Relationships DB (48e43778) gained a `Chicago IL` option; STEP 5A's option list now names it,
+so Chicago brokers are tagged instead of left blank with a "Markets option missing" note.
+NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE, BUDGET OR GOVERNOR CHANGED (the 30-load 1B-A cap
+was reviewed and kept, Gabriel 2026-11-09: re-check after the 11-10 and 11-17 runs).
+
+v2.15 — CHICAGO–GREATER COOK COUNTY IL LEG ADDED; THE SCAN IS NOW ELEVEN CLUSTERS, NOT TEN
+(2026-11-06, coverage fix; NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE OR GOVERNOR CHANGED).
+Chicago–Greater Cook County IL was ratified as the 11th canonical cluster on 2026-09-29
+(target-markets.json v1.11, now v1.14), but this spec still said "ten" in STEP 1's driving
+loop, the fallback list, the out-of-cluster disqualifier, the R4 receipt and the §7b matrix,
+so Cook County was never scouted and a Cook listing found by chance was disqualified as
+"outside the ten clusters" — the Louisville v2.5 defect again. Found by the independent review
+of ZeOoba/ora-claude-config#412. STEP 1 now iterates the `clusters` array of target-markets.json
+(the embedded list is the fallback only). Added: Chicago to the fallback list, the RCT v03
+mirror row (acquisition-underwriting is still authoritative), and a Chicago broker line with no
+unverified firm names. Chicago is ENTRY-PHASE: Market 14/20, no satellite eligibility (Ruling 3),
+so DuPage/Will/Lake/Kane/McHenry listings stay out. target-geography-probe.py now flags a
+whole-set cluster count that disagrees with target-markets.json.
+
+v2.14 — WRITE-ONCE FIRST-SIGHTING PREDICTION (2026-11-05, Gabriel in-turn: "Write-once
+first-sighting fields"). NO SCORE, WEIGHT, GATE, FLOOR, TIER RULE OR GOVERNOR CHANGED. STEP 5
+also writes `Verdict at First Sighting` and `Score at First Sighting` (Notion properties
+created 2026-11-05) on row CREATION only, copying the Verdict and Buy Box Score (100) this run
+writes on the new row; see the OVERWRITE RULE in STEP 5B. Origin: the 2026-11-05 live
+back-test found three of the four 2026-10-27 T1 PURSUE rows no longer reading T1, because the
+10-30 review overwrote their Verdict, so the prediction the v2.9 back-test must grade was gone.
+Existing rows are NOT backfilled by this version; a backfill from the decision ledger is a
+separate supervised pass.
+
+v2.13 — TWO FLOORS DOCUMENTED (2026-11-03, Gabriel in-turn). The $1M floor in the buy-box
+block and the §7d sub-scale list is this scan's SOURCING filter; the SCREEN floor is $500K
+(acquisition-underwriting Stage 0 Gate 2). Both numbers stay where they were; text only.
+
+v2.12 — PORTFOLIO-FLAG WIRED THROUGH TIERING (2026-11-03, Gabriel in-turn "Fix all here" on
+the /code-review of #378). v2.11 opened the STEP 2 gate but left the later steps unaware of
+portfolios, so: a flagged portfolio could still score into T1 PURSUE; a retail/office
+building still forced PASS/RE-ROUTE via the v2.9 EXCEPTION, STEP 2.0 and TIER ASSIGNMENT; the
+term "gate flag" collided with this file's GATE-FLAGGED (= Verdict PASS, clear <12 ft); the
+10-80K SF band had no portfolio reading; and (e) ran on the listing title only. Now: the
+portfolio flag is the distinct token `PORTFOLIO-FLAG: <cause>`, its causes aligned to
+acquisition-underwriting Amendment H (i) (any per-building gate or floor, incl. >=50,000 SF);
+it caps the row at T2 WATCH until Gabriel rules in the Deal Sourcing Log `Gate Review` field
+(Cleared- lifts the cap, Rejected- = PASS; unpriced rows keep REQUEST PRICE), is never PASS on
+a building's own failure, and is listed in digest (4a); SF and (e) run PER BUILDING; STEP 2.0,
+the EXCEPTION and TIER ASSIGNMENT carve portfolios out; STEP 3B's Capital-sleeve line is
+annotated in place. NO score, weight, floor or governor changed; the v2.11 OPEN QUESTION on the
+Capital sleeve stays open.
+
+v2.11 — AMENDMENT H PORTFOLIO PATH IN THE STEP 2 ELIGIBILITY GATE (2026-10-30, Gabriel in-turn:
+"update the upstream filters" once acquisition-underwriting v4.40/v4.41 merged, ora-skills
+#187/#189). STEP 2 (c) dropped every deal over $10M, so a $10–15M portfolio never reached
+scoring. Portfolios sold together now pass up to $15M total, with no per-building price band.
+A portfolio of more than 5 buildings, one over $15M, or one containing a failing building is
+KEPT as a gate flag, never dropped (Amendment H (i); Ruling 5). NO score, weight, floor or
+governor changed. OPEN QUESTION FOR GABRIEL: the Capital sleeve score component (STEP 3,
+"outside 0") is left UNCHANGED, so a $10–15M portfolio scores 0/10 there, a 10-point handicap
+against this scan's T1 PURSUE >= 60 test. Changing a score component needs his ratification;
+until then such portfolios can still reach T2 and the acquisition-underwriting SCREEN.
+
+v2.10 — SOURCE MAPPING (2026-10-30, Gabriel-approved "Build it now", Deal Sourcing Expansion
+Plan Phase 1). NO SCORE, WEIGHT, GATE, FLOOR OR GOVERNOR CHANGED — STEP 5 now states how the
+`Source` select is filled (see SOURCE MAPPING under STEP 5). Origin: the first weekly funnel
+scorecard (2026-10-30) found 131 of 206 scored rows in the trailing 90 days carrying
+Source = 'Other', so channel mix — which channels actually produce screens and PURSUEs — was
+unmeasurable. STEP 5 had listed `Source` as a field with no rule for filling it.
+
+v2.9 — T1 GATE NO LONGER PROMOTES ON REPLACEMENT-NEW DISCOUNT ALONE (2026-10-30,
+Gabriel-ratified). NO GOVERNOR, RCT v03 ROW, VINTAGE RAMP OR SCORE WEIGHT CHANGED. Origin:
+2026-10-30 verified-deal-recon of the four priced 2026-10-27 T1 PURSUE rows returned 3 PASS +
+1 NEEDS-MORE (13500 E 40 Hwy = dark Gordmans RETAIL anchor, 76,520 SF; 2810 W Saratoga =
+1940 ~11.5 ft flip priced at its $80/SF like-kind comp; 67 & 76 Washington = 13'4" clear, 86%
+coverage, no truck court, circular PROXY discount; 3752 Kentucky = market-priced Class C).
+Back-test of all 44 ever-T1 Floor-PASS rows: 0 of 8 decided rows held T1 on doctrine.
+Root cause: the only price test was RCT v03 replacement-NEW, which obsolete stock always
+clears (Floor PASS rows average 1957 vintage vs 1979 for FAIL-BASIS). Changes:
+  A. STEP 2.0 ASSET-CLASS / USE-CODE CHECK before scoring (retail/office/Other → PASS +
+     ALT-ASSET-TRACK; unknown/conflict caps at T2; Product pts require VERIFIED use).
+  B. STEP 3A-2 COMP-BAND TEST — ask must ALSO be <=85% of the like-kind comp median, with
+     >=2 like-kind comps (both ratified by Gabriel 2026-10-30). No comp band →
+     T1-PENDING-VERIFY (new bucket), never T1 PURSUE.
+  C. Numeric physical floors (clear <12 ft gate-flagged; 12-<16 ft, coverage >60%, truck
+     court <60 ft / no yard each cap at T2; unknown → T1-PENDING-VERIFY).
+  D. [PROXY] metros cannot reach T1 without a cited comp-band PASS.
+  E. Per-building SF >=50,000 caps at T2 — a CAP, not a kill (ratified by Gabriel
+     2026-10-30; aligns to acquisition-underwriting Stage 0 Gate 2 and the firm buy-box).
+  F. T1-PENDING-PRICE rows (unpriced, Floor N/A) are WRITTEN to Notion as Verdict 'T2 WATCH'
+     + literal `T1-PENDING-PRICE` tag in Next Action and Notes / Flags — never 'T1 PURSUE' —
+     so they neither inflate T1 counts nor trigger verified-deal-recon (ratified 2026-10-30).
+  G. MIXED CLEAR: the clear gate tests the minimum bay, but minimum <12 ft with any bay
+     >=16 ft caps at T2 (not PASS); gate-flagged PASS only when no bay reaches 16 ft
+     (ratified 2026-10-30).
+  New STEP 3D captures use code, clear, coverage and comps for T1-bound rows in-run.
+Evidence: RE-SCAN-2.9-1 (asset class: 13500 E 40, 2401-2501 International Ln — 2 incidents);
+RE-SCAN-2.9-2 (functional/comp: 2810 Saratoga, 67&76 Washington — 2); RE-SCAN-2.9-3
+(PROXY: 67&76 Washington — EVIDENCE: SINGLE-INCIDENT, sunset at the December back-test);
+RE-SCAN-2.9-4 (size: 13500 E 40, International Ln — 2). Testable: share of T1 PURSUE rows
+that survive verified-deal-recon, Dec 2026 back-test. Rows already logged are NOT re-tiered
+by this version (score snapshots are immutable); any re-tier is a separate supervised pass.
+
+v2.8 — COVERAGE-GAP CLOSURE (2026-09-23, Gabriel-directed). NO SCORE, WEIGHT, GATE,
+THRESHOLD, FLOOR OR GOVERNOR CHANGED — this version changes run ORDER, SOURCE COVERAGE and
+REPORTING only. The 2026-09-23 run named six coverage gaps; root cause for four of them was
+the same: mandatory steps sat at the END of a long run (tracker fetch, roster refresh,
+construction photos, provisional verification) and were dropped when budget ran out, while
+the source ladder was executed text-only by scouts that had no browser. Fixes:
+  1. NEW STEP 0 PRE-FLIGHT runs BEFORE any scouting: Pipeline Tracker fetch + capacity
+     gate, Property Register roster-drift refresh, provisional carry-forward load,
+     Montgomery-cadence decision. These can no longer be starved by a long Step 1.
+  2. NEW STEP 1B BROWSER PASS, run by the ORCHESTRATOR (not scouts — the browser pane is
+     one shared surface), sequential and paced: Crexi public marketplace, LoopNet public
+     search, the JS-rendered broker-direct pages, provisional-listing detail resolution —
+     under HARD page-load caps and compact-JSON extraction. A per-market SOURCE COVERAGE
+     CONTRACT (Step 1) says which source families each market must touch; KC now REQUIRES
+     Block & Co and Newmark Zimmer direct. Crexi's public search was MEASURED loadable in
+     the logged-out pane on 2026-09-23 (the working URL form is recorded in 1B-A).
+  3. CONSTRUCTION: new STEP 3C (after tiers) photo-checks every T1 PURSUE /
+     T1-PENDING-PRICE row in-run; T2 UNKNOWN rows are HANDED OFF to
+     `ora-sourcing-construction-verify` (created 2026-09-23 for exactly this; it waits for
+     this scan's DONE-MARKER so the two never drive the browser pane at once). A handoff is
+     a RECEIPT, not a coverage gap. A skipped or unattributable T1 check is still a gap.
+     Existing T1/T2 rows with a blank Construction Type are set to 'Unknown — CONFIRM'
+     when touched, so they enter the backstop queue.
+  4. PROVISIONAL LISTINGS: must get a detail-page resolution attempt in Step 1B. Addressed
+     + still unresolved → LOGGED as PROVISIONAL (T2 max), never silently dropped.
+     Unaddressed → carried forward in a state file and retried for 3 runs.
+  5. LISTING-DATE BASIS captured per listing (listed / days-on-market / updated-only /
+     ORA-first-sighted). An "updated" date alone is never evidence of a new listing or a
+     re-list. Step 4 carries the re-list-vs-refresh decision rule.
+  6. DIGEST §7 SPLIT into 7a RUN RECEIPTS (every mandatory step: DONE / HANDED-OFF /
+     FAILED + reason), 7b SOURCE COVERAGE MATRIX, 7c TRUE COVERAGE GAPS, 7d FILTERED BY
+     DESIGN (Madison nil, Montgomery cadence, sub-scale). Scope-by-design items no longer
+     masquerade as gaps, and real gaps can no longer hide among them.
+
+v2.7 — LISTING-AGENT CAPTURE + BROKER RELATION LINKING (2026-09-19, Gabriel-directed).
+NO SCORE, WEIGHT, GATE, THRESHOLD OR GOVERNOR CHANGED — this version only adds data
+capture. Driven by the 2026-09-19 broker-coverage analysis: of 545 Deal Sourcing Log
+rows, only 310 (56.9%) carry a usable broker NAME; the rest name an aggregator (Crexi,
+CommercialSearch, Revere) or a placeholder, and the `Broker (Linked)` relation is
+essentially empty (the Broker Relationships DB holds 9 rows). ORA therefore cannot see
+which brokers are actually active in its markets. Fixed at the source: STEP 1 now
+requires the listing AGENT off the listing DETAIL page, STEP 5 writes `Broker / Contact`
+as "Name, Firm" AND links `Broker (Linked)` to a Broker Relationships row (creating a
+minimal row when none exists, capped at 25/run), and STEP 6 reports a "Broker capture"
+section. Match key is NAME + FIRM, not email — see the executability findings in STEP 1.
+*** PROVENANCE NOTE FOR WHOEVER COMMITS THIS FILE: v2.7 was layered on TOP of the
+UNCOMMITTED v2.6 own-portfolio-guard change in the shared ~/.claude checkout, on branch
+`feat/model-canary-probe-step25`. The working tree therefore carries TWO separate
+uncommitted changes (v2.6 and v2.7) by two different sessions. Commit accordingly. ***
+
+v2.6 — OWN-PORTFOLIO GUARD (2026-09-18, Gabriel-directed). STEP 2 gains criterion (e),
+run first: every candidate goes through _shared\own_portfolio_guard.py (range-aware
+match against _shared\ora-own-portfolio-exclusions.json). Closes the 2026-09-05 defect
+where ORA's own Cushman-listed 2000-2026 Zettler complex was logged T1 PURSUE. Own assets
+seen on market now go to a digest section, never to Notion as leads. STEP 4 reports
+legacy own-asset rows for retirement. No scoring weight changed.
 
 v2.5 — LOUISVILLE KY LEG ADDED; THE SCAN IS NOW TEN MARKETS, NOT NINE (2026-08-11,
 coverage fix + mirror sync, no scoring weight changed). Louisville was ratified as the
@@ -24,13 +191,13 @@ been given a [PROXY: Columbus] figure while `target-markets.json` v1.8 carried a
 [PROXY: Indianapolis] one. BOTH WERE WRONG. Louisville is in the C&W 2025 guide, and the
 extract has been in THIS TASK'S OWN FOLDER all along:
   skills/cw-2025-construction-costs.json  (45 markets, small25/med25/large25 per market)
-Louisville small25 = $135.28 -> LOW $237.07 -> clears at $82.97/SF (<=1995), $94.83 (>=2005).
-That sourced row is now in acquisition-underwriting and is mirrored above; the [PROXY] tag
+Louisville's own small25 hard cost builds its RCT LOW row (figures: private RCT file, v2.17).
+That sourced row is now in acquisition-underwriting and the private RCT file; the [PROXY] tag
 is GONE and Louisville does NOT carry DENOMINATOR-SENSITIVE.
 CHECK THAT FILE FIRST for any per-market hard cost — it is faster and better-sourced than
 any proxy, and the C&W flipbook itself is canvas-rendered with no text layer, so scraping
 it fails. CLOSED 2026-08-12 (Gabriel): `target-markets.json`'s Louisville `replacement_cost` block —
-which carried hard $143.46 (Indianapolis proxy) and the false claim "Louisville is NOT in the
+which carried an Indianapolis-proxy hard cost and the false claim "Louisville is NOT in the
 C&W guide" — was DELETED. Louisville is the only cluster with no replacement_cost block, by
 decision. The other nine clusters KEEP theirs (Gabriel, 2026-08-12): their numbers are correct
 and match the C&W hard costs behind RCT v03, and the blocks carry provenance that exists
@@ -60,7 +227,8 @@ Jonlen interior photos exposed a taproom/arcade build-out that Step 2.5 zero-cre
 v2.3 — BASIS DENOMINATOR RECONCILED TO RCT v03 (Gabriel, 2026-07-14, governor-level):
 This scan had been running its own basis benchmark. It no longer does. THE FIRM HAS
 ONE DENOMINATOR: **RCT v03**, in `acquisition-underwriting`. Rebuilt from the C&W 2025
-guide (all-in, shallow-bay); the vintage ramp was recalibrated 30/25 -> 65/60 because
+guide (all-in, shallow-bay); the vintage ramp was recalibrated (old 30/25 cliff retired;
+current ramp in the private RCT file, v2.17) because
 the floor % and the denominator are a matched pair. Basis now includes the 2% closing
 cost doctrine requires. RETIRED, do not reintroduce: the C&W-hard "operative benchmark"
 (ratified and retired the same day), the old $140/$170/$150/$130 constants, and RCT v02.
@@ -111,7 +279,8 @@ app reinstall; recovered from the 2026-06-22 fleet snapshot.)
 ROLE & PURPOSE
 Run the weekly on-market sourcing scan for Oxford Realty Advisors (ORA), a private
 buyer of Class B/C shallow-bay industrial/flex. Each run finds newly listed (or
-re-listed / price-cut) properties in ORA's ten target markets, screens them against
+re-listed / price-cut) properties in ORA's eleven target markets (every cluster in
+target-markets.json), screens them against
 the buy-box, scores survivors, writes them to the Notion Deal Sourcing Log, and emails
 a ranked digest. This task covers the ON-MARKET channel; the
 off-market distress channel is owned by ora-distress-signal-monitor — do not
@@ -122,16 +291,25 @@ CANONICAL INPUTS
   Read it each run from EITHER of these (first that loads wins):
     1) C:\Users\Owner\ora-skills\target-markets.json  (authoritative — the canonical ora-skills git repo; repointed 2026-07-09 when the third clone at Claude_Workspace\01_Workspace\.claude\skills\ was archived per THIRD_CLONE=RECONCILE-COMMITS)
     2) skills/target-markets.json  (local mirror in this task folder — materialized 2026-07-09; refresh it whenever the canonical file changes)
-  The file carries the ten clusters with submarkets, demand drivers, and market
+  The file's `clusters` array IS the cluster list: scan every entry in it, and
+  state the count you loaded in the digest (eleven as of v1.14). It carries the
+  eleven clusters with submarkets, demand drivers, and market
   metrics (incl. sale $/SF benchmarks usable for the basis-vs-replacement score).
+  If the array holds a cluster this spec has no broker or RCT line for, scan it
+  anyway off the Yardi network + Crexi/LoopNet and name the missing lines in §7c.
   ONLY IF BOTH are unreachable, fall back to the embedded list below and flag
-  staleness in the email. TEN clusters: Columbus OH, Cincinnati OH, Kansas City
+  staleness in the email. ELEVEN clusters: Columbus OH, Cincinnati OH, Kansas City
   MO/KS, Indianapolis IN, Madison WI, Maryland Baltimore/DC (established) +
-  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, LOUISVILLE KY.
+  entry-phase Grand Rapids MI, Richmond VA, Des Moines IA, LOUISVILLE KY,
+  CHICAGO–GREATER COOK COUNTY IL.
   (Louisville ratified as the 10th canonical cluster by Gabriel 2026-08-05 in
   target-markets.json v1.7/v1.8; the scan only began covering it 2026-08-11 —
-  it was a live cluster with no scanning leg for six days. Entry-phase, so
-  Market scores 14/20, not 20.)
+  it was a live cluster with no scanning leg for six days. Chicago–Greater Cook
+  County ratified as the 11th on 2026-09-29 (v1.11); the scan only began covering
+  it in v2.15 (2026-11-06) — five weeks with no leg. Both entry-phase, so Market
+  scores 14/20, not 20. Chicago scope = ALL of Cook County (City of Chicago +
+  suburban Cook); DuPage, Will, Lake, Kane and McHenry are NOT in the cluster and
+  NOT satellites (Ruling 3) — a collar-county listing is outside the clusters.)
 - Scoring methodology: restated in full below so this prompt is self-contained.
   CITATION CORRECTED 2026-07-14 — this task previously cited
   "20260517_ORA_Investment-Candidates-Ranking_v01.xlsx (Methodology sheet)". THAT FILE
@@ -147,17 +325,25 @@ CANONICAL INPUTS
 
 ORA BUY-BOX (screening filter — apply unchanged)
 - Product: Class B/C industrial, shallow-bay, flex, office-warehouse ONLY.
-- Size: ~10,000-80,000 SF building; deal size $1M-$10M (sweet spot $1.5-6M).
+- Size: ~10,000-80,000 SF building to LOG; <50,000 SF PER BUILDING to reach T1
+  (acquisition-underwriting Stage 0 Gate 2 — v2.9; >=50,000 SF caps at T2, not a kill).
+  Deal size $1M-$10M is this scan's SOURCING filter (sweet spot $1.5-6M); a portfolio sold
+  together up to $15M total (Amendment H — see STEP 2 (c)). The SCREEN floor is lower, $500K
+  (acquisition-underwriting Stage 0 Gate 2: $500K-$10M single asset) — two floors, both
+  ratified (Gabriel in-turn 2026-11-03, v2.13): a $500K-$1M single asset is not screened here
+  but goes on the §7d sub-scale hand-override list, where Gabriel can send it to SCREEN.
 - Capital sleeve: $0.75-5.0M equity at 65% LTV; all-cash close + post-close refi.
 - Hard floors (independent): >=25% discount to replacement cost (basis-buyer
   doctrine — basis beats cap rate) AND >8% stabilized yield-on-cost.
 - Value-add preferred over stabilized "almost always" (below-market rents, vacancy,
   short WALT, mismanagement are POSITIVES, not negatives).
-- Physical floors: >=200A power, >=2 stalls/1,000 SF parking, functional clear height.
+- Physical floors: >=200A power, >=2 stalls/1,000 SF parking, clear height >=16 ft (>=14 ft
+  where every unit is <3,500 SF), site coverage <=60%, truck court >=60 ft or a usable yard
+  (v2.9 — numeric per the acquisition-underwriting clear/loading matrix; see STEP 3A).
 - Mezzanine/2nd-floor SF on slab = 0% credit unless independently functional.
 - Instant disqualifiers: retail-only; office-only; multifamily; auto-use tenancy;
-  ground lease <30 yr; environmental remediation >20% of price; outside the ten
-  clusters; institutional Class A pricing (>$130/SF without exceptional justification).
+  ground lease <30 yr; environmental remediation >20% of price; outside the eleven
+  clusters (every cluster in target-markets.json); institutional Class A pricing (>$130/SF without exceptional justification).
 - CAPACITY NOTE (re-verify current deal status EVERY run before applying): IF a
   Columbus acquisition is under contract, bandwidth favors the $1.5-6M sleeve over
   $7M+ checks — score large deals normally but mark them "CAPACITY-GATED" in the
@@ -165,10 +351,74 @@ ORA BUY-BOX (screening filter — apply unchanged)
   TERMINATED (now a lender-note/foreclosure track), so no Columbus deal is under
   contract and NO candidate should be marked CAPACITY-GATED. Do not apply this gate
   on the strength of this note alone — check the Acquisition Pipeline Tracker
-  (bcfe4a03) each run and say in the digest which way you found it.
+  (bcfe4a03) each run and say in the digest which way you found it. (v2.8: that check
+  now happens in STEP 0, before scouting — never at the end of the run.)
+
+RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
+  STEP 0 pre-flight → STEP 1 text scouts (parallel) → STEP 1B browser pass (orchestrator,
+  sequential) → STEP 2 / 2.0 / 2.5 / 3A / 3A-2 / 3B gate + score → STEP 3C construction
+  photos for T1-bound rows → STEP 3D T1 verify pass (v2.9) → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
+  ora-sourcing-construction-verify → STEP 6 digest → DONE-MARKER (last action).
+  BUDGET — HARD CAPS, NOT JUDGMENT (the 2026-09-23 run died on "if running long"):
+    STEP 1B-A discovery: ≤ 30 page loads TOTAL across all eleven clusters (≈1 Crexi + ≤2
+      broker-direct per market; LoopNet only for markets where Crexi was blocked or
+      returned 0; v2.15: eleven clusters × 3 can exceed 30 — spend the FIRST pass at ≥1
+      load per cluster, Chicago–Cook included, before any cluster's 2nd or 3rd, so the cap
+      can never zero out a cluster; any cluster left short is named in §7c). STEP 1B-B provisional resolution: ≤ 12 loads. STEP 3C: ≤ 4 loads per
+      T1 row. STEP 3D (v2.9): ≤ 4 loads + 2 GIS queries per T1-PENDING-VERIFY row. Count loads; stop the sub-step at its cap and name what was not loaded.
+    EXTRACTION DISCIPLINE: read pages with `javascript_tool` returning COMPACT JSON (address,
+      price, SF, DOM/listed date, href — nothing else), or `get_page_text` with
+      max_chars ≤ 6000. Never pull a full accessibility tree or full page text into
+      context — raw page dumps are what exhaust the run.
+    CHECKPOINT: STEP 0 must be complete before 1B-A starts, and the Step 1 text-scout
+      candidate list must already be recorded in the run notes, so a 1B overrun can cost
+      only 1B's own breadth — never the gate, dedupe or Notion writes.
+  If a mandatory step nevertheless fails, it is a FAILED receipt with its reason — the
+  digest never omits it and never re-labels it a "scope choice".
+  MANDATORY STEP ROSTER (each gets a receipt line in digest §7a, every run):
+    R1 Pipeline Tracker fetch + capacity gate · R2 Property Register roster refresh ·
+    R3 provisional carry-forward load · R4 text scouts, all eleven clusters ·
+    R5 browser pass (Crexi · LoopNet · JS broker-direct) · R6 provisional detail
+    resolution · R7 construction — T1 in-run · R8 construction — handoff list ·
+    R9 full-set dedupe · R10 Notion writes · R11 Step 5B tracker cross-writes ·
+    R12 own-portfolio guard · R13 carry-forward file written · R14 done-marker written.
+  DONE-MARKER (R14, the run's LAST action, after the digest send attempt): write
+    C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\deal-sourcing-scan-done.json
+    = {"run_date":"YYYY-MM-DD","completed_at":"<ISO>","handoff_rows":N}. The follow-on
+    ora-sourcing-construction-verify reads it and does NOT start until it shows today's
+    date — that is what stops it driving the browser pane while this scan still is.
+
+STEP 0 — PRE-FLIGHT (v2.8 — runs FIRST, before any scout is dispatched)
+Compute the run date once (`date '+%A %Y-%m-%d'`) and the day-of-month.
+  0a. ACQUISITION PIPELINE TRACKER — query collection://bcfe4a03-7e61-4ac1-a0bb-c44174fa138b
+      for ALL rows (paginate on has_more; no LIMIT window — same rule as the Step 4
+      dedupe guard). Keep the result in context: STEP 4 (don't re-surface active deals)
+      and STEP 5B (verified-ask cross-writes) BOTH reuse this one fetch — do not re-pull.
+      CAPACITY GATE: from the same result, determine whether any Columbus OH row sits in
+      an under-contract stage (PSA executed / under contract / DD / closing). State the
+      finding and the rows it rests on in receipt R1. If the fetch fails (quota → the
+      `notion-quota-fallback` skill; still failing → R1 FAILED): apply NO capacity gate,
+      SKIP 5B (write nothing to the tracker), and say both in the digest header line —
+      never fall back silently on the "last known" note above.
+  0b. PROPERTY REGISTER ROSTER REFRESH — read collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3
+      (Address column) and the Tenant DB 'Property Address' options; diff against
+      _shared\ora-own-portfolio-exclusions.json. Every owned address missing from the
+      roster is added to an IN-MEMORY supplement for this run's STEP 2(e) check (treat as
+      owned) and reported "ROSTER DRIFT: <address>" in R2. Do not edit the roster file.
+      If the read fails, R2 FAILED and the guard runs on roster v-current only — say so.
+  0c. PROVISIONAL CARRY-FORWARD — read
+      C:\Users\Owner\OneDrive - Oxford Capital Partners\Claude_Workspace\_state\deal-sourcing-provisional-carryforward.json
+      (outside every git checkout on purpose — a state file in ~/.claude would show up as
+      unowned WIP in dirty-tree triage)
+      (absent on first run = empty list; that is not a failure). Each entry
+      {id, market, descriptor, source_url, first_seen, attempts, last_attempt, reason} is
+      queued for STEP 1B-B detail resolution this run.
+  0d. MONTGOMERY COUNTY MD — run it only when day-of-month <= 7 (the first Tuesday). Decide
+      here, record the decision in §7d; this is cadence by design, not a gap.
 
 STEP 1 — PULL NEW LISTINGS (preceding ~8 days; widen to ~30 if prior run missed)
-For each of the ten clusters, web-search for newly listed industrial/flex product:
+For each cluster in target-markets.json `clusters` (eleven as of v1.14 — never a
+remembered count), web-search for newly listed industrial/flex product:
 - Query patterns: "[metro] industrial property for sale [current month/year]",
   "[metro] flex warehouse listing", "[metro] industrial investment offering
   memorandum new".
@@ -198,6 +448,11 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
      Additional local Louisville brokerages are NOT yet verified — surface
      whichever firms appear as listing brokers on the first run and record
      them here rather than guessing at names.
+     Chicago–Greater Cook County (v2.15) — NO brokerage is verified yet. Work the
+     Yardi network + Crexi/LoopNet for Cook County (City of Chicago and suburban
+     Cook submarkets: North/Northwest, West, Near South Cook, Southwest/I-55), then
+     record whichever firms appear as listing brokers in the digest (§7d) so they
+     can be verified and added here. Never guess firm names.
   3) Crexi / LoopNet gated detail pages — open ONLY the logged-out public version via
      Claude-in-Chrome when no aggregator/broker page is available. NEVER log in, NEVER
      bypass a paywall or CAPTCHA. If still inaccessible, note it and move on.
@@ -215,7 +470,11 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   verified data). Sanity check: a per-market agent that returns in under ~5 tool
   calls almost certainly delegated rather than worked — re-dispatch with the
   guardrail before trusting a thin or empty result.
-- BROWSER-TOOL REQUIREMENT (added 2026-09-05): a per-market dispatch given ONLY
+- [v2.8: the Claude-in-Chrome references in the SOURCE STRATEGY ladder above and the
+  "grant the dispatch browser-pane access" option below are SUPERSEDED by the v2.8
+  RESOLUTION that follows and by STEP 1B — every browser read is done by the orchestrator
+  in the browser pane (mcp__Claude_Browser__*), never by a scout.]
+- BROWSER-TOOL REQUIREMENT (added 2026-09-05; remedy superseded by v2.8): a per-market dispatch given ONLY
   WebSearch/WebFetch cannot read JS-rendered broker-direct inventory pages — WebFetch
   returns an empty page or a nav shell for these, which reads as "no crawlable
   inventory" when the page may in fact carry live listings. Confirmed unreachable this
@@ -225,6 +484,39 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   the dispatch browser-pane / Claude-in-Chrome tool access and have it actually load the
   page, or say explicitly in the run notes that only a text-only pass was attempted —
   do not let a text-only null read as a confirmed empty inventory.
+  v2.8 RESOLUTION: scouts stay text-only (WebSearch/WebFetch) and run in parallel; every
+  browser-dependent source is read by the ORCHESTRATOR in STEP 1B, sequentially. Do NOT
+  give per-market subagents the browser pane — it is one shared pane, and parallel agents
+  driving it clobber each other's navigation. Each scout's final message MUST include a
+  SOURCE LEDGER: one line per source it tried → {loaded + N listings | loaded, 0 listings
+  | empty/JS shell | 403 | not tried}. Every "empty/JS shell" and "403" line becomes a
+  STEP 1B work item. A scout that returns no ledger is re-dispatched (like the <5-tool-call
+  delegation check above).
+
+- SOURCE COVERAGE CONTRACT (v2.8). A market is COVERED only when all three families
+  below have a receipt (loaded with listings, verified-loaded-empty, or a named block):
+    F1 Yardi network (commercialsearch / commercialcafe) — text scout.
+    F2 Crexi public marketplace + LoopNet public search — STEP 1B browser pass.
+    F3 Broker-direct: AT LEAST the REQUIRED brokerages below — text scout first, STEP 1B
+       browser if the text pass returned empty/JS shell.
+  REQUIRED broker-direct per market (the rest of the list above is best-effort):
+    Columbus — NAI Ohio Equities, Colliers Columbus · Cincinnati — Colliers (Kroger team),
+    Cushman Cincinnati · KANSAS CITY — BLOCK & CO AND NEWMARK ZIMMER, BOTH REQUIRED
+    (2026-09-23 run covered KC from CommercialSearch/CommercialCafe only) · Indianapolis —
+    Bradley Co, Colliers Indy · Madison — Oakbrook, Colliers WI · Maryland — MacKenzie,
+    NAI KLNB · Grand Rapids — NAI Wisinski, Colliers West MI · Richmond — Cushman
+    Thalhimer, Porter Realty · Des Moines — CBRE Hubbell, NAI Iowa · Louisville —
+    Commercial Kentucky, KCREA · Chicago–Greater Cook County — NONE VERIFIED YET (v2.15):
+    its F3 cell reads `no verified broker — listing brokers seen: <names>` until firms
+    are verified and added here; that is a stated gap in §7c, not a silent one.
+  Record the per-market × per-family result in the digest's §7b SOURCE COVERAGE MATRIX.
+  A family with no receipt for a market is a TRUE GAP (§7c) naming the market and family.
+  CELL SEMANTICS (one rule, used by the contract AND §7c): `N listings` and `0 (verified
+  loaded)` are COVERED. `blocked` (403 / Access Denied / bot-check) is a GAP-EXTERNAL —
+  listed in §7c under its own sub-heading, because nothing the run can legitimately do
+  fixes it. `JS shell — not read`, `pane throttled` and `not tried` are GAP-RUN — the run
+  fell short, and they lead §7c. Note: the 2026-09-19 "Crexi 403s" finding was for PLAIN
+  FETCH; the logged-out browser pane loaded Crexi search on 2026-09-23 (STEP 1B-A).
 - SUBMARKET COVERAGE (do NOT skip): the KS side of Kansas City (Lenexa, Olathe, Shawnee, Overland
   Park) and Maryland's Howard County (Columbia, Jessup, Elkridge) + Anne Arundel/Hanover.
   Run these explicitly through the step-1 aggregators / Claude-in-Chrome, not just
@@ -255,9 +547,11 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   short WALT, seller financing) is the most buy-box-shaped signal there, but it is
   behind a CBRE deal-room login and CANNOT be reached by any automated pass — it needs
   a broker call, not another scan.
-- MADISON WI — a nil result is NORMAL. Only ~4 industrial for-sale listings exist
-  citywide (confirmed 2026-07-14). An honest empty return is the correct output, not a
-  scan failure — do not stretch office or retail product into "flex" to fill the table.
+- MADISON WI — thin, but NOT near-empty. The old "~4 citywide" anchor (2026-07-14) is
+  SUPERSEDED: the 2026-10-05 scan counted ~15-18 distinct industrial-for-sale addresses
+  across all sources, ~5 of them in the buy box. A nil is possible but should be
+  surprising — a Madison nil means check that F1/F2/F3 were all actually read. Do not
+  stretch office or retail product into "flex" to fill the table.
 - Also capture RE-LISTS and PRICE CUTS on properties already in the Deal Sourcing
   Log or previously ranked — both are motivation signals; note prior price and delta.
 - Respect site terms: public pages and web-search results only. Never log in, never
@@ -266,7 +560,64 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   year built, occupancy/tenancy, clear height, parking, power (if stated),
   CONSTRUCTION TYPE (masonry / brick / block / tilt-up / precast / PEMB-metal /
   hybrid — see the Construction & envelope score in Step 3B), broker + firm,
-  listing URL, date first seen.
+  listing URL, date first seen, and LISTING-DATE BASIS (v2.8, below).
+
+  *** LISTING-DATE BASIS — MANDATORY (v2.8, 2026-09-23) ***
+  The 2026-09-23 run's dates were mostly platform "updated" stamps, so re-list vs refresh
+  could not be told apart. For every candidate record exactly one basis, strongest first:
+    LISTED <date>   — the page shows a listed / "on market since" / "date listed" date.
+    DOM <n>         — the page shows days-on-market (Crexi and LoopNet usually do; derive
+                      listed = run date − n and record both). This is why STEP 1B reads the
+                      Crexi/LoopNet copy of a listing even when the Yardi copy was found.
+    UPDATED-ONLY <date> — only a "last updated"/"refreshed" stamp (typical on
+                      CommercialSearch/CommercialCafe). NEVER treat this as a listing date.
+    NONE            — nothing shown. ORA's own `First Sighted` is then the only anchor.
+  Write it into Notes / Flags as `DATE-BASIS: <basis>` (no new Notion property — the scan
+  must not mutate the DB schema unattended). When two sources disagree, keep the EARLIEST
+  listed date and name both. The re-list decision rule that uses this is in STEP 4.
+
+  *** LISTING-AGENT CAPTURE — MANDATORY (v2.7, 2026-09-19, Gabriel-directed) ***
+  Capture the LISTING AGENT(S) for every candidate: full name, firm, and email/phone
+  ONLY where actually shown. This is the fix for the 545/310 (56.9%) broker-name gap.
+  A PLATFORM IS NOT A BROKER. Never write "Crexi", "LoopNet", "CommercialSearch",
+  "CommercialCafe", "Revere", "CoStar", "PropertyShark" or any other platform name into
+  a broker field — those belong in the Deal Sourcing Log's own `Source` select, not in
+  `Broker / Contact`. Never guess a name, never construct or infer an email address from
+  a firm's domain pattern, and never carry an agent name over from a different listing.
+  SOURCE ORDER (measured 2026-09-19 against real current Columbus OH and Indianapolis IN
+  industrial listings — write around what actually works, per the v2.4 lesson):
+  1) commercialsearch.com / commercialcafe.com listing DETAIL pages — WORKS. 5 of 5
+     detail pages returned a clean agent name + firm via plain WebFetch (Dan Sheeran Jr.
+     / NAI Ohio Equities · Michael J. Semon / NAI Ohio Equities · Matthew Ferguson /
+     Premier Commercial | TCN Worldwide · Annie Scott / Annie Scott Realty Group). This
+     is the PRIMARY source and it is the same Yardi-network ladder Step 1 already uses.
+     THE DETAIL PAGE IS REQUIRED: the city SEARCH-RESULT pages show address/price/SF and
+     NO agent at all, so a search-card scrape yields nothing. Get the detail-page slug
+     from the index, then fetch it.
+  2) Brokerage's OWN site — BEST-EFFORT FALLBACK ONLY, not the preferred source. Measured
+     worse than the aggregators: drk-realty.com's listings page returned no listings at
+     all to WebFetch, and ohioequities.com is query-param/JS-driven and yielded only the
+     firm switchboard number, no agent. Try it (browser pane if WebFetch is empty, per
+     the BROWSER-TOOL REQUIREMENT above) but do not spend a run's budget here.
+  3) Crexi / LoopNet — DO NOT COUNT ON THESE. Both 403 on BOTH the search index and the
+     listing detail page to automated fetch (re-confirmed 2026-09-19). A blocked
+     aggregator is `AGENT NOT CAPTURED`, reason `aggregator blocked` — it is NEVER a
+     reason to guess, and NEVER a reason to attempt a login, a paywall bypass or a
+     CAPTCHA (see the standing rule above).
+  EMAIL AND PHONE ARE USUALLY UNOBTAINABLE — THIS IS EXPECTED, NOT A FAILURE. Every
+  aggregator detail page tested gates contact behind a "Contact Broker" form; 0 of 5
+  published an agent email or direct phone. Capture them when a page genuinely shows
+  them (brokerage sites sometimes do) and leave them blank otherwise. Do NOT hold up a
+  listing waiting for contact details.
+  FALLBACK ORDER when the agent cannot be resolved: (i) named individual agent + firm —
+  best; (ii) firm only, with the agent as `AGENT NOT CAPTURED` — acceptable, record the
+  firm; (iii) neither — write the literal string `AGENT NOT CAPTURED` and record the
+  REASON in Notes / Flags (`aggregator blocked` · `detail page not loaded` · `no agent
+  shown on page` · `listing came from an OM/broker email with no agent named`).
+  BROKER CAPTURE NEVER BLOCKS A LISTING WRITE. A candidate whose agent cannot be
+  captured is still logged, still gated, still scored and still written to Notion
+  exactly as it would otherwise be — `AGENT NOT CAPTURED` is a data state, not an error
+  and not a filter. Never drop, defer or fail a listing over a missing broker.
 
   *** HOW TO ACTUALLY DETERMINE CONSTRUCTION TYPE (added 2026-08-04 — the previous
   instruction was just "LOOK: listing photos usually settle it in seconds", and on the
@@ -283,6 +634,30 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   this step is a COVERAGE GAP to name explicitly in that run's digest, exactly like a
   submarket that returned nothing — never a silent scope trade-off a run makes on its
   own. Restore it every run. ***
+  *** v2.8 SPLIT (2026-09-23 — skipped again on the 2026-09-23 run, budget exhausted): ***
+  - IN-RUN (receipt R7): after STEP 3A/3B assigns tiers, run steps 1-2 below for EVERY
+    T1 PURSUE and T1-PENDING-PRICE row, in STEP 3C. These are the rows that trigger an
+    OM request or a broker call this week; they cannot wait. Skipping one = R7 FAILED and
+    a §7c gap naming the address. T1 rows are NEVER handed off.
+  - HANDOFF (receipt R8): every T2 WATCH row left UNKNOWN is written with
+    `Construction Type` = 'Unknown — CONFIRM' AND a populated `Listing URL` (except a
+    Crexi/LoopNet-only-URL row, which stays BLANK per STEP 5), which is
+    exactly the target set of `ora-sourcing-construction-verify` (runs after this scan's
+    done-marker, own budget, corrects the construction score only). Name the handoff count
+    in §7a. A handed-off row is NOT a coverage gap — EXCEPT a T2 whose only working URL is
+    crexi/loopnet: that task skips those domains, so name it in §7c as "construction
+    unverifiable — Crexi/LoopNet-only URL" rather than counting it as handed off.
+  - BACKFILL ON TOUCH: when STEP 4 updates an EXISTING active T1/T2 row whose
+    `Construction Type` is BLANK (116 such rows on 2026-09-23 — they predate the field),
+    set it to 'Unknown — CONFIRM' in the same update so the row enters the backstop queue —
+    EXCEPT rows carrying `PROVISIONAL-UNRESOLVED` or whose only URL is crexi/loopnet, which
+    stay blank (see STEP 5).
+    Do not mass-backfill untouched rows from this task.
+  - MARK WHAT YOU CHECKED: every row photo-checked in-run (resolved OR verified-attempt
+    UNKNOWN) gets the verify task's own token appended to Notes / Flags —
+    `CONSTRUCTION-CHECKED <run date>: <type or 'UNKNOWN — <reason>'>; findings: <...>` —
+    so the verify task does not redo it.
+  - Step 1 of the procedure (read the listing text) still runs for EVERY candidate.
   1. Read the listing text first. A minority state it outright ("masonry", "precast
      concrete", "pre-engineered steel", "block"). Cheapest win; take it and stop.
   2. Otherwise open the listing in the BROWSER PANE (preview_start / navigate), then:
@@ -342,12 +717,172 @@ For each of the ten clusters, web-search for newly listed industrial/flex produc
   already settled from text — and note that the "non-diagnostic" aerials still produced
   three of those five findings.
 
+STEP 1B — BROWSER PASS (v2.8 — ORCHESTRATOR ONLY, sequential, browser pane)
+Why: the 2026-09-23 scouts were text-only, so Crexi/LoopNet were never fetched, JS-rendered
+broker inventory was never read, and two provisional finds were dropped for want of a
+detail page. The browser pane (mcp__Claude_Browser__*) reads all three. Run it yourself,
+after the text scouts return and before gating.
+SETUP: resize_window 1280x900 FIRST and confirm `window.innerWidth` > 0 (a fresh pane is
+0x0 and renders nothing). If the browser tools are absent or a permission prompt blocks
+them with nobody attending: R5/R6/R7 = FAILED ("no browser pane this session"), every
+affected market-family goes to §7c, and the run CONTINUES text-only — never substitute
+curl/WebFetch against a 403 and never look for another route around a block.
+HARD LIMITS (all sub-steps): public, logged-out pages ONLY. Never log in, never create an
+account, never solve or bypass a CAPTCHA / "Access Denied" / bot-check. On any block page:
+stop that SITE for the rest of the run (no retry, no alternate route), record `403/blocked`
+in the source ledger, move on. PACING: ≥20 s between page loads on the same domain (LoopNet
+tripped "Access Denied" at ~25 loads in a few minutes on 2026-09-18 — see
+ora-loopnet-listings-sync). A block on LoopNet here can also block Monday's
+ora-loopnet-listings-sync, so stay well inside the pace.
+  1B-A  DISCOVERY (receipt R5) — per market, in this order, within the HARD CAPS:
+        · Crexi public marketplace — MEASURED 2026-09-23 (logged-out, browser pane): the
+          public search DOES load and filters work. WORKING URL FORM:
+            https://www.crexi.com/properties?types%5B%5D=Industrial&placeIds%5B%5D=<Google place id>
+          (Columbus OH = ChIJcd6QucGJOIgRM7Wxz_hmMuQ, verified — the tab title resolved to
+          "Columbus, OH Industrial For Sale | Crexi"). For other metros do NOT build the URL by
+          hand: `address_value=<City>` alone (no placeIds) returns an EMPTY SHELL with the generic
+          title "Commercial Real Estate For Sale | Crexi" (measured 2026-10-05, Cincinnati and
+          Baltimore). Instead load https://www.crexi.com/properties?types%5B%5D=Industrial, click
+          the location box (~(160,54) at 1280x900), REMOVE any existing metro chip first (its x —
+          typing with a chip present adds a second blank entry and returns the old metro's cards),
+          type "<City>, <ST>", click the FIRST "Map search" suggestion (~(131,112)), wait ≥10 s,
+          then click empty page space to close the recents dropdown. Metro title appears BEFORE
+          the cards refresh (observed: Baltimore header/facets over Kansas City cards for >30 s
+          and across an F5): if card addresses don't name the metro, reload plain /properties
+          and redo the autocomplete — never read cards under a mismatched header. A location-
+          sharing prompt may leave the pane in map view; dismiss it. Verified this way
+          2026-10-05: Columbus 49, Cincinnati 49, Kansas City 63, Baltimore 36 industrial cards.
+          The city-path form (/properties/OH/Columbus?...) HUNG on a spinner — do not use it.
+          Results hydrate SLOWLY: wait ≥10 s and confirm the tab title names the metro
+          before reading — an early read returns a 51-character shell that looks like
+          "no listings". Extract cards with javascript_tool: unique hrefs matching
+          /properties/<id>/ plus the enclosing tile's innerText (walk up the parent chain
+          until the text is >60 chars; cap 300 chars per card). If the pane is HIDDEN and a
+          script times out, retry once with a shorter script, then record `pane throttled`.
+        · LoopNet public search — only where Crexi was blocked or returned 0 for the metro
+          (protects Monday's ora-loopnet-listings-sync from an Access-Denied block).
+        · Every REQUIRED broker-direct page from the SOURCE COVERAGE CONTRACT whose scout
+          ledger line says empty/JS shell (plus any other empty/JS-shell ledger line, budget
+          permitting). Record listings found; "loaded, 0 for-sale listings" is a legitimate
+          verified-empty result — "never loaded" is not.
+        New finds here join the candidate list exactly like scout finds (same Step 1 record,
+        same agent capture, same DATE-BASIS). For a candidate already found via Yardi, read
+        its Crexi/LoopNet card only to get DOM / listed date — do not duplicate it.
+  1B-B  PROVISIONAL RESOLUTION (receipt R6) — for every PROVISIONAL candidate (index-only,
+        snippet-only, or unaddressed) from this run's scouts AND every carry-forward entry
+        loaded in STEP 0c: try to load a DETAIL page (search the platform/broker site by
+        the descriptor — e.g. "50,000 SF industrial West Chester OH" — in the pane).
+          · Resolved (detail page loaded) → normal candidate; drop PROVISIONAL.
+          · ADDRESSED but unresolved → it IS LOGGED to Notion (STEP 5) flagged with the exact
+            token `PROVISIONAL-UNRESOLVED` in Notes / Flags (ora-sourcing-construction-verify
+            excludes rows on that exact token — keep the spelling),
+            Verdict capped at T2 WATCH (the standing "PROVISIONAL cannot be T1" rule), Next
+            Action "VERIFY LISTING — detail page not loadable <run date>". It is NEVER
+            silently left out (2026-09-23: 1211 Cox Ave, Erlanger KY was dropped this way).
+            It still runs STEP 2(e) own-portfolio guard first. TWO FIELDS STAY BLANK on a
+            PROVISIONAL row, deliberately:
+              - `Ask at First Sighting` — an index-page figure must never become the
+                write-once baseline (index rows understated one KC price by $125K in July;
+                baking that in fires a phantom CUT/RAISED later). Put the index ask in
+                `Asking Price` with "PROVISIONAL ASK" in Notes; write `Ask at First
+                Sighting` on the run that first VERIFIES the ask (this is not the
+                "overwrite" case — the field was empty).
+              - `Construction Type` — leave BLANK, not 'Unknown — CONFIRM'. The verify task
+                would otherwise load the index URL, find no gallery, stamp
+                CONSTRUCTION-CHECKED and drop the row from its queue for good. Set it to
+                'Unknown — CONFIRM' on the run that resolves the detail page.
+          · UNADDRESSED and unresolved → cannot become a Notion row (no dedupe key). Keep it
+            in the carry-forward file (STEP 0c path) with attempts+1; after 3 failed
+            attempts drop it and name it once in §7c as "abandoned after 3 runs".
+        Write the carry-forward file at the end of the run (receipt R13): the surviving
+        unaddressed entries only. This is a local JSON state file — no Notion write. On a
+        later run, a resolved PROVISIONAL row is updated in place (STEP 4 match): replace the
+        `PROVISIONAL-UNRESOLVED` token with `PROVISIONAL-RESOLVED <run date>` (the verify task
+        then picks the row up), write the verified ask to `Asking Price` AND the (still-empty)
+        `Ask at First Sighting`, set `Construction Type` = 'Unknown — CONFIRM' unless resolved
+        (or leave it BLANK if the only working URL is Crexi/LoopNet, per STEP 5).
+  (Construction photos for T1-bound rows are NOT part of this pass — they need tiers, so
+  they run later as STEP 3C, after TIER ASSIGNMENT. Do not attempt them here.)
+
 STEP 2 — ELIGIBILITY GATE
-Keep a candidate only if: (a) industrial/flex/office-warehouse product; (b) in a
-target cluster; (c) within or plausibly within 10-80K SF and $1-10M; (d) no instant
-disqualifier. Log filtered items with one-line reasons in the run notes; do not
-write them to Notion. Unpriced listings in-cluster and on-product PASS the gate
-(price discovery is a next action, not a disqualifier).
+Keep a candidate only if: (a) industrial/flex/office-warehouse product, per STEP 2.0; (b) in a
+target cluster; (c) within or plausibly within 10-80K SF and $1-10M — PORTFOLIO PATH (v2.11,
+Amendment H): buildings sold together as one deal pass (c) up to $15M total, with no
+per-building price band. For a portfolio the SF test is PER BUILDING, never on the portfolio
+total, and the 10-80K LOG band does not apply to its buildings (v2.12). A portfolio >5
+buildings, >$15M, or containing a building that fails ANY per-building test (acquisition-
+underwriting Amendment H (i) — the single-asset gates and floors per building: (a)/(b)/(d)/
+STEP 2.0 product or use, >=50,000 SF, a failed or <12 ft physical floor per STEP 3A, an
+instant disqualifier) is KEPT, never dropped here, and carries the token `PORTFOLIO-FLAG: <cause>` in Notes / Flags (v2.12 —
+deliberately NOT "GATE-FLAGGED", which in this file means Verdict PASS for clear <12 ft; see
+TIER ASSIGNMENT). For a portfolio, (a), (d) and STEP 2.0 are applied PER BUILDING: one failing
+building (e.g. a RETAIL/OFFICE use under STEP 2.0) makes the whole portfolio a PORTFOLIO-FLAG,
+NOT a fail of (a)/(d) and NOT the STEP 2.0 PASS/RE-ROUTE — only Gabriel carves a building out;
+(d) no instant disqualifier; (e) NOT ORA's OWN PORTFOLIO (v2.6 — see below; runs FIRST, before
+a-d; for a portfolio, PER BUILDING ADDRESS — v2.12).
+Log filtered items with one-line reasons in the run notes; do not
+write them to Notion.
+EXCEPTION (v2.9): a candidate failing (a) or (d) solely on a STEP 2.0 RETAIL/OFFICE/'Other' use IS written
+to Notion as Verdict PASS with the RE-ROUTE Next Action; a MIXED/CONFLICTING/[UNVERIFIED]
+use passes (a) and is capped per STEP 2.0. NOT for a portfolio (v2.12): a failing building
+there is a PORTFOLIO-FLAG cause, never this PASS/RE-ROUTE.
+
+*** (e) OWN-PORTFOLIO GUARD (v2.6, 2026-09-18, Gabriel-directed after a real incident) ***
+On 2026-09-05 this scan logged ORA's OWN Cushman & Wakefield listing — "2000-2026 Zettler
+Road Complex, Columbus OH" — as a new lead: T1 PURSUE, score 71, Next Action "REQUEST
+PRICE" from our own listing broker. The address range never string-matched any owned
+address (2000-2002 / 2018 / 2022 Zettler) and NO step checked ownership. A scan that
+tells us to call our own broker for our own price is not a sourcing tool.
+For EVERY candidate, before any scoring or Notion read/write:
+  python "C:\Users\Owner\.claude\scheduled-tasks\_shared\own_portfolio_guard.py" "<full listing address as titled>" --broker "<listing broker firm + names>"
+  - exit 2 / OWN-PORTFOLIO → DROP. Never score it, never write it to the Deal Sourcing Log
+    or Pipeline Tracker. Put one line in the digest under "OWN ASSETS SEEN ON MARKET"
+    (address, platform, ask if shown, days on market) — that is disposition intel for
+    Gabriel, not a lead.
+  - exit 3 / BROKER-FLAG → the listing broker is one ORA has engaged on its own assets.
+    Not a drop by itself; verify the address against the roster by hand and state the
+    check in Notes / Flags before logging.
+  - exit 0 / CLEAR → continue to (a)-(d).
+  PORTFOLIO (v2.12): a portfolio title rarely lists every building, so run the guard ONCE PER
+  BUILDING ADDRESS (from the OM, flyer or listing detail), not on the title alone. Any building
+  exit 2 → treat the portfolio as containing an own asset: do NOT score or log it as a lead;
+  put it under "OWN ASSETS SEEN ON MARKET" naming the owned building(s). If the per-building
+  addresses cannot be obtained, write `PORTFOLIO-FLAG: building addresses unverified — own-
+  portfolio guard ran on title only` and state it in digest (4a).
+  The matcher is RANGE-AWARE (a "2000-2026" listing hits owned 2018) and normalizes
+  suffixes/directionals. Roster: _shared\ora-own-portfolio-exclusions.json (v1.0).
+  ROSTER REFRESH each run (v2.8: EXECUTED IN STEP 0b, before scouting — use its in-memory
+  supplement here; do not re-read): read the Notion Property Register
+  (collection://24d6a531-f4b7-4c38-87fb-3b1be4a4f1f3) Address column and the Tenant DB
+  'Property Address' options; any owned address missing from the roster → treat as owned
+  for this run and report "ROSTER DRIFT: <address>" in the run notes (do not edit the
+  roster file unattended). Known gap: the Sepich Portfolio is one aggregate Register row
+  with no addresses — the roster covers only the Sepich buildings named elsewhere.
+  If the guard script cannot run (python missing, file absent), FAIL CLOSED for Columbus
+  OH candidates on streets that appear in the roster, and say so in the digest.
+Unpriced listings in-cluster and on-product PASS the gate (a)-(d) (price discovery is a
+next action, not a disqualifier) — but never (e): an unpriced own asset is still ours.
+
+STEP 2.0 — ASSET-CLASS / USE-CODE CHECK (v2.9; runs BEFORE any score; DECIDES PRODUCT)
+Product is a FACT to source, not a reading of listing prose. For every candidate record
+`USE-CODE: <value> | <source>` in Notes / Flags from, strongest first: (1) the county
+assessor/auditor land-use or property-class code (listing-enrichment-gate step 5 sources);
+(2) the listing platform's structured "Property Type" field; (3) listing text — tagged
+[UNVERIFIED]. Outcomes:
+  - INDUSTRIAL/FLEX verified (1) or (2) → proceed; Product scores normally.
+  - RETAIL, OFFICE, or Notion Asset Type 'Other' → Verdict PASS, Next Action
+    "RE-ROUTE: ALT-ASSET-TRACK (acquisition-underwriting Stage 0 Gate 6 / 2.9)". Never T1/T2.
+    PORTFOLIO EXCEPTION (v2.12): when the RETAIL/OFFICE/'Other' building is one building of a
+    portfolio, this outcome does NOT apply — record that building's USE-CODE, add
+    `PORTFOLIO-FLAG: <address> USE-CODE <value>`, and tier the portfolio per TIER ASSIGNMENT.
+    Origin: 13500 E 40 Hwy (Gordmans anchor, scored Product 15 with Asset Type 'Other');
+    2401-2501 International Ln (office, logged T1 as Multi-Tenant Industrial).
+  - MIXED or CONFLICTING (listing says industrial, code says retail/office/commercial) →
+    Product scores 8 (not 15); max tier T2 WATCH until a human resolves it.
+  - [UNVERIFIED] only (listing text, no code or structured field) → Product 8 provisional;
+    T1-PENDING-VERIFY at best (STEP 3D resolves it).
+Never write Asset Type 'Other' on a row whose Verdict is T1 PURSUE — that combination is
+self-contradictory and is a bug.
 
 STEP 2.5 — FUNCTIONAL SF NORMALIZATION (do this BEFORE any $/SF is computed)
 Compute $/SF on FUNCTIONAL SF, not marketed SF. Marketed SF routinely includes
@@ -382,9 +917,33 @@ old $140/$170/$150/$130 constants, the retired C&W-hard figures, or RCT v02.
 
 BASIS TEST (ratified by Gabriel 2026-07-14):
   basis $/SF = (price x 1.02 closing) / FUNCTIONAL SF     <- Step 2.5 SF, not marketed SF
-  CLEARS if  basis $/SF  <=  RCT v03 LOW x (1 - vintage floor)
-  Vintage floor = linear ramp: 65% at <=1995 -> 60% at >=2005 (-0.5%/yr).
-  Year built UNKNOWN -> default 1995 (the 65% floor; conservative). Flag it.
+  CLEARS if  basis $/SF  <=  RCT LOW x (1 - vintage floor)
+  Vintage floor = the linear ramp in the private RCT file's `vintageFloor` block (oldest-
+  vintage floor % at or before `oldYear`, newest-vintage floor % at or after `newYear`,
+  linear between). Year built UNKNOWN -> default to `oldYear` (the oldest-vintage, highest
+  floor; conservative). Flag it.
+
+  RCT LOAD (v2.17 — run ONCE per run, before any basis test):
+    Path: the environment variable ORA_RCT_TABLE_PATH if set, else
+          C:\Users\Owner\.ora-private\rct\replacement-cost.json
+    (private, outside every repo; the same table acquisition-underwriting reads — if
+    acquisition-underwriting names a different private path, that path wins.)
+    Read: `rctVersion`; `markets[<row>].low` (the denominator), `.point`, `.high`, `.proxy`;
+    `vintageFloor` {oldYear, oldPct, newYear, newPct}. Rows are keyed by the cluster's own
+    label (e.g. "Columbus OH"); the Maryland/Delmarva leg uses the "Mid-Atlantic" row and
+    Chicago–Greater Cook County uses the "Chicago Cook County IL" row.
+    Per-metro floors are computed each run: LOW x (1 - floor%) at each vintage.
+    State `rctVersion` and the private file's path in the digest header.
+    FAIL CLOSED — if the file is missing, unreadable or unparseable, `vintageFloor` is absent,
+    or a scanned cluster has no row: do NOT compute a basis verdict from memory, a prior
+    digest, Notion, a cached copy or any number elsewhere in this spec. Every priced candidate
+    in the affected cluster(s) gets Floor Result `N/A (RCT UNAVAILABLE)`, maximum tier T2
+    WATCH, never T1 PURSUE; unpriced rows stay T1-PENDING-PRICE but with no "dies above"
+    ask. The digest's FIRST line reads "RCT TABLE UNAVAILABLE — BASIS GATE NOT RUN (<cause>)"
+    and the same item opens QUESTIONS FOR GABRIEL. The rest of the scan (search, dedupe,
+    physical floors, scoring, Notion log, broker capture) still runs.
+    NEVER copy figures from that file into this spec, `_scheduled_tasks_backup/`, memory,
+    the event log or any other tracked file — ~/.claude is backed up to a PUBLIC repo.
 
   Note the 2% closing cost: doctrine defines basis as ALL-IN (price + closing + CapEx
   + lease-up carry). At scan time we cannot know CapEx or carry, so price x 1.02 is a
@@ -392,28 +951,24 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
   that clears by a thin margin. (The scan previously used bare price/SF, which
   flattered every candidate.)
 
-    METRO         RCT v03 LOW   clears at <=1995   clears at >=2005
-    Columbus         $229.65         $ 80.38            $ 91.86
-    Cincinnati       $251.46         $ 88.01            $100.58
-    Kansas City      $227.90         $ 79.77            $ 91.16
-    Indianapolis     $253.83         $ 88.84            $101.53
-    Maryland         $232.97         $ 81.54            $ 93.19
-    Madison          $229.08         $ 80.18            $ 91.63   [PROXY]
-    Grand Rapids     $253.11         $ 88.59            $101.24   [PROXY — WEAKEST]
-    Richmond         $232.97         $ 81.54            $ 93.19   [PROXY]
-    Des Moines       $231.66         $ 81.08            $ 92.66   [PROXY]
-    Louisville       $237.07         $ 82.97            $ 94.83
-  (Table mirrored for convenience. acquisition-underwriting WINS on any disagreement.)
+  ROW FLAGS (labels only; the figures are in the private RCT file):
+    [PROXY]                   Madison, Grand Rapids (WEAKEST), Richmond, Des Moines
+    [DENOMINATOR-SENSITIVE]   Chicago–Cook (in the C&W guide, NOT a proxy, but
+                              acquisition-underwriting lists Chicago as always
+                              DENOMINATOR-SENSITIVE — say so on any Chicago basis verdict)
+  (The table is no longer mirrored here, v2.17. acquisition-underwriting WINS on any
+  disagreement with the private file; report a disagreement in QUESTIONS FOR GABRIEL.)
 
-WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
-  The floor % and the denominator are a MATCHED PAIR. RCT v03 is TRUE all-in
-  shallow-bay replacement cost (~$230-254/SF LOW), roughly DOUBLE the understated
-  figure the old 25-30% floor was calibrated against. A 25% floor against RCT v03
-  would let a Columbus deal pay $172/SF and "clear" — every candidate in the buy-box
-  passes. A FLOOR THAT PASSES EVERYTHING IS NOT A FLOOR.
-  ORA's real, revealed strategy is to buy at ~35-40% OF TRUE REPLACEMENT COST — a
-  ~64% discount. The "25% discount" language was always an artifact of a wrong
-  denominator. Use the real number in the digest; it is a far stronger fact.
+WHY THE FLOOR IS THE PRIVATE FILE'S RAMP, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
+  The floor % and the denominator are a MATCHED PAIR. The RCT is TRUE all-in
+  shallow-bay replacement cost, roughly DOUBLE the understated figure the old 25-30%
+  floor was calibrated against. A 25% floor against the RCT would let a typical
+  cluster's deal "clear" at a price nearly every candidate in the buy-box meets.
+  A FLOOR THAT PASSES EVERYTHING IS NOT A FLOOR.
+  ORA's real, revealed strategy is to buy at a deep discount to TRUE replacement cost;
+  the ramp in the private file encodes it. The "25% discount" language was always an
+  artifact of a wrong denominator. Use the real number in the digest (private email);
+  it is a far stronger fact.
   *** METAL-BUILDING BASIS DISTORTION — READ THIS BEFORE CLEARING A PEMB ***
   The C&W benchmark measures ground-up build-to-suit DISTRIBUTION CENTERS, i.e.
   CONCRETE / TILT-UP product. A pre-engineered metal building costs materially LESS
@@ -429,12 +984,32 @@ WHY THE FLOOR IS 65%, NOT 25% — READ THIS BEFORE YOU "CORRECT" IT:
   We do NOT yet have a sourced PEMB $/SF, so no numeric adjustment is applied —
   flag it, do not fabricate a multiplier. Sourcing a PEMB shell cost is on the
   same GC/lender email that would settle soft costs and the small-bay premium.
-- PHYSICAL FLOORS: >=200A power, >=2 stalls/1,000 SF parking, functional clear
-  height. UNKNOWN is not FAILED — treat unknowns as open questions, not failures.
+- PHYSICAL FLOORS (v2.9 — numeric): >=200A power, >=2 stalls/1,000 SF parking, and:
+    clear height  <12 ft ............ GATE-FLAGGED (AU Stage 0 Gate 4) → Verdict PASS, listed in
+                                      §7d for hand override; never T1/T2 on its own
+                                      (mixed clear with any bay >=16 ft: T2 — see below)
+    clear height 12 to <16 ft ....... FAILED physical floor → max tier T2 WATCH
+                                      (14 ft suffices only where every unit is <3,500 SF)
+    site coverage >60% (building footprint ÷ land area) ... FAILED → max T2 WATCH
+    truck court <60 ft AND no usable yard ................. FAILED → max T2 WATCH
+  Mixed clear (e.g. "10'-28'") is tested at the MINIMUM bay unless functional SF is normalized
+  to the >=16 ft bays per STEP 2.5. MIXED-CLEAR RULE (Gabriel-ratified 2026-10-30): if the
+  minimum bay is <12 ft AND any bay is >=16 ft, the row is a FAILED physical floor capped at
+  T2 WATCH — NOT gate-flagged PASS. The <12 ft gate-flagged PASS applies only when NO bay
+  reaches 16 ft. The MIXED-CLEAR RULE applies even where functional SF is normalized per
+  STEP 2.5; normalization can clear only a 12 to <16 ft minimum, never a <12 ft one.
+  Eave height is not clear height.
+  UNKNOWN is still not FAILED — but an unknown clear height, coverage or truck court cannot
+  reach T1 PURSUE: it routes to T1-PENDING-VERIFY (TIER ASSIGNMENT). Origin: 67 & 76
+  Washington (13'4", 86% coverage, no court) and 2810 Saratoga (~11.5 ft) both logged T1.
 - INSTANT DISQUALIFIERS: per the buy-box list above.
 
 Gate outcomes (write the outcome to Notion `Floor Result`):
-- PASS — clears basis, no failed physical floor, no disqualifier. ELIGIBLE FOR T1.
+- PASS — clears basis, no failed power/parking floor, no disqualifier. ELIGIBLE FOR T1 — but
+  (v2.9) clearing the RCT floor alone never makes T1 PURSUE: STEP 2.0, STEP 3A-2 and the
+  TIER ASSIGNMENT conditions must ALSO hold. [INTERIM v2.9, pending Gabriel ruling] A
+  basis-clearing row with a FAILED v2.9 physical floor (clear, coverage, court) is written
+  Floor Result PASS; the physical cap is applied in TIER ASSIGNMENT, never by the field.
 - FAIL-BASIS — priced above 75% of replacement. CANNOT BE T1 AT ANY SCORE.
   Maximum tier is T2 WATCH. Log it, state the price at which it WOULD clear, and
   monitor for a cut. Pursuing one requires an explicit Gabriel exception plus a
@@ -447,11 +1022,33 @@ Gate outcomes (write the outcome to Notion `Floor Result`):
   headline badly. For each, state the ask ABOVE WHICH IT DIES on basis, so the broker
   call has a decision rule attached before it is made.
 
+STEP 3A-2 — COMP-BAND TEST (v2.9; SECOND basis test; must ALSO pass for T1)
+The RCT v03 floor measures the discount to building NEW. It cannot see functional
+obsolescence, so worn-out stock always clears it. acquisition-underwriting v3.4 already rules
+"A large RCT discount does NOT establish mispricing if the comp band is near or above the ask";
+this step applies that rule at scan time.
+  COMP BAND = >=2 like-kind Class B/C industrial comps in the same submarket: closed sales
+  <=24 months (county-sales-monitor comps database / recorded deed first) or, failing that,
+  active asks; like-kind = year built within ±15 years, clear height in the same band as STEP
+  3A, and either side of 50,000 SF matched. Record
+  `COMP-TEST: <PASS|FAIL|UNKNOWN> | median $X/SF | n=<k> | <address, $/SF, date, source>; ...`.
+  PASS if  ask $/SF (FUNCTIONAL SF)  <=  0.85 x comp-band median $/SF.
+           [0.85 and n>=2 = RATIFIED-JUDGMENT, Gabriel 2026-10-30; calibrate at the Dec 2026
+           back-test. Unsourced — never cite 0.85 as a market statistic.]
+  FAIL → max tier T2 WATCH; Next Action states the ask at which it WOULD pass (0.85 x median x
+         functional SF).
+  UNKNOWN (fewer than 2 like-kind comps found in-run) → T1-PENDING-VERIFY, never T1 PURSUE.
+  [PROXY] METROS (Madison, Grand Rapids, Richmond, Des Moines): the RCT floor there is not
+  independent evidence, so a PROXY row reaches T1 ONLY on a COMP-TEST PASS with cited comps.
+  Origin: 2810 Saratoga (renovated like-kind 2441 W Baltimore St closed $80/SF, ask $69-74 →
+  ~86-92% of comp → FAIL); 67 & 76 Washington ("49% discount" was a circular PROXY RCT).
+  Never use RCT as a comp; never use one comp; never net the two tests.
+
 STEP 3B — SCORE (Fit Score 0-100 — RANKS WITHIN A GATE OUTCOME, never overrides it)
 - Market — primary cluster (20): established cluster 20; entry-phase 14; edge of
   cluster 8; outside 0 (should have been filtered).
-- Product — B/C industrial/flex (15): on-doctrine 15; mixed w/ heavy office 8;
-  marginal 4.
+- Product — B/C industrial/flex (15): on-doctrine with USE-CODE VERIFIED (STEP 2.0) 15;
+  mixed w/ heavy office, or use [UNVERIFIED] 8; marginal 4. (v2.9)
 - Basis vs replacement (15): >=25% below replacement 15; 10-25% below 9; near
   replacement 4; above 0. Unpriced = 7 provisional. RETAINED as a ranking signal
   (depth of discount legitimately separates two deals that both clear the floor) —
@@ -473,48 +1070,130 @@ STEP 3B — SCORE (Fit Score 0-100 — RANKS WITHIN A GATE OUTCOME, never overri
   NEVER A DISQUALIFIER — a metal building is a preference penalty, not a floor.
 - Stabilized YoC (10): >8% achievable on stated/estimated NOI 10; 7-8% 6; <7% 2;
   unknown 5 provisional.
-- Capital sleeve (10): $1.5-6M 10; $1-1.5M or $6-10M 6; outside 0.
+- Capital sleeve (10): $1.5-6M 10; $1-1.5M or $6-10M 6; outside 0. (v2.12 note: a $10-15M
+  Amendment H portfolio scores 0 here BY DESIGN pending Gabriel's ratification — see the
+  v2.11 OPEN QUESTION. It is NOT a STEP 2 filtering error; never drop or re-flag it for this.)
 - Value-add bias (5): vacancy/below-market rents/short WALT present 5; stabilized 2.
-- Physical floors (10): meets power+parking+clear 10; one unknown 6; one failed 3;
-  two+ failed 0.
+- Physical floors (10): meets power+parking+clear+coverage+court 10; one unknown 6; one
+  failed 3; two+ failed 0. Thresholds per STEP 3A (v2.9).
 - Mezz SF credit (5): no mezz dependency 5; mezz-inflated SF 0.
 - Lease quality (5): PG or 3%+ escalations evident 5; unknown 3; weak 0.
 
 TIER ASSIGNMENT (gate first, score second):
-- T1 PURSUE      = Floor Result PASS **AND** score >=60. Request OM immediately.
-- T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60. REQUEST PRICE only.
-                     Report and count SEPARATELY from T1 PURSUE.
-- T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59. Log, monitor
-                   for price cuts, no outreach.
+- T1 PURSUE      = Floor Result PASS **AND** COMP-TEST PASS **AND** USE-CODE industrial/flex
+                   VERIFIED **AND** clear height, site coverage and truck court each MET (none
+                   unknown) **AND** no power/parking floor FAILED (power/parking UNKNOWN
+                   permitted, per STEP 3A) **AND** <50,000 SF per building (per-building SF
+                   KNOWN) **AND** score >=60 **AND** no unruled `PORTFOLIO-FLAG` (v2.12). Request OM
+                   immediately. (v2.9)
+- T1-PENDING-VERIFY = would be T1 PURSUE but one or more of COMP-TEST / USE-CODE (unknown or
+                   [UNVERIFIED]) / clear / coverage / truck court / per-building SF
+                   (multi-building) is UNKNOWN after STEP 3D. Written to Notion as
+                   Verdict 'T2 WATCH' + token `T1-PENDING-VERIFY: <missing facts>` (fail-safe:
+                   verified-deal-recon fires only on T1 PURSUE). Report and count SEPARATELY.
+- T1-PENDING-PRICE = Floor Result N/A (unpriced) AND score >=60 AND no unruled
+                     `PORTFOLIO-FLAG` (v2.12 — a flagged one is T2 WATCH that still keeps
+                     REQUEST PRICE; see PORTFOLIO-FLAG). REQUEST PRICE only.
+                     Report and count SEPARATELY from T1 PURSUE. (v2.9, Gabriel-ratified
+                     2026-10-30) Written to Notion as Verdict 'T2 WATCH' + the literal tag
+                     `T1-PENDING-PRICE` in Next Action AND Notes / Flags — NEVER as Verdict
+                     'T1 PURSUE', so unpriced rows neither inflate T1 counts nor trigger
+                     verified-deal-recon (same pattern as T1-PENDING-VERIFY).
+- T2 WATCH       = FAIL-BASIS (any score), OR PASS with score 50-59, OR COMP-TEST FAIL, OR a
+                   FAILED physical floor, OR >=50,000 SF per building, OR USE-CODE
+                   mixed/conflicting, OR [PROXY] without a COMP-TEST PASS, OR a
+                   `PORTFOLIO-FLAG` row (v2.12) not yet Cleared by Gabriel that no
+                   portfolio-level PASS / DECLINE clause catches (see PORTFOLIO-FLAG below). Log, monitor for price cuts, no outreach.
+- PORTFOLIO-FLAG (v2.12) = a CAP pending Gabriel's ruling, not a verdict: max tier T2 WATCH,
+                   never T1 PURSUE / T1-PENDING-VERIFY. Write Verdict 'T2 WATCH' + the literal
+                   token `PORTFOLIO-FLAG: <cause>` in Next Action AND Notes / Flags ("Gabriel to
+                   rule on Amendment H carve-out"), and list it in digest (4a). UNPRICED: if the
+                   row would otherwise be T1-PENDING-PRICE, keep "REQUEST PRICE" in Next Action
+                   beside the token — price discovery stays allowed; nothing else is outreach.
+                   RULING (read, never written, by this scan): Gabriel records his ruling in the
+                   Deal Sourcing Log `Gate Review` field, the same field ora-entry-market-scan
+                   uses — `Cleared-<date>` / `Rejected-<date>` + note (e.g. which building is
+                   carved out). On `Cleared-` at an unchanged price and building set, the cap
+                   is LIFTED: apply normal TIER ASSIGNMENT to the portfolio as Gabriel cleared
+                   it (a carved-out building is removed and the rest re-tested), keeping the
+                   token in Notes / Flags as history. A breach Gabriel CLEARED is not re-raised
+                   as a flag cause; a single-asset cap it triggers (e.g. >=50,000 SF → T2)
+                   still applies unless his ruling note lifts it.
+                   BASELINE: every run that writes or updates a flagged row APPENDS
+                   `PORTFOLIO-BASIS: ask $<x> | <n> bldgs | <date>` to Notes / Flags. "Unchanged
+                   price and building set" means the current ask and building count equal the
+                   latest PORTFOLIO-BASIS line dated on or before the ruling date. NO such
+                   line (e.g. a row written before v2.12) → treat as CHANGED: cap applies and
+                   (4a) re-asks (fail closed). On `Rejected-` at an unchanged price and
+                   building set: Verdict PASS, reason "Rejected by Gabriel <date>". A changed
+                   price, building set or status voids the ruling for this run — cap applies
+                   and (4a) re-asks. Any other `Gate Review` value (blank, `N/A …`, sibling-task
+                   text) is NOT a ruling for a portfolio. The flag itself is NEVER a PASS
+                   reason, and a building's own failure never PASSes the portfolio. The ONLY
+                   PASS / DECLINE clauses that apply to a flagged, unruled portfolio are the
+                   portfolio-level ones (exhaustive): blended basis at or above replacement, or
+                   score <50 — name the clause and keep the token in Notes / Flags.
 - PASS / DECLINE = priced at or above replacement, OR 2+ failed physical floors, OR
-                   an instant disqualifier, OR score <50. Log with the reason.
+                   an instant disqualifier, OR USE-CODE retail/office/Other (re-route), OR
+                   clear <12 ft with no bay >=16 ft (gate-flagged), OR score <50. Log with the
+                   reason. For a PORTFOLIO (v2.12), the 2+ failed floors, instant disqualifier,
+                   USE-CODE and clear <12 ft clauses are tested per building and are
+                   PORTFOLIO-FLAG causes, never a PASS of the whole portfolio.
 A score >=60 NEVER promotes a FAIL-BASIS deal into T1. If you find yourself writing
 "scores 78 but fails basis — worth a look," STOP: that is the exact failure this
 redesign exists to prevent. It is a T2.
+
+STEP 3C — CONSTRUCTION PHOTOS, T1-BOUND (v2.8, receipt R7 — runs NOW, after tiers exist)
+For every T1 PURSUE and T1-PENDING-PRICE row whose construction is still UNKNOWN after the
+listing-text read: run the STEP 1 construction procedure (browser pane, both traps), ≤ 4
+page loads per row. Order of URLs to try: the commercialsearch/commercialcafe detail page
+(the `.property-details-gallery` selector and the alt-text attribution check are VALIDATED
+only there) → broker-direct listing page → Crexi public detail page.
+NON-YARDI PAGES: there is no validated gallery selector. Take only images inside the
+listing's own media/gallery container (never a "similar"/"nearby"/"recommended" block),
+and only when the alt text or the adjacent caption names the SUBJECT address or title —
+the same attribution rule as the Yardi trap. If attribution cannot be established, the
+result is NOT a verified-attempt UNKNOWN: it is R7 FAILED for that row, named in §7c
+("T1 construction unverified — no attributable gallery on <platform>"), with Next Action
+"CONFIRM CONSTRUCTION" on the broker call. Never mark an unattributable page as checked.
+Write the result, the CONSTRUCTION-CHECKED token and any by-products into the row in
+STEP 5. If a confirmed construction type moves the score across the 60 line, re-apply
+TIER ASSIGNMENT (the gate is unchanged; only the 5-pt component moved).
+
+STEP 3D — T1 VERIFY PASS (v2.9; runs after TIER ASSIGNMENT, same budget class as 3C)
+For every row that would be T1 PURSUE but is T1-PENDING-VERIFY for an UNKNOWN in STEP 2.0,
+3A (clear/coverage/court), 3A-2 (comps) or per-building SF (multi-building): run listing-enrichment-gate steps 1, 5 and 7 (use
+class, footprint ÷ parcel coverage, listing clear height) and one comp pull, <= 4 page loads +
+2 GIS queries per row. Test "would be T1 PURSUE" scoring an [UNVERIFIED] use at Product 15;
+after resolution re-score Product and Physical floors and re-apply TIER ASSIGNMENT. Resolved and passing → T1 PURSUE (and, if its construction is still
+UNKNOWN, it then gets the STEP 3C photo check like any T1 row). Resolved and failing → the cap that
+rule names. Still unknown → stays T1-PENDING-VERIFY with Next Action naming the missing
+fact(s) and the decision rule. A skipped row is a §7c coverage gap, named by address.
 
 BENCHMARK HONESTY (mandatory in every digest): the denominator is RCT v03 — SOURCED
 from the C&W 2025 guide and ratified by Gabriel 2026-07-14. State in the digest which
 metro floor was applied, and state the discount as a share of TRUE replacement ("this
 deal buys at 34% of all-in replacement cost"), not as a vague "below replacement."
 Live caveats that must still be surfaced:
-- THE x1.30 SOFT/PROFIT/FINANCING MULTIPLIER IS AN [EST] — the only unsourced input in
-  RCT v03. It is deliberately set at the LOW end of the industry range, so the floor
+- THE SOFT/PROFIT/FINANCING MULTIPLIER IS AN [EST] — the only unsourced input in
+  the RCT (its value: private RCT file / acquisition-underwriting, v2.17). It is deliberately set at the LOW end of the industry range, so the floor
   is HARDER than truth, not softer. One GC quote per market retires it.
 - BASIS IS A GENEROUS PROXY AT SCAN TIME — price x 1.02 omits CapEx and lease-up carry,
   which doctrine includes. True basis is always worse than the scan's figure.
 - FOUR METROS USE PROXIES — Madison (Milwaukee), Grand Rapids (Detroit), Richmond
   (Baltimore), Des Moines (Minneapolis) are NOT in the C&W guide. Mark any basis
-  verdict in those four [PROXY]. GRAND RAPIDS IS THE WEAKEST: Detroit is a high-cost
+  verdict in those four [PROXY]; a [PROXY] row reaches T1 only on a STEP 3A-2 COMP-TEST
+  PASS (v2.9). GRAND RAPIDS IS THE WEAKEST: Detroit is a high-cost
   union market while RSMeans shows Grand Rapids well below the national average, so
-  its floor ($107.73) is probably TOO GENEROUS — flag Grand Rapids passes accordingly.
+  its floor is probably TOO GENEROUS — flag Grand Rapids passes accordingly.
 - NAME ANY DEAL WITHIN ~3% OF ITS FLOOR. The benchmark is March-2025 vintage and
   construction cost is reaccelerating (Turner +4.87% YoY, Mortenson +6.77%, AGC input
   PPI +8.4%), so a near-line deal could move on the next guide.
 DO NOT use an "all-in" (hard + soft + land) denominator. It was considered and
-REJECTED on ratification: at ~$230/SF Midwest it sets the floor near $172/SF, which
-essentially every Class B/C deal clears — a floor that passes everything is not a
-floor. The true all-in figure (~$200-240/SF) is an IC-MEMO NARRATIVE point — "we buy
-at 30-50% of true replacement" — and belongs in memos and lender packages, NOT in
+REJECTED on ratification: at Midwest all-in levels it sets a floor that essentially
+every Class B/C deal clears — a floor that passes everything is not a floor. The true
+all-in figure is an IC-MEMO NARRATIVE point — "we buy at a fraction of true
+replacement" — and belongs in memos and lender packages, NOT in
 the screen.
 
 PROVISIONAL / UNVERIFIED LISTINGS: a listing captured from a search-results INDEX
@@ -548,7 +1227,14 @@ until has_more is false). Build the normalized-address set from the COMPLETE res
 match each candidate against it. Normalize by stripping the em-dash/comma city/ZIP suffix and
 lower-casing the street (e.g. "5545 Fair Ln" == "5545 Fair Lane — Fairfax (Cincinnati), OH
 45227"); match on street-number + street-name + (SF within 2%) as the dup key, since the
-same property is logged with varying submarket labels and dash/comma punctuation. If a
+same property is logged with varying submarket labels and dash/comma punctuation. DO NOT
+dedupe with LIKE '%<full suffix word>%' — the 2026-10-05 run created 3 duplicates because
+"South 6th Street" missed "S 6th St", "West 7th" missed "W 7th", and "Trafficway" was never
+searched against "Tfwy". Query on the street NUMBER plus the street-name stem only (e.g.
+LIKE '%1301 S%6th%', or just LIKE '1301 %'/'%7th St%'), checking BOTH directional and suffix
+abbreviations (S/South, W/West, St/Street, Rd/Road, Dr/Drive, Tfwy/Trafficway/Trfwy, Cir/Circle,
+Ln/Lane, Pkwy/Parkway). Already-flagged duplicates carry `Duplicate Of`; honor it, never
+re-create. If a
 candidate matches an existing row, UPDATE that row (per the rules below) — never create a
 second. A per-run sanity check: if >1 row shares a normalized street address, they are dups.
 
@@ -566,7 +1252,8 @@ spot. All 144 priced rows were backfilled on 2026-07-14, so the baseline exists:
 On each run:
 - Existing + unchanged: skip silently.
 - Existing + PRICE CUT: update `Asking Price` and `Price / SF` ONLY. Leave
-  `Ask at First Sighting` untouched. The formula surfaces the delta. These LEAD the
+  `Ask at First Sighting` untouched (except a PROVISIONAL row being resolved, whose empty
+  `Ask at First Sighting` is filled once per STEP 1B-B). The formula surfaces the delta. These LEAD the
   digest — a cut is the strongest motivation signal in the whole scan.
 - Existing + RE-LIST (was Dead/Passed, now live again): flip Status, flag "RE-LIST".
 - ONE EXCEPTION to the never-overwrite rule: if the stored first ask was OUR OWN
@@ -575,11 +1262,37 @@ On each run:
   formula fires a phantom "RAISED x%" signal on what was actually our data error —
   this happened on 3255 N 7th St Trafficway, corrected 2026-07-14.
 - New: create a record. Never create duplicates. Also check the Acquisition
-  Pipeline Tracker (bcfe4a03) so active deals are not re-surfaced as leads.
+  Pipeline Tracker (bcfe4a03) so active deals are not re-surfaced as leads — against the
+  STEP 0a fetch already in context (v2.8); do not re-pull it here.
+
+RE-LIST vs REFRESH — DECISION RULE (v2.8; uses the STEP 1 DATE-BASIS). Flag "RE-LIST" ONLY
+when one of these is true:
+  (a) the matching row is Dead/Passed and the listing is live again (the rule above); or
+  (b) the EARLIEST LISTED/DOM-derived date across ALL platforms carrying the listing is
+      LATER than the row's `First Sighted` (re-entered on market after ORA first saw it).
+      Use the earliest across sources — a Crexi copy posted after the Yardi copy ORA saw
+      first is syndication lag, not a re-list.
+  A changed platform ID / URL by itself (no dated evidence under (b)) is flagged
+  "POSSIBLE RE-LIST — URL changed" in Notes, never "RE-LIST", and is not a motivation
+  signal in the digest. (No field records every re-sighting — unchanged rows are skipped
+  silently — so an "absent N days" test is not executable; do not attempt one.)
+  An UPDATED-ONLY date newer than `First Sighted` is a REFRESH — never a re-list, never a
+  new listing, never a motivation signal. ONLY when a re-list question actually arises on
+  an existing row (price changed, URL/ID changed, or a newer UPDATED stamp) AND neither (a)
+  nor (b) can be tested (DATE-BASIS UPDATED-ONLY/NONE on every source), write "RE-LIST
+  UNDETERMINABLE" in Notes and count it in §7c — do not guess either way. Unchanged rows
+  stay silent; they never generate this flag. For a NEW row, `First Sighted` = run date regardless of
+  basis; the DATE-BASIS token records what the platform actually claimed.
+- EXISTING ROW THAT IS AN OWN ASSET (v2.6): if the full active-set fetch contains a row
+  the own-portfolio guard flags (e.g. legacy LoopNet-inbound rows for 2800-2826 Banwick,
+  384-398 Morrison, 1100 Rarig; the 2026-09-05 Zettler row), do NOT update it as a lead.
+  Report it once per run under "OWN-ASSET ROWS IN SOURCING LOG" for Gabriel to retire —
+  never flip Status unattended.
 
 STEP 5 — WRITE TO NOTION (canonical record — write BEFORE email)
+CREATE-VERIFY (Deal Sourcing Log rows AND new Broker Relationships rows): if a create returns a grace/quota notice or no page ID, look for it — query the data source for the row's natural key (address / `Listing URL`; `Broker Name` + `Company / Brokerage`), then search by that key (search lags: a miss alone is not proof) — a match created at/after the create call is this run's row, use it; never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — name it under the digest's coverage gaps. Quota errors → `notion-quota-fallback` skill.
 Create/update Deal Sourcing Log records: Deal Name / Address; Metro / Submarket;
-Source; **`Listing URL`** (the working public URL captured in Step 1 — field added
+Source (v2.10 — per SOURCE MAPPING below; never 'Other' by default); **`Listing URL`** (the working public URL captured in Step 1 — field added
 2026-08-12; before that STEP 1 was told to capture a URL for every listing and STEP 5 had
 NOWHERE TO WRITE IT, so every run captured one and silently discarded it. That is why no
 historical row can have its ask provenance reconstructed, and why STEP 5B's cross-write had
@@ -587,29 +1300,139 @@ to fall back to document provenance. Write it on creation AND whenever a re-sigh
 different working URL; leave blank only when the ask came from an OM or a broker directly,
 i.e. when there genuinely is no listing page); Status = "New Lead" (or existing status on
 update); Asking Price;
-**Ask at First Sighting + First Sighted (on creation only)**; Total SF; Price / SF
+**Ask at First Sighting + First Sighted (on creation only — EXCEPT a PROVISIONAL row:
+`First Sighted` = creation date as usual, but `Ask at First Sighting` stays BLANK until the
+run that verifies the ask; see STEP 1B-B)**; Total SF; Price / SF
 (FUNCTIONAL — per Step 2.5); Year Built; Buy Box Score (100); **Verdict** (T1 PURSUE /
-T2 WATCH / PASS / KILLED); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
-FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type; Broker /
-Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
+T2 WATCH / PASS / KILLED — v2.9: T1-PENDING-PRICE and T1-PENDING-VERIFY rows are written
+'T2 WATCH' with their literal tag, never 'T1 PURSUE'; only a full T1 PURSUE gets that value);
+**Verdict at First Sighting + Score at First Sighting** (v2.14 — WRITE-ONCE, on creation only:
+the same Verdict and Buy Box Score (100) this run writes on the new row; never written on an
+update, a re-sighting, a re-tier or a PROVISIONAL resolution, and never cleared; see the
+OVERWRITE RULE in STEP 5B); **Floor Result** (PASS / FAIL-BASIS / FAIL-YIELD /
+FAIL-BOTH / N/A — this is the gate outcome from Step 3A); Asset Type;
+**`Construction Type`** (v2.8 — select; EXACT options: 'Masonry / Brick' · 'Block / CMU' ·
+'Tilt-Up / Precast Concrete' · 'Hybrid (masonry + metal)' · 'Pre-Engineered Metal (PEMB)' ·
+'Unknown — CONFIRM'. Write it on EVERY create and whenever this run resolved it; an
+unresolved row MUST carry 'Unknown — CONFIRM' — that value plus `Listing URL` is the
+handoff key ora-sourcing-construction-verify selects on, so a blank here silently drops
+the row from the backstop. TWO EXCEPTIONS stay BLANK on purpose: a PROVISIONAL-UNRESOLVED
+row (STEP 1B-B), and a T2 whose only working URL is crexi/loopnet (the verify task cannot
+load those domains; name it in §7c instead)); Broker / Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").
+v2.9: Notes / Flags carries the `USE-CODE:`, `COMP-TEST:` and (where applicable)
+`T1-PENDING-VERIFY:` tokens immediately after the gate outcome. No new Notion property.
+
+SOURCE MAPPING (v2.10). `Source` records the channel through which ORA FIRST FOUND the listing —
+the FIRST-DISCOVERED page (the one that put the property on the candidate list), which is NOT
+necessarily the page later captured as `Listing URL` (Listing URL is the best *working* page and
+may be rewritten on re-sighting). Key on the first-discovered page's domain (or, with no
+listing page, on how the ask reached ORA). Always write `SOURCE-URL: <first-discovered domain>`
+in Notes / Flags immediately after the gate-outcome tokens, so attribution is auditable even
+when it differs from `Listing URL`. When two scouts surfaced the same listing in the same
+parallel pass and order is not determinable, break the tie F3 broker-direct > F1 Yardi > F2
+Crexi/LoopNet (the SOURCE COVERAGE CONTRACT families). Use ONLY these existing select options:
+  - crexi.com                                        → 'Crexi'
+  - loopnet.com                                      → 'LoopNet'
+  - costar.com                                       → 'CoStar'
+  - a brokerage's OWN website (e.g. Block & Co, Newmark Zimmer, any firm-domain listing page),
+    or an OM / flyer / email received from a broker  → 'Broker — Direct'
+  - any other aggregator or index (commercialcafe.com, commercialsearch.com, other Yardi-network
+    sites, PropertyShark, Revere, municipal/EDC site databases, a search-engine result with no
+    loadable listing page)                           → 'Other', AND add the token
+    `SOURCE-DETAIL: <domain>` to Notes / Flags, so the 'Other' bucket stays decomposable
+    without a schema change.
+  - 'Off-Market' is NEVER written by this scan — it belongs to county-record / owner-outreach
+    leads only.
+  ON UPDATE of an existing row: Source is a first-discovery fact, so a later sighting on a
+  different site NEVER changes it. Never overwrite a non-'Other' Source. Never overwrite an
+  'Other' that already carries a `SOURCE-DETAIL:` token (that is a correct aggregator
+  attribution, not a gap). Only a legacy row whose Source is blank, or 'Other' with NO
+  `SOURCE-DETAIL:`/`SOURCE-URL:` token, may be backfilled — and only from evidence of where it
+  was FIRST seen (its `First Sighted` run's record or the original `Listing URL`), never from
+  where this run happened to see it; note `SOURCE-REMAPPED: <old>→<option> (basis: <evidence>)`.
+  If that evidence is absent, leave it. Never invent a select option; a domain that fits none of
+  the rules is 'Other' + `SOURCE-DETAIL:`.
+
+*** STEP 5A — BROKER FIELD + BROKER RELATION (v2.7, 2026-09-19, Gabriel-directed) ***
+Two writes per listing, both in the Deal Sourcing Log row you just created/updated:
+  - `Broker / Contact` (text — this is the ACTUAL property name in the log's schema;
+    verified 2026-09-19 against collection://9a6ae219-85a3-4621-899c-c757fd062f8b.
+    It is NOT called "Broker / Source"): write `Name, Firm` — e.g.
+    `Dan Sheeran Jr., NAI Ohio Equities`. Firm only when the agent is unknown:
+    `AGENT NOT CAPTURED, NAI Ohio Equities`. Neither known: `AGENT NOT CAPTURED`.
+    Multiple agents: `Name1, Name2, Firm`. NEVER a platform name (see Step 1).
+  - `Broker (Linked)` (relation → collection://48e43778-b1f2-4b16-8f3c-0bf18f8642e9):
+    link to the matching Broker Relationships row. The broker-side mirror of this
+    relation is `Sourced Listings` — link ONE side and Notion populates the other; do
+    not write both. Leave the relation EMPTY when the agent is `AGENT NOT CAPTURED` —
+    never link a row to a firm-only placeholder, and never create a placeholder row.
+
+MATCHING — NAME + FIRM IS THE KEY, NOT EMAIL. The 2026-09-19 executability test found
+agent emails are essentially never published (0 of 5 detail pages), so an email-first
+match would almost always miss and manufacture duplicates. Read the Broker
+Relationships DB first, then match in this order, stopping at the first hit:
+  1. exact `Broker Name` + exact `Company / Brokerage`;
+  2. case-insensitive / whitespace-normalized `Broker Name` within the same firm;
+  3. if `Email` is known AND a row carries that exact `Email`, that row wins outright.
+NEVER CREATE A DUPLICATE WHEN A MATCH EXISTS. If two existing rows both match, link the
+one with the higher `Tier` and report the duplicate pair in the digest — do not merge
+them unattended.
+
+CREATING A NEW BROKER ROW (only when no match exists). Write ONLY these properties —
+they are the ones that actually exist in this DB (schema read 2026-09-19); inventing a
+property or a select option will fail the write:
+  - `Broker Name`          (title)        — the agent's full name. Required.
+  - `Company / Brokerage`  (text)         — the firm.
+  - `Email`                (email)        — ONLY if the page actually published it; else blank.
+  - `Phone`                (phone_number) — ONLY if actually published; else blank.
+  - `Markets`              (multi_select) — ONLY an option that ALREADY EXISTS:
+        Columbus OH · Kansas City MO · Indianapolis IN · Maryland · Cleveland OH ·
+        Nashville TN · Multi-Market · Des Moines IA · Cincinnati OH · Louisville KY ·
+        Madison WI · Grand Rapids MI · Richmond VA · Chicago IL
+      (Cincinnati OH through Richmond VA were ADDED to the database by Gabriel's direction on
+      2026-09-19 — the original 8 kept their option ids and all 9 existing rows read
+      identically before and after. `Chicago IL` was ADDED 2026-11-09 (Gabriel in-turn); the
+      13 prior options kept their ids. Use it for Chicago–Greater Cook County brokers.) For a market with NO matching option — e.g. a new entry market — LEAVE
+      `Markets` BLANK and name the market in `Notes`. NEVER invent a select option — the
+      scan runs unattended and must not mutate the DB's schema. Report any such gap once
+      per run in the digest ("Markets option missing for: <market>") so Gabriel can add it
+      by hand.
+  - `Tier`                 (select)       — `Tier 3 — Cold` for every new row (verify that
+      exact option string, EM DASH included, exists before writing; the live options are
+      `Tier 1 — Active` / `Tier 2 — Warm` / `Tier 3 — Cold` / `Inactive`). A broker the
+      scan has merely observed is cold by definition — never open a row at a warmer tier.
+  - `Notes`                (text)         — `Source: ora-deal-sourcing-scan; First seen: <listing date>`.
+      *** There is NO `Source` property and NO `First Seen` property on this DB. That is
+      why both go in `Notes`. `Date Added` is a created_time and is READ-ONLY. ***
+  Do NOT write `Relationship Owner`, `Specialty`, `Contact Frequency`, `Last Contacted`,
+  `Deals Referred`/`Deals Closed`, `Volume Closed ($)`, `HubSpot Contact Link` or
+  `LinkedIn` — those are relationship-management fields a human owns, and the rollup /
+  formula properties (`Listings Sent (Auto)`, `T1/T2 Listings (Auto)`, `LOIs (Auto)`,
+  `Closed (Auto)`) are computed and must never be written.
+
+CAP: at most 25 NEW broker rows per run. Linking to EXISTING rows is uncapped. On
+hitting the cap, stop creating rows, still write `Broker / Contact` text for every
+remaining listing, leave those relations empty, and report the overflow count and the
+names not created in the digest's "Broker capture" section so the next run picks them up.
 
 STEP 5B — CROSS-WRITE THE VERIFIED ASK TO THE ACQUISITION PIPELINE TRACKER
 (added 2026-08-12, Gabriel-directed in-turn. Closes a real 36-minute-fuse defect: on
 2026-08-11 this scan verified 4484 Robertson Road's published ask at $2,950,000
-($116.14/SF marketed vs a Madison floor of $80.18 — FAIL-BASIS) and emailed it, but
+($116.14/SF marketed, above the Madison basis floor — FAIL-BASIS) and emailed it, but
 nothing wrote it to the pipeline tracker. The tracker row was re-stamped 36 minutes
 LATER, still recording the ask as "NOT YET KNOWN — verified null" and still instructing
 the deal owner to ask the broker for a price on a call the next morning. Two ORA systems
 held contradictory states because this task had a read of the tracker but no write.)
 
 WHEN THIS RUNS: for every scanned candidate that matches an EXISTING row in the
-Acquisition Pipeline Tracker (bcfe4a03-7e61-4ac1-a0bb-c44174fa138b). STEP 4 already
-fetches that tracker to avoid re-surfacing active deals as leads — reuse that same fetch
-and the same normalized-address match key (street-number + street-name, SF within 2%).
-Do NOT issue a second pull.
+Acquisition Pipeline Tracker (bcfe4a03-7e61-4ac1-a0bb-c44174fa138b). STEP 0a already
+fetched that tracker (v2.8 — moved up front so 5B cannot be starved: on 2026-09-23 the
+fetch was never executed and 5B silently did not run) — reuse that same fetch and the same
+normalized-address match key (street-number + street-name, SF within 2%). Do NOT issue a
+second pull. If STEP 0a FAILED, write nothing here and say so (receipt R11 FAILED).
 
 *** "VERIFIED" IS A HARD PRECONDITION, NOT A LABEL. *** Write ONLY if this run actually
 loaded a listing DETAIL page and read the ask off it. If the candidate is PROVISIONAL
@@ -668,6 +1491,13 @@ another task exists to watch. This mirrors that task's own standing guardrail.
 OVERWRITE RULE (deliberately the OPPOSITE of `Ask at First Sighting`):
   - `Ask at First Sighting` in the Deal Sourcing Log is WRITE-ONCE — it is a historical
     baseline and overwriting it destroys the price-cut signal.
+  - `Verdict at First Sighting` and `Score at First Sighting` (v2.14) are WRITE-ONCE for the
+    same reason, on EVERY row, including rows this run only updates: they are the scan's
+    original prediction, which `ora-passed-deal-tracker`'s monthly back-test
+    (`maintenance/funnel-backtest.py`) grades against the row's later outcome. A review that
+    passes a T1 changes `Verdict`, `Status` or `Go / No-Go`, never these. Leave them blank on a
+    row that lacks them (rows created before 2026-11-05); never infer them from the current
+    Verdict.
   - `Listing Ask (Verified)` is a CURRENT-STATE field — overwrite it freely whenever a
     newer run verifies a different published ask, and re-stamp `Listing Ask Verified On`.
     The stamp is what makes the figure trustworthy; a value without a fresh date is a
@@ -694,18 +1524,17 @@ STEP 6 — EMAIL DIGEST
 Send TO ggoldberg@oxfordra.net ONLY — per the 2026-05-15 routing directive, re-ratified 2026-06-10: only the Daily Brief cc's egoldberg.
 Email send path (per ORA standing rule — COM is PRIMARY):
   PRIMARY — Outlook COM via the shared helper. Write the HTML body to a temp file, then:
-    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "<temp>.html" -BodyFormat html
+    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -BodyFile "<temp>.html" -BodyFormat html -DedupTaskId "ora-deal-sourcing-scan" -DedupPeriodKey "<run date yyyy-MM-dd>"
     Exit 0 = sent (appended to _shared\send-log.txt). The helper uses the signed-in
     desktop Outlook profile — no OAuth/token. (When run inside the Bash tool, read the
-    send-log "[OK] Sent" line to confirm; a trailing $LASTEXITCODE echo may report a
+    send-log "[OK] Sent" (or "[OK] DEDUP-SKIP") line to confirm; a trailing $LASTEXITCODE echo may report a
     shell error that is NOT the helper's exit code.)
-  NO send fallback (Composio removed 2026-06-11). On a non-zero COM exit: retry once; if it
-    still fails, prefix the Notion Deal Sourcing Log digest title with ⚠️ [EMAIL FAILED] and
+  NO send fallback (Composio removed 2026-06-11). Contract mode (R-05): the helper dedups on task id + period + subject before Send() and itself retries exit 2/4 once, so the caller NEVER retries any exit code. <run date yyyy-MM-dd> = the date part of the run date computed once at run start (the same value used in the subject). On exit 1, 3 or 5: do NOT retry; flag it loudly in the run summary. On exit 6 (send state unknown — the message MAY have gone out; includes DEDUP-BLOCK/QUARANTINE and the fail-closed DEDUP-* refusals): do NOT retry and never resend; flag it loudly in the run summary for a human to check Sent Items, per rules.md §2. On any failed send, prefix the Notion Deal Sourcing Log digest title with ⚠️ [EMAIL FAILED] and
     log the failure — do NOT halt. The automation-health-monitor producer-beacon check surfaces
     the silent send to Gabriel.
   Outlook only — never Gmail; never route to Composio (gone) or Rube (shut down).
-Subject: "ORA Deal-Sourcing Scan — [date] — [N] pursue / [P] pending price / [M] flagged".
-Count T1 PURSUE and T1-PENDING-PRICE SEPARATELY in the subject and everywhere else.
+Subject (FIXED per run day so the R-05 dedup key matches a same-day rerun; no counts or other run-dependent text): "ORA Deal-Sourcing Scan — [date]". [date] = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part only), reused verbatim in every title, subject and body.
+Count T1 PURSUE, T1-PENDING-VERIFY and T1-PENDING-PRICE SEPARATELY in the body and everywhere else; the body opens with the counts line "[N] pursue / [V] pending verify / [P] pending price / [M] flagged" (counts never go in the subject).
 Body order:
   (1) PRICE CUT / RE-LIST flags first — the strongest motivation signals. Read them
       off the `Price Delta vs First Ask` formula; give prior ask, new ask, and %.
@@ -714,18 +1543,64 @@ Body order:
   (2) T1 PURSUE — gate-cleared AND priced. These are the only deals that earn an OM
       request. Address, metro, functional SF, ask, functional $/SF, the basis
       discount vs the [EST] benchmark, score, pre-mortem, URL.
+  (2b) T1-PENDING-VERIFY — clears the RCT floor but a v2.9 fact is unknown. For each: the
+      missing fact(s), the comp band if partial, and the decision rule ("decline if clear
+      <16 ft or ask > 0.85 x comp median = $X").
   (3) T1-PENDING-PRICE — on-doctrine but unpriced; the basis test could not be run.
       Action is REQUEST PRICE, nothing more. For each, give the ask ABOVE WHICH IT
       DIES, so the broker call carries its own decision rule. Group the calls by
       brokerage — one call often covers several listings.
   (4) T2 WATCH — including every FAIL-BASIS deal, with the price at which it WOULD
       clear. State plainly that a high score does not override a failed floor.
+  (4a) PORTFOLIO-FLAG — FOR GABRIEL (v2.12): every Amendment H portfolio carrying a
+      `PORTFOLIO-FLAG` this run, one line each: title, building count, total ask, the cause
+      (>5 buildings / >$15M / which building fails which rule / addresses unverified), current
+      tier, and the carve-out decision needed. Never fold these into 7d FILTERED BY DESIGN.
+      A row whose `Gate Review` already records Gabriel's ruling (`Cleared-<date>` /
+      `Rejected-<date>`) at an unchanged price and building set is marked "ruled <date>"
+      here (and tiered per the RULING clause) instead of re-asked; re-ask only if price,
+      building set or status changed. When updating a flagged row, APPEND to Notes / Flags —
+      never rewrite or drop prior tokens or Gabriel's note.
   (5) One-line count of PASS/DECLINE logged.
   (6) Benchmark honesty note: which replacement-cost figure was used, that it is
       [EST] and PROVISIONAL, and any deal within ~3 ppt of the floor line.
-  (7) Coverage gaps, named explicitly — a submarket that returned nothing gets said
-      out loud, never silently omitted.
-  (8) Link to the Deal Sourcing Log.
+  (7) COVERAGE — four sub-sections (v2.8; replaces the single "coverage gaps" list, which
+      mixed real gaps with scope-by-design items):
+      7a RUN RECEIPTS — one line per mandatory step R1-R14 (roster under RUN ORDER; R14 is
+         written after the send, so the digest lists it as "pending — written last"):
+         DONE (with the key count/finding) · HANDED-OFF (to what, how many) · FAILED
+         (reason). R1 must state the capacity-gate finding and the rows it rests on. R8
+         must state the handoff count to ora-sourcing-construction-verify. A step with no
+         receipt line is a defect in the run, not a quiet week.
+      7b SOURCE COVERAGE MATRIX — eleven clusters (one row per target-markets.json cluster) × F1 Yardi / F2 Crexi+LoopNet / F3 required
+         broker-direct: each cell `N listings` · `0 (verified loaded)` · `blocked` ·
+         `JS shell — not read` · `not tried`. Compact table.
+      7c TRUE COVERAGE GAPS — anything that should have been read and was not: every
+         non-green matrix cell, any FAILED receipt, T1 rows without a photo check,
+         PROVISIONAL rows logged unresolved, carry-forward entries abandoned after 3 runs,
+         RE-LIST UNDETERMINABLE count, a submarket that returned nothing. Named, never
+         omitted.
+      7d FILTERED BY DESIGN — not gaps, listed so they are visibly deliberate: Madison nil
+         (possible but unlikely — ~15-18 industrial-for-sale addresses seen 2026-10-05 — and ONLY when
+         Madison's F1, F2 and F3 matrix cells are all loaded; a Madison nil with any unread family
+         is a §7c gap, not by-design), Montgomery County MD skipped (not first Tuesday — STEP 0d),
+         sub-scale exclusions (<10K SF or <$1M, single assets only — never a portfolio building,
+         v2.12: address + SF + ask, one line each — the
+         buy-box floor is unchanged; this list lets Gabriel override by hand), clear <12 ft
+         GATE-FLAGGED rows (v2.9 STEP 3A: address + clear + ask, one line each, for hand
+         override), and the own-assets-seen-on-market list.
+  (8) BROKER CAPTURE (added v2.7, 2026-09-19) — four counts, one short section:
+        - listings scanned this run;
+        - listings with a NAMED listing agent;
+        - count of `AGENT NOT CAPTURED`, broken out by reason (aggregator blocked /
+          detail page not loaded / no agent shown / OM-or-email with no agent named);
+        - NEW Broker Relationships rows created this run.
+      Also name here, when they occur: the 25-row cap being hit and the names not
+      created; any missing `Markets` select option (e.g. a market outside the 14 current options);
+      and any duplicate broker rows found while matching. This section is the audit
+      trail for the 56.9% broker-name gap this version exists to close — report the
+      counts even when they are bad, and never round them up.
+  (9) Link to the Deal Sourcing Log.
 If nothing new: send a brief "no new on-doctrine listings this week" note — a short,
 honest digest is the correct output of a quiet week.
 
