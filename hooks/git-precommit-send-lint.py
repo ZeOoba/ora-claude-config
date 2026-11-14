@@ -47,6 +47,7 @@ import tempfile
 LINT = "maintenance/_tests/test_send_contract_spec_lint.py"
 SPEC_RE = re.compile(r"^scheduled-tasks/([^/]+)/skill\.md$", re.I)
 FAIL_RE = re.compile(r"^\s*FAIL\s+(.*)$")
+SUMMARY_RE = re.compile(r"^send-contract spec lint: \d+ failure\(s\)\s*$", re.M)
 TIMEOUT_S = 20
 BLOCK = 10   # the only exit code the shim treats as a block
 
@@ -128,12 +129,16 @@ def run():
                  if p and SPEC_RE.match(p)]
         git("checkout-index", f"--prefix={tmp}/", "--stdin", "-z",
             stdin="\0".join([LINT, *files]) + "\0")
-        env = dict(os.environ, HOME=tmp, USERPROFILE=tmp, PYTHONIOENCODING="utf-8")
+        env = dict(os.environ, HOME=tmp, USERPROFILE=tmp)   # -I ignores PYTHON* vars; the lint sets UTF-8 itself
         try:
             r = subprocess.run([sys.executable, "-I", os.path.join(tmp, *LINT.split("/"))],
                                capture_output=True, text=True, encoding="utf-8",
                                errors="replace", timeout=TIMEOUT_S, env=env, cwd=tmp)
-            out, crashed = r.stdout + r.stderr, r.returncode not in (0, 1)
+            out = r.stdout + r.stderr
+            # A finished lint always prints its summary line and exits 0 (clean) or 1
+            # (failures). An uncaught error ALSO exits 1, so the exit code alone cannot tell
+            # a crash from a finding (re-review 2026-11-14): no summary line = crashed.
+            crashed = r.returncode not in (0, 1) or not SUMMARY_RE.search(out)
         except subprocess.TimeoutExpired:
             out, crashed = "", True
         if crashed and lint_staged:
