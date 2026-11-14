@@ -512,6 +512,142 @@ except ael.MalformedEntryError:
     expect("insert_newest raises MalformedEntryError", True)
 
 
+# --- auto-commit after a successful append (2026-11-14) -----------------------------
+# A throwaway repo with its own empty hooks dir, so no real ORA hook runs here.
+import shutil as _sh
+import subprocess as _sp
+
+
+def _g(repo, *args):
+    return _sp.run(["git", "-C", repo, *args], capture_output=True, encoding="utf-8",
+                   errors="replace")
+
+
+def _make_repo(branch="live/primary-checkout"):
+    repo = tempfile.mkdtemp(prefix="ael_autocommit_")
+    hooks = os.path.join(repo, ".nohooks")
+    os.makedirs(hooks)
+    _g(repo, "init", "-q", "-b", branch)
+    for k, v in (("user.name", "t"), ("user.email", "t@example.invalid"),
+                 ("core.hooksPath", hooks), ("commit.gpgsign", "false"),
+                 ("core.autocrlf", "false")):
+        _g(repo, "config", k, v)
+    os.makedirs(os.path.join(repo, "memory"))
+    log = os.path.join(repo, "memory", "event_log.md")
+    with open(log, "w", encoding="utf-8", newline="\n") as f:
+        f.write(log_seed)
+    with open(os.path.join(repo, "other.md"), "w", encoding="utf-8") as f:
+        f.write("x\n")
+    _g(repo, "add", "-A")
+    _g(repo, "commit", "-q", "-m", "seed")
+    return repo, log
+
+
+def _entry_file(title):
+    fd, p = tempfile.mkstemp(suffix="_entry.md")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write("## 2026-11-14 — %s\n- d\n" % title)
+    return p
+
+
+def _count(repo):
+    return int(_g(repo, "rev-list", "--count", "HEAD").stdout.strip())
+
+
+_saved_env = {k: os.environ.pop(k, None) for k in (ael.AUTOCOMMIT_OFF_ENV,
+                                                    ael.AUTOCOMMIT_BRANCHES_ENV)}
+try:
+    # 1. commits the log only, on the landing branch, leaving other staged work alone
+    repo, log = _make_repo()
+    with open(os.path.join(repo, "other.md"), "w", encoding="utf-8") as f:
+        f.write("another session's staged edit\n")
+    _g(repo, "add", "other.md")
+    ep = _entry_file("autocommit one")
+    rc1 = ael.main(["--entry-file", ep, "--log", log])
+    shown = _g(repo, "show", "--name-only", "--format=%s", "HEAD").stdout
+    expect("autocommit: append exits 0", rc1 == 0, rc1)
+    expect("autocommit: one new commit", _count(repo) == 2, _count(repo))
+    expect("autocommit: commit holds only the log",
+           shown.strip().splitlines()[-1] == "memory/event_log.md", shown)
+    expect("autocommit: subject names the entry",
+           shown.startswith("memory(event_log): 2026-11-14 — autocommit one"), shown)
+    expect("autocommit: another session's staged file stays staged, uncommitted",
+           _g(repo, "diff", "--cached", "--name-only").stdout.strip() == "other.md")
+    expect("autocommit: log clean against HEAD afterwards",
+           _g(repo, "diff", "--quiet", "HEAD", "--", log).returncode == 0)
+    os.remove(ep)
+    _sh.rmtree(repo, ignore_errors=True)
+
+    # 2. --no-commit and the env switch both leave it uncommitted
+    for label, argv_extra, env in (("--no-commit", ["--no-commit"], None),
+                                   ("env off", [], "1")):
+        repo, log = _make_repo()
+        if env:
+            os.environ[ael.AUTOCOMMIT_OFF_ENV] = env
+        ep = _entry_file("off " + label)
+        rc2 = ael.main(["--entry-file", ep, "--log", log] + argv_extra)
+        os.environ.pop(ael.AUTOCOMMIT_OFF_ENV, None)
+        expect("autocommit %s: appended, not committed" % label,
+               rc2 == 0 and _count(repo) == 1
+               and _g(repo, "diff", "--quiet", "HEAD", "--", log).returncode == 1)
+        os.remove(ep)
+        _sh.rmtree(repo, ignore_errors=True)
+
+    # 3. not a landing branch / detached HEAD: skipped, append still exits 0
+    repo, log = _make_repo(branch="feat/something")
+    ep = _entry_file("feature branch")
+    expect("autocommit: feature branch skipped",
+           ael.main(["--entry-file", ep, "--log", log]) == 0 and _count(repo) == 1)
+    os.remove(ep)
+    _g(repo, "checkout", "-q", "--detach")
+    _g(repo, "checkout", "-q", "--", log)
+    ep = _entry_file("detached")
+    expect("autocommit: detached HEAD skipped",
+           ael.main(["--entry-file", ep, "--log", log]) == 0 and _count(repo) == 1)
+    os.remove(ep)
+    _sh.rmtree(repo, ignore_errors=True)
+
+    # 4. a held index.lock makes the commit fail: append still exits 0, nothing lost,
+    #    and the NEXT append's commit lands both entries
+    repo, log = _make_repo()
+    lock = os.path.join(repo, ".git", "index.lock")
+    open(lock, "w").close()
+    ep = _entry_file("locked one")
+    rc4 = ael.main(["--entry-file", ep, "--log", log])
+    expect("autocommit: index.lock held -> append exits 0, no commit",
+           rc4 == 0 and _count(repo) == 1, (rc4, _count(repo)))
+    os.remove(lock)
+    os.remove(ep)
+    ep = _entry_file("after the lock")
+    ael.main(["--entry-file", ep, "--log", log])
+    committed = _g(repo, "show", "HEAD:memory/event_log.md").stdout
+    expect("autocommit: next append lands both entries",
+           _count(repo) == 2 and "locked one" in committed and "after the lock" in committed)
+    os.remove(ep)
+    _sh.rmtree(repo, ignore_errors=True)
+
+    # 5. mid-merge: skipped
+    repo, log = _make_repo()
+    head = _g(repo, "rev-parse", "HEAD").stdout.strip()
+    with open(os.path.join(repo, ".git", "MERGE_HEAD"), "w") as f:
+        f.write(head + "\n")
+    ep = _entry_file("mid merge")
+    expect("autocommit: merge in progress skipped",
+           ael.main(["--entry-file", ep, "--log", log]) == 0 and _count(repo) == 1)
+    os.remove(ep)
+    _sh.rmtree(repo, ignore_errors=True)
+
+    # 6. temp log outside any repo: autocommit_log is a silent no-op
+    path = _make_temp_log(log_seed)
+    expect("autocommit: log outside a repo -> no commit, no raise",
+           ael.autocommit_log(path, "## 2026-11-14 — x") is False)
+    _cleanup(path)
+finally:
+    for k, v in _saved_env.items():
+        if v is not None:
+            os.environ[k] = v
+
+
 passed = sum(1 for ok, _ in results if ok)
 print("\nappend-event-log tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
