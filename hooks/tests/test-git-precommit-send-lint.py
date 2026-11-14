@@ -79,12 +79,12 @@ try:
     write(repo, "ora-bad-task", BAD)
     git(repo, "add", "-A")
     rc, out = run_hook(repo)
-    check("staged generic-retry spec -> blocked", rc == 1 and "BLOCKED" in out and "ora-bad-task" in out, (rc, out))
+    check("staged generic-retry spec -> blocked", rc == 10 and "BLOCKED" in out and "ora-bad-task" in out, (rc, out))
 
     # 3. the index is what counts: fix the working copy without staging -> still blocked
     write(repo, "ora-bad-task", GOOD)
     rc, out = run_hook(repo)
-    check("good working copy, bad staged copy -> still blocked", rc == 1, (rc, out))
+    check("good working copy, bad staged copy -> still blocked", rc == 10, (rc, out))
     git(repo, "add", "-A")
     rc, out = run_hook(repo)
     check("fixed and staged -> passes", rc == 0, (rc, out))
@@ -117,6 +117,76 @@ try:
     check("whole-word task match", block == [] and len(other) == 1, (block, other))
     block, other = hook.blocking_failures("  FAIL  anything\n", set(), True)
     check("lint script staged -> every FAIL blocks", len(block) == 1, (block, other))
+
+    # 7. deletes and renames count as staged specs (both names of a rename)
+    rows = [("D", "scheduled-tasks/ora-gone/SKILL.md"),
+            ("R", "scheduled-tasks/ora-old/SKILL.md", "scheduled-tasks/ora-new/SKILL.md"),
+            ("M", "scheduled-tasks/ora-case/Skill.md"), ("M", "notes.md")]
+    check("deleted, renamed (both names) and case-variant specs are staged tasks",
+          hook.staged_tasks(rows) == {"ora-gone", "ora-old", "ora-new", "ora-case"}, hook.staged_tasks(rows))
+
+    # 8. through REAL `git commit` with the shim installed (review finding 8)
+    SHIM = os.path.join(REPO, "hooks", "precommit-shim.sh")
+    repo = make_repo(); repos.append(repo)
+    hooks_dir = os.path.join(repo, ".nohooks")
+    with open(SHIM, encoding="utf-8") as f:
+        shim = f.read().replace("\r\n", "\n")
+    with open(os.path.join(hooks_dir, "pre-commit"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(shim)
+    os.chmod(os.path.join(hooks_dir, "pre-commit"), 0o755)
+
+    def commit(*a):
+        return git(repo, "commit", "-q", *a)
+
+    write(repo, "ora-bad-task", BAD)
+    git(repo, "add", "-A")
+    r = commit("-m", "bad")
+    check("real commit of a bad staged spec is blocked", r.returncode != 0 and "BLOCKED" in r.stderr,
+          (r.returncode, r.stderr))
+    with open(os.path.join(repo, "event_log.md"), "w") as f:
+        f.write("entry\n")
+    git(repo, "add", "event_log.md")
+    r = commit("-m", "log", "--", "event_log.md")
+    check("pathspec event_log commit is not blocked by a bad spec staged elsewhere", r.returncode == 0,
+          (r.returncode, r.stderr))
+    git(repo, "reset", "-q", "--", "scheduled-tasks")
+    write(repo, "ora-bad-task", GOOD)
+    git(repo, "add", "-A")
+    commit("-m", "good")
+    write(repo, "ora-bad-task", BAD)
+    r = commit("-a", "-m", "regress via -a")
+    check("commit -a of a bad working-tree spec is blocked", r.returncode != 0, (r.returncode, r.stderr))
+    git(repo, "checkout", "-q", "--", ".")
+
+    # 9. the shim is fail-open: a crashing or missing hook never blocks; only exit 1 does
+    hook_in_repo = os.path.join(repo, "hooks", os.path.basename(HOOK))
+    real = open(hook_in_repo, encoding="utf-8").read()
+    with open(os.path.join(repo, "notes2.md"), "w") as f:
+        f.write("y\n")
+    git(repo, "add", "notes2.md")
+    for label, body in (("crashing hook (exit 2)", "import sys; sys.exit(2)\n"),
+                        ("raising hook (exit 1)", "raise SystemExit('boom')\n"),
+                        ("syntax error in hook", "def broken(:\n")):
+        with open(hook_in_repo, "w", encoding="utf-8") as f:
+            f.write(body)
+        r = git(repo, "commit", "-q", "--dry-run", "-m", "x")
+        r = commit("-m", label, "--", "notes2.md") if os.path.exists(os.path.join(repo, "notes2.md")) else r
+        check(f"shim fail-open: {label} does not block", r.returncode == 0, (r.returncode, r.stderr))
+        with open(os.path.join(repo, "notes2.md"), "a") as f:
+            f.write("z\n")
+        git(repo, "add", "notes2.md")
+    os.remove(hook_in_repo)
+    r = commit("-m", "hook missing", "--", "notes2.md")
+    check("shim fail-open: missing hook file does not block", r.returncode == 0, (r.returncode, r.stderr))
+    with open(hook_in_repo, "w", encoding="utf-8") as f:
+        f.write("import sys; sys.exit(10)\n")
+    with open(os.path.join(repo, "notes2.md"), "a") as f:
+        f.write("w\n")
+    git(repo, "add", "notes2.md")
+    r = commit("-m", "deliberate block", "--", "notes2.md")
+    check("shim passes a deliberate exit 10 through as a block", r.returncode != 0, (r.returncode, r.stderr))
+    with open(hook_in_repo, "w", encoding="utf-8") as f:
+        f.write(real)
 finally:
     for r in repos:
         shutil.rmtree(r, ignore_errors=True)
