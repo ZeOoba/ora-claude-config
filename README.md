@@ -497,6 +497,10 @@ be verified from this repo:
 - `skills/` is intentionally small. Cross-check `docs/system-inventory.md` and
   `ZeOoba/ora-skills` for the catalog.
 - `docs/system-inventory.md` is only as current as its last `ora-weekly-hygiene` run.
+- The fleet-floor tripwires live in one place: `maintenance/_shared/scheduler-stores.json`
+  (`fleetFloors`). `fleet-deadman.yml` reads them from there at run time (since 2026-11-05)
+  and fails closed if it cannot; `maintenance/test-fleet-deadman-workflow.py` pins that
+  parity. Its alarms open one GitHub issue per failure class (`FLEET DEAD-MAN [<class>]: ...`).
 - The Cowork fleet's specs are outside this repo (OneDrive versioning only).
 - Some older docs and file headers still describe this repository as private; it is public as
   of 2026-11-10.

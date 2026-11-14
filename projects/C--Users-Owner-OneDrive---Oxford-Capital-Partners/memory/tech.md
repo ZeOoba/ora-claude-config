@@ -124,7 +124,9 @@ The old VERDICT logic flagged ATTENTION on ANY never-ran task, ANY expired one-t
 - ORA PM Crons | state=retired | crit=no | exit1-ok=no | since=2026-08-16 | superseded-by=ora-pm-daily-crons | note=OI-162; its SKILL.md says do not re-enable; last result 0x8007042B is the 08-16 kill, not a live failure
 <!--END-WINDOWS-TASK-ROSTER-->
 
-## 3i. Self-hosted GitHub Actions runners (documented 2026-10-28; /insights: runners went offline after sleep)
+## 3i. Self-hosted GitHub Actions runners — DECOMMISSIONED (2026-11-09 Gabriel ruling)
+
+**Current state (verified 2026-11-09):** all four runners were unregistered 2026-11-02 ~18:40Z (`.runner`/credentials removed; 0 runners on every ZeOoba repo); `CI_RUNNER` is unset on every repo, so all CI runs GitHub-hosted. Gabriel made AAOS, Website, ora-skills, ora-pm, oxford-command-center and ora-claude-config PUBLIC for free hosted minutes and said "stop running self-hosted runners" — do not re-register or re-propose. The four `ORA-Runner-*` scheduled tasks are Disabled; their XML is exported under `maintenance/_archive/2026-11-09_runner-tasks/`. Runner dirs left on disk, unused. Private repos (BrainVault, Internal-Accounting-App, ora-county-sales-monitor, ora-cowork-watchdog) remain billing-blocked for hosted Actions until the payment method is fixed. History below is reference only.
 
 Four runners on LAPTOP-CSHSCBE6, all label `ora-ci`; none is a Windows service (`Get-Service actions.runner.*` is empty). Each listener runs `run.cmd` under Task Scheduler as user Owner. Not in the 3h roster on purpose (that block is machine-read; these are not ORA* automation).
 

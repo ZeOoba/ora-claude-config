@@ -31,7 +31,7 @@ pts + add 12-mo downtime carry.
    `Investment Candidates -- 2026\`) — preserve formulas elsewhere; if the
    workbook is locked/dehydrated, write a dated sidecar
    YYYYMMDD_ORA_BearMode-States_v01.md instead and flag it.
-5. Post the trigger table to Notion Ops Hub (32b6ecd8) as a dated block.
+5. Post the trigger table to Notion Ops Hub (32b6ecd8) as a dated block. Date = the run date computed once at run start (`date '+%A %Y-%m-%d'`; date part in every date slot, weekday only where one is named), reused verbatim here, in any step 4 sidecar name and in the email.
 6. Email ONLY on a state CHANGE (any market flipping ON or OFF) via the SOLE send path
    `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` (Composio removed
    2026-06-11, no fallback connector exists; on a non-zero COM exit retry once, then flag)

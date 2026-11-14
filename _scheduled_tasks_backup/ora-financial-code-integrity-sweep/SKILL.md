@@ -1,6 +1,6 @@
 ---
 name: ora-financial-code-integrity-sweep
-description: Weekly (Mon 1:30 PM ET) adversarial integrity sweep of financial-decision code in oxford-command-center — runs the refute-financial-change workflow against the last 7 days of warehouse/scoring/NOI/capital-config commits; Notion completion row always, emails ggoldberg only on a real defect or tooling failure. v1.0 2026-06-13. Restored 2026-07-07. Refuter tier raised opus->fable with opus fallback per-lens, 2026-07-10 (CLAUDE.md governor/financial-code floor). Path scope rebuilt as directory globs (file-list missed the debt module) + rate-limit retry subcase 8a, 2026-07-24. [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: Weekly (Mon 1:30 PM ET) adversarial integrity sweep of financial-decision code in oxford-command-center — runs the refute-financial-change workflow against the last 7 days of warehouse/scoring/NOI/capital-config commits; Notion completion row always, emails ggoldberg only on a real defect or tooling failure. v1.0 2026-06-13. Restored 2026-07-07. Refuter tier raised opus->fable with opus fallback per-lens, 2026-07-10 (CLAUDE.md governor/financial-code floor). Path scope rebuilt as directory globs (file-list missed the debt module) + rate-limit retry subcase 8a, 2026-07-24. [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
 ORA Financial-Code Integrity Sweep — weekly adversarial review of capital-allocation code. Self-contained; you start fresh with no memory of prior runs. Surface: Claude Code (CC/MCP fleet). This is a READ-ONLY review task — do not edit, stage, commit, or push anything in the repo.
@@ -31,11 +31,17 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
                          balances (arBalances[], ~$204,788 on its first live run) that feed the
                          daily brief's collections alerts. NOT a warehouse/workbook file, which is
                          exactly why it was missed until this run's pre-flight scope check caught it.)
-  data/snapshots/portfolio.json, data/ar/**, docs/templates/property-tax-assessments*.csv,
-  scripts/import-assessments.ts
+  data/snapshots/portfolio.json, data/ar/**, data/ar-mapping-cache.json, data/overlay.json,
+  docs/templates/property-tax-assessments*.csv, scripts/import-assessments.ts
                         (added 2026-08-17 — see the lesson below. These are DATA artifacts, not
                          code, but they carry NOI/AR/tax figures directly and this task's own scope
-                         had never named a single data file before this.)
+                         had never named a single data file before this. data/ar-mapping-cache.json
+                         and data/overlay.json added 2026-09-22 — 5TH RECURRENCE of this exact
+                         failure mode: both are top-level data/ files, not under data/ar/**, so they
+                         sat off this list for over a month after the 2026-08-17 lesson that should
+                         have caught them. A confirmed SKIP ruling or a dangling lease-id mapping in
+                         ar-mapping-cache.json is as consequential as any figure named above — it
+                         silently governs which delinquency rows auto-attribute.)
   scripts/**, server/index.ts, server/brief/run.ts
                         (added 2026-08-24 — see the lesson below. scripts/** is now IN SCOPE
                          WHOLESALE, not by individual filename: scripts/bake-warehouse.ts bakes
@@ -78,7 +84,7 @@ FINANCIAL-CODE PATHS (the review scope — only changes touching these matter):
   the scoped log is non-empty.)
 
 STEPS:
-1. PRE-FLIGHT: confirm the repo exists and git works. If not, write a Notion completion row noting the failure and STOP (do not fabricate a result).
+1. PRE-FLIGHT: confirm the repo exists and git works. If not, write a Notion completion row (see step 6's create guard) noting the failure and STOP (do not fabricate a result).
 2. SCOPE THE WINDOW: compute the review range. Run BOTH logs — the unscoped one is not optional:
      git log --since="7 days ago" --pretty=format:"%h %ad %s" --date=short
      git log --since="7 days ago" --pretty=format:"%h %ad %s" --date=short -- <financial paths above>
@@ -94,19 +100,19 @@ STEPS:
    find, and report the scope defect itself as a finding — the list is a cache of where financial
    code lived when it was written, never an authority on where it lives now.
 3. GUARD — NO-CHANGE WEEK: if NO commits in the window touched financial-code paths AND step 2a
-   found nothing outside the list, do NOT run the workflow. Write a Notion completion row "CLEAN — no
+   found nothing outside the list, do NOT run the workflow. Write a Notion completion row (see step 6's create guard) "CLEAN — no
    financial-code changes in the trailing 7 days" with the date, and STOP. Do NOT send an email on a
    clean week (the Notion row + ora-automation-health-monitor cover liveness). A "clean" row is a
    POSITIVE claim that the window was reviewed — never write one to record that the scope matched
    nothing.
 4. RUN THE ADVERSARIAL WORKFLOW: if there ARE financial-code changes, invoke the saved refute workflow via the Workflow tool:
      Workflow({ scriptPath: "C:\\Users\\Owner\\oxford-command-center\\.claude\\workflows\\refute-financial-change.js", args: { changeSet: "<PROSE: list the commits (hash + subject), the changed files, and the diffstat from step 2. Tell the refuters to review the COMMITTED diff for the exact range with: git diff <oldest-sha>^..HEAD -- <the financial paths>. Summarize what each changed file does.>", greenContext: "These changes already passed the gate when merged. Probe the EDGES the test corpus does not exercise — a green gate does not prove correctness on unencountered data. Hunt for: governor-invariant bypass (DSCR<1.25 / LTV>0.40 ever persisted), NOI sign/double-count, basis-mixing, non-total-order comparators, null/empty-cohort/singleton gaps, atomicity holes." } })
-   The workflow runs 3 fable refuters (correctness · determinism · edges), each falling back to opus per-lens if Fable is unavailable, and returns { verdicts, anyRealDefect, worstSeverityRank, succeeded, allFailed }.
-5. INTERPRET: if allFailed=true, treat this as a TOOLING ERROR (every lens failed on both Fable and the opus fallback) — do NOT report CLEAN, skip to step 8. Otherwise collect every verdict where foundRealDefect=true. For each, capture lens, title, severity, concreteTrigger, detail, suggestedFix. If succeeded < 3, note the partial coverage (which lens(es) failed) in the Notion row even when the covered lenses are clean — a partial sweep is not the same claim as a full one.
-6. NOTION COMPLETION ROW (ALWAYS): write a row to the Ops Hub (Notion collection 32b6ecd8) recording: date, commits reviewed (count + hashes), result (CLEAN / N DEFECTS FOUND / TOOLING ERROR / PARTIAL — N of 3 lenses), worst severity, and a one-line summary. Never fabricate — if a step failed, say so in the row.
-7. EMAIL (ONLY on a real defect OR a tooling failure): send via Outlook COM — the SOLE send path:
+   The workflow runs its default lens set on `opus` (Opus 5.5 floor; Fable retired 2026-10-05), retrying a failed lens once on opus, and returns { verdicts, anyRealDefect, worstSeverityRank, succeeded, allFailed, lensCount, clean } (`lensCount` = lenses run; `clean` = every lens succeeded AND none set foundRealDefect AND worstSeverityRank < 2 (medium). `worstSeverityRank` spans each lens's maxSeverity AND every finding's severity; ranks: none 0, low 1, medium 2, high 3, critical 4. An older workflow copy may not return `clean`/`lensCount`; if absent, derive them (an older copy also computes worstSeverityRank from maxSeverity only; recompute it from every findings[].severity so steps 4-6 agree): lensCount = number of lenses run, clean = succeeded === lensCount AND anyRealDefect=false AND worstSeverityRank < 2).
+5. INTERPRET: if allFailed=true, treat this as a TOOLING ERROR (every lens failed on both the first attempt and the opus retry) — do NOT report CLEAN, skip to step 8. Otherwise collect every verdict where foundRealDefect=true AND every finding of severity medium or higher in ANY verdict (a lens can set foundRealDefect=false yet report a medium+ finding — that run is NOT CLEAN; worstSeverityRank >= 2 with no foundRealDefect = "NOT CLEAN — medium+ finding(s)"). For each, capture lens, title, severity, concreteTrigger, detail, suggestedFix. If succeeded is below lensCount, note the partial coverage (which lens(es) failed) in the Notion row even when the covered lenses are clean — a partial sweep is not the same claim as a full one.
+6. NOTION COMPLETION ROW (ALWAYS): write a row to the Ops Hub (Notion parent page 32b6ecd8-9e59-81f2-b329-df3fd0e25062, full UUID) — this guard covers every completion-row write in this file (steps 1, 3, 8 too): if the create errors or returns a grace/quota notice, look for it — `notion-fetch` the parent for a child carrying this run's date, then search by that date + task name (search lags: a miss alone is not proof) — a match created at/after the create call is this run's row, use it; never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the row is UNVERIFIED — say so in the run output and send the step-7 email as a TOOLING ERROR. Quota errors → `notion-quota-fallback` skill. The row records: date (the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part, reused verbatim), commits reviewed (count + hashes), result (CLEAN only when `clean`=true / N DEFECTS FOUND / NOT CLEAN — medium+ finding(s) / TOOLING ERROR / PARTIAL — N of lensCount lenses), worst severity, and a one-line summary. Never fabricate — if a step failed, say so in the row.
+7. EMAIL (ONLY on a real defect, a NOT CLEAN medium+ finding, OR a tooling failure): send via Outlook COM — the SOLE send path:
      powershell -NoProfile -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<subject>" -Body "<body>"
-   TO ggoldberg@oxfordra.net ONLY (never cc Eric — this is not the Daily Brief; never ze@). Subject: "ORA Financial-Code Integrity Sweep — N defect(s) found ([worst severity])" or "... — TOOLING ERROR". Body: per-defect block (file · lens · severity · concrete trigger · suggested fix) plus the reviewed commit list. On a non-zero exit from the send script: retry ONCE; if it still fails, flag loudly in the Notion completion row and continue — do NOT halt.
+   TO ggoldberg@oxfordra.net ONLY (never cc Eric — this is not the Daily Brief; never ze@). Subject: "ORA Financial-Code Integrity Sweep — N defect(s) found ([worst severity])", "... — NOT CLEAN: medium+ finding(s) ([worst severity])" or "... — TOOLING ERROR". Body: per-defect block (file · lens · severity · concrete trigger · suggested fix) plus the reviewed commit list. On exit 2 or 4 from the send script: retry ONCE; if it still fails, flag loudly in the Notion completion row and continue — do NOT halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 8. NEVER FABRICATE deal, tenant, or financial data. If the workflow cannot run (e.g. Workflow tool unavailable in this context), git is broken, or the workflow returns allFailed=true (every lens failed on both Fable and the opus fallback), record a TOOLING ERROR in the Notion row, email the error per step 7, and stop — do not invent a verdict.
    8a. RATE-LIMIT SUBCASE (added 2026-07-24 after a live occurrence: all 6 lens attempts failed
    with "You've hit your weekly limit · resets <time>"): when the per-agent failure messages show

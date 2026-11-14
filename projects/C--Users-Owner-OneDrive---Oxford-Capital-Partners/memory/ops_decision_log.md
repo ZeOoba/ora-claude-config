@@ -30,7 +30,7 @@ the overturn explicitly rather than silently replacing.
 - **T3 names no price.** Creative structures (1031 runway, IRC §453 carry-back, leaseback) deploy on the CALL only. This supersedes the 2026-06-15 creative-structures doc, which scoped them to a "T3 specific-offer letter." Because no letter carries a number, the whole ladder stays inside the generate-only carve-out with no per-letter approval.
 - **Dispatch: Gabriel hand-addresses everything**, ~50/wk (`--wave-cap 50` standing). He was offered a print-mail vendor and a hybrid and chose full hand-addressing, accepting ~3–5 hrs/wk indefinitely. **"200 qualified leads/month" = 200 letters dispatched**, not 200 net-new parcels.
 - **T2 call slice:** top 5–8/week by Screen Score (tiebreak P1 %). A universal call touch at 50 letters/wk would be ~48 calls/wk, which does not fit alongside addressing.
-- **Targeting:** all 10 canonical clusters incl. Louisville. Metro `Other` deliberately NOT ratified — it holds.
+- **Targeting:** all eleven canonical clusters — Louisville, and Chicago (Chicago–Greater Cook County IL) added by **OR-2026-002** (Gabriel in-turn 2026-11-09: "Add Cook, letters after screen"; Chicago letters wait for a Cook parcel screen in the master with Metro = `Chicago` and `Chicago` in `owner_outreach_weekly.py` METROS). Metro `Other` deliberately NOT ratified — it holds.
 Any change to template text, metros, cadence, wave cap, signature, or channel is a re-ratification trigger; template SHA-256s hard-fail the pack build.
 
 ### 2026-08-16 — Does a malformed date in mail-log.csv hold the parcel, or mail it?

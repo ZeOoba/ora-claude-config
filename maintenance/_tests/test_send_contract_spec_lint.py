@@ -165,9 +165,8 @@ WAIVED_PENDING_LANDING = frozenset()
 # name -> (sha256[:16] of the ONE reviewed explicit-5/6 unit's normalized text, why it is not a send-exit
 # retry). Any edit to that unit (or a new retry joined into it) changes the hash and fails L1.
 REVIEWED_NOT_SEND_EXIT = {
-    "ora-aaos-expire-leases": ("350b7b59f0cee2e9",
-                               "its 'exit 5 (EVENT COMMIT FAILURE): retry' is the aaos tool's own exit "
-                               "code; the retry targets that tool, and the email is sent once after it"),
+    # ora-aaos-expire-leases ("350b7b59f0cee2e9") removed on the live branch: its spec was archived to
+    # scheduled-tasks/_archive_2026-11-05_aaos-frozen/ by ede9cbf4 (retired AAOS task), so the entry is stale.
 }
 
 failures = []

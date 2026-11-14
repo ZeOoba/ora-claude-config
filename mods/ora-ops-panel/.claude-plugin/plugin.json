@@ -1,0 +1,6 @@
+{
+  "name": "ora-ops-panel",
+  "version": "0.1.0",
+  "description": "Pinned pane beside every Code session: dual-fleet scheduled-task health plus the open decisions waiting on Gabriel (this session, other sessions, and the open-items tracker).",
+  "types": "./types/index.d.ts"
+}

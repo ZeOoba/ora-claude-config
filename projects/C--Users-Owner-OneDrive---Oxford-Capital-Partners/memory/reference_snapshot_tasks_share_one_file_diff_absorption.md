@@ -1,12 +1,14 @@
 ---
 name: reference-snapshot-tasks-share-one-file-diff-absorption
-description: "ora-lease-snapshot-refresh and ora-cc-snapshot-refresh write the SAME tracked data/snapshots/portfolio.json — whichever runs after the workbook moves captures the diff and commits; the other then finds the file already matching HEAD and correctly commits nothing. A long commit gap is expected behavior, not a broken task."
+description: "PRE-2026-11-12 HISTORY: the two snapshot-refresh tasks used to commit the same tracked portfolio.json and absorb each other's diffs. Since v2.0 (OCC PR #565) the file is untracked and refreshed in place; there are no snapshot commits to look for."
 metadata: 
   node_type: memory
   type: reference
   originSessionId: e0f8485e-e687-437e-8cfa-2b85164df03d
   modified: 2026-08-12T21:00:30.414Z
 ---
+
+**Superseded 2026-11-12.** oxford-command-center PR #565 untracked `data/snapshots/portfolio.json`; both tasks are now v2.0 and refresh it in place with no commit, sharing a lock (`data/snapshots/.refresh.lock`) and a pre-run backup baseline. Diagnose a quiet task from its run transcripts and `data/snapshots/_prev/` backups, not from git. Current facts: [[reference_command_center_snapshot_is_tracked_not_ignored]]. The rest of this file describes the pre-#565 behavior.
 
 Both `ora-lease-snapshot-refresh` (weekday `40 7 * * 1-5`) and `ora-cc-snapshot-refresh` (weekly `15 6 * * 1`) regenerate and commit the **same** git-tracked file, `data/snapshots/portfolio.json` in `oxford-command-center`. Both run the same material-change gate, which ignores `meta.generatedAt` and restores the file rather than committing timestamp-only churn.
 

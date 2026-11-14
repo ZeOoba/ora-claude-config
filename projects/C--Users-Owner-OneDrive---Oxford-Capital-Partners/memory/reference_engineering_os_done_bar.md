@@ -33,5 +33,12 @@ Evidence behind "keep, don't merge" (2026-10-01): the Workflow has 56 persisted 
 
 Related: [[reference_agent_skills_repo_intake_2026-08-13]] (the intake that surfaced this gap) · [[reference_claude_md_word_budget_is_a_floor]] · [[reference_refute_cross_model_escalation]].
 
+## Stop-when-unused (D1–D3, added 2026-11-05)
+Source: maintenance-reduction bundle 1 (`docs/superpowers/specs/2026-11-05-maintenance-reduction-bundle-1-design.md`). Five repo surveys found most maintenance load is sessions generating follow-up work for each other, not content volume.
+
+- **D1 — Follow-ups ride the parent PR.** Fixes from a review round, QC pass or "residuals" commit to the same branch as the change they fix. Never open a separate PR for them. If the parent has already merged, the follow-up PR title must name it (`follow-up to #N`).
+- **D2 — Usage evidence before maintenance.** Before amending, re-tuning the cadence of, or adding tests/docs to a system, scheduled task or skill, cite usage from the last 30 days (task runs, seam traffic, invocations, page reads). With none, propose freeze or retirement instead. Exempt: security and confidentiality fixes, and explicit requests from Gabriel.
+- **D3 — Wording-only edits wait for the next real change.** A wording-only or changelog-only edit to a SKILL.md or task spec gets no version bump or PR of its own. It ships with the next behavior change. Exempt: factual errors in doctrine, and anything a gate blocks.
+
 ## Non-trivial technical recommendations (moved from CLAUDE.md 2026-10-30)
 Structure: current state → evidence → root cause → alternatives → ROI/confidence → risk → rollback — evidence over preference.
