@@ -744,6 +744,88 @@ def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT,
         pass  # best-effort only -- must never affect the append's own success
 
 
+AUTOCOMMIT_BRANCHES_ENV = "ORA_EVENT_LOG_COMMIT_BRANCHES"
+AUTOCOMMIT_BRANCHES_DEFAULT = ("live/primary-checkout", "main")
+AUTOCOMMIT_OFF_ENV = "ORA_EVENT_LOG_NO_AUTOCOMMIT"
+
+
+def _git_out(repo, *args, timeout=10):
+    p = subprocess.run(["git", "-C", repo, *args], capture_output=True,
+                       encoding="utf-8", errors="replace", timeout=timeout)
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def autocommit_log(log, header, branches=None):
+    """Commit the log by PATHSPEC right after a successful append (2026-11-14).
+
+    Before this, appends sat uncommitted until some session landed them by hand
+    ("memory(event_log): land the settled ... append"), so the log's history depended on
+    whoever touched the repo next -- warn_if_uncommitted_backlog() only nudged.
+
+    Commits ONLY the log (`git commit -- <log>` takes the working-tree file and ignores
+    whatever else other sessions have staged), runs the repo's hooks (no --no-verify),
+    and never pushes. It lands every settled append in the file, other sessions'
+    included -- that is the intent. Skipped, with a one-line note, when the log is
+    untracked or outside a repo (tests' temp logs), HEAD is detached, a merge / rebase /
+    cherry-pick / revert is in progress, or the branch is not an allowed landing branch
+    (default live/primary-checkout or main; override with ORA_EVENT_LOG_COMMIT_BRANCHES,
+    comma-separated). Off entirely with ORA_EVENT_LOG_NO_AUTOCOMMIT=1 or --no-commit.
+
+    NEVER affects the append's exit code: any failure (index.lock held by a concurrent
+    commit, a hook refusing) prints a note to stderr and returns False; the next append's
+    commit picks the entry up. Returns True only when a commit was made."""
+    try:
+        log = os.path.abspath(log)
+        repo_dir = os.path.dirname(log)
+        rc, top, _ = _git_out(repo_dir, "rev-parse", "--show-toplevel")
+        if rc != 0 or not top:
+            return False  # not in a repo: silent, as for tests' temp logs
+        rc, _, _ = _git_out(top, "ls-files", "--error-unmatch", "--", log)
+        if rc != 0:
+            return False  # untracked log: nothing to land
+        rc, branch, _ = _git_out(top, "symbolic-ref", "--quiet", "--short", "HEAD")
+        if rc != 0:
+            sys.stderr.write("event_log not auto-committed: HEAD is detached.\n")
+            return False
+        allowed = branches
+        if allowed is None:
+            env = os.environ.get(AUTOCOMMIT_BRANCHES_ENV, "")
+            allowed = tuple(b.strip() for b in env.split(",") if b.strip()) \
+                or AUTOCOMMIT_BRANCHES_DEFAULT
+        if branch not in allowed:
+            sys.stderr.write("event_log not auto-committed: branch %r is not a landing "
+                             "branch (%s).\n" % (branch, ", ".join(allowed)))
+            return False
+        for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD",
+                       "rebase-merge", "rebase-apply"):
+            rc, path, _ = _git_out(top, "rev-parse", "--git-path", marker)
+            if rc == 0 and path and os.path.exists(os.path.join(top, path)
+                                                   if not os.path.isabs(path) else path):
+                sys.stderr.write("event_log not auto-committed: a %s is in progress.\n"
+                                 % marker)
+                return False
+        rc, _, _ = _git_out(top, "diff", "--quiet", "HEAD", "--", log)
+        if rc == 0:
+            return False  # nothing uncommitted (already landed by someone else)
+        title = re.sub(r"^##\s*", "", header).strip()
+        msg = ("memory(event_log): %s\n\nAuto-committed by maintenance/append-event-log.py "
+               "after a successful append; lands every settled append in the file." % title)
+        rc, _, err = _git_out(top, "commit", "-q", "-m", msg, "--", log, timeout=120)
+        if rc != 0:
+            sys.stderr.write("event_log appended but NOT committed (%s); the next append "
+                             "will pick it up.\n" % (err.splitlines()[-1] if err else "git commit failed"))
+            return False
+        rc, sha, _ = _git_out(top, "rev-parse", "--short", "HEAD")
+        print("committed event_log: %s on %s" % (sha, branch))
+        return True
+    except Exception as e:  # best-effort only -- must never affect the append's own success
+        try:
+            sys.stderr.write("event_log auto-commit skipped: %s\n" % e)
+        except Exception:
+            pass
+        return False
+
+
 def main(argv=None):
     # Windows consoles default to cp1252; entries routinely contain em-dashes / arrows / box
     # glyphs. Reconfigure the std streams to UTF-8 so the success + diagnostic prints never raise
@@ -760,6 +842,8 @@ def main(argv=None):
     ap.add_argument("--allow-duplicate", action="store_true",
                     help="append even if a content-identical entry already exists "
                          "(default: skip it and exit 0)")
+    ap.add_argument("--no-commit", action="store_true",
+                    help="append only; do not auto-commit the log (see autocommit_log)")
     a = ap.parse_args(argv)
     if a.entry_file:
         with open(a.entry_file, encoding="utf-8") as f:
@@ -844,10 +928,14 @@ def main(argv=None):
             # still saw retries with only _atomic_insert/_inplace_insert guarded.
             with _log_lock(a.log):
                 with open(a.log, encoding="utf-8") as f:
-                    if header in f.read():
-                        print("appended: %s" % header)
-                        warn_if_uncommitted_backlog(a.log)
-                        return 0
+                    landed = header in f.read()
+            if landed:
+                print("appended: %s" % header)
+                # Outside the log lock: the commit reads the file and can take seconds.
+                if not (a.no_commit or os.environ.get(AUTOCOMMIT_OFF_ENV) == "1"):
+                    autocommit_log(a.log, header)
+                warn_if_uncommitted_backlog(a.log)
+                return 0
         except MalformedEntryError:
             raise  # NOT ValueError: a UnicodeDecodeError reading the log must retry + spool
         except Exception as e:
