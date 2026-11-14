@@ -35,7 +35,7 @@ field is recorded in `county-endpoints.md` but no run has scored hold off it.
 | Richmond VA | Hanover | **NO** | no use code, no SF, no sale date/price — deed book/page only | VERIFIED absent |
 | Des Moines IA | Polk | **YES — best in class** | inventory `transfer_th1` (current-owner deed date) + sales file 1987->current with `sale_date`, `instrument` (Deed/Contract), `seller`/`buyer`, and Iowa DOR `quality` arms-length classification | VERIFIED |
 | Des Moines IA | Dallas | **YEAR ONLY** | `Assessor/Sales` layers carry `SaleYear` + `Sale1..Sale4` prices — **no sale date, no parties**. Year granularity is enough for the curve (+/-1 yr moves <1 pt past year 10) but not for the nominal-transfer test. | VERIFIED |
-| Louisville KY | Jefferson | **UNKNOWN — never screened** | no section in `county-endpoints.md`; not among the nine ratified clusters | UNKNOWN |
+| Louisville KY | Jefferson | **UNKNOWN — never screened** | no section in `county-endpoints.md`; Louisville has been a ratified entry-phase cluster since 2026-08-05 (`target-markets.json`), but its county endpoints were never built | UNKNOWN |
 
 Three practical consequences: **(a)** Missouri and Kansas will never have a
 hold signal from public records — the >20% branch (drop the component) is their

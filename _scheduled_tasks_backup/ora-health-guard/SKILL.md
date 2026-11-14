@@ -1,6 +1,6 @@
 ---
 name: ora-health-guard
-description: Single sequential pre-morning health-guard session (05:15 ET, CC/MCP fleet): Block A) scheduled-task-integrity self-heal + wake-cause/power-sleep classification; Block B) Connector Pre-Flight + Morning Mirror (tier-4 daily-brief fallback, no clock deadline); Block C) probe suite (fleet-status, governor-drift, memory-integrity, confidentiality self-test, cc-verifier, setup-self-audit, connector-drift) into one consolidated email. Emails ggoldberg@oxfordra.net ONLY (2026-05-15 directive, no egoldberg cc) via the sole send-via-outlook.ps1 path; C.3 subject flips to [ACTION] on any probe FAIL, missed-cycle escalation, or am-brief Block B/C / rate-snapshot staleness (subject to drain/host-unavailable/ordering-precondition provisionality and the Notion-publish-degraded email-only rule — see body). Guarded against double-fire via block-sentinel.py + outlook-sent-probe.ps1 pre-send checks on all three blocks. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: claude-opus-5 observed | checked 2026-08-12 via live-run transcript canary]
+description: Single sequential pre-morning health-guard session (05:15 ET, CC/MCP fleet): Block A) scheduled-task-integrity self-heal + wake-cause/power-sleep classification; Block B) Connector Pre-Flight + Morning Mirror (tier-4 daily-brief fallback, no clock deadline); Block C) probe suite (fleet-status, governor-drift, memory-integrity, confidentiality self-test, cc-verifier, setup-self-audit, connector-drift) into one consolidated email. Emails ggoldberg@oxfordra.net ONLY (2026-05-15 directive, no egoldberg cc) via the sole send-via-outlook.ps1 path; C.3 subject flips to [ACTION] on any probe FAIL, missed-cycle escalation, or am-brief Block B/C / rate-snapshot staleness (subject to drain/host-unavailable/ordering-precondition provisionality and the Notion-publish-degraded email-only rule — see body). Guarded against double-fire via block-sentinel.py + outlook-sent-probe.ps1 pre-send checks on all three blocks. Full versioned changelog lives in the body of this file (migrated from frontmatter, class-n remediation 2026-08-17). [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
 RESTORATION NOTE (2026-07-09): This file was DEGRADED 2026-07-08 after the CC canonical file (a thin pointer-stub) lost its OneDrive target — `Documents\Claude\Scheduled\ora-health-guard\SKILL.md` was deleted outright (not archived) during the 2026-07-08 fleet reconciliation, confirmed absent from the active location and every archive folder checked (`_archive_2026-07-08_retired`, `_archive_2026-06-11_orphans`, `_archive_2026-06-09_retired`). A second mirror at `Claude_Workspace\00_Governance\Scheduled\ora-health-guard\SKILL.md` was itself only another redirect to the same deleted path.
@@ -50,7 +50,7 @@ This is a **guard** task, so the Phase-3 I6 rule applies: **EMIT proposals/repor
 ## SHARED MCP ROUTING (canonical — normalized 2026-06-03)
 
 The prior `8a611864` Composio wrapper is NOT connected; Rube (`d6315173`) is retired; the stale `outlook_icaco-sequel` alias is superseded — **never reference any of them. M365 Outlook only — no Gmail/Google Workspace.**
-- **Outlook email:** `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` — the SOLE automated send path (Composio removed 2026-06-11; no fallback connector exists; on a non-zero COM exit retry once, then fall to the B.4 last-resort local-log path — do not halt).
+- **Outlook email:** `C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1` — the SOLE automated send path (Composio removed 2026-06-11; no fallback connector exists; on COM exit 2 or 4 retry once, then fall to the B.4 last-resort local-log path — do not halt; on exit 5 or 6 do NOT retry and never resend (send state unknown — the message MAY have gone out), flag loudly in the run summary and the failure record named above).
 - **Notion:** native `mcp__c5f4869f-…__notion-*`.
 - **Recipients:** all Health-Guard emails go **to ggoldberg@oxfordra.net ONLY** (Eric removed per the 2026-05-15 directive; normalized here 2026-06-03 — the source preflight-guard and cc-verifier had cc'd egoldberg). The Daily Brief (in `ora-am-brief`) remains the only egoldberg-cc'd send.
 - **Python (for Block A engine + Block C probes):** use the full interpreter path `C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe` (bare `python`/`powershell` are NOT on PATH in scheduled sessions). Maintenance scripts live under `C:/Users/Owner/.claude/maintenance/`; hooks under `C:/Users/Owner/.claude/hooks/`.
@@ -66,7 +66,7 @@ The prior `8a611864` Composio wrapper is NOT connected; Rube (`d6315173`) is ret
 **Claim at the head of each block** (`--block blockA` / `blockB` / `blockC`), before any of that block's work:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45
 ```
 
 - **Exit 0** → claimed; run the block normally.
@@ -82,7 +82,7 @@ python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --
 
 **If a `complete` or `fail` returns exit 12, the close did NOT land — the helper wrote nothing.** Two reachable causes, and neither is a non-issue: the claim itself never persisted (`claim` fails open with `"persisted": false` when the state write errors, so there is no record to close), or the `run_id` differs between the claim call and the close call. Either way the block stays `IN_PROGRESS` and will stand down every fire until the TTL expires. Report it as **FAIL-OPEN (guard degraded)** with the helper's JSON verbatim. **Do not retry with `--adopt`** unless the Sent-Items probe independently returned exit 10 — `--adopt` fabricates a COMPLETE with no prior claim, and doing that on a block that never actually ran would suppress every later fire that ET date, silently, reported as a NORMAL skip.
 
-**Derive `run_id` ONCE, at the very start of the session, and reuse that exact string for every claim and every close.** Any stable per-run value works (the scheduler's run identifier, or an ET timestamp such as `ora-health-guard-20260811T0515`) — what matters is that it does not change between a block's claim and its close. Minting a fresh id per call site makes every close return 12 while looking superficially fine.
+**Compute the run date ONCE, too:** `date '+%A %Y-%m-%d'` at session start (date part in every date slot; weekday only where one is named); reuse that exact value in every subject, probe stem, beacon and body date in this file (a brief once mixed Tuesday/Wednesday). **Derive `run_id` ONCE, at the very start of the session, and reuse that exact string for every claim and every close.** Any stable per-run value works (the scheduler's run identifier, or an ET timestamp such as `ora-health-guard-20260811T0515`) — what matters is that it does not change between a block's claim and its close. Minting a fresh id per call site makes every close return 12 while looking superficially fine.
 
 **Do NOT "fix" a double-fire by retiming this task's cron.** The burst is documented, intended fleet-wide behavior — and this task exists precisely to observe it. The guard belongs at the block entry.
 
@@ -95,13 +95,13 @@ Guarantee every ACTIVE scheduled task's SKILL.md is present at the scheduler's c
 **A.00 — CLAIM BLOCK A** (first action in this block, before A.0's lateness computation): `block-sentinel.py claim --task ora-health-guard --block blockA --run-id <run_id> --ttl-min 45`, per STEP 0. Exit 10/11 → skip to Block B, recording a NORMAL skip. This guards A.1's self-heal as well as A.0's alert: `guard.ps1` **restores files and writes mirrors**, so it is the one genuinely mutating step in this task.
 
 **A.0 — WAKE-LATENESS IMMEDIATE ALERT (NEW 2026-07-22).** This task's cron target is 05:15 ET. On every fire, compute how late the session actually started vs that target. Motivating pattern: repeated "machine/Cowork-app closed overnight" catch-up bursts (2026-07-14, 2026-07-20, 2026-07-21, 2026-07-22) sat undetected until `automation-health-monitor`'s ~11:05 ET run — a 3-6 hour silent gap. No on-machine scheduled task (this one included) can fire before the machine itself wakes, so this cannot be a true pre-9am external ping (that would require extending the existing GitHub Actions/Power Automate dead-man's-switch pattern already used for `ora-cowork-heartbeat` — out of reach from a Cowork/Code session, no such connector available; flagged as a follow-up requiring a session with GitHub/Power Automate access). What this step CAN do: convert "silently discovered ~5h later" into "alerted the instant the system notices."
-  - If actual start time is **> 45 minutes past 05:15 ET**, this is a late/catch-up wake. **Probe Sent Items first** (Layer 2, mandatory before this send): `powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Overnight machine-offline detected>"`. Exit 10 → do NOT send; log `BLOCK_A_WAKE_ALERT_ALREADY_IN_SENT_ITEMS` and record a NORMAL skip. Exit 1 → fail open: send, and record the probe gap.
+  - If actual start time is **> 45 minutes past 05:15 ET**, this is a late/catch-up wake. **Probe Sent Items first** (Layer 2, mandatory before this send): `powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Overnight machine-offline detected>"`. Exit 10 → do NOT send; log `BLOCK_A_WAKE_ALERT_ALREADY_IN_SENT_ITEMS` and record a NORMAL skip. Exit 1 → fail open: send, and record the probe gap.
     **This stem is deliberately UNDATED — the only one in this file.** The minutes-late figure sits *between* the stem and the date (`…woke 320min late — 2026-07-24`) and legitimately differs between two fires, so no dated prefix can cover both. Date scoping comes from the probe's `SentOn` filter (default: today, host clock = ET), not from the subject. The stem stays safe only because it is anchored at position 0 — pinned by self-test cases proving it does **not** match this task's other two emails.
     Then send a SEPARATE, lightweight standalone email (do NOT wait for the Block C consolidated send) via the SOLE send path `send-via-outlook.ps1`, to `ggoldberg@oxfordra.net` only:
     - Subject: `🌙 Overnight machine-offline detected — ora-health-guard woke {N}min late — YYYY-MM-DD`
     - Body: one line — actual start time (ET), minutes late vs 05:15 target, and a note that the AM task cluster (05:15–06:30 ET) is now catching up and `automation-health-monitor`'s 11:05 ET run will confirm full recovery.
   - If actual start time is within 45 minutes of 05:15 ET, skip this step silently — no email, proceed to A.1. A normal-cadence run needs no extra signal.
-  - This is a bounded, additive notification only — it never blocks or delays A.1–C.5, and never retries more than once on a COM failure (same one-retry-then-flag discipline as every other send in this file).
+  - This is a bounded, additive notification only — it never blocks or delays A.1–C.5, and never retries more than once, and only on exit 2 or 4 (same per-code discipline as every other send in this file).
 
 **A.0b — POWER-SLEEP REGRESSION CHECK (NEW 2026-08-12, Gabriel-directed).** Run this on **every** fire, on-time or late — it is one command and sub-second. A.0 above detects the *symptom* (a late wake, after the morning is already lost); this detects the *cause* while it is still cheap to fix.
 
@@ -134,26 +134,43 @@ Read `Current AC Power Setting Index` (possible values: 0 Do nothing · 1 Sleep 
 
 Why: the 2026-09-12 wake was 666 min late because the laptop slept overnight **with the lid closed** (Kernel-Power 506 `LidOpenState=false` at 23:38 and 01:38 standby entries). Clean `STANDBYIDLE` AC=0 could not see it, because on Modern Standby a closed lid parks the host regardless of idle timeout. Gabriel's ruling that day (`memory/ops_decision_log.md` 2026-09-12): keep it plugged in overnight, and set lid-close on AC to Do nothing. A Windows update or a scheme switch can silently reset LIDACTION just as it can STANDBYIDLE, so it is watched the same way. **Expected first-run state:** the setting was still `0x00000001` (Sleep) when this check was added, so it FAILs until Gabriel applies the command. That is the intended nudge, not a false alarm.
 
-**Cause-annotation on a late wake.** If A.0 above determined this fire IS late (>45min), append exactly one line to that alert's body, choosing by the AC index just read plus the power source (`powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Battery).BatteryStatus"` — `2` = on AC, `1` = discharging, null = no battery present, treat as AC):
+**Cause-annotation on a late wake.** If A.0 above determined this fire IS late (>45min), run A.0c's probe FIRST, then append exactly one line to that alert's body. Pick the line using the AC index just read plus the **SLEEP-TIME** power source: `sleepTimePower` in `_state/wake-cause.json`, also printed as the probe's `SLEEP-TIME-POWER` line, which describes the Modern Standby entry that governed the 05:15 slot.
 - AC index ≠ 0 → `Likely cause: power-sleep regression — AC sleep is <n>s, expected NEVER.`
-- AC index = 0 and BatteryStatus = 1 → `Machine was on BATTERY; DC sleep remains 3h by design (2026-08-12 ruling) — expected behaviour, not a regression.`
-- AC index = 0 and on AC → `Sleep config intact and machine on AC — the 2026-08-12 sleep cause is EXCLUDED for this wake; look elsewhere.`
+- AC index = 0 and `sleepTimePower.state` = `DC` → `Machine was on BATTERY at sleep time (<cause> at <entryTime>, via <source>); DC sleep remains 3h by design (2026-08-12 ruling) — expected behaviour, not a regression.`
+- AC index = 0 and `sleepTimePower.state` = `AC` → `Sleep config intact and machine on AC at sleep time (<cause> at <entryTime>, reason <reasonName>, via <source>) — the 2026-08-12 idle-timeout sleep cause is EXCLUDED for this wake; look elsewhere.`
+- AC index = 0 and `sleepTimePower.state` = `UNKNOWN`, or the probe exited 2 / the JSON is unreadable → `Power source at sleep time UNKNOWN (<detail>) — the 2026-08-12 sleep cause can NOT be excluded for this wake.` Quote `detail`, not `source`. A `kp105` source can sit on an UNKNOWN state (conflicting evidence, or a charger change during standby), and it must not read like a verdict.
 
-That third line matters as much as the first two: it stops a future session re-deriving the sleep hypothesis that has already been ruled out for this fire.
+The AC line still matters: it stops a future session from re-deriving a sleep hypothesis already ruled out for this fire. That only holds when the evidence dates from sleep time.
 
-**A.0c — WAKE-CAUSE CLASSIFIER (NEW v1.7, 2026-08-13, Gabriel-directed). Run this whenever A.0 determined the fire is late. It answers the question A.0b's third line can only pose.**
+**Never pick this line from `Win32_Battery.BatteryStatus` or any other run-time reading (corrected 2026-09-12).** This task fires only after the host wakes, and waking is exactly when the charger gets plugged back in. On 2026-09-12 the run fired at 16:21 ET, read `BatteryStatus=2`, and emitted "machine on AC — EXCLUDED". The host had actually been on battery since 09-11 17:38:02 (Kernel-Power 105 `AcOnline=false`). The lid was closed at 23:38:19 (506 `Reason=15 LidOpenState=false`), and the machine stayed in DC standby until 16:18:45. The true attribution was `LID-CLOSED-ON-BATTERY`, which is behavioural, not excluded. Evidence precedence, same-boot rule and Reason-code provenance: header of `maintenance/wake-cause-lib.ps1`. Tests: `maintenance/test-wake-cause-lib.ps1`.
+
+**A.0c — WAKE-CAUSE CLASSIFIER (NEW v1.7, 2026-08-13, Gabriel-directed). Run this whenever A.0 determined the fire is late. It answers the question A.0b's annotation line can only pose.**
 
 Three consecutive 5h+ late mornings (08-11, 08-12, 08-13) with `STANDBYIDLE` AC = 0 confirmed intact each time proved A.0b is structurally incapable of explaining a late wake on this host. It is not wrong — it is scoped to one cause out of at least four, and it cannot see the other three:
 
 - **This host is Modern Standby (S0 Low Power Idle).** `powercfg /a` reports S1/S2/S3 all unavailable. Under S0ix the machine enters low-power idle regardless of `STANDBYIDLE`, so **a clean AC index is not evidence the host stayed awake.** Reading it as such is what made "sleep config confirmed intact" and "the host slept anyway" look contradictory when they are both simply true.
-- **2026-08-11:** host was POWERED OFF — `winlogon.exe` initiated a power-off at 2026-08-10 12:50:37 ET, nothing ran until the app cold-started 08-11 17:01.
-- **2026-08-12:** host in Modern Standby 08-11 19:38 → 08-12 11:00. The app process survived but was suspended; a suspended process correctly does not dispatch. `ora-health-guard` spawned 13s after resume.
+- **2026-08-11:** host was POWERED OFF — `winlogon.exe` initiated a power-off at 2026-08-10 12:50:37 ET, nothing ran until the app cold-started 08-11 17:01. *Corrected 2026-09-12 from the event log:* the power-off was real, a Fast Startup hybrid shutdown (Kernel-Power 42 `TargetState=6` at 12:50:47). But power came back at **08-10 14:14:18** (Kernel-Boot 27 `BootType=1`), 1.4h later, so the host was not off at the 08-11 05:15 slot. Two things held that slot instead:
+- **Standby:** the host was in battery Modern Standby with the lid closed, from 506 at 08-10 23:58:34 (`Reason=55`, `LidOpenState=false`) to 507 at 08-11 16:59:36 (`PowerStateAc=false`).
+- **No app process:** Claude Desktop had not been relaunched after the 14:14 boot. It cold-started at 17:01:27, two minutes after the wake.
+- **2026-08-12:** host in Modern Standby 08-11 19:38 → 08-12 11:00. The app process survived but was suspended; a suspended process correctly does not dispatch. `ora-health-guard` spawned 13s after resume. *Corrected 2026-09-12 from the event log:* the host **hibernated** (S4) rather than staying in Modern Standby. Kernel-Power 42 `TargetState=5 EffectiveState=5` was logged at 08-11 19:38:06, and the 08-12 11:00:17 boot is Kernel-Boot 27 `BootType=2` (resume from hibernation). Hibernation preserves processes, which is why the app survived. The 08-12 AC sleep ruling is unaffected.
 - **2026-08-13:** `MoUsoCoreWorker.exe` (Windows Update Orchestrator) restarted the machine at **04:32:22**, then `TrustedInstaller.exe` twice more at **04:40:09** and **04:41:18** — three system-initiated reboots out of Modern Standby, installing the 2026-08 Security Update + .NET rollup (completed 04:45:54). **All three landed BEFORE the 05:15 slot.** Claude Desktop does not auto-start after a reboot, so the scheduler process did not exist between 04:42 and the manual launch at 10:50:41 (`[ScheduledTasks] Reset` → `Renderer listener ready` → `Initialized`, a cold start, with no preceding large `[likely sleep: power_event]` stall — the signature that distinguishes a NEW process from a RESUMED one).
 
 **So the framing "why isn't the Desktop app dispatching through 05:15–06:30" is answerable and the answer is: on these mornings it was not running.** Not throttled, not hung, not misconfigured — absent. A cold `Initialized` is proof the process did not exist beforehand, and no scheduler dispatches a slot that falls while its process is gone.
 
-Run: `C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:/Users/Owner/.claude/maintenance/wake-cause-probe.ps1" -WindowHours 24 -JsonOut "C:/Users/Owner/.claude/maintenance/_state/wake-cause.json"`
-Exit 0 = no cause found in window (an UNEXPLAINED gap — escalate, do not treat as clean) · 1 = cause identified · 2 = could not look (a FAIL). It classifies `WU-REBOOT` / `HOST-POWER-OFF` / `MODERN-STANDBY` / `SCHEDULER-COLD-START` from Kernel-Power 42/107/109/506/507/577/578, User32 1074, WindowsUpdateClient 19/43, and the app's own `main*.log` lifecycle lines, and reports both power indices for the record. Put the `[CAUSE]` lines verbatim into A.0's alert body **in place of** A.0b's third annotation line whenever the probe returns one.
+Run: `C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:/Users/Owner/.claude/maintenance/wake-cause-probe.ps1" -WindowHours 24 -SlotTime 05:15 -JsonOut "C:/Users/Owner/.claude/maintenance/_state/wake-cause.json"`
+Exit 0 = no cause found in window (an UNEXPLAINED gap — escalate, do not treat as clean) · 1 = cause identified · 2 = could not look (a FAIL). It classifies `WU-REBOOT` / `HOST-POWER-OFF` / `MODERN-STANDBY` / `SCHEDULER-COLD-START` from Kernel-Power 42/107/109/506/507/577/578, User32 1074, WindowsUpdateClient 19/43, and the app's own `main*.log` lifecycle lines, and reports both power indices for the record. **Host-off lines (2026-09-12 follow-up).** A User32 1074 is only a *request*. `HOST-POWER-OFF` / `WU-REBOOT` / `RESTART` are reported as `[CAUSE]` only when the host actually went down, confirmed by one of two events that follows the request:
+- **Full shutdown:** Kernel-General 13.
+- **Fast Startup hybrid shutdown:** Kernel-Power 42 `TargetState=6`. This host has `HiberbootEnabled=1`, and every "power off" here logs this event and no 6006/109/13.
+
+Each `[CAUSE]` line carries the power-restore time (the next Kernel-Boot 27), the duration, the mode and the boot type. Other lines:
+- **Unconfirmed request:** prints as `[note]` and is never a cause.
+- **Standalone 42 `TargetState=5`:** `HOST-HIBERNATE`. The mode is `hibernate-from-standby` when a Modern Standby exit came ≤60s before, i.e. the battery standby timeout moved the host into hibernate.
+- **Standalone Kernel-General 13 with no request:** `RESTART-UNATTRIBUTED` when a boot follows within 2 min, else `HOST-SHUTDOWN`.
+- **Kernel-Power 41 (crash or held power button):** `HOST-DIRTY-OFF`. It runs from the last event logged before the 41 to the boot the 41 was written at; the actual power-loss time is not recorded.
+
+Boot boundaries for the same-boot 105 rule now come from Kernel-Boot 27, which is logged on every boot. Kernel-General 12 missed all 16 Fast Startup and hibernate-resume boots in the 35 days to 09-12. A `Get-WinEvent` "No events were found" is an empty result, never `[unverifiable]`.
+
+Since 2026-09-12 it also decodes each Modern Standby entry's EventData into a per-entry `[CAUSE]` line: `LID-CLOSED-ON-BATTERY` / `LID-CLOSED-ON-AC` / `STANDBY-ON-BATTERY` / `STANDBY-ON-AC` / `*-POWER-UNKNOWN`, carrying reason, lid, external monitor and battery at entry. Power source comes from Kernel-Power 105 in the same boot, then 507 `PowerStateAc`, then falling entry capacity, else UNKNOWN. The probe also writes the `SLEEP-TIME-POWER` summary that A.0b's annotation uses. Put the `[CAUSE]` lines verbatim into A.0's alert body beneath A.0b's annotation line. They add detail to that line and never replace it.
 
 **Host-level remediations — status CORRECTED 2026-08-27, re-read before reporting either as open:**
 
@@ -196,7 +213,7 @@ Five verdicts. **`STALE-LOCATION` is checked FIRST and outranks `FROZEN`, becaus
 
 **A.1 — Execute the deterministic engine** via Bash/Desktop Commander (bare `powershell` is NOT on PATH; use the full interpreter):
 ```
-C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\ora-task-integrity-guard\guard.ps1"
+C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\ora-task-integrity-guard\guard.ps1"
 ```
 **(Repointed 2026-07-09 — the original `scheduled-task-integrity-guard\guard.ps1` was retired 2026-06-11; see RESTORATION NOTE above.)** This is the SAME authoritative engine `ora-task-integrity-guard` runs daily at 12:54 PM ET — invoking it again here at 05:15 ET is safe and intentional: the engine is idempotent (canonical-is-authoritative, add-only, never deletes — NOT newest-wins; see the 2026-08-09 rewrite note), and this earlier run exists specifically to protect the 06:00 morning batch, independent of `ora-task-integrity-guard`'s own later alarm-email run. Per `ora-task-integrity-guard`'s own spec, this engine restores any MISSING SKILL.md at each task's registry `filePath` from a surviving copy (canonical + 2 mirrors, never deletes) across BOTH registries. **It no longer restores a "stale" canonical (rewritten 2026-08-09):** a present canonical is authoritative and is never overwritten, because "stale" was decided by mtime and a mirror can hold OLDER CONTENT with a NEWER MTIME — which reverted three live SKILL.mds on 2026-08-09. Content that has moved backwards is now REPORTED via `regressed[]`, not silently rewritten (`claude-code-sessions` AND `local-agent-mode-sessions`). **Do NOT reimplement this logic — treat both tasks' invocations as calling the same authoritative script, not two independent ones.** *(This is the I6-permitted bounded mutation. The engine restores SKILL.md task-instruction files only — it does NOT touch settings/hooks/CLAUDE/memory or the registry.)*
 
@@ -215,7 +232,7 @@ If the guard.ps1 script itself is missing, skip Block A gracefully this run, log
 **A.5 — CLOSE THE BLOCK A CLAIM.** Run this once A.1–A.4 have resolved **or Block A was skipped for an absent engine (A.1)**. Both are *recorded outcomes*, not aborted blocks — an INTEGRITY ENGINE ERROR and an INTEGRITY ENGINE ABSENT each produce a reportable result, so both close with `complete`:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockA --run-id <run_id>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-health-guard --block blockA --run-id <run_id>
 ```
 
 Block A publishes no Notion page, so `--notion-page-id` is omitted; add `--email-sent-at <ISO8601>` **only if A.0 actually sent the late-wake alert**. Call `fail --error "<what broke>"` instead only if the block genuinely aborted before A.2 captured anything — that releases the claim so an operator retry need not wait out the TTL.
@@ -342,7 +359,7 @@ Block A publishes no Notion page, so `--notion-page-id` is omitted; add `--email
 **B.3.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the B.3 send).** Layer 2 of the double-fire guard, and the step that would have stopped the 2026-07-24 duplicate:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: ORA Connector Pre-Flight - {YYYY-MM-DD}>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: ORA Connector Pre-Flight - {YYYY-MM-DD}>"
 ```
 
 Probe the **dated stem** `ORA Connector Pre-Flight - {YYYY-MM-DD}` and nothing more — write it with a plain ASCII hyphen and **no leading emoji**. The status prefix (`✅` / `⚠️`) and the trailing connector list are both run-specific: on 2026-07-24 the two sends were `ORA Connector Pre-Flight - 2026-07-24 - Notion OK` and `✅ ORA Connector Pre-Flight — 2026-07-24 — Notion OK`. The stem matches both after normalization; either full subject would have matched only itself, which is precisely how that duplicate got through. Exit 10 → do **NOT** send; log `BLOCK_B_MIRROR_ALREADY_IN_SENT_ITEMS` with the probe's matched `sentOn`, record a NORMAL skip, and still call `complete` at B.3.9 so the state file re-converges. Exit 1 → fail open: send, and record the probe gap.
@@ -397,10 +414,10 @@ Purpose: `automation-health-monitor` (LAMS/Cowork fleet) previously had no relia
 **B.3.9 — CLOSE THE BLOCK B CLAIM.** After the B.3 send resolves and B.3.5b's beacon write has been attempted (success *or* documented skip — a skipped beacon on a known Notion outage is a completed block, not a failed one):
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockB --run-id <run_id> --notion-page-id 3a56ecd8-9e59-8152-83b6-c61cec736f2b --email-sent-at <ISO8601 of the successful send>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-health-guard --block blockB --run-id <run_id> --notion-page-id 3a56ecd8-9e59-8152-83b6-c61cec736f2b --email-sent-at <ISO8601 of the successful send>
 ```
 
-Omit `--email-sent-at` if the send failed both attempts and B.4's local-log path was used instead — the block still completed, it simply has no send timestamp to record. Call `fail --error "<what broke>"` only if the block aborted before B.3 (which releases the claim, correctly allowing a retry to capture a fresh mirror — see the B.0 tradeoff note).
+Omit `--email-sent-at` if the send failed (any exit code) and B.4's local-log path was used instead — the block still completed, it simply has no send timestamp to record. Call `fail --error "<what broke>"` only if the block aborted before B.3 (which releases the claim, correctly allowing a retry to capture a fresh mirror — see the B.0 tradeoff note).
 
 **B.4 — FAILURE PATHS.**
 - Notion FAILED but Outlook OK: still send the alert email (Outlook is independent). The `rate_snapshot` WILL have been reconstructed via the B.2 fallback ladder — include it and state its `confidence` prominently; only `portfolio_watch` is lost. If web_fetch also failed (primary tier down), say so and label rates SECONDARY (below decision-grade). Recommend a manual Notion check / re-auth before the next cycle.
@@ -469,12 +486,12 @@ If any probe script is missing/absent this run (folders may not have survived th
 
 > **WHY C.3 POINTS AT A.3 INSTEAD OF LISTING THE CONDITIONS (added 2026-08-09).** These two lists drifted apart the moment the engine was rewritten. A.3 was widened the same day to escalate `regressed[]`, `unreadable[]`, `errors[]`, `id_collisions[]` and `ledger_status` — the new engine's entire alarm surface — but C.3 still named only `missing_everywhere` and "integrity engine error." The result: Block A could detect that a live SKILL.md had been **reverted to an older version** (`regressed[]`), write it prominently into the body, and still ship it under an `ALL PASS` subject — the one line most likely to be skimmed and filed. A duplicated condition list is a standing drift hazard; there is now exactly one, in A.3, and adding a condition there is sufficient. Do not paste the list back into C.3.
 
-**C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On non-zero COM exit: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt.
+**C.4 — Deliver** to **ggoldberg@oxfordra.net only** via the SOLE send path `send-via-outlook.ps1` (Composio removed 2026-06-11; no fallback connector exists). Write the HTML to a temp file and `-BodyFile` it. On COM exit 2 or 4: retry once, then flag the failure via the B.4 last-resort local-log path — do not halt. On exit 5 or 6 (or any code other than 2 or 4) do NOT retry: flag it loudly in the run summary and in the failure record named above, and never resend (exit 6 = send state unknown — the message MAY have gone out), per rules.md §2.
 
 **C.4.0 — PRE-SEND SENT-ITEMS PROBE (mandatory, immediately before the C.4 send):**
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Health Guard - {YYYY-MM-DD}>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly: Health Guard - {YYYY-MM-DD}>"
 ```
 
 Probe the **dated stem** `Health Guard - {YYYY-MM-DD}` — **without** the `[ORA]` / `[ACTION]` tag (the probe strips leading bracket tags, so including one would over-narrow the match and let a verdict flip through) and without the trailing verdict. Exit 10 → do **NOT** send; log `BLOCK_C_EMAIL_ALREADY_IN_SENT_ITEMS`, record a NORMAL skip, and still call `complete` at C.4.9. Exit 1 → fail open: send, and record the probe gap.
@@ -484,7 +501,7 @@ Probe the **dated stem** `Health Guard - {YYYY-MM-DD}` — **without** the `[ORA
 **C.4.9 — CLOSE THE BLOCK C CLAIM.** Once the send resolves:
 
 ```
-python C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-health-guard --block blockC --run-id <run_id> --email-sent-at <ISO8601>
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-health-guard --block blockC --run-id <run_id> --email-sent-at <ISO8601>
 ```
 
 Block C publishes no Notion page, so `--notion-page-id` is omitted. Call `fail --error "<what broke>"` if the probe suite aborted before C.2 composed anything.
@@ -492,7 +509,7 @@ Block C publishes no Notion page, so `--notion-page-id` is omitted. Call `fail -
 `--email-sent-at` is conditional, exactly as in B.3.9 — this block has the same two-attempts-then-local-log path at C.4, so do not treat it as an unconditional part of the command:
 - send succeeded → the ISO8601 of that send;
 - **C.4.0 returned exit 10** (already in Sent Items) → pass the probe's matched `sentOn`, **not** now — the email went out on the earlier fire, and stamping the current time would misdate the artifact. Same rule applies to B.3.9 after a B.3.0 exit 10;
-- send failed both attempts and the B.4 local-log path was used → **omit the flag entirely**. The block still completed; it simply has no send timestamp to record.
+- send failed (any exit code) and the B.4 local-log path was used → **omit the flag entirely**. The block still completed; it simply has no send timestamp to record.
 
 **C.5 — HARD RULE (reiterated):** Block C never edits, creates, moves, or deletes any file or task, and never writes settings/hooks/CLAUDE/memory/registry. A FAILing probe is reported with its observed value; Gabriel decides remediation.
 

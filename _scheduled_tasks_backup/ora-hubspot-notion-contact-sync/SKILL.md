@@ -102,7 +102,7 @@ STEPS:
    - Known repeat parks as of 2026-08-28, both parked on 08-24 and 08-28: DevCor, LLC (G2) and New Benevis Smiles, LLC (G3). These should escalate on the very next run.
    - If the prior report cannot be located, say so and treat every park this run as first-strike. Do not guess at history.
 
-7. POST THE RUN REPORT to the Notion Operations Hub as a new page titled "HubSpot→Notion Contact Sync — [ISO date]", containing:
+7. POST THE RUN REPORT to the Notion Operations Hub as a new page titled "HubSpot→Notion Contact Sync — [ISO date]" (compute the run date once at run start with `date '+%A %Y-%m-%d'` — date part in every date slot, weekday only where one is named — and reuse that exact value in every title and body; for this page and step 6b's child pages, if a Notion create returns no page ID (e.g. a grace-period/quota notice), search by the exact title before any retry — a match created at/after the create call is this run's page; never blind-retry a create; quota errors → `notion-quota-fallback` skill), containing:
    a. Counts: rows scanned (from population_count), candidate rows (blank contact), rows written, rows parked, rows with no HubSpot match at all. Written + parked + no-match must cross-foot to the candidate total — verify the arithmetic explicitly before posting.
    b. WRITE LOG — one line per write: tenant name, Notion page URL, field written, exact value written. This is the reversal handle. Anyone reading this page must be able to undo every write this run made without guessing. This is what makes the auto-write posture defensible; do not omit or abbreviate it.
    c. PARKED ITEMS from step 6, grouped by which guard fired, with repeat parks broken out per step 6b.
