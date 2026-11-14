@@ -158,7 +158,7 @@ try:
     check("commit -a of a bad working-tree spec is blocked", r.returncode != 0, (r.returncode, r.stderr))
     git(repo, "checkout", "-q", "--", ".")
 
-    # 9. the shim is fail-open: a crashing or missing hook never blocks; only exit 1 does
+    # 9. the shim is fail-open: a crashing or missing hook never blocks; only exit 10 does
     hook_in_repo = os.path.join(repo, "hooks", os.path.basename(HOOK))
     real = open(hook_in_repo, encoding="utf-8").read()
     with open(os.path.join(repo, "notes2.md"), "w") as f:
@@ -187,6 +187,21 @@ try:
     check("shim passes a deliberate exit 10 through as a block", r.returncode != 0, (r.returncode, r.stderr))
     with open(hook_in_repo, "w", encoding="utf-8") as f:
         f.write(real)
+    # 10. a staged lint that crashes with a normal Python error (exit 1, no summary) is blocked;
+    #     the same crash in an UNSTAGED lint is fail-open (re-review 2026-11-14, finding 1)
+    repo = make_repo(); repos.append(repo)
+    lint_in_repo = os.path.join(repo, "maintenance", "_tests", os.path.basename(LINT))
+    good_lint = open(lint_in_repo, encoding="utf-8").read()
+    with open(lint_in_repo, "w", encoding="utf-8") as f:
+        f.write("raise RuntimeError('broken lint')\n" + good_lint)
+    git(repo, "add", "-A")
+    rc, out = run_hook(repo)
+    check("staged lint crashing with exit 1 -> blocked", rc == 10 and "crashed" in out, (rc, out))
+    git(repo, "commit", "-q", "--no-verify", "-m", "broken lint (bypassed)")
+    write(repo, "ora-another-task", GOOD)
+    git(repo, "add", "-A")
+    rc, out = run_hook(repo)
+    check("unstaged lint crashing -> fail-open with a warning", rc == 0 and "crashed" in out, (rc, out))
 finally:
     for r in repos:
         shutil.rmtree(r, ignore_errors=True)
