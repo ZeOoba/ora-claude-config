@@ -343,6 +343,43 @@ def test_check_canon_missing_gate_line_unit():
     assert probs, probs
 
 
+# --------------------------------------------------------------------------- UNIT: "USD n" spelling
+# ora-skills rewrites dollar-digit figures in SKILL.md bodies to "USD n" (tools/lint_skill_dollar_args.py):
+# the skill loader substitutes a dollar sign followed by digits with argument tokens. Every rule must read
+# both spellings, or the rewrite trips the canon alarm and blinds the drift scan.
+
+CANON_GATE2_USD = (CANON_GATE2.replace("$500K", "USD 500K").replace("$10M", "USD 10M")
+                   .replace("$15M", "USD 15M"))
+
+
+def test_usd_canon_line_clean_and_accepted_unit():
+    assert_clean(CANON_GATE2_USD, "the canon line in USD spelling")
+    assert P.check_canon_text("# STAGE 0\n" + CANON_GATE2_USD) == []
+
+
+def test_usd_canon_moved_still_detected_unit():
+    probs = P.check_canon_text("# STAGE 0\n" + CANON_GATE2_USD.replace("USD 15M", "USD 20M"))
+    assert probs and any("15" in p for p in probs), probs
+
+
+def test_usd_ceiling_phrasings_all_flag_unit():
+    for line in (
+        "ORA targets sub-USD 10M, sub-50K SF, Class B/C assets.\n",
+        "- **USD 1M–USD 10M per acquisition, sub-50,000 SF per building.**\n",
+        "- **Price:** **USD 500K-USD 10M** total.\n",
+        "- ORA box: Class B/C shallow-bay industrial/flex · USD 1-10M\n",
+        "- Buy box price ≤USD 10M per deal.\n",
+        "- Buy-box: USD 10M max per acquisition.\n",
+    ):
+        assert_flags(line, "USD ceiling phrasing: %r" % line)
+
+
+def test_usd_portfolio_mention_clean_unit():
+    assert_clean("- Buy-box: sub-USD 10M single asset; 2-5 building portfolios sold together to USD 15M.\n",
+                 "USD portfolio path on the same line")
+    assert_clean("- ORA box: USD 1-10M (portfolios up to USD 15M total)\n", "portfolios up to USD")
+
+
 # --------------------------------------------------------------------------- E2E helpers
 
 DRIFT = "- Buy-box: sub-$10M, sub-50K SF, Class B/C industrial/flex.\n"
