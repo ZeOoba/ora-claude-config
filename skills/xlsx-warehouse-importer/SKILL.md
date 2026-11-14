@@ -1,12 +1,12 @@
 ---
 name: xlsx-warehouse-importer
-description: Use when a spreadsheet or JSON extract (broker loss runs, PCA/capex register, assessor export, dec pages, any xlsx a Cowork session produced) must be loaded into the oxford-command-center SQLite warehouse as a new importer script — scaffold, validation rules, property-id crosswalk, idempotency and test checklist. Trigger on: import this xlsx into the warehouse, new importer script, warehouse:import, load the register into the warehouse, loss-run importer, PCA importer, ingest extraction register, importer template. Pattern source is scripts/import-insurance-data.ts. Does NOT cover the P&L/QuickBooks ingest (ingest.ts), migrations (architect-owned) or surfaces that read the data.
+description: "Use when a spreadsheet or JSON extract (broker loss runs, PCA/capex register, assessor export, dec pages, any xlsx a Cowork session produced) must be loaded into the oxford-command-center SQLite warehouse as a new importer script — scaffold, validation rules, property-id crosswalk, idempotency and test checklist. Trigger on: import this xlsx into the warehouse, new importer script, warehouse:import, load the register into the warehouse, loss-run importer, PCA importer, ingest extraction register, importer template. Pattern source is scripts/import-insurance-data.ts. Does NOT cover the P&L/QuickBooks ingest (ingest.ts), migrations (architect-owned) or surfaces that read the data."
 license: ORA Internal
 ---
 
-# xlsx-to-warehouse importer (v1.0)
+# xlsx-to-warehouse importer (v1.0.1)
 
-The importer pattern has been built for assessments, insurance loss runs and dec pages, and is next needed for the PCA register. Reuse it; do not reinvent it. Reference implementation: `oxford-command-center/scripts/import-insurance-data.ts` (read it first, it is the spec). Sibling: `scripts/import-assessments.ts`.
+The importer pattern has been built for assessments, insurance loss runs and dec pages, and is next needed for the PCA register. Reuse it; do not reinvent it. Reference implementation: `oxford-command-center/scripts/import-insurance-data.ts` (read it first, it is the spec). Sibling: `oxford-command-center/scripts/import-assessments.ts`.
 
 ## Preconditions (stop if any fails)
 
@@ -74,8 +74,11 @@ Confidential check before any row naming a deal: roster of record is `hooks/conf
 
 ## Known instances
 
-| Importer | Source | Notes |
+| Importer (oxford-command-center repo, `scripts/`) | Source | Notes |
 |---|---|---|
 | `import-assessments.ts` | county assessor CSV | original pattern |
 | `import-insurance-data.ts` | loss-run JSON, dec pages, policies | three modes; reference implementation |
 | `import-pca-register.ts` (planned) | `PCA-Extraction_Register` xlsx | plan: `docs/capital/2026-10-07-pca-capex-ledger-integration-plan.md`; source of record is the xlsx now, Notion later |
+
+## Changelog
+- v1.0.1 (2026-10-29): Marked importer scripts as living in the oxford-command-center repo. This was a reference-path clarification only (wording; no change to procedures, scored or governor constants): NO change to scored or governor constants.

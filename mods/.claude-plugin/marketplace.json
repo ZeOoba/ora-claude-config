@@ -1,0 +1,5 @@
+{
+  "name": "ora-mods",
+  "owner": { "name": "Gabriel Goldberg" },
+  "plugins": [{ "name": "ora-ops-panel", "source": "./ora-ops-panel" }]
+}

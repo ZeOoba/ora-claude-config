@@ -40,7 +40,7 @@ STEP 4 — Amortization schedule freshness
 For any loan whose register card cites an amortization schedule, check whether a newer copy exists in SharePoint than the one cited. A schedule updated since the register's sourcing date may record payments that change a current balance or a paid-through date. Report the file's modified date and flag if newer. Do not re-derive balances — just flag.
 
 STEP 5 — Report
-PRIMARY DELIVERY — Notion Operations Hub (page 32b6ecd8-9e59-81ed-b571-dfc871ab9f25). Create a dated entry titled "Loan Terms Reconciliation — YYYY-MM-DD" containing:
+PRIMARY DELIVERY — Notion Operations Hub (page 32b6ecd8-9e59-81ed-b571-dfc871ab9f25). Create a dated entry titled "Loan Terms Reconciliation — YYYY-MM-DD" (YYYY-MM-DD = the run date computed once at run start with `date '+%A %Y-%m-%d'`, date part in every date slot, weekday only where one is named, reused verbatim in every title, subject and body; if the create returns no page ID — e.g. a grace-period/quota notice — search by the exact title before any retry; a match created at/after the create call is this run's page — use it; never blind-retry a create (it produced a duplicate). Quota errors → `notion-quota-fallback` skill) containing:
   - a per-loan table of field verdicts
   - every MISMATCH in full, with instrument quote, register value, and consequence
   - the UNVERIFIABLE standing-gap list

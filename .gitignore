@@ -27,6 +27,9 @@
 !/commands/
 !/agents/
 !/skills/
+# ora-mods: the local Claude Code mod marketplace settings.json enables (ora-ops-panel).
+# Tracked 2026-11-14 after an adversarial review so the enabled code is reviewable.
+!/mods/
 !/maintenance/
 # Reviewable settings.json proposals awaiting an explicit apply (hooks-audit
 # 2026-09-30). Tracked so a proposal survives its worktree and ships with the
@@ -346,6 +349,22 @@ maintenance/_state/ground-truth-pending-approval/
 *.xlsm
 *.xlsb
 
+# (2026-11-04, dirty-tree triage) never-tracked runtime state: machine-written by probes and
+# scheduled tasks, regenerated every run. Ignored, not committed. Existing files are untouched.
+/skills/synced/
+maintenance/_state/headless-findings/
+maintenance/_state/ground-truth/digest-*.html
+maintenance/_state/ground-truth/stage0-attempts.jsonl
+maintenance/_state/ground-truth/archive/
+maintenance/_state/archive/
+maintenance/_state/checkout-merge-forward-last-run.json
+maintenance/_state/full-gate-weekly.json
+maintenance/_state/prepush-gate-sweep.json
+maintenance/_state/mcp-usage-ledger.jsonl
+maintenance/_state/audit-log-sweep-history.jsonl
+maintenance/_state/fleet-pause-windows.json
+maintenance/_state/ora-arch-review-followup-status.json
+
 # (2026-11-08) Session-audit transcript archive. maintenance/audit-log-sweep.py
 # --apply (scheduled task ora-audit-log-sweep) gzips stale LAMS/Cowork per-session
 # audit.jsonl tool-call transcripts here -- LOCAL-ONLY disk reclamation by the
@@ -363,6 +382,7 @@ audit.jsonl.gz
 # tracked files (placeholders read "[contact Cxx: ..., see contacts.local.md]"). Holds the
 # real addresses, so it must never be tracked in this public repo, wherever it sits.
 contacts.local.md
+deal-figures.local.md
 # (2026-11-13) RCT replacement-cost table out of this PUBLIC repo (Gabriel's 2026-11-12 audit
 # ruling: keep the repo public, move the governor-level table out of source). Archive copies
 # that embedded the table were untracked (history NOT rewritten); their contents were moved to
@@ -378,3 +398,15 @@ contacts.local.md
 /maintenance/_state/_archive/2026-10-30_live-sync-379-overlap/scheduled-tasks/ora-entry-market-scan/SKILL.md
 /maintenance/_state/_archive/2026-10-30_live-sync-overlap/scheduled-tasks/ora-deal-sourcing-scan/SKILL.md
 /maintenance/_state/_archive/2026-10-30_live-sync-overlap/scheduled-tasks/ora-entry-market-scan/SKILL.md
+
+# Live-branch session scratch archives, untracked 2026-11-14 before landing on main (public repo):
+# pre-scrub event_log snapshot, task XML exports, registry dumps. Kept on disk.
+/maintenance/_archive/2026-10-30_cowork-setup-session/
+/maintenance/_archive/2026-11-02_primary-checkout-repoint/
+/maintenance/_archive/2026-11-03_merge-forward-identical-overlap/
+/maintenance/_archive/2026-11-06_pending-patchblocks-v03/
+/maintenance/_archive/2026-11-09_runner-tasks/
+/maintenance/_state/_archive/2026-10-17_scratch-triage/
+/maintenance/_state/_archive/2026-10-30_live-sync-379-overlap/
+/maintenance/_state/_archive/2026-10-30_live-sync-overlap/
+/maintenance/_state/_archive/2026-10-31_phase3-repoint/

@@ -1,0 +1,6 @@
+---
+name: ora-resume-0928-attend-reminder
+description: 30-minute heads-up that ora-routine-pause-resume-09-28 needs an attended Desktop session at 10:00 AM ET to approve the re-enable calls.
+---
+
+Send ONE email to ggoldberg@oxfordra.net only, no cc, via powershell -File C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1. Subject: "[ORA] CC fleet resume fires at 10:00 — approval needed". Body: the ora-routine-pause-resume-09-28 task fires in 30 minutes and needs the Desktop app open with someone present to approve each update_scheduled_task permission prompt (the Desktop runner does not auto-approve these unattended, per register-scheduled-task v2.23). If nobody is available, the resume will sit blocked until the app is next opened. Also note the LAMS/Cowork fleet's resume is separate, is NOT a registered task, and must be run by hand from a native on-device Cowork session by running the brief C:\Users\Owner\.claude\maintenance\_state\handoffs\2026-09-28_LAMS-fleet-resume_brief.md; start it by 10:30 ET so the LAMS Monday slots from 10:35 fire on schedule. This is a reminder only — do not touch any scheduled task.

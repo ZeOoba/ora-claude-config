@@ -455,13 +455,20 @@
   },
   "enabledPlugins": {
     "superpowers@superpowers-marketplace": true,
-    "pr-review-toolkit@claude-plugins-official": true
+    "pr-review-toolkit@claude-plugins-official": true,
+    "ora-ops-panel@ora-mods": true
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
       "source": {
         "source": "github",
         "repo": "anthropics/claude-plugins-official"
+      }
+    },
+    "ora-mods": {
+      "source": {
+        "source": "directory",
+        "path": "C:\\Users\\Owner\\.claude\\mods"
       }
     }
   },
