@@ -5,10 +5,12 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 8e3f40ea-05cc-48c4-9e6b-49cd7ec8ee9e
-  modified: 2026-09-07T19:08:05.329Z
+  modified: 2026-11-02T18:14:40.028Z
 ---
 
-Current lineup as of 2026-09-02: Fable 5.1 (`claude-fable-5-1`, hardest tier — succeeded Fable 5) · Opus 5 (`claude-opus-5`, standard high-capability) · Sonnet 5 (`claude-sonnet-5`, standard implementation) · Haiku 4.5 (`claude-haiku-4-5-20251001`, mechanical). CLAUDE.md's tier doctrine (Fable/opus/sonnet/haiku by role) is alias-based and needs NO edit on a release — confirmed zero hardcoded model IDs in CLAUDE.md or the 6 `~/.claude/agents/*.md` files (as of the 2026-07-26 check; re-verify if this file hasn't been touched since).
+Current lineup as of 2026-11-02: Fable 5.1 (`claude-fable-5-1`, hardest tier — unchanged) · Opus 5.5 (`claude-opus-5-5`, standard high-capability — succeeded Opus 5) · Sonnet 5.5 (`claude-sonnet-5-5`, standard implementation — succeeded Sonnet 5) · Haiku 5.5 (`claude-haiku-5-5`, mechanical — succeeded Haiku 4.5). CLAUDE.md's tier doctrine (Fable/opus/sonnet/haiku by role) is alias-based and needs NO edit on a release — confirmed zero hardcoded model IDs in CLAUDE.md or the 6 `~/.claude/agents/*.md` files (as of the 2026-07-26 check; re-verify if this file hasn't been touched since).
+
+**PRIOR (superseded 2026-11-02):** lineup as of 2026-09-02 had Opus 5 (`claude-opus-5`), Sonnet 5 (`claude-sonnet-5`), and Haiku 4.5 (`claude-haiku-4-5-20251001`) before the across-the-board 5.5 releases. Detected via ora-model-release-watch's 2026-11-02 scheduled run reading this session's own system-prompt model-lineup statement (`claude-opus-5-5`/`claude-sonnet-5-5`/`claude-haiku-5-5` present, not in the recorded set). Fable 5.1 (`claude-fable-5-1`) unchanged. Note: this same run's session-info line separately reported itself as running on `claude-sonnet-5` (not 5.5) — consistent with the already-documented CC/MCP server-pinning gap (item 3 below / issue #48976), not a sign the 5.5 lineup is wrong.
 
 **PRIOR (superseded 2026-09-02):** lineup as of 2026-07-26 had Fable 5 (`claude-fable-5`) in the hardest tier. Detected via ora-model-release-watch's 2026-09-02 scheduled run reading this session's own system-prompt model-lineup statement (`claude-fable-5-1` present, not in the recorded set). Opus 5, Sonnet 5, and Haiku 4.5 IDs are unchanged.
 

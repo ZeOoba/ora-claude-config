@@ -40,7 +40,7 @@ STEPS:
    - DUE SOON: date is within the next 60 days.
    - ON WATCH: everything else Active/Upcoming, for awareness only.
 3. Never fabricate a resolution — if a deadline's outcome (e.g., was NTP actually reached) isn't confirmable from Notion/SharePoint/Outlook search, report it as PASSED-UNCONFIRMED, not as resolved. Do not guess dates or outcomes.
-4. Post a status block to the Notion Ops Hub (same page tree as the tracker) with the three buckets, plainly formatted, dated.
+4. Post a status block to the Notion Ops Hub (same page tree as the tracker) with the three buckets, plainly formatted, dated. The date = the run date computed once at run start (`date '+%A %Y-%m-%d'`; date part in every date slot, weekday only where one is named), reused verbatim here and in the step 5 subject. If the create response has no page ID (e.g. a grace-period/quota notice), search by the exact title before any retry; a match created at/after the create call is this run's page; never blind-retry the create (it produced a duplicate). Quota errors → `notion-quota-fallback` skill.
 5. Email a summary to ggoldberg@oxfordra.net ONLY (never cc egoldberg — that exception is reserved for the Daily Brief alone). Subject: "Critical Deadlines Scan — [today's date]". Lead with PASSED-UNCONFIRMED items if any exist; otherwise lead with DUE SOON. If there is no working send path available on this surface, save the summary as an Outlook draft or a dated file instead of failing silently, and say so in the Notion post.
 6. If you find a PASSED-UNCONFIRMED item, do not attempt to resolve it yourself (e.g., do not draft or send anything to an external counterparty) — flag it clearly for Gabriel with a one-line suggested next step (e.g., "confirm with [counterparty] directly").
 

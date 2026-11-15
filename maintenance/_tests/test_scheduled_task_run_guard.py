@@ -238,6 +238,11 @@ ORDERING_VERIFIED_BY_HAND = {
     # Read by hand 2026-10-17: the sole claim is STEP -1 (first action). STEP 0-3 only crawl
     # the public site read-only; the one side effect is the STEP 4 regression email, after it.
     "ora-site-seo-crawl-weekly": "claim@STEP -1 precedes email@STEP 4; crawl is read-only",
+    # Read by hand 2026-11-14 (guard added the same day): the claim is the unfenced line in the
+    # DOUBLE-FIRE ENTRY GUARD block placed before STEPS. Steps 1-2 only build and read; the side
+    # effects are prose -- artifact asset publishes at step 3, ArtifactData writes at step 4, and
+    # the FAILURE alert via send-via-outlook.ps1 -- all after the claim.
+    "ora-portfolio-desk-refresh": "claim@guard (before STEPS) precedes publish@step 3, data writes@step 4, FAILURE email",
     # Read by hand 2026-10-17: the sole claim is the STEP 0 line (first action). STEP 1 only
     # READS the pause file/workbook mtime; STEP 2 fetches and adds a detached worktree from the shared checkout's .git (after the claim) and runs npm ci there; the only write
     # before the claim-holder reports is the full-gate-weekly.json state file (STEP 3); the one

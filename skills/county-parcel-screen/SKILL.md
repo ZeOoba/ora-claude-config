@@ -1,18 +1,9 @@
 ---
-name: county-parcel-screen
-description: >
-  Use when the user mentions: parcel screen, county screen, ring screen,
-  off-market sourcing, owner outreach list, cold call list, delinquent tax
-  leads, motivated sellers, estate owners, long-hold owners, assessor or auditor
-  parcel data, or off-market industrial candidates in ANY target market or new
-  county. Also "next market", "run the screen on X", or owner-level lead lists
-  from public property records. Recorded-sales tracking routes to
-  county-sales-monitor; a single already-identified target routes to
-  verified-deal-recon (deal-recon agent for a first look only); an inbound
-  broker batch routes to deal-flow-triage.
+name: "county-parcel-screen"
+description: "Use when the user mentions: parcel screen, county screen, ring screen, off-market sourcing, owner outreach list, cold call list, delinquent tax leads, motivated sellers, estate owners, long-hold owners, assessor or auditor parcel data, or off-market industrial candidates in ANY target market or new county. Also \"next market\", \"run the screen on X\", or owner-level lead lists from public property records. Recorded-sales tracking routes to county-sales-monitor; a single already-identified target routes to verified-deal-recon (deal-recon agent for a first look only); an inbound broker batch routes to deal-flow-triage.\n"
 ---
 
-# county-parcel-screen (v1.6)
+# county-parcel-screen (v1.7)
 
 Generate off-market industrial acquisition leads for Oxford Realty Advisors from
 public county property data. The screen finds owners with the CAPACITY to sell at
@@ -406,6 +397,7 @@ volume + quarterly re-runs + signal-led call order is the strategy.
 - versions/CHANGELOG-v1.0-v1.3.md - full changelog text.
 
 ## Changelog
+- **v1.7 (2026-11-05):** `references/hold-data-availability.md`'s Louisville row said the market was "not among the nine ratified clusters"; Louisville was ratified as an entry-phase cluster on 2026-08-05, before that table was written. The row now says so and that its county endpoints were never built. Found by `tools/doctrine_consistency.py`. Wording only; no scan cycle, scoring rule or market list changed.
 - **v1.6 (2026-10-27):** Added `lebanon_pa` (VERIFIED after a paged `where=1=1` pull the same day; non-canonical) to county-endpoints.v1.json and county-endpoints.md for single-target screens and the acquisition-underwriting v4.37 recent-acquisition check. No scan cycle, scoring rule or market list changed (the 25% / $150 text is annotated as a legacy frame, thresholds untouched).
 - **v1.5 (2026-10-18):** Step 8 adds a finalist-only loan-maturity check (recorded mortgage + assumed 5/7/10-yr term, `[est]`) producing `MATURITY-WINDOW` and `SALE-LEASEBACK` lead flags; call order inserts `MATURITY-WINDOW` after delinquent entity owners. `workflows/parcel-screen-fanout.js` implements it: the verify agent records `recordedMortgage` / `maturityWindow` / `saleLeasebackCandidate`, and ranking uses a `maturity-window` bucket. The 2026-09-18 bulk-mining ruling stands. Parity with acquisition-underwriting v4.33 Seller/Motivation signals. No scored constant changed.
 - **v1.4 (2026-10-02):** Added references/distress-feeds.md (foreclosure and tax-lien sources for Franklin OH, Maryland, Jackson MO) and a step 7 pointer; county-endpoints.md: Jackson DLT cancellation/petition source, Wyandotte count refresh, Maryland `CONVEY1=4` decoded, recording-lag re-check flagged. Docs only. No scored constant changed.

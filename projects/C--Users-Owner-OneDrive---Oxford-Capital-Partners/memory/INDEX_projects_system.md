@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 16c5371f-037c-41a7-907c-504cc9671b5b
-  modified: 2026-11-10T00:00:00.000Z
+  modified: 2026-11-13T22:30:00.000Z
 ---
 
 # ORA Memory Index — Projects & System
@@ -49,7 +49,7 @@ metadata:
 - [Mirror Deploy 0xC000013A is usually benign](reference_mirror_deploy_0xc000013a_is_usually_benign.md) — run the classifier; duration is not a detector
 - [oxford-cc worktree gotchas](project_oxford-command-center_worktree_gotchas.md) — WORKBOOK_PATH not inherited per-worktree
 - [portfolio.json generatedAt churn](reference_portfolio_json_generatedat_commit_churn.md) — RESOLVED 07-27; dirty ≠ lease data changed
-- [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra; Cowork round-trip unreachable from Code
+- [AAOS Agent Coordination Layer](project_aaos_agent_coordination_layer.md) — real infra, FROZEN 2026-11-05 (ADR-0007); no AAOS work; tasks stay off unless revived
 - [brain.oxfordra.net Access](brain-oxfordra-access-finding.md) — LIVE via Pages mirror; tunnel path is a DEAD END
 - [GitHub CI Auto-Fix Rollout](github_ci_autofix_rollout.md) — live on 2 repos; #7 awaits sign-off
 
