@@ -1,6 +1,6 @@
 ---
 name: ora-full-gate-weekly
-description: Weekly Monday 11:30 ET (OI-254) - runs the FULL `npm run gate` for oxford-command-center from a throwaway origin/main worktree on this machine (Master Workbook + Property Financials mounted), so reconcile:noi-crosscheck, warehouse:verify and warehouse:drift run on a schedule (they are absent from gate:ci). Silent when clean; emails ggoldberg only on a non-zero stage, stale or unreachable input. Pause-aware. Read-only. [MODEL: claude-sonnet-5-5 | set 2026-10-13]
+description: Weekly Monday 11:30 ET (OI-254) - runs the FULL `npm run gate` for oxford-command-center from a throwaway origin/main worktree on this machine (Master Workbook + Property Financials mounted), so reconcile:noi-crosscheck, warehouse:verify and warehouse:drift run on a schedule (they are absent from gate:ci). Silent when clean; emails ggoldberg only on a non-zero stage, stale or unreachable input. Pause-aware. Read-only. [MODEL: claude-sonnet-5-5 | checked 2026-11-15]
 ---
 
 ORA weekly full-gate run (OI-254). CI's `gate:ci` omits reconcile:noi-crosscheck, warehouse:verify and warehouse:drift (they need the Master Workbook and the 32-file Property Financials set, which never leave Oxford machines); the self-hosted workflow has zero runs and no matching runner. This task is the watcher until PR-blocking CI is decided (Gabriel declined PR-blocking 2026-10-13: do NOT provision a runner or add a schedule: trigger).
