@@ -81,15 +81,20 @@ SKIP_NAME_RE = re.compile(r"^(?:event_log_\d{4}-\d{2}-\d{2}|INDEX_.*|CHANGELOG.*
 _DASH = r"[–—\-]"
 _MILL = r"(?:M|MM|mm|million)\b"
 _NUM = r"(\d+(?:\.\d+)?)"
+# Currency marker: "$10M" or "USD 10M". ora-skills writes dollar figures in SKILL.md bodies as "USD n"
+# (tools/lint_skill_dollar_args.py) because the skill loader substitutes a dollar sign followed by digits
+# with argument tokens; every rule reads both spellings.
+_CUR = r"(?:\$|\bUSD\b)"
 RE_PRICE_CEIL_WORD = re.compile(
     r"(?:\bsub-?|\bunder\s+|\bbelow\s+|\bless than\s+|<=?\s*|≤\s*|\bup to\s+|\bmax(?:imum)?\s+"
     r"|\bat most\s+|\bnot exceeding\s+|\bno more than\s+|\bceiling of\s+)"
-    r"[*_`]*\$\s?" + _NUM + r"\s?" + _MILL, re.I)
+    r"[*_`]*" + _CUR + r"\s?" + _NUM + r"\s?" + _MILL, re.I)
 RE_PRICE_CEIL_RANGE = re.compile(
-    r"\$\s?\d+(?:\.\d+)?\s?(?:K|M|MM)?[*_`]*\s?(?:" + _DASH + r"|\bto\b)\s?[*_`]*\$?\s?" + _NUM + r"\s?" + _MILL,
+    _CUR + r"\s?\d+(?:\.\d+)?\s?(?:K|M|MM)?[*_`]*\s?(?:" + _DASH + r"|\bto\b)\s?[*_`]*" + _CUR + r"?\s?"
+    + _NUM + r"\s?" + _MILL,
     re.I)
 RE_PRICE_CEIL_SUFFIX = re.compile(
-    r"\$\s?" + _NUM + r"\s?" + _MILL + r"\s+(?:max(?:imum)?|cap|ceiling|or (?:less|under|below))\b", re.I)
+    _CUR + r"\s?" + _NUM + r"\s?" + _MILL + r"\s+(?:max(?:imum)?|cap|ceiling|or (?:less|under|below))\b", re.I)
 
 RE_SIZE_CEIL = re.compile(
     r"(?:\bsub-?|\bunder\s+|\bbelow\s+|\bless than\s+|<=?\s*|≤\s*|\bup to\s+|\bmax(?:imum)?\s+)"
@@ -116,7 +121,7 @@ FINANCING_BEFORE = 40
 # book: "fits the existing portfolio mix", "see portfolio-growth"). Review C3, 2026-11-03.
 RE_PORTFOLIO = re.compile(
     r"amendment h\b|sold together|portfolio path|multi-building portfolio|portfolio of 2(?![0-9])"
-    r"|\b2\s?" + _DASH + r"\s?5[\s-]+buildings?|portfolios?\s+(?:up to|to|of up to|≤|<=)\s*\$", re.I)
+    r"|\b2\s?" + _DASH + r"\s?5[\s-]+buildings?|portfolios?\s+(?:up to|to|of up to|≤|<=)\s*" + _CUR, re.I)
 # "not sold together", "Amendment H does not apply" negate the qualifier (review round 2).
 RE_NEGATION_BEFORE = re.compile(r"\b(?:not|no|never|without|excludes?)\b[^.;]{0,6}$", re.I)
 # Only an explicit non-application counts after the qualifier: "never exceed $15M" / "do not exceed"
@@ -299,10 +304,10 @@ def check_canon_text(text):
     if line is None:
         return ["canon Gate 2 'Size/Price' line not found"]
     probs = []
-    if not re.search(r"\$%dK\s*%s\s*\$%dM\s+single asset" % (CANON_SINGLE_FLOOR_K, _DASH, CANON_SINGLE_CEIL_M),
-                     line, re.I):
+    if not re.search(r"%s\s?%dK\s*%s\s*%s\s?%dM\s+single asset"
+                     % (_CUR, CANON_SINGLE_FLOOR_K, _DASH, _CUR, CANON_SINGLE_CEIL_M), line, re.I):
         probs.append("canon single-asset band is no longer $%dK-$%dM" % (CANON_SINGLE_FLOOR_K, CANON_SINGLE_CEIL_M))
-    if not re.search(r"(?:≤|<=)\s*\$%dM\s+multi-building portfolio" % CANON_PORTFOLIO_CEIL_M, line, re.I):
+    if not re.search(r"(?:≤|<=)\s*%s\s?%dM\s+multi-building portfolio" % (_CUR, CANON_PORTFOLIO_CEIL_M), line, re.I):
         probs.append("canon portfolio ceiling is no longer <= $%dM" % CANON_PORTFOLIO_CEIL_M)
     if not re.search(r"\b%d\s*%s\s*%d buildings" % (CANON_PORTFOLIO_BUILDINGS[0], _DASH, CANON_PORTFOLIO_BUILDINGS[1]),
                      line, re.I):
