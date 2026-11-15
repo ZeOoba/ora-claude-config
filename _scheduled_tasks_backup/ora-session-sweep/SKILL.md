@@ -9,6 +9,8 @@ You are running the ORA weekly session sweep (v1.1, 2026-08-11 — now self-cont
 
 0. Call `request_cowork_directory` with path `C:\Users\Owner\Obsidian\BrainVault`. This is a best-effort re-mount attempt for the unattended context — cheap/idempotent if access is already granted. If BrainVault is still unreadable after this (Step 2 fails), skip to the FAIL-CLOSED PATH at the bottom — do not improvise, do not guess at paths.
 
+0a. Compute the run date once with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reuse that exact value for every [RUN DATE]/run-date use in notes and the Notion report.
+
 1. Call `list_sessions` (include_archived: true, limit: 50) to get all sessions.
 
 1a. Call `list_scheduled_tasks` (no args) and keep the full result — used in Step 4a for date sourcing.
