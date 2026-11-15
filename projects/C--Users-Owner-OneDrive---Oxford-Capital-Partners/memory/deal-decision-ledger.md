@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: a744d8cf-2abe-4151-98ea-2bd224723db2
-  modified: 2026-08-24T22:07:27.272Z
+  modified: 2026-11-14T23:55:00.000Z
 ---
 
 # Deal Decision Ledger
@@ -18,6 +18,11 @@ Companion to the "Active deal pipeline" table in [projects.md](projects.md) (whi
 
 | Date | Deal | Verdict | One-line reason | Buy-box rule validated / refined | FORT |
 |---|---|---|---|---|---|
+| 2026-11-14 | 906 N 19th St / 1164 Gibbard Ave, Columbus OH (4-bldg, 44,451 SF, Matthews; SCREEN 36) | PASS at ask | Gabriel-confirmed. VDR NEEDS_MORE → SCREEN PASS-band. All-in ~$90/SF misses the 1950 floor at every multiplier; ask unconfirmed ($3.35M vs $3.8M); Franklin like-kind $45–58/SF; plating shop 1 blk E (VI risk at Bldg 2); MTM roll on mark-to-market. Re-engage at $2.49–2.91M walk | VALIDATED: a pre-read basis that omits CapEx + re-tenanting is not a floor pass; Amendment H per-building test surfaced the sub-12' Bldg 2 | — |
+| 2026-11-14 | 60 S State Ave, Indianapolis IN (35,608 SF, 1939, Avison Young; SCREEN 28) | PASS at ask | Gabriel-confirmed. Strict ×0.90 floor $79.95/SF clears on price + closing only; CapEx $8–15/SF puts all-in at $83–90/SF. No OM/NOI; adjacent brownfield (40 S State) → ENV-WATCH. Re-engage ~$2.39M walk | VALIDATED: CapEx belongs in the basis read before any floor call on pre-1950 stock | — |
+| 2026-11-14 | 3031 S Holt Rd, Indianapolis IN (10,000 SF, 1955, SVN; SCREEN 24) | PASS | Gabriel-confirmed. Zone AE across the whole parcel incl. building pad (Gate 5); building on C-5, yard on D-5 (nonconforming); misses strict ×0.88 floor by $29–69K; in-place NNN ~36% above market with Unit 2 = 50.7% of rent. Walk $727K | VALIDATED: Stage -1 #8 (commercial-district industrial) + a pad-level SFHA together end the screen; footprint SF needs a parcel-boundary check (13,548 SF upside was the neighbor's building) | — |
+| 2026-11-14 | 3425 Terrace St, Kansas City MO (7,000 SF IOS on 2.29 ac, 1974 PEMB, Midwest CRE Advisors) | PASS | Gabriel-confirmed (VDR PASS). All-in 2.7–3.3× the strict floor at any $1.0–1.5M ask; land-at-market indeterminate (no ≥3 executed Midtown/West Bottoms land sales); KCMO Ch. 88 accessory outdoor-storage cap may leave ~1.15 usable ac; ~31 months unsold. Re-engage < ~$850K after zoning letter + topo | REFINED (pending doctrine merge): land-at-market credit must use USABLE acreage, not gross | — |
+| 2026-11-14 | 5407 & 5501 W Mill Rd, Milwaukee WI (41,224 SF, 1966, Brait Capital FSBO; exception screen) | PASS | Gabriel-confirmed (VDR PASS). Misses the 65% floor under both formulas at $3.10M (PROVISIONAL C&W-derived Milwaukee RCT); in-place NNN 15–25% above market and seller owns competing vacant space 1 mi W; EPA TRI confirms ink manufacturing on site. Re-engage ~$2.6–2.9M after rent roll + Bell lease + Phase I | VALIDATED: Milwaukee stays non-canonical under the cluster freeze (2nd Milwaukee PASS after Falls Commerce Center 2026-11-04) | — |
 | 2026-10-30 | 13500 E 40 Hwy, Independence MO (10-27 scan T1 86) | PASS | Former Gordmans retail anchor in dark Noland Fashion Square under Tri-Land TIF redevelopment; over 50K SF cap; $68/SF at/above dark-retail asks | REFINED: asset class / use code must be verified before the industrial basis frame is applied (scan-doctrine miss) | — |
 | 2026-10-30 | 2810 W Saratoga St, Baltimore MD (T1 86) | PASS at ask | 1940 ~11.5 ft-clear flip; renovated like-kind comp $80/SF, so basis fair not discounted; YoC ~7–7.5%. Re-engage $1.3–1.4M | REFINED: replacement-new discount alone does not promote functionally obsolete stock — needs a market-comp basis test | — |
 | 2026-10-30 | 67 & 76 Washington Ave, Des Moines IA (T1 80) | PASS at ask | 13'4" clear, ~86% coverage, no truck court; proxy RCT made the 49% discount circular; ~5.4% YoC; likely ex-Acme Printing. Re-engage $1.15–1.4M | REFINED: PROXY replacement-cost figures should cap a scan row at T2 | — |
