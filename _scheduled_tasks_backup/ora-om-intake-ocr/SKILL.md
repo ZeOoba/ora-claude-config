@@ -101,7 +101,7 @@ Gate-passing new candidates → Notion Deal Sourcing Log
 gates result in Notes / Flags. If Step 3.5 returned extracted fields, append an
 "OM Extraction" section to Notes listing each field: value pair (e.g. "price: 1450000 |
 totalSf: 17688 | yearBuilt: 1987 | clearHeightFt: 18 | inPlaceRentPsf: 5.40 | waltYears: 3.2").
-Check for an existing row first; never duplicate.
+Check for an existing row first; never duplicate. If a Notion create-pages response comes back without a page ID (e.g. a grace-period/quota notice), search for the row by its exact title before any retry — a match created at/after the create call is this run's row; never blind-retry a create (that produced a duplicate). Quota errors → `notion-quota-fallback` skill.
 Update manifest.json with all processed files.
 
 ## Step 5 — Report
@@ -109,7 +109,7 @@ Email summary via Outlook COM — C:\Users\Owner\.claude\scheduled-tasks\_shared
 (SOLE send path; Composio removed 2026-06-11 — on COM failure retry once then flag, do not halt)
 from ggoldberg@oxfordra.net to ggoldberg@oxfordra.net ONLY (no egoldberg cc — per the 2026-05-15
 routing directive re-ratified 2026-06-10, only the Daily Brief cc's Eric).
-Subject: "OM Intake — {date}: {n} new, {m} OCR'd, {k} gate-passed".
+Subject: "OM Intake — {date}: {n} new, {m} OCR'd, {k} gate-passed". {date} (here, in gate-*-{date} statuses and the fallback report name) is the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; weekday only where one is named) and reused verbatim in every title, subject and body.
 Body: per-property gate verdicts, OCR failures, questions for Gabriel.
 If zero new files: send nothing; the Step 0 run-complete entry suffices.
 If the Outlook COM send is unavailable or fails after the one retry (e.g. Desktop Commander/PowerShell

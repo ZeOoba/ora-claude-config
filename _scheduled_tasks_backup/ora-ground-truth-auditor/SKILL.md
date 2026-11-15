@@ -1,6 +1,6 @@
 ---
 name: ora-ground-truth-auditor
-description: Nightly re-derivation audit of the previous 24h of scheduled-task runs across both fleets. Dispatches one verifier agent per side-effecting run (side-effect-free runs get a cheap deterministic stamp, no agent) to re-derive every factual claim from PRIMARY SOURCES ONLY -- never a prior summary, log line, or finding. Reports on four axes: IDEMPOTENCY, CLAIM ACCURACY, STALENESS, FRESHNESS OF INPUTS. Emails one morning digest to ggoldberg@oxfordra.net; any retraction or published-page edit is drafted and named in the digest, never sent or applied. Full design: docs/superpowers/specs/2026-09-10-ground-truth-auditor-design.md. [MODEL: claude-opus-5 | set 2026-09-10]
+description: Weekly (Tue 04:00 ET; nightly until 2026-09-17) re-derivation audit of every scheduled-task run since the previous auditor run, across both fleets. The window auto-widens; sub-weekly tasks' extra runs get a status-only STEP 1b pass. Dispatches one verifier agent per side-effecting run (side-effect-free runs get a cheap deterministic stamp, no agent) to re-derive every factual claim from PRIMARY SOURCES ONLY -- never a prior summary, log line, or finding. Reports on four axes: IDEMPOTENCY, CLAIM ACCURACY, STALENESS, FRESHNESS OF INPUTS. Emails one morning digest to ggoldberg@oxfordra.net; any retraction or published-page edit is drafted and named in the digest, never sent or applied. Full design: docs/superpowers/specs/2026-09-10-ground-truth-auditor-design.md. [MODEL: UNVERIFIABLE | checked 2026-10-30]
 ---
 
 # ORA Ground-Truth Auditor
@@ -36,7 +36,7 @@ AUDITED run that STEPS 3-6 refer to, and must not be substituted for one.
 Claim before anything else:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --ttl-min 240
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --ttl-min 240
 ```
 
 - **Exit 10** -> today's audit already completed. Log `BLOCK_MAIN_ALREADY_COMPLETE_TODAY`,
@@ -64,25 +64,27 @@ C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner
 **How this run closes the claim -- exactly one of these, on every path that got exit 0:**
 
 - **An audit digest reached STEP 8** -- sent, skipped because the Layer 2 probe found it
-  already in Sent Items, or unsent after the send retry but drafted and saved -- close
+  already in Sent Items, or unsent (send failed after its retry, or exit 5/6: no retry) but drafted and saved -- close
   with `complete`. Pass `--email-sent-at` only when this run's send actually succeeded.
   An unsent digest is still a complete run (flagged per STEP 8's exit-code canon),
   because re-running would repeat the whole verifier fan-out:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --email-sent-at <ISO8601>
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --email-sent-at <ISO8601>
 ```
 
 - **No audit happened** -- STEP 1 exit 2 (after its could-not-start digest is sent or
   probe-skipped), or ANY abort at any step before an audit digest reaches STEP 8 (e.g. the
-  STEP 3 `ValueError` stop, which sends nothing) -- close with `fail`, so a later same-day
+  STEP 3 `ValueError` stop, which sends nothing; exception: a could-not-start digest whose send ended exit 6 closes `complete`, see STEP 8) -- close with `fail`, so a later same-day
   fire re-claims (`RECLAIMED_AFTER_FAILED`) and actually runs the audit:
 
 ```
-C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:\Users\Owner\.claude\scheduled-tasks\_shared\block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --error "<what broke>"
+C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-ground-truth-auditor --block main --run-id <guard_run_id> --error "<what broke>"
 ```
 
 ## STEP 1 -- build the run index (Stage 0, deterministic, no judgment)
+
+`<today's date>` everywhere in this file = the run date computed once at run start with `date '+%A %Y-%m-%d'` (date part in every date slot; no weekday is named here) and reused verbatim in every filename, folder, subject, stem and body.
 
 ```
 "C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe" "C:/Users/Owner/.claude/maintenance/ground-truth-run-index.py" --out "C:/Users/Owner/.claude/maintenance/_state/ground-truth/run-index-<today's date, YYYY-MM-DD>.json"
@@ -108,6 +110,25 @@ never treat them the same:**
   there is no data to report on). Do not attempt to synthesize a normal-shaped digest
   around a missing run-index. It goes out under the separate could-not-start subject
   (STEP 8), then the claim closes with `fail` (STEP 0b).
+
+## STEP 1b -- sub-weekly tasks: account for the runs the index cannot see (added 2026-09-22)
+
+This task runs **weekly** (Tuesday 04:00) under the fleet once-a-week cap. The window
+auto-widens to the gap since the last auditor run, so every WEEKLY task's run is still
+indexed. The run index, however, holds ONE row per task id: the registry keeps only each
+task's latest `lastRunAt`. For a task that fires more often than weekly, that means only
+its latest run is indexed and verified. Today that is `ora-am-brief` (daily) on CC; it
+would be any other task that is exempt from the cap.
+
+For each enabled CC task whose `cronExpression` fires more often than weekly, call
+`list_task_runs(taskId, limit: 10)`. For every run whose start falls inside the run
+index's window and that is NOT the indexed run, record one SUPPLEMENTAL line in the
+digest: date, status, and one-line summary. Also flag any run whose status is not
+`succeeded`, and any calendar day in the window with no run at all (a missed daily brief).
+Do NOT dispatch verifier agents for supplemental runs. Their claims are not re-derived,
+so label them "status-only, not re-derived" and never count them toward the
+CLAIM-ACCURACY axis. If `list_task_runs` is unavailable on this surface, say so in the
+digest's status section rather than omitting the section.
 
 ## STEP 2 -- extract side effects (Stage 1, deterministic, no judgment)
 
@@ -138,7 +159,7 @@ agent_tool_model = gmr.to_agent_tool_model_name(verifier_model)
 
 `resolve_verifier_model` returns a full model id (e.g. `"claude-opus-5"`) -- the Agent
 tool's `model` parameter does NOT accept full ids, only the short names
-`sonnet | opus | haiku | fable`. Always call `to_agent_tool_model_name` on the resolved
+`sonnet | opus | haiku`. Always call `to_agent_tool_model_name` on the resolved
 id and dispatch the Agent tool with `agent_tool_model` (the short name), never with
 `verifier_model` (the full id) directly. `to_agent_tool_model_name` raises `ValueError`
 loudly if `verifier_model` is somehow outside the known four -- do not catch and
@@ -159,7 +180,7 @@ If `run["file_path"]` is absent or unreadable, pass `skill_md_text=None` and let
 ladder fall through to rung 3 (never fail the dispatch over a missing SKILL.md read).
 
 **Runs touching financial data, governor
-constants (DSCR/LTV), or a confidential deal never verify below Fable regardless of what
+constants (DSCR/LTV), or a confidential deal never verify below Opus 5.5 regardless of what
 the ladder returns** -- round up explicitly for those, per CLAUDE.md's Dispatch
 invariants (round up before converting with `to_agent_tool_model_name`, so the
 short name passed to the Agent tool reflects the rounded-up floor). Pin the resolved
@@ -355,7 +376,7 @@ Write the matching stem -- `Ground-Truth Audit -- <today's date>` or
 then:
 
 ```
-powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\_shared\outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the stem>"
+powershell -ExecutionPolicy Bypass -File C:/Users/Owner/.claude/scheduled-tasks/_shared/outlook-sent-probe.ps1 -SubjectFile "<temp .txt containing exactly the stem>"
 ```
 
 - **Exit 10** (`ALREADY_SENT`) -> do NOT send. Log `MAIN_EMAIL_ALREADY_IN_SENT_ITEMS`,
@@ -372,24 +393,26 @@ powershell -ExecutionPolicy Bypass -File C:\Users\Owner\.claude\scheduled-tasks\
 powershell -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "<the subject above>" -BodyFile "<path to the composed HTML>" -BodyFormat html
 ```
 
-Exit-code handling (canon): exit 2 (COM failure) or 4 (timeout) -- retry once, then flag
+Exit-code handling (canon): exit 2 (COM failure) or 4 (timeout before `Send()`) -- retry once, then flag
 loudly if it fails again (do not halt the task over a send failure once the digest is
 drafted and saved). Exit 1 (usage error) or 3 (stuck wizard) -- do not retry, flag
 immediately with the exact exit code and stderr.
 
-**Before the exit-4 retry, re-run the Sent-Items probe** (same command, same stem file).
-A timeout does not prove the message failed -- COM can deliver it after the helper gave
-up, and a blind retry then sends the digest twice. **Exit 10** -> the timed-out send
-landed: do NOT retry, log `MAIN_EMAIL_DELIVERED_DESPITE_TIMEOUT`, and close with
-`complete --email-sent-at <match.sentOn from the probe's JSON>` (the timestamp of the
-message actually in Sent Items, not the time of the failed call); for a could-not-start
-digest close with `fail` as above. **Exit 0** -> retry the send once. **Exit 1 or any
-other code** -> fail open and retry, naming the probe gap in STEP 9. A send whose
-timeout the re-probe proves delivered counts as "this run's send actually succeeded" for
-STEP 0b's `--email-sent-at` rule.
+**Exit 5 (refused: attachment + external recipient, or an unauthorized external recipient), exit 6 (send state
+unknown -- the message MAY have gone out), or any code other than 2 or 4** -- do NOT retry and never
+resend (rules.md section 2): flag loudly in STEP 9 with the exact exit code and stderr (for exit 6 quote the
+`SEND-STATE-UNKNOWN` / `DEDUP-BLOCK` / `QUARANTINE` line from send-log.txt) and say a human must check
+Outlook Sent Items. For exit 5 or any other code the claim closes as STEP 0b specifies for that digest type,
+never with `--email-sent-at`. For exit 6 the claim closes `complete` for BOTH digest types (a could-not-start
+digest included), still without `--email-sent-at`: a send that may have gone out counts as sent for the
+period, so no same-day fire resends.
+
+No Sent-Items re-probe before the exit-4 retry: exit 4 now means the timeout hit BEFORE `Send()`, so the
+message cannot have gone out and the retry is safe (R-05 send contract). A timeout AFTER `Send()` is
+exit 6 and is never retried.
 
 Once the send has resolved, close the STEP 0b claim exactly as STEP 0b specifies, with
-`guard_run_id` (already done above if either probe returned 10 -- close once). If that
+`guard_run_id` (already done above if the probe returned 10 -- close once). If that
 close returns exit 12, report `guard_run_id` and the helper's JSON verbatim in STEP 9.
 
 ## STEP 9 -- completion note
