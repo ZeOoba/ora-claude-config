@@ -690,6 +690,15 @@ def main():
             bad = True
             continue
         e_hits = _exp.scan_diff(pe.stdout.decode("utf-8", "ignore"), exp_needles)
+        # Rule 3 reads file CONTENTS at every pushed commit (exposure_leak_check.shape_hits).
+        try:
+            e_hits = sorted(set(e_hits) | set(_exp.shape_hits(rng)))
+        except _exp.ShapeScanError as e:
+            sys.stderr.write("pre-push BLOCKED (fail-closed): could not read the pushed .json "
+                             "files on %s (%s) -- cannot check for the pipeline-snapshot "
+                             "shape.\n" % (local_ref, e))
+            bad = True
+            continue
         if e_hits:
             sys.stderr.write("pre-push BLOCKED: pipeline / PII / debt data ADDED on %s (range "
                              "%s): %s. Values are not echoed. This repo is PUBLIC: keep the "

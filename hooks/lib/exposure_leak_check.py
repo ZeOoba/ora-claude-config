@@ -22,8 +22,11 @@ the push that deletes data passes.
                         archive copies included) carrying a North-American phone number
                         (separated, parenthesised, E.164, Unicode dashes, glued extension).
                         Published government office lines in PUBLIC_PHONES are allowed.
-  3. PIPELINE SHAPE  -- a .json / .jsonl file whose added lines carry BOTH a "deal" key and a
-                        "stage" key (any case): the {page_id: {deal, stage}} snapshot shape.
+  3. PIPELINE SHAPE  -- a .json / .jsonl file that, as it stands in any pushed commit that
+                        touches it, carries BOTH a "deal" key and a "stage" key (any case):
+                        the {page_id: {deal, stage}} snapshot shape. Read from file contents
+                        by shape_hits(), not from added lines, so the keys cannot be split
+                        across commits or pushes (merge gate round 2).
   4. DEBT FIGURE     -- an added line or commit-message line carrying a loan figure from the
                         gitignored data/loan-terms.json (every number >= 100,000 under
                         "loans": principal, balloon, appraisal, anchor balance, schedule) in
@@ -274,9 +277,6 @@ def scan_diff(body, needles=None):
     m = _matcher(needles)
     hits = set()
     commit, path, minus, width, in_msg = None, None, None, 0, False
-    # Keyed on PATH across the whole pushed range (merge gate round 1): keyed per commit, a
-    # "deal" key added in one commit and "stage" in the next never combined.
-    shape = {}  # path -> {"deal": bool, "stage": bool}
     for line in body.split("\n"):
         if line.endswith("\r"):
             line = line[:-1]
@@ -319,12 +319,51 @@ def scan_diff(body, needles=None):
             hits.add((path, "exposure-path"))
         if is_memory_path(path) and _private_phone(text):
             hits.add((path, "phone-in-memory"))
-        if _norm(path).endswith((".json", ".jsonl")):
-            s = shape.setdefault(path, {"deal": False, "stage": False})
-            s["deal"] = s["deal"] or bool(DEAL_KEY_RE.search(text))
-            s["stage"] = s["stage"] or bool(STAGE_KEY_RE.search(text))
-            if s["deal"] and s["stage"]:
-                hits.add((path, "pipeline-shape"))
         if m and m.search(text):
             hits.add((path, "debt-figure"))
+    return sorted(hits)
+
+
+class ShapeScanError(Exception):
+    """git could not enumerate or read the pushed .json files -- the caller must BLOCK."""
+
+
+def _git_bytes(args, cwd):
+    try:
+        p = subprocess.run(["git", "-c", "core.quotePath=false"] + args, cwd=cwd,
+                           capture_output=True, timeout=120)
+    except Exception as e:
+        raise ShapeScanError("git %s failed (%s)" % (args[0], type(e).__name__))
+    if p.returncode != 0:
+        raise ShapeScanError("git %s exited %d" % (args[0], p.returncode))
+    return p.stdout
+
+
+def shape_hits(rng, cwd=None):
+    """Rule 3 on FILE CONTENTS, not added lines (merge gate round 2 redesign).
+
+    For every commit in `rng` and every .json / .jsonl path that commit adds or modifies
+    (merges compared against each parent), read the file as it stands IN that commit and
+    flag it when it carries both a "deal" and a "stage" key. Every such state is published
+    by the push, so this sees what the remote will hold: keys split across commits or across
+    pushes (the context line is in the post-image), and it never flags a file in which the
+    two keys never coexisted. Sorted (path, "pipeline-shape") list; ShapeScanError on any
+    git failure."""
+    revs = _git_bytes(["rev-list", rng], cwd).decode("ascii", "replace").split()
+    hits = set()
+    for c in revs:
+        out = _git_bytes(["diff-tree", "-r", "--root", "--no-renames", "-m", "--no-commit-id",
+                          "--name-status", "-z", c], cwd)
+        parts = out.decode("utf-8", "replace").split("\0")
+        paths, i = set(), 0
+        while i + 1 < len(parts):
+            status, p = parts[i], parts[i + 1]
+            i += 2
+            if status and status[0] != "D" and _norm(p).endswith((".json", ".jsonl")):
+                paths.add(p)
+        for p in sorted(paths):
+            blob = _git_bytes(["cat-file", "-p", "%s:%s" % (c, p)], cwd)
+            text = blob.decode("utf-8", "ignore")
+            if DEAL_KEY_RE.search(text) and STAGE_KEY_RE.search(text):
+                hits.add((p, "pipeline-shape"))
     return sorted(hits)
