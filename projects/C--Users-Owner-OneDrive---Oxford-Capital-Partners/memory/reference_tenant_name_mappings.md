@@ -31,9 +31,9 @@ PM platform exports (Rent Manager / Yardi / AppFolio) sometimes use different te
 
 These tenants appear in A/R reports but have no matching record:
 
-- Building Bridges Therapy Svcs (29000 Info Lane) — $3,884.84 delinquent
-- Eastpoint Church (29000 Info Lane) — $2,084.84 delinquent
-- Chateau 1590, LLC (29000 Info Lane) — $1,742.31 delinquent
+- Building Bridges Therapy Svcs (29000 Info Lane) — [amount: private] delinquent
+- Eastpoint Church (29000 Info Lane) — [amount: private] delinquent
+- Chateau 1590, LLC (29000 Info Lane) — [amount: private] delinquent
 - Butter Pat Industries / Butter Pat Industries, LLC (29000 — two tenant accts) — $1,887.58 combined
 - Magothy Electric Company, Inc. (29000) — $290.87
 - Lamar Advantage GP Co. (3034 Westerville, billboard tenant) — $500 (likely ghost charge)

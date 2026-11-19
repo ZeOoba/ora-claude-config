@@ -51,7 +51,7 @@ metadata:
 Discovered by accident during the [1100 Rarig disposition analysis](deal_1100_rarig_disposition_2026-07.md) (only 3 of 14 real units had rows), then confirmed portfolio-wide via a full group-by-Property-Address query of `collection://b12f4cfd-a995-4755-8341-6435ae8173b4` (296 rows total):
 
 - **3347 McGregor Ln — Toledo OH: zero tenant rows.** A valid dropdown option with no rows at all — worse than Rarig's partial gap, this property is entirely invisible to any Notion-driven analytics (daily brief 4b/4c, exception-detection, portfolio-anomaly-scout, etc.).
-- **76 of 296 rows (26%) have no Property Address set at all** — untied to any property, including the portfolio's two single largest AR delinquencies ($46,665.48 and $21,632.15, both 90+ days — can't be routed to a PM/collections workflow by property until fixed).
+- **76 of 296 rows (26%) have no Property Address set at all** — untied to any property, including the portfolio's two single largest AR delinquencies ([amount: private] and [amount: private], both 90+ days — can't be routed to a PM/collections workflow by property until fixed).
 - **The Property Address select field only defines 19 distinct options** against ORA's known ~27-property portfolio — roughly 8 properties may have no selectable option in the schema at all, meaning even a conscientious data-entry person couldn't tag a tenant to those properties correctly today. Specific missing 8 not yet identified — needs the canonical property list cross-referenced against the live schema options.
 - Several other properties show suspiciously low row counts for their likely tenant density (1900 N Broadway, 29000 Information Ln, 3034 Westerville, 3540 E. 5th Ave, 5333 Secor Rd — each 1 row; 9901 River Rd — 2; 7658 Fishel Dr N, 2822 Banwick Rd, 401 Sunburst Hwy — 3-4) — not confirmed as gaps, just flagged for a human spot-check the same way Rarig was caught.
 - Duplicate-row suspicion: two near-identical "Heritage Pool Supply" rows at 7658 Fishel Dr N with the same expiration date.
@@ -63,8 +63,8 @@ Discovered by accident during the [1100 Rarig disposition analysis](deal_1100_ra
 **Next step (needs Gabriel or a dedicated reconciliation session):** identify the ~8 unrepresented properties by diffing the Tenant DB's 19 Property Address options against the canonical 27-property roster in [firm.md](firm.md); reconcile the 76 unlinked rows against PM rent rolls to restore property linkage, prioritizing the two 90+-day delinquencies first since they're actionable dollars.
 
 **Progress 2026-07-10: 4 of 76 rows fixed, both 90+-day delinquencies now linked.** Sourced via the row's own "HubSpot Contact" relation (cross-referencing the linked HubSpot contact/company record's address field) rather than guessing — a legitimate, non-fabricated source of record distinct from the PM rent roll:
-- New Benevis Smiles, LLC → 1900 N Broadway — Baltimore MD, Unit 102 (the $46,665.48 delinquency)
-- Masala Bazaar (XPO Foods, LLC) → 9050 Red Branch Rd — Columbia MD, Unit M & N (the $21,632.15 delinquency)
+- New Benevis Smiles, LLC → 1900 N Broadway — Baltimore MD, Unit 102 (the [amount: private] delinquency)
+- Masala Bazaar (XPO Foods, LLC) → 9050 Red Branch Rd — Columbia MD, Unit M & N (the [amount: private] delinquency)
 - Chesapeake Brands, LLC → 29000 Information Ln — Easton MD, Unit 501
 - THE BAY AREA CORPORATION → 401 Sunburst Hwy
 

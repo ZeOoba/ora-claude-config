@@ -13,7 +13,7 @@ edited at 16:46 mid-session. Two changes landed in `External Loans Summary`; a t
 one, did not.
 
 **What landed.** Banwick range `B11:B70` → `B11:B71` (OI-094 truncation — genuinely FIXED, the
-$3.35M r71 balloon is now inside the summed range), and the right edge on `H6:I9` moved
+[loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
 `EDATE(Assumptions!$B$30,12)` → `EOMONTH(Assumptions!$B$30,12)`.
 
 **What did NOT land, and must.** `Assumptions!B30` still reads
@@ -37,7 +37,7 @@ manual-override cases (9 pay-days × 28 days-of-month × 12 months, 2027):
 
 Worked case: `B32 = 2027-03-15`, pay-day 20 → window `(2027-03-15, 2028-03-31]` captures **13**
 payments. This is the OI-092 over-capture defect re-opened, at ~69% of override dates instead of
-~6 days/loan/year. Corroborates OI-094's own 1,428-deviation simulation (different case set, same
+[loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
 direction and magnitude class).
 
 **Latent only** because `B31 = "Auto (current month-end)"` today, which forces B30 to a month-end
@@ -49,7 +49,7 @@ Only the four borrower rows moved. `H15`/`I15` (Restoration Church Trust) and `H
 (485 S Walnut) are **still on `EDATE`**. Two different right-edge functions now govern one
 summary block, so the six loans no longer share a window definition under manual override.
 
-**Not fixed by this edit, still open:** RCT's [figure: data/loan-terms.json] balloon (Oxford 50% = [figure: data/loan-terms.json])
+[loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
 sits in the PAYMENT AMOUNT column, invisible to the `D`/`E`-only sum — live now, since RCT matures
 2027-02-20 inside the current window. Also `E16` still anchors on bare `TODAY()` while every other
 cell anchors on `B30`, so 485 S Walnut's principal and interest use different as-of dates.
@@ -59,5 +59,5 @@ window as `EDATE(B30,12)` independently, so once the workbook's `EOMONTH` window
 override, the recomputed-vs-cached comparison fires a one-payment `annualDebtService` divergence.
 It is the reason the Banwick truncation was observed being fixed in real time.
 
-Related: [[reference_workbook_annual_debt_service_366day_overcapture]] ·
+Related: `reference_workbook_annual_debt_service_366day_overcapture.md` (local only, gitignored) ·
 [[feedback_findings_decay_recheck_before_writing]] · [[feedback_verified_null_vs_inferred_null]]

@@ -787,7 +787,7 @@ carries `direction`: `borrower` (ORA owes — real debt), `lender` (ORA is owed 
 a note RECEIVABLE), or `internal` (intercompany). As of 2026-07-16 the Brief's
 balloon alert does NOT filter on direction, so it fires on `lender` loans with
 the detail line *"Prepare refinance or payoff"* — the wrong action for a note ORA
-holds and collects. The live example is **Restoration Church Trust** ($979,772,
+holds and collects. The live example is **Restoration Church Trust** ([figure: private],
 9%, balloon 2027-02-20): it is an ASSET, not a liability. Two other `lender`
 loans exist (1100 Rarig/Fenton [figure: data/loan-terms.json]; 485 S. Walnut St. $[figure: data/loan-terms.json]). When a
 balloon alert fires, check `direction` in `portfolio.json` first and report it as

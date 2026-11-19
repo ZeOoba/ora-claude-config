@@ -39,7 +39,7 @@ metadata:
 - [Broker coverage-gap map 09-19](reference_broker_coverage_gap_map_findings_2026-09-19.md) — v01 'missed warm leads' REFUTED on thread bodies; real finding = unsent drafts incl. 2 chases to Koon on 808 Rhoads; gap pool has almost no emails
 - [Mortgage-maturity signal not bulk-accessible 09-18](reference_mortgage_maturity_signal_not_bulk_accessible_2026-09-18.md) — no ORA market's recorder exposes bulk mortgage data; do not re-propose as a free build
 - [Renewal cohort rulings + lease basis by property 09-18](reference_renewal_cohort_rulings_and_lease_basis_2026-09-18.md) — who already has an offer out (first-stage HubSpot deal ≠ un-worked), 9050 Red Branch = NNN, GT bay layout, Fresenius rent schedule
-- [2207 Northwood MTM tenants ≠ holdover 09-18](reference_2207_northwood_mtm_tenants_not_holdover_2026-09-18.md) — Adkins Towing + Anibal Morales are month-to-month per Gabriel; workbook "Holdover" label is wrong for them
+- 2207 Northwood MTM tenants ≠ holdover 09-18 (`reference_2207_northwood_mtm_tenants_not_holdover_2026-09-18.md`, local only, gitignored) — Adkins Towing + Anibal Morales are month-to-month per Gabriel; workbook "Holdover" label is wrong for them
 - [parseLeases vacancy-block phantom leases](reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md) — CLOSED 08-03
 - [Both snapshot tasks write ONE file](reference_snapshot_tasks_share_one_file_diff_absorption.md) — the sibling's "no commit" is correct, not broken
 - [CC snapshot is TRACKED, not ignored](reference_command_center_snapshot_is_tracked_not_ignored.md) — auto-committed unattended; the task file's "git-ignored" claim is wrong
@@ -57,6 +57,6 @@ metadata:
 - [Master workbook no single-writer 07-24](project_master_workbook_no_single_writer_2026-07-24.md) — OPEN: uncoordinated concurrent edits
 - [Master workbook single-writer proposal 07-25](project_master_workbook_single_writer_proposal_2026-07-25.md) — RATIFIED; text now [tech.md](tech.md) §3d
 - [Cash Data excludes PM-held accounts](reference_cash_data_excludes_pm_held_accounts.md) — negative balance is usually tax-timing, not distress
-- [Annual debt service 366-day over-capture](reference_workbook_annual_debt_service_366day_overcapture.md) — RESOLVED 08-05
+- Annual debt service 366-day over-capture (`reference_workbook_annual_debt_service_366day_overcapture.md`, local only, gitignored) — RESOLVED 08-05
 - [ELS EOMONTH pair-fix landed HALF](reference_els_eomonth_pair_fix_half_applied_2026-08-05.md) — OI-094: `H6:I9` moved to EOMONTH but `Assumptions!B30` was never constrained to month-end; strictly WORSE than pre-fix under manual override
 - **[754 Old State §31 has NO "Parking Contingency Period" 08-26](reference_754_section31_has_no_parking_contingency_period_2026-08-26.md)** — §31 is "Parking Modifications"; governing dates are **Sept 9** (PD filing) and **Oct 9, 2026** (FP outer limit) off the **Aug 10** certified Effective Date. The 08-12 psa-reconciliation banner wrongly listed this term as corroborated — a prior banner's corroboration list is not itself verified. Also: sig page is raster, text-layer read falsely reports an unexecuted instrument

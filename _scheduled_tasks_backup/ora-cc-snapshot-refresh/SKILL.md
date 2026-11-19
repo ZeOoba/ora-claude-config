@@ -29,7 +29,7 @@ snapshot regression"). It now shares `scripts/lease-snapshot-drift-check.ts`'s e
 
 ## ✅ 2026-08-03 phantom-lease incident — CLOSED, suspension LIFTED 2026-08-03 20:2x UTC (Gabriel ruling)
 
-This task was suspended 2026-08-03 after `parse.ts:476`'s `propertyKey` guard stringified a Date instead of rejecting it, ingesting the rent roll's derived "VACANCY & UPCOMING AVAILABILITY" block as 10 phantom leases (138 → 148 leases, annual rent +$312,540). This task's own 2026-08-03 15:54 UTC run is what wrote that corruption to disk; reverted by hand the same day. Full diagnosis: `memory/reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md`.
+This task was suspended 2026-08-03 after `parse.ts:476`'s `propertyKey` guard stringified a Date instead of rejecting it, ingesting the rent roll's derived "VACANCY & UPCOMING AVAILABILITY" block as 10 phantom leases (138 → 148 leases, annual rent +[figure: private]). This task's own 2026-08-03 15:54 UTC run is what wrote that corruption to disk; reverted by hand the same day. Full diagnosis: `memory/reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md`.
 
 Both halves of the lifting condition are done, independently verified:
 1. **Parser fix** — [PR #250](https://github.com/ZeOoba/oxford-command-center/pull/250) (`d35931a`).

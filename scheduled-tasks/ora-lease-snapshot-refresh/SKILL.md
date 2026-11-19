@@ -16,7 +16,7 @@ You are running the scheduled task `ora-lease-snapshot-refresh` for Oxford Realt
 
 ## ✅ 2026-08-03 phantom-lease incident — CLOSED, suspension LIFTED 2026-08-03 20:2x UTC (Gabriel ruling)
 
-This task was suspended (write, then write-and-commit) 2026-08-03 after `parse.ts:476`'s `propertyKey` guard stringified a Date instead of rejecting it, ingesting the rent roll's derived "VACANCY & UPCOMING AVAILABILITY" block as 10 phantom leases (138 → 148 leases, annual rent +$312,540). Full diagnosis: `memory/reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md`.
+This task was suspended (write, then write-and-commit) 2026-08-03 after `parse.ts:476`'s `propertyKey` guard stringified a Date instead of rejecting it, ingesting the rent roll's derived "VACANCY & UPCOMING AVAILABILITY" block as 10 phantom leases (138 → 148 leases, annual rent +[figure: private]). Full diagnosis: `memory/reference_parseleases_vacancy_block_phantom_leases_2026-08-03.md`.
 
 Both halves of the lifting condition are now done and independently verified, not merely merged:
 1. **Parser fix** — [PR #250](https://github.com/ZeOoba/oxford-command-center/pull/250) (`d35931a`).

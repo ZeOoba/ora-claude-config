@@ -37,7 +37,7 @@ When an OPEN item's auto-check matches, the probe emits a WARN (report-only, nev
 | [OI-019](#OI-019) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Gabriel must add `HUBSPOT_TOKEN` (Private App, `crm.objects.deals.read`) to `oxford-command-center/.env` — PR #221 (frontend trigger) ready, blocked only on the credential. Once live, re-verify 2146 Enterprise Pkwy Twinsburg OH (currently untracked in projects.md/deal-decision-ledger.md) lands correctly in acq_candidates |
 | [OI-020](#OI-020) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | ora-cowork-heartbeat: LAMS registry entry has no `approvedPermissions` grant (root cause, 3x documented since 07-16). No MCP tool on either surface can write this — only fix is Gabriel manually approving the Notion-tool prompt during a live unattended fire in Cowork's own Scheduled Tasks UI (a manual "Run Now" doesn't count). GitHub watchdog issue open, needs manual closure once genuinely fixed |
 | [OI-024](#OI-024) | 2026-07-24 | `hooks/shared-checkout-guard.py` (attribution test realignment, commit b599432) | Guard reads provenance from `SHARED_CHECKOUT_SESSIONS_DIR`, not `commit_provenance.sessions_dir()` — inert today (neither env var set, both resolve to `hooks/sessions`), but setting `COMMIT_PROVENANCE_SESSIONS_DIR` alone would silently degrade attribution to UNATTRIBUTED forever. Gabriel's call 2026-07-24: log, don't fix |
-| [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Restoration Church Trust: no borrower-side repayment/extension conversation logged since the Apr 2026 Covenant Watch call for lender outreach "by June 2026" (deadline passed); needs Gabriel's own outreach decision (outbound comms, not initiated here). Separately: HubSpot's "Lease Renewal — Restoration Church Trust" deal ($16,714, appointmentscheduled) is likely the same mis-entered-loan-counterparty error already fixed in the Tenant DB (OI-009) — needs a retirement decision. The other 49-stuck-deals batch pass CLOSED 2026-07-25, see below |
+| [OI-021](#OI-021) | 2026-07-19 | [event_log.md](event_log.md#2026-07-19) | Loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19. |
 | [OI-025](#OI-025) | 2026-07-25 | shared-checkout investigation, this session | `Claude_Workspace\00_Governance\Scheduled\` holds 100+ scheduled-task folders (incl. several `_archive_*` subfolders already in that same directory) whose live/dead status vs. the two documented fleet registries is unverified — one instance (`ora-tenant-hubspot-reconciliation`) was confirmed orphaned and archived this session; the rest (including apparent name-collisions with live CC tasks like `ora-am-brief`, `ora-weekly-hygiene`, `ora-health-guard`) are unaudited |
 | [OI-026](#OI-026) | 2026-07-26 | `oxford-command-center` `gov-ltv-hardening` worktree, 18-round adversarial-refute session | debt-snapshot.ts's degraded-marker "does a new loan explain this one's disappearance" check is tick-partition order-dependent (same facts, opposite governor verdict depending on which snapshot write each fact lands in) — Gabriel's ruling 2026-07-26: ship rounds 14-18 as-is, document only, no fix yet |
 | [OI-029](#OI-029) | 2026-07-26 | Repo-sweep session, 2026-07-26 | TWO live/unrotated credential exposures found: (1) `oxford-realty/oxfordra-net` git history has a plaintext `NETLIFY_AUTH_TOKEN` from an April WSL experiment (repo now archived to `archive/oxford-realty_archived-20260726/`, history NOT scrubbed); (2) Claude_Workspace `oxford-site` duplicate has a non-redacted Netlify MCP proxy token in a `.git-corrupted-20260716/` backup folder on disk — needs Gabriel to rotate BOTH tokens, then this folder specifically needs secure deletion (not mere archiving — never verified as-touched by this session per the ORA autonomy gate's oxfordra.net-path block on 2026-07-26, so the whole `Claude_Workspace/01_Workspace/oxford-site` duplicate is also still un-archived) |
@@ -215,7 +215,7 @@ systemic bug classes discovered beyond OI-008's Escalation-Date pattern.**
   but NOT written, blocked on a schema decision.** Executed lease (`Lease Eursort -- EG comments
   8-17-22.docx`, Eric Goldberg Family, LLC landlord, Aug 2022) plus the Notion Property Register
   page "55 New Plant Ct, Owings Mills MD" and the Portfolio Intelligence Dashboard ("Largest Tenant
-  by ARR Eurosort, Inc. (55 New Plant Court) — $452,835/8.03%") confirm this is a real, distinct
+  by ARR Eurosort, Inc. (55 New Plant Court) — [figure: private]/8.03%") confirm this is a real, distinct
   ORA property — just one with no existing `Property Address` select option in the Tenant DB
   (`notion-update-page` rejected the write: select properties are a closed enum; Notion's
   `notion-update-data-source` DDL tool could add the option but requires restating all 19 existing
@@ -269,10 +269,10 @@ anomaly flagged.**
     Notion's $1,483.39, termination 2026-05-31 (already past today) — too many open threads
     without a more current document.
 - **1 anomaly flagged — RESOLVED 2026-07-17 (Gabriel-confirmed):** "Restoration Church Trust"
-  `32b6ecd8-9e59-81ed-b571-dfc871ab9f25` is not a Northwood tenant — it is a $2M loan counterparty
+  [loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
   (ORA/Eric Goldberg as lender, per the Master Workbook's own "Restoration Church Trust"
   loan-amortization tab and SharePoint's `5600 Sunnyside Ave` loan-document folder, being paid off
-  per a July 2026 payoff statement). The Notion row's Monthly Rent ($14,135.38) and Lease
+  [loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
   Expiration (2027-02-20) exactly match this loan's Phase-1 payment and balloon maturity — a
   categorical data-entry error, not a correctable field. Gabriel confirmed: retire, not delete.
   Set `Row Retired = __YES__` via `notion-update-page`, Notes annotated with the full rationale,
@@ -355,7 +355,7 @@ partially resolved; 8 archived duplicates retired.**
   Start/Expiration/SF/Suite fields are left as the historical space-lease record, not current terms.
   Verified.
 - **Restoration Church Trust** (`32b6ecd8-9e59-81ed-b571-dfc871ab9f25`) — not a tenant at all, a
-  $2M loan counterparty (ORA is lender) whose loan payment/balloon maturity had been data-entered as
+  [loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
   rent/lease-expiration. Gabriel: remove from the Tenant DB. `Row Retired=__YES__`, `Notes` records
   full evidence (Master Workbook loan-amortization tab + SharePoint payoff statement). Verified.
 - **Chesapeake Communications, LLC** (`32b6ecd8-9e59-8173-8d78-de14796381e0`) — zero trace in any
@@ -464,7 +464,7 @@ tenant is vacating end of month (2026-07-31). Wrote via `notion-update-page` (`3
 fc8c610b609f`): `Lease Status` → Notice Given, `Lease Expiration` 2026-05-31 (stale) → 2026-07-31 (vacate
 date). `Monthly Rent` ($16,713.65, still unexplained by any source found) deliberately left as-is —
 final figure is now a move-out reconciliation question, not a lease-terms question. Verified via fresh
-fetch. Note: AR Balance shows $180.19 at 90+ days aged — not chased further, outside this item's scope.
+[loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
 **Progress 2026-07-26 (bounded batch, 12 tenants): the never-doc-verified remainder of the Northwood
 bulk-address-fix population checked; 12/12 resolved (11 confirmed correct as-is, 1 corrected —
 a NEW bug variant: cross-row contact-field contamination); 2 writes made, both verified by fresh fetch.**
@@ -480,7 +480,7 @@ a NEW bug variant: cross-row contact-field contamination); 2 writes made, both v
   (HubSpot-derived, read in full) and **`Rent Roll 7.20.2026.xlsx`** (egoldberg OneDrive root,
   Master-Workbook export, "As of July 20 2026 · 137 tenants · Active Scenario: Base" — 6 days old
   at check time) — plus primary documents where the rolls diverged.
-- **NOTE FOR NEXT PASS — the notion_only premise has shifted:** Rent Roll 7.20.2026 (workbook
+- [loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
   lineage) now CONTAINS all 30 occupied 2207 Northwood units. The Master Workbook appears to have
   gained Northwood rows since the 07-17 "zero Northwood rows in EXPORT_RentRoll" finding — the
   93-row universe should be RE-DERIVED against the current workbook before the next batch.
@@ -832,7 +832,7 @@ Tracker, Critical Deadlines Tracker), the one associated HubSpot deal, and Outlo
 borrower contact name or email exists anywhere in the system, only internal loan-tracking data. Needs
 Gabriel to supply the actual contact before send (not guessed, per Invariant 7).
 **HubSpot mis-entered deal — CLOSED 2026-07-25 (Gabriel's explicit go-ahead).** "Lease Renewal —
-Restoration Church Trust" ($16,714, was `appointmentscheduled`) confirmed as the same
+[loan detail (amounts, rates, payments, loan numbers) moved to the gitignored deal-figures.local.md, 2026-11-19]
 mis-entered-loan-counterparty pattern as OI-009 (a loan, not a lease, entered as a tenant renewal
 deal). Retired via `manage_crm_objects`: `dealstage` → `closedlost`, `dealname` prefixed
 `RETIRED (data-entry error, see open-items-tracker.md OI-021) —`. Verified post-write via

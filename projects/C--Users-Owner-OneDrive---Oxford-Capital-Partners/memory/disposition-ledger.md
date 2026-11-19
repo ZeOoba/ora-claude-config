@@ -21,17 +21,17 @@ Companion to [deal-decision-ledger.md](deal-decision-ledger.md), which tracks PR
 | Date | Property | Event | Terms / Amount | Rationale | Source |
 |---|---|---|---|---|---|
 | 2015-08-27 | 9050 Red Branch Rd, Columbia MD | ACQUIRED | [figure: data/loan-terms.json]; existing loan assumed [figure: data/loan-terms.json] + 1031 QI funds [figure: data/loan-terms.json] | Baseline acquisition | Settlement statement (Muirkirk Properties LLC) |
-| 2015-08-31 | 1900 N Broadway, Baltimore MD | ACQUIRED | $1,350,000 | Baseline acquisition | Settlement statement (1900 North Broadway LLC) |
+| 2015-08-31 | 1900 N Broadway, Baltimore MD | ACQUIRED | [figure: private] | Baseline acquisition | Settlement statement (1900 North Broadway LLC) |
 | 2016-10-28 | 155 New Plant Ct, Owings Mills MD | ACQUIRED | $1,818,750; 1031 QI (Eric Goldberg Family LLC) | Baseline acquisition | Settlement statement |
-| 2016-12-22 | 29000 Information Lane, Easton MD | ACQUIRED | $2,000,000; 1031 QI | Baseline acquisition | Settlement statement (29000 Information Lane LLC) |
+| 2016-12-22 | 29000 Information Lane, Easton MD | ACQUIRED | [figure: private]; 1031 QI | Baseline acquisition | Settlement statement (29000 Information Lane LLC) |
 | 2021-02-01 | Sepich Portfolio (8 parcels), Columbus OH | ACQUIRED | $4,650,000 | Baseline acquisition | Settlement statement (Fairground Village Center LLC) |
-| 2022-01-20 | 3540 E 5th Ave, Columbus OH | ACQUIRED | $1,300,000; 1031 QI | Baseline acquisition | Settlement statement |
+| 2022-01-20 | 3540 E 5th Ave, Columbus OH | ACQUIRED | [figure: private]; 1031 QI | Baseline acquisition | Settlement statement |
 | 2023-10-06 | 1100 Rarig Ave, Columbus OH | ACQUIRED | $1,800,000, unencumbered | Baseline acquisition | Settlement statement (1100 Rarig Ave LLC) |
-| 2024-09-19 | 3034 Westerville Rd, Columbus OH | ACQUIRED | $1,652,400 | Baseline acquisition | Settlement statement (5242 Angola Road LLC) |
-| 2024-10-18 | 9620 E State Rte 350, Raytown MO | ACQUIRED | $2,000,000; 1031 QI | Baseline acquisition | Settlement statement |
-| 2024-10-25 | 2203/2205/2207 Northwood Dr, Salisbury MD | ACQUIRED | $4,400,000; seller-financed (2900 Loch Raven LLC) | Baseline acquisition | Settlement statement (2203 Northwood LLC) |
+| 2024-09-19 | 3034 Westerville Rd, Columbus OH | ACQUIRED | [figure: private] | Baseline acquisition | Settlement statement (5242 Angola Road LLC) |
+| 2024-10-18 | 9620 E State Rte 350, Raytown MO | ACQUIRED | [figure: private]; 1031 QI | Baseline acquisition | Settlement statement |
+| 2024-10-25 | 2203/2205/2207 Northwood Dr, Salisbury MD | ACQUIRED | [figure: private]; seller-financed (2900 Loch Raven LLC) | Baseline acquisition | Settlement statement (2203 Northwood LLC) |
 | 2025-06-10 | 3875-3883 E Livingston Ave, Columbus OH | ACQUIRED | $925,000 | Baseline acquisition | Settlement statement |
-| 2026-01-27 | 401 Sunburst Hwy, Cambridge MD | ACQUIRED | $950,000 | Baseline acquisition | Settlement statement (Fairground Village Center LLC) |
+| 2026-01-27 | 401 Sunburst Hwy, Cambridge MD | ACQUIRED | [figure: private] | Baseline acquisition | Settlement statement (Fairground Village Center LLC) |
 | 2026-01-29 | 7658 Fishel Dr N, Dublin OH | ACQUIRED | ~$1,765,000 | Baseline acquisition | Settlement statement / cost segregation study |
 | 2026-07-09 | 1100 Rarig Ave, Columbus OH | HOLD (disposition-analysis ruling) | No transaction. Refi lever available: ~$760K tax-free at 40% LTV ceiling if liquidity needed | Unencumbered, 100% occupied, bought at bottom of replacement cost; taxable sale would price near-flat-to-basis — gain is ~40% effective tax via depreciation recapture, estate step-up forfeited | [deal_1100_rarig_disposition_2026-07.md](deal_1100_rarig_disposition_2026-07.md) |
 | UNKNOWN (pre-2026-07-28) | 29000 Information Lane, Easton MD | REFI (cash-out, INFERRED — NOT YET VERIFIED) | Equity invested shows as −[figure: data/loan-terms.json] in Property NOI tab (implies net cash pulled exceeds original equity); Symetra loan, balance $[figure: data/loan-terms.json], 37.9% LTV | Property NOI's Acq Date field also shows 2021-01-01 vs. the 2016-12-22 settlement date — may be dating this refi event, not the acquisition. Backfill exact date/terms from Symetra loan docs or QuickBooks before treating as fact | Property NOI tab inference only — see open discrepancy #1 in [project_historical_evaluations_acquisition_review_2026-07-29.md](project_historical_evaluations_acquisition_review_2026-07-29.md) |

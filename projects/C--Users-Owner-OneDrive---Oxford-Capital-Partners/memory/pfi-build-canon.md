@@ -37,7 +37,7 @@ metadata:
 - Ownership presentation: 100% property-level figures with an **Oxford-share overlay** (50% Red Branch + Broadway, 25% 1851 Solar).
 - **R&M capex rule: single item > $5,000 = capex; ≤ $5,000 = opex. When line detail is unavailable, assume opex and flag.**
 - **Source of record: PM-software exports are AUTHORITATIVE over internal QuickBooks** — QB carries internal-operation accounting not indicative of property performance.
-- FVC 2025 contains a **$500,000 one-time perpetual cell-tower easement sale** (American Tower; was on Zettler Rd) — exclude from run-rate NOI.
+- FVC 2025 contains a **[figure: private] one-time perpetual cell-tower easement sale** (American Tower; was on Zettler Rd) — exclude from run-rate NOI.
 - Zettler sale: **dead — still owned**; Sepich remains 8 props inside FVC.
 - 9510 Persimmon Tree (residence): excluded from the build.
 - **1851 S Club Solar income is real and stands as-is (ruled 2026-06-13): SRECs are sold to DC at roughly $400+/SREC — never haircut or discount the SREC income line.** (Entity NOI 2024 ≈ 630.8k / 2025 ≈ 507.5k validated.)
