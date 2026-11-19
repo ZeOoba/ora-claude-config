@@ -48,8 +48,8 @@ For each item use this format:
 ### Category 1 — External Borrower Payments (We Pay)
 - EXT-BOR-3540FIFTH: 3540 E. Fifth Ave → Park National Bank Loan #4101128158004, $16,304.46, amortizing, 6.04%→6.5% yr6
 - EXT-BOR-9050REDBRANCH: 9050 Red Branch Rd → NorthMarq/Symetra Loan #410374, $12,189.11, 4.25%, 50% share
-- EXT-BOR-29000INFO: 29000 Information Lane → Symetra Life Loan #10258, $17,362.06, 5.60%, balloon
-- EXT-BOR-BANWICK: Banwick/Morrison → Symetra Life Loan #11153, $22,919.27, 5.52%, first pmt 5/1/2026
+- EXT-BOR-29000INFO: 29000 Information Lane → Symetra Life Loan #[loan no.: data/loan-terms.json], $17,362.06, 5.60%, balloon
+- EXT-BOR-BANWICK: Banwick/Morrison → Symetra Life Loan #[loan no.: data/loan-terms.json], $22,919.27, 5.52%, first pmt 5/1/2026
 - EXT-BOR-3883OXFORD: 3883 from Oxford (50%) → Oxford Capital/LAST Non, $1,955.25, IO, 6.00%
 Total outflow: ~$70,730/mo
 

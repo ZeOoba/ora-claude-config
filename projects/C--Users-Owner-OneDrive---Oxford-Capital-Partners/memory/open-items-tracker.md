@@ -4110,7 +4110,7 @@ a MANDATORY adversarial REFUTE pass plus the old-vs-new differential battery
 **Description:** `485 S Walnut St` rows 45 and 46 both carry the date `2028-09-26`:
 ```
 r45  2028-09-26   D=1,365      E=1,365   F=[figure: data/loan-terms.json]   <- final regular payment
-r46  2028-09-26   D=253,365    E=1,365   F=0         <- payoff ([figure: data/loan-terms.json] principal + 1,365 interest)
+r46  2028-09-26   D=[figure: data/loan-terms.json]    E=1,365   F=0         <- payoff ([figure: data/loan-terms.json] principal + 1,365 interest)
 ```
 `'External Loans Summary'!H16` sums column `E` over the date predicate and therefore picks up **both**
 rows' $1,365 — the same September interest counted twice.

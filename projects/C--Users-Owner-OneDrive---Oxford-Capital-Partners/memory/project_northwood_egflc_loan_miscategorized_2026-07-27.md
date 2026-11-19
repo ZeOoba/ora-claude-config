@@ -10,7 +10,7 @@ metadata:
 
 # ⚠️ CURRENT STATE (2026-08-10): internal debt reporting is FROZEN — Gabriel ruled Option C.
 
-The status of the $2,800,000 loan against **2203-2207 Northwood Dr** (6.99%, IO, matures 2031-10-01) is **unresolved and contested**. Do not publish internal debt or Total Debt as current until **Eric produces the source document** — note, assignment, settlement statement, or the intercompany entry that created it.
+The status of the $[figure: data/loan-terms.json] loan against **2203-2207 Northwood Dr** (6.99%, IO, matures 2031-10-01) is **unresolved and contested**. Do not publish internal debt or Total Debt as current until **Eric produces the source document** — note, assignment, settlement statement, or the intercompany entry that created it.
 
 **FROZEN — do not quote:**
 - **Internal intercompany debt** — booked at **$4,462,463**; true figure lies in a **$2.8M band** up to **$7,262,463** if Northwood belongs in the book.
@@ -24,14 +24,14 @@ The status of the $2,800,000 loan against **2203-2207 Northwood Dr** (6.99%, IO,
 
 1. **2026-07-17** — the $2.8M appeared in the workbook's External sheets, entered between 13:07 and 19:43, with **no Claude Log turn recording it**.
 2. **2026-07-27** — Gabriel confirmed it is **internal** (Northwood pays EGFLLC), not third-party. Ingest had to publish a same-day correction.
-3. **2026-08-03** — Gabriel authorised COM writes; full reclassification applied (new `Rate_Northwood_EGFLLC`, a `Northwood FROM EGFLLC` accrual journal, PSI row 10, Loan Index internal row, external rows deleted). Both LTV cells self-corrected. A hypothesis that it duplicated `2203 FROM EGFLLC` was **tested and refuted** on evidence: that loan is the original acquisition financing, opening 12/9 at $2,757,016 against the 2024-10-03 acquisition, running continuously and never moving by more than $500k, at a **different rate (6.00% vs 6.99%) and principal ($2,757,016 vs $2,800,000)**.
+3. **2026-08-03** — Gabriel authorised COM writes; full reclassification applied (new `Rate_Northwood_EGFLLC`, a `Northwood FROM EGFLLC` accrual journal, PSI row 10, Loan Index internal row, external rows deleted). Both LTV cells self-corrected. A hypothesis that it duplicated `2203 FROM EGFLLC` was **tested and refuted** on evidence: that loan is the original acquisition financing, opening 12/9 at $2,757,016 against the 2024-10-03 acquisition, running continuously and never moving by more than $500k, at a **different rate (6.00% vs 6.99%) and principal ($2,757,016 vs $[figure: data/loan-terms.json])**.
 4. **2026-08-05 (Turn 150)** — the journal had already vanished once with no archive record; it was rebuilt.
 5. **2026-08-09 — REVERSED AGAIN, unlogged.** The journal was deleted (workbook back to **50 tabs**), PSI row 10 zeroed and status set "Paid Off", and hand-typed labels **"⚠ DUPLICATE OF ROW 6 — DO NOT USE"** added on both PSI row 10 and Loan Index row 24. **No Claude Log / Sync Queue / Archive Log entry records it** — a manual human edit. Total Debt $17,555,291 → $14,704,262; internal $7,313,492 → $4,462,463; **external unchanged**.
 6. **2026-08-10** — weekly ingest caught it, filed **WBC-012**, and put options A/B/C to Gabriel. **Gabriel ruled C.**
 
 ## Why neither reading is established
 
-**For "duplicate" (reading A):** same property, same EG Florida LLC counterparty; `Monthly Checklist` row 20 describes `2203 FROM EGFLLC` as the 2203/Northwood property loan; and critically **there is no $2,800,000 movement in any of the 16 tracked entities across all 21 months of Cash Data** — no funding event exists anywhere, which a recharacterisation of an existing balance would explain.
+**For "duplicate" (reading A):** same property, same EG Florida LLC counterparty; `Monthly Checklist` row 20 describes `2203 FROM EGFLLC` as the 2203/Northwood property loan; and critically **there is no $[figure: data/loan-terms.json] movement in any of the 16 tracked entities across all 21 months of Cash Data** — no funding event exists anywhere, which a recharacterisation of an existing balance would explain.
 
 **Against it (reading B):** the 08-03 refutation above still holds in the live file — different rate, different principal, and `2203 FROM EGFLLC`'s journal shows no drawdown that could have produced $2.8M.
 
@@ -47,7 +47,7 @@ Independently investigating why `debt_scores` (DSCR/LTV governor trend history) 
 ## Source evidence found 2026-10-06 (basis for lifting the freeze)
 
 Found in the Northwood fact base and OneDrive `Business\2203-2207 Northwood` while reconciling internal loans (read-only; nothing written). **The $2.8M / 6.99% / IO / matures 2031-10-01 loan is the SELLER's purchase-money note** (2900 Loch Raven LLC, Ferdinand "Jerry" Greeff), not an internal loan and not a duplicate:
-- Settlement statement 10/25/2024 lists a $2,800,000 purchase-money note (non-cash at closing, which is why "no cash movement" was ever seen); deed of trust dated 10/25/2024, Liber 5462 Folio 23. Note terms: 6.99%, 365/365, interest-only from 11/1/2024, balloon 10/1/2031 (fact base `note_terms`; the executed scan is image-only).
+- Settlement statement 10/25/2024 lists a $[figure: data/loan-terms.json] purchase-money note (non-cash at closing, which is why "no cash movement" was ever seen); deed of trust dated 10/25/2024, Liber 5462 Folio 23. Note terms: 6.99%, 365/365, interest-only from 11/1/2024, balloon 10/1/2031 (fact base `note_terms`; the executed scan is image-only).
 - **Paid in full 12/9/2025:** Truist wire 12/09/2025 for **$2,804,826.00** (= $2.8M + 9 days' interest at 6.99%, $4,826) from 2203 Northwood LLC to 2900 Loch Raven LLC; Certificate of Satisfaction Dec 2025 (Bk 5662 Pg 466): "debt secured thereby has been paid in full." 2025 interest $162,474 fits a early-Dec payoff.
 - **Replacement funding the same day:** the `2203 FROM EGFLLC` journal opens 12/9/2025 at $2,757,016 (6%, IO). The $47,810 gap to the wire is unexplained (likely Northwood cash). Loan #2 is a different instrument (6.00%, $2,757,016), as the 08-03 refutation found.
 
