@@ -37,4 +37,4 @@ Post one row to the Notion Operations Hub (parent page 32b6ecd8-9e59-81f2-b329-d
 STEP 5 - CLOSE.
 Run the Step 0 complete command with --email-sent-at. On any abort run the fail command. Report only what happened; never fabricate a balance or a payment.
 
-MAINTENANCE (not part of a scheduled run): the terms file is refreshed ONLY from lender documents in a supervised session, when a loan is paid, refinanced, assigned or re-documented. Tests: python C:/Users/Owner/.claude/maintenance/_tests/test_loan_balance_check.py
+MAINTENANCE (not part of a scheduled run): the terms file is refreshed ONLY from lender documents in a supervised session, when a loan is paid, refinanced, assigned or re-documented. Refresh data/loan-terms.expected.json (gitignored; the test's expected lender figures) in the same session, or the test fails. Tests: python C:/Users/Owner/.claude/maintenance/_tests/test_loan_balance_check.py
