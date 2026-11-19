@@ -432,3 +432,5 @@ deal-figures.local.md
 /maintenance/_archive/**/user_gabriel_consolidated_*.md
 /maintenance/_state/_archive/**/projects/*/memory/people.md
 /maintenance/_state/_archive/**/projects/*/memory/user.md
+# Tenant delinquency/eviction/attorney-status record (named tenants), untracked 2026-11-19 (PR 476 gate, OI-408). Kept on disk.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_delinquency_report_collection_status_blindspot.md
