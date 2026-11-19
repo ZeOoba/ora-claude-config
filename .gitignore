@@ -410,3 +410,14 @@ deal-figures.local.md
 /maintenance/_state/_archive/2026-10-30_live-sync-379-overlap/
 /maintenance/_state/_archive/2026-10-30_live-sync-overlap/
 /maintenance/_state/_archive/2026-10-31_phase3-repoint/
+
+# Public-repo exposure untrack, 2026-11-18 (cross-repo audit, ora-claude-config findings
+# deal-snapshot-public / public-memory-tenant-default-pii / public-memory-third-party-phones).
+# Pipeline state (deal names + stages + Notion page ids), a named co-tenant's default record,
+# the principal's contact record and the third-party phone roster. Kept on disk; never pushed.
+# Guarded at push time by hooks/git-prepush-confidential-scan.py (exposure-class paths).
+/maintenance/_state/deal-stage-snapshot.json
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/people.md
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/user.md
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/tenant_*default*.md
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/_archive/user_gabriel_consolidated_2026-06-03.md
