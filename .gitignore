@@ -417,6 +417,9 @@ deal-figures.local.md
 # the principal's contact record and the third-party phone roster. Kept on disk; never pushed.
 # Guarded at push time by hooks/git-prepush-confidential-scan.py (exposure-class paths).
 /maintenance/_state/deal-stage-snapshot.json
+/maintenance/_state/deal-stage-snapshot.json.*
+/maintenance/_state/_archive/**/deal-stage-snapshot.json*
+/maintenance/_state/_archive/**/tenant_*default*.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/people.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/user.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/tenant_*default*.md

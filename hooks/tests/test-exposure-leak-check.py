@@ -99,16 +99,32 @@ for label, txt in (("date", "2026-11-18"), ("bare 10 digits", "id 2025550143"),
 quoted = "\n".join([C1, "", "    msg", "", 'diff --git "a/%s/caf\\303\\251.md" "b/%s/caf\\303\\251.md"' % (MEM, MEM),
                     'new file mode 100644', '--- /dev/null', '+++ "b/%s/caf\\303\\251.md"' % MEM,
                     "@@ -0,0 +1 @@", "+call 202-555-0143"]) + "\n"
-expect("C-quoted non-ASCII memory path still caught",
-       [r for _, r in elc.scan_diff(quoted)] == ["phone-in-memory"], elc.scan_diff(quoted))
+expect("C-quoted non-ASCII memory path still caught, path decoded",
+       elc.scan_diff(quoted) == [(MEM + "/caf" + chr(0xE9) + ".md", "phone-in-memory")],
+       elc.scan_diff(quoted))
 bdir = "\n".join([C1, "", "    msg", "", "diff --git a/%s/a b/x.md b/%s/a b/x.md" % (MEM, MEM),
                   "--- a/%s/a b/x.md\t" % MEM, "+++ b/%s/a b/x.md\t" % MEM,
                   "@@ -1 +1 @@", "+call 202-555-0143"]) + "\n"
 expect("directory ending in ' b' parsed from +++ line",
        elc.scan_diff(bdir) == [(MEM + "/a b/x.md", "phone-in-memory")], elc.scan_diff(bdir))
-expect("git log args pin prefixes, quoting and textconv",
+expect("git log args pin prefixes, quoting, textconv, text, cc and root",
        all(a in elc.GIT_LOG_ARGS for a in ("--src-prefix=a/", "--dst-prefix=b/", "--no-textconv",
-                                            "--no-ext-diff", "core.quotePath=false")))
+                                            "--no-ext-diff", "core.quotePath=false", "--text",
+                                            "--cc", "--root")))
+expect("reconciler tmp-write sidecar is an exposure path",
+       elc.is_exposure_path("maintenance/_state/deal-stage-snapshot.json.tmp-write"))
+
+# extra phone formats (merge gate round 1)
+NB = chr(0xA0)
+for label, ph in (("+1(area) no sep", "+1(202)555-0143"), ("1(area) sp", "1(202) 555-0143"),
+                  ("+1(area) sp", "+1(202) 555-0143"), ("nbsp", "202" + NB + "555" + NB + "0143")):
+    expect("phone (%s) in memory blocks" % label,
+           elc.scan_diff(diff(MEM + "/f.md", ["call " + ph])) == [(MEM + "/f.md", "phone-in-memory")])
+# false-positive guards (each boundary must hold)
+for label, txt in (("leading digit", "9202-555-0143"), ("trailing digit", "202-555-01439"),
+                   ("exchange 1xx", "202-155-0143")):
+    expect("no phone false positive: %s" % label, elc.scan_diff(diff(MEM + "/x.md", [txt])) == [],
+           elc.scan_diff(diff(MEM + "/x.md", [txt])))
 
 expect("allowlisted public office line passes",
        elc.scan_diff(diff(MEM + "/x.md", ["recorder (614) 525-3930"])) == [])
@@ -124,6 +140,13 @@ expect("deal+stage json shape blocks",
 expect("stage-only json passes", elc.scan_diff(diff("x.json", ['"stage": "build"'])) == [])
 expect("deal+stage in a .md passes (shape rule is json only)",
        elc.scan_diff(diff("docs/x.md", ['"deal": "a"', '"stage": "b"'])) == [])
+expect("mixed-case keys in .json block",
+       elc.scan_diff(diff("x.json", ['"Deal": "a",', '"STAGE": "b"'])) == [("x.json", "pipeline-shape")])
+expect(".jsonl one-line record blocks",
+       elc.scan_diff(diff("s.jsonl", ['{"id": 1, "deal": "a", "stage": "b"}'])) == [("s.jsonl", "pipeline-shape")])
+two = diff("p.json", ['{"p1": {"deal": "a",']) + diff("p.json", ['"stage": "b"}}']).replace(C1, "commit " + "b" * 40)
+expect("deal and stage added in two commits of one push block",
+       elc.scan_diff(two) == [("p.json", "pipeline-shape")], elc.scan_diff(two))
 
 # --- rule 4: debt figures -----------------------------------------------------------------
 tmp = tempfile.mkdtemp(prefix="exp-leak-")
@@ -140,6 +163,13 @@ try:
     with open(deny, "w") as f:
         json.dump({"strings": ["LN-000123456"]}, f)
     missing = os.path.join(tmp, "nope.json")
+
+    def _w(obj, _c=[0]):
+        _c[0] += 1
+        p = os.path.join(tmp, "src%d.json" % _c[0])
+        with open(p, "w") as f:
+            json.dump(obj, f)
+        return p
     fake_home = os.path.join(tmp, "home")
     os.mkdir(fake_home)
 
@@ -154,8 +184,16 @@ try:
                        ("anchor balance", "bal 3,333,333")):
         expect("debt figure (%s) blocks anywhere" % label,
                elc.scan_diff(diff("docs/x.md", [txt]), n) == [("docs/x.md", "debt-figure")])
+    n2 = elc.load_needles(loan_terms_path=_w({"loans": [{"original_principal": 1111111.55}]}))
+    for label, txt in (("truncated whole $", "bal $1,111,111"), ("truncated bare", "bal 1111111"),
+                       ("rounded", "bal 1,111,112"), ("cents", "bal 1,111,111.55")):
+        expect("figure with cents, written as %s, blocks" % label,
+               elc.scan_diff(diff("docs/x.md", [txt]), n2) == [("docs/x.md", "debt-figure")])
+    nd = elc.load_needles(loan_terms_path=lt, denylist_path=_w({"strings": ["ab", "LN-000123456"]}))
+    expect("denylist entries under 4 chars are ignored",
+           elc.scan_diff(diff("docs/x.md", ["about this"]), nd) == [])
     for label, txt in (("longer number", "11111110"), ("decimal tail", "1111111.5"),
-                       ("group tail", "1,111,111,000")):
+                       ("group tail", "1,111,111,000"), ("leading digit", "21111111")):
         expect("no debt false positive: %s" % label, elc.scan_diff(diff("docs/x.md", [txt]), n) == [],
                elc.scan_diff(diff("docs/x.md", [txt]), n))
     msg = "\n".join([C1, "", "    land 1,111,111 refi", ""]) + "\n"
@@ -304,6 +342,125 @@ try:
     sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
     expect("git log args disable rename detection", "--no-renames" in elc.GIT_LOG_ARGS
            and "-M" not in elc.GIT_LOG_ARGS and "-C" not in elc.GIT_LOG_ARGS)
+
+    # rename-with-edit into memory (catches a dropped --no-renames end to end)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    sh(["git", "mv", "notes.txt", MEM + "/moved.md"], repo)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "moved.md"), "a") as f:
+        f.write("line five\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "rename into memory"], repo)
+    r = push_scan()
+    expect("e2e: rename-with-edit into memory is caught",
+           r.returncode == 1 and "moved.md -> phone-in-memory" in r.stderr, r.stderr[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+
+    # NUL byte in a re-added exposure file (catches a dropped --text)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "people.md"), "wb") as f:
+        f.write(b"- Broker D\x00 202-555-0143\n")
+    sh(["git", "add", "-f", MEM + "/people.md"], repo)
+    sh(["git", "commit", "-qm", "binary-looking people"], repo)
+    r = push_scan()
+    expect("e2e: NUL-byte people.md re-add blocked", r.returncode == 1
+           and "people.md -> exposure-path" in r.stderr, r.stderr[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+
+    # phone introduced only by a merge's conflict resolution (catches a dropped --cc)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "m.md"), "w") as f:
+        f.write("base\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "m base"], repo)
+    advance()
+    sh(["git", "checkout", "-qb", "side"], repo)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "m.md"), "w") as f:
+        f.write("side\n")
+    sh(["git", "commit", "-qam", "side"], repo)
+    sh(["git", "checkout", "-q", "main"], repo)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "m.md"), "w") as f:
+        f.write("ours\n")
+    sh(["git", "commit", "-qam", "ours"], repo)
+    sh(["git", "merge", "-q", "side"], repo)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "m.md"), "w") as f:
+        f.write("resolved, call 202-555-0143\n")
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "resolve"], repo)
+    # push only the merge on top of a remote that already has both parents
+    sh(["git", "push", "-q", "--no-verify", "origin", "HEAD~1:refs/heads/ours", "side:refs/heads/side"], repo)
+    sh(["git", "fetch", "-q", "origin"], repo)
+    head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    base = sh(["git", "rev-parse", "HEAD~1"], repo).stdout.strip()
+    env = {k: v for k, v in os.environ.items() if k not in strip}
+    env.update(HOME=fake_home, USERPROFILE=fake_home)
+    r = subprocess.run([sys.executable, scan_copy, "origin", origin], cwd=repo,
+                       input="refs/heads/ours %s refs/heads/ours %s\n" % (head, base),
+                       capture_output=True, text=True, env=env)
+    expect("e2e: phone added only in a conflict resolution is caught",
+           r.returncode == 1 and "m.md -> phone-in-memory" in r.stderr, r.stderr[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+    sh(["git", "branch", "-qD", "side"], repo)
+
+    # orphan root commit with log.showRoot=false (catches a dropped --root)
+    sh(["git", "config", "log.showRoot", "false"], repo)
+    sh(["git", "checkout", "-q", "--orphan", "leak"], repo)
+    sh(["git", "rm", "-rqf", "--cached", "."], repo)
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "people.md"), "w") as f:
+        f.write("- Broker E\n")
+    sh(["git", "add", "-f", MEM + "/people.md"], repo)
+    sh(["git", "commit", "-qm", "orphan"], repo)
+    head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    r = subprocess.run([sys.executable, scan_copy, "origin", origin], cwd=repo,
+                       input="refs/heads/leak %s refs/heads/leak %s\n" % (head, "0" * 40),
+                       capture_output=True, text=True, env=env)
+    expect("e2e: orphan root commit scanned despite log.showRoot=false",
+           r.returncode == 1 and "people.md -> exposure-path" in r.stderr, r.stderr[:400])
+    sh(["git", "checkout", "-qf", "main"], repo)
+    sh(["git", "config", "--unset", "log.showRoot"], repo)
+    sh(["git", "clean", "-qfd"], repo)
+
+    # the exposure pass's own `git log` failing must block (fail closed)
+    import io
+    sspec = importlib.util.spec_from_file_location("scan_mod", scan_copy)
+    smod = importlib.util.module_from_spec(sspec)
+    sspec.loader.exec_module(smod)
+    real_run = smod.subprocess.run
+
+    def failing_run(args, *a, **k):
+        if isinstance(args, list) and "--no-renames" in args:
+            return subprocess.CompletedProcess(args, 128, b"", b"boom")
+        return real_run(args, *a, **k)
+    with open(os.path.join(repo, "ok.md"), "w") as f:
+        f.write("harmless\n")
+    sh(["git", "add", "ok.md"], repo)
+    sh(["git", "commit", "-qm", "ok"], repo)
+    head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    base = sh(["git", "rev-parse", "origin/main"], repo).stdout.strip()
+    saved = (os.getcwd(), sys.stdin, sys.stderr, dict(os.environ))
+    try:
+        os.chdir(repo)
+        os.environ.update(HOME=fake_home, USERPROFILE=fake_home)
+        for k in strip:
+            os.environ.pop(k, None)
+        sys.stdin = io.StringIO("refs/heads/main %s refs/heads/main %s\n" % (head, base))
+        sys.stderr = io.StringIO()
+        smod.subprocess.run = failing_run
+        rc = smod.main()
+        err = sys.stderr.getvalue()
+    finally:
+        smod.subprocess.run = real_run
+        os.chdir(saved[0])
+        sys.stdin, sys.stderr = saved[1], saved[2]
+        os.environ.clear()
+        os.environ.update(saved[3])
+    expect("e2e: failed exposure git log blocks the push", rc == 1
+           and "cannot check for pipeline, PII or debt data" in err, err[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
 
     # debt figure in a new file: blocked with a loan-terms source
     with open(os.path.join(repo, "note.md"), "w") as f:
