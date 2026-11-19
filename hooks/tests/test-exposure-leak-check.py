@@ -204,6 +204,40 @@ try:
         expect("shape: bad range raises ShapeScanError", False)
     except elc.ShapeScanError:
         expect("shape: bad range raises ShapeScanError", True)
+    # R3-05: git that cannot even start (bad cwd) also raises -> caller blocks
+    try:
+        elc.shape_hits("%s..%s" % (d2, x1), os.path.join(_st, "no-such-dir"))
+        expect("shape: git launch failure raises ShapeScanError", False)
+    except elc.ShapeScanError:
+        expect("shape: git launch failure raises ShapeScanError", True)
+    # R3-02: shaped file in a NON-tip commit of the pushed range
+    n1 = put("s/early.json", '{"p": {"deal": "a", "stage": "b"}}\n', "early shaped")
+    n2 = put("docs/later.md", "unrelated\n", "later tip")
+    expect("shape: shaped file in a non-tip commit is caught",
+           elc.shape_hits("%s..%s" % (x1, n2), _st) == [("s/early.json", SH)],
+           elc.shape_hits("%s..%s" % (x1, n2), _st))
+    # R3-03: a merge commit that itself adds the shaped file (evil merge)
+    g("checkout", "-qb", "side")
+    put("docs/side.md", "side\n", "side work")
+    g("checkout", "-q", "main")
+    put("docs/main2.md", "main\n", "main work")
+    pre = g("rev-parse", "HEAD").stdout.strip()
+    g("merge", "-q", "--no-ff", "--no-commit", "side")
+    with open(os.path.join(_st, "s", "evil.json"), "w") as f:
+        f.write('{"p": {"deal": "a", "stage": "b"}}\n')
+    g("add", "s/evil.json")
+    g("commit", "-qm", "evil merge")
+    em = g("rev-parse", "HEAD").stdout.strip()
+    expect("shape: shaped file added only by a merge commit is caught",
+           elc.shape_hits("%s..%s" % (pre, em), _st) == [("s/evil.json", SH)],
+           elc.shape_hits("%s..%s" % (pre, em), _st))
+    # R3-04: range that reaches a ROOT commit adding the shaped file (orphan-branch push)
+    g("checkout", "-q", "--orphan", "orph")
+    g("rm", "-rqf", "--cached", ".")
+    root = put("s/root.json", '{"p": {"deal": "a", "stage": "b"}}\n', "orphan root")
+    expect("shape: shaped file in a root commit is caught",
+           elc.shape_hits(root, _st) == [("s/root.json", SH)], elc.shape_hits(root, _st))
+    g("checkout", "-qf", "main")
 finally:
     shutil.rmtree(_st, ignore_errors=True)
 
@@ -525,6 +559,32 @@ try:
         os.environ.update(saved[3])
     expect("e2e: failed exposure git log blocks the push", rc == 1
            and "cannot check for pipeline, PII or debt data" in err, err[:400])
+
+    # R3-01: the shape pass's own git failing (diff-tree) must block the push, and the block
+    # must come from the shape branch itself (its own message), not from another scan.
+    def failing_difftree(args, *a, **k):
+        if isinstance(args, list) and "diff-tree" in args:
+            return subprocess.CompletedProcess(args, 128, b"", b"boom")
+        return real_run(args, *a, **k)
+    saved = (os.getcwd(), sys.stdin, sys.stderr, dict(os.environ))
+    try:
+        os.chdir(repo)
+        os.environ.update(HOME=fake_home, USERPROFILE=fake_home)
+        for k in strip:
+            os.environ.pop(k, None)
+        sys.stdin = io.StringIO("refs/heads/main %s refs/heads/main %s\n" % (head, base))
+        sys.stderr = io.StringIO()
+        smod.subprocess.run = failing_difftree
+        rc = smod.main()
+        err = sys.stderr.getvalue()
+    finally:
+        smod.subprocess.run = real_run
+        os.chdir(saved[0])
+        sys.stdin, sys.stderr = saved[1], saved[2]
+        os.environ.clear()
+        os.environ.update(saved[3])
+    expect("e2e: failed shape scan (diff-tree) blocks the push", rc == 1
+           and "could not read the pushed .json files" in err, "rc=%r %s" % (rc, err[:400]))
     sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
 
     # pipeline shape split across two real pushes (existing-ref push): blocked on push 2
