@@ -439,3 +439,7 @@ deal-figures.local.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/project_northwood_egflc_loan_miscategorized_2026-07-27.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_2207_northwood_mtm_tenants_not_holdover_2026-09-18.md
 /_scheduled_tasks_backup/_archive_2026-06-09_retired/ora-monthly-close-kickoff/SKILL.md
+# Archived memory snapshots (event_log rollovers, tracker backups, consolidated notes) and
+# archived memory copies: local-only from 2026-11-19 (PR 476, Gabriel: "Redesign: archives local"). Kept on disk.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/_archive/
+/maintenance/_archive/**/projects/*/memory/
