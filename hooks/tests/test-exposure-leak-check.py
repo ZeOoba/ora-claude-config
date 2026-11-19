@@ -286,6 +286,25 @@ try:
            r.stderr[:600])
     sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
 
+    # copy of an already-public non-memory file into memory: the phone must still be seen
+    with open(os.path.join(repo, "notes.txt"), "w") as f:
+        f.write("vendor 202-555-0143\nline two\nline three\n")
+    sh(["git", "add", "notes.txt"], repo)
+    sh(["git", "commit", "-qm", "notes"], repo)
+    advance()
+    with open(os.path.join(repo, "notes.txt"), "a") as f:
+        f.write("line four\n")
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    shutil.copy(os.path.join(repo, "notes.txt"), os.path.join(repo, MEM, "contacts.md"))
+    sh(["git", "add", "-A"], repo)
+    sh(["git", "commit", "-qm", "copy into memory"], repo)
+    r = push_scan()
+    expect("e2e: phone copied into memory is caught (no rename/copy detection)",
+           r.returncode == 1 and "phone-in-memory" in r.stderr, r.stderr[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+    expect("git log args disable rename detection", "--no-renames" in elc.GIT_LOG_ARGS
+           and "-M" not in elc.GIT_LOG_ARGS and "-C" not in elc.GIT_LOG_ARGS)
+
     # debt figure in a new file: blocked with a loan-terms source
     with open(os.path.join(repo, "note.md"), "w") as f:
         f.write("refi balance 1,111,111\n")
