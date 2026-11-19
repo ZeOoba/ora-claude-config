@@ -11,7 +11,7 @@ metadata:
 
 **Linking rules.** Every live Tenant DB row (Row Retired != YES) is linked to its Register row by address (42 + 96 = 138 rows on 2026-09-21); retired rows stay unlinked. Set the relation from the Register side (`Tenants` array). Columbus Suburban Construction stays LIVE in the Tenant DB for the collections claim but is deliberately unlinked so occupancy excludes it.
 
-**Sepich split.** The 8-parcel aggregate is two rows: Banwick + Morrison (Symetra collateral, $6.2M C&W appraisal) and Zettler + Sepich Ln + 4595-4601 E 5th (value is a residual of the workbook aggregate, not an appraisal).
+**Sepich split.** The 8-parcel aggregate is two rows: Banwick + Morrison (Symetra collateral, [amount: private] C&W appraisal) and Zettler + Sepich Ln + 4595-4601 E 5th (value is a residual of the workbook aggregate, not an appraisal).
 
 **Loan balance check.** `~/.claude/maintenance/loan_balance_check.py` recomputes expected balances from `~/.claude/data/loan-terms.json` (lender schedules parsed to lookup tables for Symetra x2 and Park National; documented anchors for Red Branch and Restoration; interest-only for 610 Northampton). Tests: `maintenance/_tests/test_loan_balance_check.py` (16 pass). Monthly CC-fleet task `ora-loan-balance-check` (21st, 11:35 ET, report-only, emails ggoldberg only) runs it against the Notion Loans DB. The terms file is refreshed ONLY from lender documents in a supervised session. The formula (monthly 30/360, r = rate/12) reproduced Symetra and NorthMarq schedules to the cent, but Park National uses 365/360 so it is a lookup, never a formula.
 

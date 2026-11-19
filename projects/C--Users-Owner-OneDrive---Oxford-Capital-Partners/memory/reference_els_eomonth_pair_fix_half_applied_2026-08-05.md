@@ -59,5 +59,5 @@ window as `EDATE(B30,12)` independently, so once the workbook's `EOMONTH` window
 override, the recomputed-vs-cached comparison fires a one-payment `annualDebtService` divergence.
 It is the reason the Banwick truncation was observed being fixed in real time.
 
-Related: `reference_workbook_annual_debt_service_366day_overcapture.md` (local only, gitignored) ·
+Related: [[reference_workbook_annual_debt_service_366day_overcapture]] ·
 [[feedback_findings_decay_recheck_before_writing]] · [[feedback_verified_null_vs_inferred_null]]

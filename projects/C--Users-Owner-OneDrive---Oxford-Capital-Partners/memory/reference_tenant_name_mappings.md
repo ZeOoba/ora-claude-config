@@ -34,9 +34,9 @@ These tenants appear in A/R reports but have no matching record:
 - Building Bridges Therapy Svcs (29000 Info Lane) — [amount: private] delinquent
 - Eastpoint Church (29000 Info Lane) — [amount: private] delinquent
 - Chateau 1590, LLC (29000 Info Lane) — [amount: private] delinquent
-- Butter Pat Industries / Butter Pat Industries, LLC (29000 — two tenant accts) — $1,887.58 combined
-- Magothy Electric Company, Inc. (29000) — $290.87
-- Lamar Advantage GP Co. (3034 Westerville, billboard tenant) — $500 (likely ghost charge)
+- Butter Pat Industries / Butter Pat Industries, LLC (29000 — two tenant accts) — [amount: private]combined
+- Magothy Electric Company, Inc. (29000) — [amount: private]
+- Lamar Advantage GP Co. (3034 Westerville, billboard tenant) — [amount: private] (likely ghost charge)
 
 **Action:** These need to be added as new records if they're real active leases, or flagged for write-off if legacy/ghost.
 
@@ -48,5 +48,5 @@ These tenants appear in A/R reports but have no matching record:
 
 ## Update history
 
-- **2026-06-11** — Spot-check (setup-remediation C4): all 12 confirmed aliases re-verified character-exact against the 4.14.2026 drops batch (Yardi XLSX + AppFolio/Rent Manager CSVs). All 6 "not found in Tenant DB" tenants still present in the 29000 Yardi export with matching balances (Building Bridges 3,884.84 / Eastpoint 2,084.84 / Chateau 1,742.31 / Butter Pat 534.00 + 1,353.58 / Magothy 290.87). No newer PM export exists on disk — currency vs the live platforms remains UNVERIFIED; check at next A/R export. Added AppFolio property-grouping note for Gator Roofing.
+- **2026-06-11** — Spot-check (setup-remediation C4): all 12 confirmed aliases re-verified character-exact against the 4.14.2026 drops batch (Yardi XLSX + AppFolio/Rent Manager CSVs). All 6 "not found in Tenant DB" tenants still present in the 29000 Yardi export with matching balances (Building Bridges [amount: private] / Eastpoint [amount: private] / Chateau [amount: private] / Butter Pat 534.00 + [amount: private] / Magothy 290.87). No newer PM export exists on disk — currency vs the live platforms remains UNVERIFIED; check at next A/R export. Added AppFolio property-grouping note for Gator Roofing.
 - **2026-04-14** — Initial mapping from first full Module C run across 7 A/R reports. 27 tenants updated with AR Balance / AR Aging Bucket / AR Data Date. 6 tenants flagged as missing from DB.

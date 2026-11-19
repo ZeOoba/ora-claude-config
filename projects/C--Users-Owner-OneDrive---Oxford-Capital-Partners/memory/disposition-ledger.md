@@ -26,7 +26,7 @@ Companion to [deal-decision-ledger.md](deal-decision-ledger.md), which tracks PR
 | 2016-12-22 | 29000 Information Lane, Easton MD | ACQUIRED | [figure: private]; 1031 QI | Baseline acquisition | Settlement statement (29000 Information Lane LLC) |
 | 2021-02-01 | Sepich Portfolio (8 parcels), Columbus OH | ACQUIRED | $4,650,000 | Baseline acquisition | Settlement statement (Fairground Village Center LLC) |
 | 2022-01-20 | 3540 E 5th Ave, Columbus OH | ACQUIRED | [figure: private]; 1031 QI | Baseline acquisition | Settlement statement |
-| 2023-10-06 | 1100 Rarig Ave, Columbus OH | ACQUIRED | $1,800,000, unencumbered | Baseline acquisition | Settlement statement (1100 Rarig Ave LLC) |
+| 2023-10-06 | 1100 Rarig Ave, Columbus OH | ACQUIRED | [figure: private], unencumbered | Baseline acquisition | Settlement statement (1100 Rarig Ave LLC) |
 | 2024-09-19 | 3034 Westerville Rd, Columbus OH | ACQUIRED | [figure: private] | Baseline acquisition | Settlement statement (5242 Angola Road LLC) |
 | 2024-10-18 | 9620 E State Rte 350, Raytown MO | ACQUIRED | [figure: private]; 1031 QI | Baseline acquisition | Settlement statement |
 | 2024-10-25 | 2203/2205/2207 Northwood Dr, Salisbury MD | ACQUIRED | [figure: private]; seller-financed (2900 Loch Raven LLC) | Baseline acquisition | Settlement statement (2203 Northwood LLC) |

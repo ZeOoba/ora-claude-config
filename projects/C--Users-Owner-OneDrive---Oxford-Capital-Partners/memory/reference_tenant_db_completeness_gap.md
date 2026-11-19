@@ -29,10 +29,10 @@ metadata:
 >   `9620 State 350 — Kansas City MO`). `2203-2207 Northwood` was relabelled Columbus OH → **Salisbury MD**.
 > - **"Duplicate Heritage Pool Supply rows" — explained:** a corporate rename. The live row is
 >   `SRS Distribution / Heritage Pool Supply`; the older Heritage rows are correctly retired.
-> - **A "$441K/yr of wrongly-retired active tenants" alarm was raised and then falsified TWICE in the same
+> - **A "[amount: private]/yr of wrongly-retired active tenants" alarm was raised and then falsified TWICE in the same
 >   session.** First pass: matching retired-but-Active rows on (Property, Suite/Unit) only suggested 6–10
 >   orphans. Cross-checking names against the rent roll narrowed it to ~2 candidates at 2207 Northwood
->   (Patrick Betz, Hobart Services) — the big-ticket names (First Student $15,000/mo, Insync Holdings, Ismael
+>   (Patrick Betz, Hobart Services) — the big-ticket names (First Student [amount: private]/mo, Insync Holdings, Ismael
 >   Montane) are simply absent from the rent roll = correctly retired former tenants. **Second pass caught a
 >   worse error: Patrick Betz's own `Notes` field said it had already been deliberately retired 2026-07-21 as
 >   a duplicate of a live "Online Auction" record at the same unit** — a considered decision made 3 days

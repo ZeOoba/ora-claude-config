@@ -23,7 +23,7 @@ Source: Cowork "Historical Evaluations" knowledge project (12 settlement stateme
 | 29000 Information Lane, Easton MD | 12/22/2016 | [figure: private] | [figure: private] | +266% | 7.00% | — | 37.9% |
 | Sepich Portfolio (8 parcels), Columbus OH | 02/01/2021 | $4,650,000 | [figure: private] | +154% | 7.00% | 61.3% | 31.5% |
 | 3540 E 5th Ave, Columbus OH | 01/20/2022 | [figure: private] | [figure: private] | +246% | 6.28% | — | 54.3% |
-| 1100 Rarig Ave, Columbus OH | 10/06/2023 | $1,800,000 | $2,374,719 | +32% | 7.00% | 20.8% | 46.6% |
+| 1100 Rarig Ave, Columbus OH | 10/06/2023 | [figure: private] | $2,374,719 | +32% | 7.00% | 20.8% | 46.6% |
 | 3034 Westerville Rd, Columbus OH | 09/19/2024 | [figure: private] | $1,568,800 | −5% | 7.50% | 7.1% | 0% |
 | 2203/2205/2207 Northwood Dr, Salisbury MD | 10/25/2024 | [figure: private] | $4,809,606 | +9% | 8.00% | 8.7% | 0% |
 | 9620 E State Rte 350, Raytown MO | 10/18/2024 | [figure: private] | [figure: private] | 0% | 5.42% | 5.4% | 0% |
@@ -50,7 +50,7 @@ Raytown MO (5.42% cap rate/CoC, lowest in the book; 92% occupied, the only sub-1
 1. **29000 Information Lane** — settlement statement: 12/22/2016 close, [figure: private], seller Easton Technology Phase I LLC. Property NOI sheet: Acq Date 1/1/2021, equity invested **−[figure: private]** (implies cash-out refi). Verify against Acquisition Pipeline (bcfe4a03) before citing either date externally.
    - **RESOLVED:** Property Register row ORA-P-2 (Notion `39b6ecd8…feb9d`, CORRECTIONS 2026-09-19) sets Purchase Date 2016-12-22, [figure: private]; SDAT transfer 2016-12-27; acquired as a 1031 replacement (IPX letter 2016-12-02). The 1/1/2021 workbook date is wrong. The −[figure: private] equity figure is still unexplained (the "cash-out refi" reading is not confirmed; see [disposition-ledger.md](disposition-ledger.md) row, still INFERRED).
 2. **Sepich Portfolio** — settlement statement: 02/01/2021 close, $4,650,000. Property NOI sheet: Acq Date 3/16/2021 (6-week gap, larger than typical disbursement lag — possible second tranche).
-   - **RESOLVED:** Property Register row ORA-P-6 (Notion `39b6ecd8…25067`, CORRECTIONS 2026-09-21): settlement 2021-02-01 is correct; 3/16/2021 was a GIS transfer-processing date (deeds recorded 3/17/2021). One closing, two sellers (Sepich Family LP $[figure: data/loan-terms.json] + Sepich Family II LP [figure: private]). Since split into two Register rows (Banwick + Morrison / Zettler + Sepich Ln + 4595-4601 E 5th). Open there, not here: $61,200 IPX boot check and the unrecorded [figure: private] Fenton Street LLC loan (OI-337).
+   - **RESOLVED:** Property Register row ORA-P-6 (Notion `39b6ecd8…25067`, CORRECTIONS 2026-09-21): settlement 2021-02-01 is correct; 3/16/2021 was a GIS transfer-processing date (deeds recorded 3/17/2021). One closing, two sellers (Sepich Family LP $[figure: data/loan-terms.json] + Sepich Family II LP [figure: private]). Since split into two Register rows (Banwick + Morrison / Zettler + Sepich Ln + 4595-4601 E 5th). Open there, not here: [figure: private] IPX boot check and the unrecorded [figure: private] Fenton Street LLC loan (OI-337).
 
 ## Resolved, not an error: 1100 Rarig rent/SF
 
