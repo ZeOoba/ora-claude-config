@@ -421,3 +421,8 @@ deal-figures.local.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/user.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/tenant_*default*.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/_archive/user_gabriel_consolidated_2026-06-03.md
+# Archived snapshot copies of the same files (2026-11-18 REFUTE pass): any depth.
+/maintenance/_archive/**/projects/*/memory/people.md
+/maintenance/_archive/**/projects/*/memory/user.md
+/maintenance/_archive/**/projects/*/memory/tenant_*default*.md
+/maintenance/_archive/**/deal-stage-snapshot.json

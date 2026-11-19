@@ -53,6 +53,12 @@ for p in ("maintenance/_state/deal-stage-snapshot.json", MEM + "/people.md", MEM
           MEM + "/tenant_alpha_default_2026-01-01.md",
           MEM + "/_archive/user_gabriel_consolidated_2026-06-03.md"):
     expect("exposure path: %s" % p.rsplit("/", 1)[-1], elc.is_exposure_path(p))
+for p in ("maintenance/_archive/2026-09-22_checkout-sync/" + MEM + "/people.md",
+          MEM + "/People.md", MEM + "/USER.MD", MEM.replace("/", "\\") + "\\people.md",
+          "maintenance/_archive/x/maintenance/_state/deal-stage-snapshot.json"):
+    expect("exposure path (archive/case/backslash): %s" % p[-40:], elc.is_exposure_path(p))
+expect("archive memory copy counts as memory",
+       elc.is_memory_path("maintenance/_archive/x/" + MEM + "/notes.md"))
 for p in (MEM + "/people_index.md", MEM + "/_archive/user_ze_retired_2026-04-21.md",
           "maintenance/_state/other.json", "docs/people.md"):
     expect("not an exposure path: %s" % p, not elc.is_exposure_path(p))
@@ -71,8 +77,13 @@ expect("100% rename onto an exposure path blocks",
        elc.scan_diff(ren) == [("maintenance/_state/deal-stage-snapshot.json", "exposure-path")])
 
 # --- rule 2: phone in memory --------------------------------------------------------------
+EN = chr(0x2013)
 for label, ph in (("dashes", "202-555-0143"), ("parens", "(614) 555-0199 x117"),
-                  ("dots", "312.555.0110"), ("+1", "+1 415 555 0187")):
+                  ("dots", "312.555.0110"), ("+1", "+1 415 555 0187"),
+                  ("E.164", "tel:+12025550143"), ("glued ext", "202-555-0143x12"),
+                  ("underscore before", "cell_202-555-0143"), ("en dash", "202" + EN + "555" + EN + "0143"),
+                  ("slash", "202/555-0143"), ("double space", "(202)  555-0143"),
+                  ("spaced parens", "( 202 ) 555 - 0143")):
     expect("phone (%s) in memory blocks" % label,
            elc.scan_diff(diff(MEM + "/feedback_x.md", ["call " + ph])) == [(MEM + "/feedback_x.md", "phone-in-memory")])
 expect("phone outside memory passes", elc.scan_diff(diff("docs/x.md", ["call 202-555-0143"])) == [])
@@ -84,6 +95,21 @@ for label, txt in (("date", "2026-11-18"), ("bare 10 digits", "id 2025550143"),
     else:
         d = diff(MEM + "/x.md", [txt])
     expect("no phone false positive: %s" % label, elc.scan_diff(d) == [], elc.scan_diff(d))
+# --- path parsing ---------------------------------------------------------------------------
+quoted = "\n".join([C1, "", "    msg", "", 'diff --git "a/%s/caf\\303\\251.md" "b/%s/caf\\303\\251.md"' % (MEM, MEM),
+                    'new file mode 100644', '--- /dev/null', '+++ "b/%s/caf\\303\\251.md"' % MEM,
+                    "@@ -0,0 +1 @@", "+call 202-555-0143"]) + "\n"
+expect("C-quoted non-ASCII memory path still caught",
+       [r for _, r in elc.scan_diff(quoted)] == ["phone-in-memory"], elc.scan_diff(quoted))
+bdir = "\n".join([C1, "", "    msg", "", "diff --git a/%s/a b/x.md b/%s/a b/x.md" % (MEM, MEM),
+                  "--- a/%s/a b/x.md\t" % MEM, "+++ b/%s/a b/x.md\t" % MEM,
+                  "@@ -1 +1 @@", "+call 202-555-0143"]) + "\n"
+expect("directory ending in ' b' parsed from +++ line",
+       elc.scan_diff(bdir) == [(MEM + "/a b/x.md", "phone-in-memory")], elc.scan_diff(bdir))
+expect("git log args pin prefixes, quoting and textconv",
+       all(a in elc.GIT_LOG_ARGS for a in ("--src-prefix=a/", "--dst-prefix=b/", "--no-textconv",
+                                            "--no-ext-diff", "core.quotePath=false")))
+
 expect("allowlisted public office line passes",
        elc.scan_diff(diff(MEM + "/x.md", ["recorder (614) 525-3930"])) == [])
 expect("public line does not mask a private one on the same line",
@@ -104,7 +130,8 @@ tmp = tempfile.mkdtemp(prefix="exp-leak-")
 try:
     loan = {"_meta": {"version": 1}, "loans": [
         {"id": "L1", "original_principal": 1111111.0, "balloon_payment": 987654.32,
-         "appraisal": {"value": 2222222}},
+         "appraisal": {"value": 2222222}, "anchor": {"principal": 3333333.0},
+         "schedule": [["2026-01-01", 4444444.0]]},
         {"id": "L2", "original_principal": 50000.0}]}
     lt = os.path.join(tmp, "loan-terms.json")
     with open(lt, "w") as f:
@@ -117,11 +144,14 @@ try:
     os.mkdir(fake_home)
 
     n = elc.load_needles(loan_terms_path=lt, denylist_path=deny)
-    for want in ("1,111,111", "1111111", "987,654.32", "987654.32", "2,222,222", "LN-000123456"):
+    for want in ("1,111,111", "1111111", "987,654.32", "987654.32", "2,222,222", "LN-000123456",
+                 "3,333,333", "4444444", "1,111,111.00"):
         expect("needle built: %s" % want, want in n)
     expect("sub-floor figure skipped", "50000" not in n and "50,000" not in n)
     for label, txt in (("comma form", "balance $1,111,111 at 4%"), ("bare form", "bal=1111111"),
-                       ("cents", "balloon 987,654.32"), ("loan no.", "loan LN-000123456")):
+                       ("cents", "balloon 987,654.32"), ("loan no.", "loan LN-000123456"),
+                       ("zero cents", "$1,111,111.00 due"), ("one-dp zero", "1111111.0"),
+                       ("anchor balance", "bal 3,333,333")):
         expect("debt figure (%s) blocks anywhere" % label,
                elc.scan_diff(diff("docs/x.md", [txt]), n) == [("docs/x.md", "debt-figure")])
     for label, txt in (("longer number", "11111110"), ("decimal tail", "1111111.5"),
@@ -137,7 +167,14 @@ try:
     os.environ.pop("ORA_LOAN_TERMS_PATH", None)
     os.environ.pop("ORA_EXPOSURE_DENYLIST", None)
     os.environ["HOME"] = os.environ["USERPROFILE"] = fake_home
-    expect("no sources -> None (skip)", elc.load_needles(start_dir=tmp) is None)
+    sub = os.path.join(tmp, "gitrepo")
+    subprocess.run(["git", "init", "-q", sub], capture_output=True)
+    expect("no sources -> None (skip)", elc.load_needles(start_dir=sub) is None)
+    try:
+        elc.load_needles(start_dir=os.path.join(tmp, "not-a-repo-dir-xyz"))
+        expect("unresolvable repo root -> error", False)
+    except elc.ExposureSourceError:
+        expect("unresolvable repo root -> error", True)
     os.environ["ORA_LOAN_TERMS_PATH"] = missing
     try:
         elc.load_needles(start_dir=tmp)
@@ -222,6 +259,31 @@ try:
     expect("e2e: re-adding people.md blocks", r.returncode == 1 and "exposure-path" in r.stderr,
            r.stderr[:400])
     expect("e2e: phone value not echoed", "555-0143" not in r.stderr)
+    # host config that rewrites diff headers / hides content must not blind the scan
+    for k, v in (("diff.noprefix", "true"), ("diff.srcPrefix", "x/"), ("diff.dstPrefix", "y/"),
+                 ("core.quotePath", "true"), ("diff.mangle.textconv", "true")):
+        sh(["git", "config", k, v], repo)
+    with open(os.path.join(repo, ".git", "info", "attributes"), "w") as f:
+        f.write("*.md diff=mangle\n")
+    r = push_scan()
+    expect("e2e: noprefix/srcPrefix/textconv config cannot hide the re-add",
+           r.returncode == 1 and "exposure-path" in r.stderr, r.stderr[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+
+    # archive-snapshot copy and case variant: blocked
+    arch = os.path.join(repo, "maintenance", "_archive", "2026-12-01_sync", *MEM.split("/"))
+    os.makedirs(arch)
+    with open(os.path.join(arch, "people.md"), "w") as f:
+        f.write("- Broker B\n")
+    os.makedirs(os.path.join(repo, MEM), exist_ok=True)
+    with open(os.path.join(repo, MEM, "People.md"), "w") as f:
+        f.write("- Broker C\n")
+    sh(["git", "add", "-f", "-A"], repo)
+    sh(["git", "commit", "-qm", "archive copy"], repo)
+    r = push_scan()
+    expect("e2e: archive copy blocked", r.returncode == 1 and "_archive" in r.stderr, r.stderr[:400])
+    expect("e2e: case-variant People.md blocked", "People.md -> exposure-path" in r.stderr,
+           r.stderr[:600])
     sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
 
     # debt figure in a new file: blocked with a loan-terms source

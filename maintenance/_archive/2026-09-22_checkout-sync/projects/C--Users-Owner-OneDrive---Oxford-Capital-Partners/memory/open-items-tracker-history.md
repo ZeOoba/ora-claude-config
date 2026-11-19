@@ -3314,7 +3314,7 @@ Rebuilt `Northwood FROM EGFLLC` in the live workbook, modeled row-for-row on `11
 (the simplest existing single-balance journal — Turn 144 named `2203 FROM EGFLLC` as its template,
 but that sheet has irregular mid-month paydowns Northwood never had; the simpler template is the
 better structural match). Matches Turn 147's own recorded specifics exactly: 8 monthly interest-only
-periods, 1/1/2026–8/31/2026, constant $2,800,000 balance, 6.99% (`Rate_Northwood_EGFLLC`, already
+periods, 1/1/2026–8/31/2026, constant $[figure: data/loan-terms.json] balance, 6.99% (`Rate_Northwood_EGFLLC`, already
 present in `Assumptions!B21`), Feb=28 days (2026 not a leap year). Wired `Portfolio Summary —
 Internal!C10`/`D10` to the new sheet with the same `LOOKUP(2,1/(...))` pattern every other row uses.
 **Verification (not skipped):** openpyxl round-trip fidelity tested first on a scratch copy (0
@@ -3371,7 +3371,7 @@ r71: B=2031-06-05  D(int)=15,336.19  E(prin)=3,333,953.68  F(bal)=0        <-- E
 ```
 `K9` (maturity) = `'Banwick-Morrison'!E7` = **2031-06-05** — the very row the SUMPRODUCT range stops
 one short of. Row 71's total is $3,349,289.87, matching Symetra loan 11153's documented balloon of
-$3,349,289.89 to within rounding.
+$[figure: data/loan-terms.json] to within rounding.
 **Impact:** currently immaterial — the forward window ends 2027-08-31, nowhere near 2031-06-05. It
 becomes real around **mid-2030**, when the balloon enters the forward-12-month window and `J9`
 silently omits it. The direction is the dangerous one: annual debt service is **understated**, so
@@ -3442,8 +3442,8 @@ found (b). It did **not** find (a); the duplicate-date over-count was caught onl
 **TWO NEW findings the range audit surfaced — both need Gabriel's read, neither is a range problem:**
 
 (a) **485 S Walnut St double-counts $1,365 from ~Oct 2027.** Rows 45 and 46 BOTH carry `2028-09-26`:
-r45 is the final regular payment (`D`=1365 interest, `E`=1365, `F`=252,000 balance); r46 is the payoff
-(`D`=253,365 = 252,000 principal + 1,365 interest, `E`=1365, `F`=0). `H16` sums column `E` over the
+r45 is the final regular payment (`D`=1365 interest, `E`=1365, `F`=[figure: data/loan-terms.json] balance); r46 is the payoff
+(`D`=253,365 = [figure: data/loan-terms.json] principal + 1,365 interest, `E`=1365, `F`=0). `H16` sums column `E` over the
 date predicate, so it picks up **both** rows' 1,365 — the same September interest counted twice. Bites
 when 2028-09-26 enters the forward window, around Oct 2027. Small ($1,365) but it is a genuine
 over-count, and it is the same "13 payments" shape as OI-092.
@@ -3607,7 +3607,7 @@ Four Gabriel-approved edits applied via Excel COM and independently re-verified:
 2. All 11 window cells `EDATE(B30,12)` → `EOMONTH(B30,12)` (0 deviations vs 9).
 3. `Assumptions!B30` manual-override branch wrapped in `EOMONTH(B32,0)` — **mandatory pair with #2**;
    with a non-month-end override, `EOMONTH` over-captures in 1,428/1,428 cases.
-4. `485 S Walnut St` r46 → pure balloon (D=252,000, E=0); TOTALS 302,505→301,140, 50,505→49,140.
+4. `485 S Walnut St` r46 → pure balloon (D=[figure: data/loan-terms.json], E=0); TOTALS 302,505→301,140, 50,505→49,140.
 **No currently-reported figure moved** — all four are future-proofing. Verified unchanged:
 195,653.52 / 146,269.26 / 208,344.72 / 275,031.24 / 47,895.08 / −50,140.95 / −16,380; 0 formula-error
 cells across 50 sheets. Snapshot re-baked and pushed (`f269986`).
@@ -3638,7 +3638,7 @@ sums the schedule over the **forward 12-month** window. All three sit under the 
 "Annual Principal (Next 12 Months)" header (`I4`). Consequences: (a) RCT's $1,945,102.73 balloon due
 **2027-02-20 — already inside the window** — is absent from `I15` because it sits in column C
 (Payment Amount) not D/E, so Oxford's 50% share of **$972,551** of principal return is missing;
-(b) `I16` will miss Walnut's $252,000 balloon when it enters the window in **Oct 2027**. The RCT sheet
+(b) `I16` will miss Walnut's $[figure: data/loan-terms.json] balloon when it enters the window in **Oct 2027**. The RCT sheet
 r8 already holds `Balloon Balance at Maturity (Oxford 50%) = -972,551.365`, so the figure exists — it
 just doesn't flow. **Careful:** RCT r37 is a 50%-share memo row and `H15`/`I15` already apply `*0.5`;
 never let r37 into a D/E sum or it double-counts.

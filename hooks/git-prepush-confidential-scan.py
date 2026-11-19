@@ -679,10 +679,10 @@ def main():
                                  "message if it is listed.\n"
                                  % (local_ref, rng, "; ".join(rct_paths)))
                 bad = True
-        # Exposure rules: own --text pass, for the same reason as the RCT pass above.
-        pe = subprocess.run(["git", "log", "-p", "--cc", "--text", "--no-color",
-                             "--no-abbrev-commit", "--pretty=medium", "-M", rng],
-                            capture_output=True)
+        # Exposure rules: own --text pass, for the same reason as the RCT pass above, with the
+        # diff prefixes, path quoting and textconv pinned (exposure_leak_check.GIT_LOG_ARGS)
+        # so a host's diff.noprefix / textconv config cannot blind the path rules.
+        pe = subprocess.run(["git"] + _exp.GIT_LOG_ARGS + [rng], capture_output=True)
         if pe.returncode != 0:
             sys.stderr.write("pre-push BLOCKED (fail-closed): `git log --text %s` failed for "
                              "%s -- cannot check for pipeline, PII or debt data.\n"
