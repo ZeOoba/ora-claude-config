@@ -443,3 +443,4 @@ deal-figures.local.md
 # archived memory copies: local-only from 2026-11-19 (PR 476, Gabriel: "Redesign: archives local"). Kept on disk.
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/_archive/
 /maintenance/_archive/**/projects/*/memory/
+/maintenance/_archive/**/projects/*/memory/**
