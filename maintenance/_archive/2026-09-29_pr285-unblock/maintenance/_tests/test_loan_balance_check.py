@@ -15,16 +15,16 @@ BY_ID = {l["id"]: l for l in TERMS["loans"]}
 class ExpectedBalance(unittest.TestCase):
     def test_schedule_lookup_matches_lender_documents(self):
         # Exact lender figures read from the schedules on 2026-09-21.
-        self.assertEqual(lbc.expected_balance(BY_ID["park_3540"], date(2026, 9, 16)), [figure: private])
-        self.assertEqual(lbc.expected_balance(BY_ID["info_lane"], date(2026, 9, 10)), [figure: private])
-        self.assertEqual(lbc.expected_balance(BY_ID["bm"], date(2026, 9, 5)), [figure: private])
+        self.assertEqual(lbc.expected_balance(BY_ID["park_3540"], date(2026, 9, 16)), [figure: data/loan-terms.json])
+        self.assertEqual(lbc.expected_balance(BY_ID["info_lane"], date(2026, 9, 10)), [figure: data/loan-terms.json])
+        self.assertEqual(lbc.expected_balance(BY_ID["bm"], date(2026, 9, 5)), [figure: data/loan-terms.json])
 
     def test_schedule_before_first_payment_is_original_principal(self):
-        self.assertEqual(lbc.expected_balance(BY_ID["bm"], date(2026, 5, 20)), [figure: private])
-        self.assertEqual(lbc.expected_balance(BY_ID["park_3540"], date(2025, 4, 20)), [figure: private])
+        self.assertEqual(lbc.expected_balance(BY_ID["bm"], date(2026, 5, 20)), [figure: data/loan-terms.json])
+        self.assertEqual(lbc.expected_balance(BY_ID["park_3540"], date(2025, 4, 20)), [figure: data/loan-terms.json])
 
     def test_schedule_day_before_a_payment_keeps_prior_balance(self):
-        self.assertEqual(lbc.expected_balance(BY_ID["info_lane"], date(2026, 9, 9)), [figure: private])
+        self.assertEqual(lbc.expected_balance(BY_ID["info_lane"], date(2026, 9, 9)), [figure: data/loan-terms.json])
 
     def test_schedule_after_balloon_is_zero(self):
         self.assertEqual(lbc.expected_balance(BY_ID["park_3540"], date(2032, 5, 1)), 0.0)
@@ -32,7 +32,7 @@ class ExpectedBalance(unittest.TestCase):
     def test_anchor_forward_reproduces_ledger_to_the_cent(self):
         # ORA ledger 9/6/2026: principal after the 8/20/2026 installment is [figure: private].
         self.assertEqual(lbc.expected_balance(BY_ID["restoration"], date(2026, 8, 20)), 1957526.84)
-        self.assertEqual(lbc.expected_balance(BY_ID["restoration"], date(2026, 8, 19)), [figure: private])
+        self.assertEqual(lbc.expected_balance(BY_ID["restoration"], date(2026, 8, 19)), [figure: data/loan-terms.json])
 
     def test_anchor_matches_register_for_red_branch(self):
         # Register 7/29/2026: ORA 50% principal [figure: private] after 162 payments.
@@ -48,17 +48,17 @@ class ExpectedBalance(unittest.TestCase):
         self.assertGreater(last_regular, 1_800_000)
 
     def test_interest_only_is_constant(self):
-        self.assertEqual(lbc.expected_balance(BY_ID["walnut"], date(2027, 1, 1)), [figure: private])
+        self.assertEqual(lbc.expected_balance(BY_ID["walnut"], date(2027, 1, 1)), [figure: data/loan-terms.json])
 
 
 class Compare(unittest.TestCase):
     def rows(self, **over):
-        base = [{"name": "Banwick/Morrison - Symetra [figure: private]", "balance": [figure: private], "maturity": "2031-06-05"},
-                {"name": "29000 Information Lane - Symetra [figure: private]", "balance": [figure: private], "maturity": "2030-12-10"},
-                {"name": "3540 E. Fifth Ave - Park National Bank", "balance": [figure: private], "maturity": "2032-04-16"},
+        base = [{"name": "Banwick/Morrison - Symetra #[loan no.: data/loan-terms.json]", "balance": [figure: data/loan-terms.json], "maturity": "2031-06-05"},
+                {"name": "29000 Information Lane - Symetra #[loan no.: data/loan-terms.json]", "balance": [figure: data/loan-terms.json], "maturity": "2030-12-10"},
+                {"name": "3540 E. Fifth Ave - Park National Bank", "balance": [figure: data/loan-terms.json], "maturity": "2032-04-16"},
                 {"name": "9050 Red Branch Rd - WoodmenLife", "balance": None, "maturity": "2028-01-01"},
                 {"name": "Restoration Church Trust Balloon", "balance": None, "maturity": "2027-02-20"},
-                {"name": "485 S. Walnut St. - Oxford Capital IO Balloon", "balance": [figure: private], "maturity": "2028-09-26"}]
+                {"name": "485 S. Walnut St. - Oxford Capital IO Balloon", "balance": [figure: data/loan-terms.json], "maturity": "2028-09-26"}]
         for r in base:
             if r["name"] in over:
                 r["balance"] = over[r["name"]]
@@ -69,7 +69,7 @@ class Compare(unittest.TestCase):
         self.assertEqual([x for x in f["differences"] if x.startswith(("bm", "info_lane", "park_3540", "walnut"))], [])
 
     def test_stale_balance_is_flagged(self):
-        f = lbc.compute(TERMS, date(2026, 9, 21), self.rows(**{"29000 Information Lane - Symetra [figure: private]": [figure: private]}))
+        f = lbc.compute(TERMS, date(2026, 9, 21), self.rows(**{"29000 Information Lane - Symetra #[loan no.: data/loan-terms.json]": [figure: data/loan-terms.json]}))
         self.assertTrue(any(x.startswith("info_lane") and "difference" in x for x in f["differences"]))
 
     def test_missing_notion_record_is_flagged(self):
@@ -86,7 +86,7 @@ class Compare(unittest.TestCase):
 class Watch(unittest.TestCase):
     def test_3540_ltv_above_ceiling_is_on_watch_list(self):
         f = lbc.compute(TERMS, date(2026, 9, 21))
-        self.assertTrue(any("park_3540" in w and "66.8%" in w for w in f["watch"]))
+        self.assertTrue(any("park_3540" in w and "[ltv %]" in w for w in f["watch"]))
 
     def test_receivables_have_no_ltv_watch(self):
         f = lbc.compute(TERMS, date(2026, 9, 21))
