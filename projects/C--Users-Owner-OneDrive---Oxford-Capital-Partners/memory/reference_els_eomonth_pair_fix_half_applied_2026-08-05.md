@@ -49,7 +49,7 @@ Only the four borrower rows moved. `H15`/`I15` (Restoration Church Trust) and `H
 (485 S Walnut) are **still on `EDATE`**. Two different right-edge functions now govern one
 summary block, so the six loans no longer share a window definition under manual override.
 
-**Not fixed by this edit, still open:** RCT's $1,945,102.73 balloon (Oxford 50% = $972,551.37)
+**Not fixed by this edit, still open:** RCT's [figure: data/loan-terms.json] balloon (Oxford 50% = [figure: data/loan-terms.json])
 sits in the PAYMENT AMOUNT column, invisible to the `D`/`E`-only sum — live now, since RCT matures
 2027-02-20 inside the current window. Also `E16` still anchors on bare `TODAY()` while every other
 cell anchors on `B30`, so 485 S Walnut's principal and interest use different as-of dates.

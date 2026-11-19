@@ -50,7 +50,7 @@ Also fixed along the way (found via B3 burn-in, not originally scoped): an unexp
 standards.md's underwriting-defaults table is now populated from 5 real deal models with full cell-level citation (754/511/470/275/DG-adjacent) — 2040 S Hamilton and the true DG 3-pack have no models and were correctly left blank, not fabricated. Divergent conventions (LC: $2/SF flat vs 6% of rent) were recorded as real divergence, not papered over.
 
 ## Top open items (needs-approval, not yet actioned) — see artifact for full detail + recommendations
-- Cowork skill cache is materially stale: monthly-close (v1.0 vs canonical v2.0, drops the Restoration Church Trust ~$982,753 balloon alert due 2027-02-20) and acquisition-underwriting (v3.3 vs v3.5, missing Louisville KY cluster + Stage 2.6 DD checklist + bear-mode rules) — top priority repackage/reimport.
+- Cowork skill cache is materially stale: monthly-close (v1.0 vs canonical v2.0, drops the Restoration Church Trust ~[figure: data/loan-terms.json] balloon alert due 2027-02-20) and acquisition-underwriting (v3.3 vs v3.5, missing Louisville KY cluster + Stage 2.6 DD checklist + bear-mode rules) — top priority repackage/reimport.
 - A third ora-skills git clone (`Claude_Workspace/01_Workspace/.claude/skills/`) is 45 commits behind canonical + has its own uncommitted edits.
 - `code-debugging-optimizations` skill claims "no approval gates" for oxfordra.net — conflicts with Hard Invariant 2, no tie-break resolves it.
 - fred MCP documented active, registered nowhere (likely lost in the 2026-07-05 Desktop reinstall).

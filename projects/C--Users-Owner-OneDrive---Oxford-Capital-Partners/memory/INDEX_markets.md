@@ -31,7 +31,7 @@ metadata:
 - [entry-market-scan defects 08-04](reference_entry_market_scan_defects_2026-08-04.md) — `Gate Review` field: blank = awaiting Gabriel, never placeholder it
 - [5515 Catfish Court broker-correspondence claim is FALSE](reference_catfish_court_broker_correspondence_claim_false.md) — 08-14 re-check is a warm follow-up, not a cold call
 - [808 Rhoads real broker is Elford, not Koon/Menninger](reference_808_rhoads_real_broker_is_elford_not_koon.md) — Deal went OUT of contract 06-26; seller wants ~$3.5M vs the $2.86M LOI plan
-- [Delinquency collection-status blind spot](reference_delinquency_report_collection_status_blindspot.md) — "no action taken" is inferred; wrong 4 of 6 tenants
+- Delinquency collection-status blind spot (`reference_delinquency_report_collection_status_blindspot.md`, local only, gitignored) — "no action taken" is inferred; wrong 4 of 6 tenants
 - Tenant default record 07-28 (local only, untracked) (`tenant_columbus_suburban_default_2026-07-28.md`, local only, gitignored)
 - [Rent-roll vacancy convention changed 08-01](reference_rent_roll_vacancy_convention_change_2026-08-01.md) — occupancy 98.6%→94.9% is definitional, not deterioration
 - [NOI opportunity sweep 09-19](reference_noi_opportunity_sweep_2026-09-19.md) — ~$18.8K/yr from 2 solar roof leases (King Energy, HARD 2027-12-31 §48E wall); cost-seg CapEx row wrong (5 studies exist); billboard = $3,600/yr; Salisbury vacant parcel NOT ORA's

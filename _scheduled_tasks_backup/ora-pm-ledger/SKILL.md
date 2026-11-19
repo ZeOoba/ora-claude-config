@@ -790,7 +790,7 @@ balloon alert does NOT filter on direction, so it fires on `lender` loans with
 the detail line *"Prepare refinance or payoff"* — the wrong action for a note ORA
 holds and collects. The live example is **Restoration Church Trust** ($979,772,
 9%, balloon 2027-02-20): it is an ASSET, not a liability. Two other `lender`
-loans exist (1100 Rarig/Fenton $553,045; 485 S. Walnut St. $[figure: data/loan-terms.json]). When a
+loans exist (1100 Rarig/Fenton [figure: data/loan-terms.json]; 485 S. Walnut St. $[figure: data/loan-terms.json]). When a
 balloon alert fires, check `direction` in `portfolio.json` first and report it as
 a collection event, not a refinancing obligation. Do not "fix" `conditions.ts`
 from this task — it is financial-decision code (Invariant 4, mandatory

@@ -15,7 +15,7 @@ When `scripts/lease-snapshot-drift-check.ts` (oxford-command-center) can't reach
 Observed 2026-08-09 07:40 ET run: `deals` 20 → 6, `counterparties` 15 → 14 (Stearns Bank record
 dropped), `leases` 138 → 138 unchanged. Field-level damage is seed placeholders overwriting real
 values (`estPrice: 1400000 → null`, `location: "1333 Research Road" → "TBD"`, stage flips like
-E. Fulton Dead→Candidate). The 6 survivors are the seed ids: `fvc-11153`, `e-fulton-street`,
+E. Fulton Dead→Candidate). The 6 survivors are the seed ids: `fvc-[loan no.]`, `e-fulton-street`,
 `banwick-morrison-refi`, `2146-enterprise-twinsburg`, `1333-research-road`, `pendleton-trade-center`.
 
 **Why it matters:** `ora-lease-snapshot-refresh`'s material-change gate only filters

@@ -8,7 +8,7 @@ description: ORA Monthly Close Kickoff — runs on the 1st of each month at 7:00
 You are running the Oxford Realty Advisors Monthly Close Kickoff for the 1st of the current month. Execute the monthly-close skill in full scheduled-task mode. Follow every step below without pausing for confirmation.
 
 ## STEP 1 — BALLOON ALERT
-Calculate months remaining to February 20, 2027 (Restoration Church Trust balloon, ~$982,753). If ≤6 months remaining, escalate urgency to CRITICAL. Surface this at the top of all outputs.
+Calculate months remaining to February 20, 2027 (Restoration Church Trust balloon, ~[figure: data/loan-terms.json]). If ≤6 months remaining, escalate urgency to CRITICAL. Surface this at the top of all outputs.
 
 ## STEP 2 — DETERMINE ACTIVE CATEGORIES THIS MONTH
 Evaluate today's date to determine:
@@ -55,7 +55,7 @@ Total outflow: ~$70,730/mo
 
 ### Category 2 — External Lender Receipts (We Receive — Cash)
 - EXT-LEN-1100RARIG: 1100 Rarig Ave LLC → $2,812.18, IO, 6.00%, demand, 50% share
-- EXT-LEN-RESTORATION: Restoration Church Trust → $8,356.83, amortizing, 9.00%, BALLOON ~$982,753 due 2/20/2027
+- EXT-LEN-RESTORATION: Restoration Church Trust → $8,356.83, amortizing, 9.00%, BALLOON ~[figure: data/loan-terms.json] due 2/20/2027
 - EXT-LEN-485WALNUT: 610 Northampton St. LLC → $1,365.00, IO, 6.50%, matures Jul-28
 Total inflow: ~$12,534/mo
 
