@@ -6,8 +6,8 @@
 
 ## Firm & people
 - [Firm Context](firm.md) — entity, portfolio, team, investment criteria/governor, ops footprint
-- [Gabriel Goldberg — Profile](user.md) — role, expertise, working style, contact, surfaces
-- [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
+- Gabriel Goldberg — Profile (`user.md`, local only, gitignored) — role, expertise, working style, contact, surfaces
+- People (`people.md`, local only, gitignored) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
 - [8625 Troost v06 decisions](project_8625_troost_v06_decisions.md) — 2026-10-17: exit cap 8.25%, 10-yr refi, finite-life primary, bid $1.15M
