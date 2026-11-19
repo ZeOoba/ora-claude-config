@@ -60,7 +60,9 @@ import subprocess
 # Arguments the caller MUST use for the `git log` whose output feeds scan_diff().
 GIT_LOG_ARGS = ["-c", "core.quotePath=false", "log", "-p", "--cc", "--text", "--no-color",
                 "--no-textconv", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
-                "--no-abbrev-commit", "--pretty=medium", "--no-renames"]
+                "--no-abbrev-commit", "--pretty=medium", "--no-renames", "--root"]
+# --root (merge gate round 1): a host's log.showRoot=false would otherwise hide the whole
+# diff of a root commit, e.g. an orphan branch pushed as a new ref.
 # --no-renames (REFUTE round 2): with -M/-C a copy or rename shows the moved lines as
 # unchanged CONTEXT, so a phone copied into memory, or a file renamed onto people.md with
 # edits, was never scanned. Without rename detection the target is a full add.
@@ -68,7 +70,7 @@ GIT_LOG_ARGS = ["-c", "core.quotePath=false", "log", "-p", "--cc", "--text", "--
 # Rule 1. Lower-case fnmatch patterns over the lower-cased repo-relative path; the leading
 # '*' (which crosses '/') makes each one match at any depth. Keep in step with .gitignore.
 EXPOSURE_PATHS = (
-    "*deal-stage-snapshot.json",
+    "*deal-stage-snapshot.json*",  # incl. the reconciler's .tmp-write sidecar
     "*projects/*/memory/people.md",
     "*projects/*/memory/user.md",
     "*projects/*/memory/tenant_*default*.md",
@@ -78,12 +80,13 @@ MEMORY_GLOB = "*projects/*/memory/*"
 
 # Rule 2. Separator: hyphen, dot, slash, space or a Unicode dash (U+2010..U+2015, U+2212),
 # with optional spaces around it.
-_DASHES = "".join(chr(c) for c in (0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212))
+_DASHES = "".join(chr(c) for c in (0x2010, 0x2011, 0x2012, 0x2013, 0x2014, 0x2015, 0x2212,
+                                    0x00A0))  # last: no-break space
 _SEP = r"\s*[-./ " + re.escape(_DASHES) + r"]\s*"
 PHONE_RE = re.compile(
     r"(?<!\d)(?:"
     r"\+1[2-9]\d{2}[2-9]\d{6}"                                  # E.164, no separators
-    r"|(?:\+?1" + _SEP + r")?"                                  # optional country code
+    r"|(?:\+?1(?:" + _SEP + r"|(?=\()))?"                       # optional country code
     r"(?:\(\s*[2-9]\d{2}\s*\)\s*|[2-9]\d{2}" + _SEP + r")"      # area code
     r"[2-9]\d{2}" + _SEP + r"\d{4}"                             # exchange + line
     r")(?!\d)")
@@ -193,6 +196,10 @@ def _fmt_number(v):
         return out
     out.add("{:,.0f}".format(v))
     out.add("{:.0f}".format(v))
+    # Truncated whole dollars (merge gate round 1): "{:.0f}" ROUNDS, so for x.50-x.99 the
+    # cents-dropped form people actually write ("$1,111,111" for 1,111,111.55) was missed.
+    out.add("{:,}".format(int(v)))
+    out.add(str(int(v)))
     out.add("{:,.2f}".format(v))
     out.add("{:.2f}".format(v))
     return out
@@ -267,7 +274,9 @@ def scan_diff(body, needles=None):
     m = _matcher(needles)
     hits = set()
     commit, path, minus, width, in_msg = None, None, None, 0, False
-    shape = {}  # (commit, path) -> {"deal": bool, "stage": bool}
+    # Keyed on PATH across the whole pushed range (merge gate round 1): keyed per commit, a
+    # "deal" key added in one commit and "stage" in the next never combined.
+    shape = {}  # path -> {"deal": bool, "stage": bool}
     for line in body.split("\n"):
         if line.endswith("\r"):
             line = line[:-1]
@@ -311,7 +320,7 @@ def scan_diff(body, needles=None):
         if is_memory_path(path) and _private_phone(text):
             hits.add((path, "phone-in-memory"))
         if _norm(path).endswith((".json", ".jsonl")):
-            s = shape.setdefault((commit, path), {"deal": False, "stage": False})
+            s = shape.setdefault(path, {"deal": False, "stage": False})
             s["deal"] = s["deal"] or bool(DEAL_KEY_RE.search(text))
             s["stage"] = s["stage"] or bool(STAGE_KEY_RE.search(text))
             if s["deal"] and s["stage"]:
