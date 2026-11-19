@@ -426,3 +426,6 @@ deal-figures.local.md
 /maintenance/_archive/**/projects/*/memory/user.md
 /maintenance/_archive/**/projects/*/memory/tenant_*default*.md
 /maintenance/_archive/**/deal-stage-snapshot.json
+/maintenance/_archive/**/user_gabriel_consolidated_*.md
+/maintenance/_state/_archive/**/projects/*/memory/people.md
+/maintenance/_state/_archive/**/projects/*/memory/user.md
