@@ -131,22 +131,81 @@ expect("allowlisted public office line passes",
 expect("public line does not mask a private one on the same line",
        elc.scan_diff(diff(MEM + "/x.md", ["recorder (614) 525-3930 or 202-555-0143"]))
        == [(MEM + "/x.md", "phone-in-memory")])
+expect("allowlisted public line with +1 prefix passes",
+       elc.scan_diff(diff(MEM + "/x.md", ["recorder +1 (614) 525-3930"])) == [])
+cc = "\n".join([C1, "Merge: a b", "", "    merge", "", "diff --cc %s/m.md" % MEM,
+                "--- a/%s/m.md" % MEM, "+++ b/%s/m.md" % MEM, "@@@ -1,1 -1,1 +1,1 @@@",
+                " +call 202-555-0143"]) + "\n"
+expect("combined-diff (@@@) added line is scanned with the right prefix width",
+       elc.scan_diff(cc) == [(MEM + "/m.md", "phone-in-memory")], elc.scan_diff(cc))
 expect("placeholder passes", elc.scan_diff(diff(MEM + "/x.md", ["[phone: see contacts.local.md]"])) == [])
 
-# --- rule 3: pipeline shape ---------------------------------------------------------------
-snap = ['{', '  "abc": {', '    "deal": "Alpha Flex Park",', '    "stage": "Candidate"', '  }', '}']
-expect("deal+stage json shape blocks",
-       elc.scan_diff(diff("maintenance/_state/other.json", snap)) == [("maintenance/_state/other.json", "pipeline-shape")])
-expect("stage-only json passes", elc.scan_diff(diff("x.json", ['"stage": "build"'])) == [])
-expect("deal+stage in a .md passes (shape rule is json only)",
-       elc.scan_diff(diff("docs/x.md", ['"deal": "a"', '"stage": "b"'])) == [])
-expect("mixed-case keys in .json block",
-       elc.scan_diff(diff("x.json", ['"Deal": "a",', '"STAGE": "b"'])) == [("x.json", "pipeline-shape")])
-expect(".jsonl one-line record blocks",
-       elc.scan_diff(diff("s.jsonl", ['{"id": 1, "deal": "a", "stage": "b"}'])) == [("s.jsonl", "pipeline-shape")])
-two = diff("p.json", ['{"p1": {"deal": "a",']) + diff("p.json", ['"stage": "b"}}']).replace(C1, "commit " + "b" * 40)
-expect("deal and stage added in two commits of one push block",
-       elc.scan_diff(two) == [("p.json", "pipeline-shape")], elc.scan_diff(two))
+# --- rule 3: pipeline shape, read from file contents (shape_hits) -------------------------
+expect("scan_diff no longer judges shape from added lines (moved to shape_hits)",
+       elc.scan_diff(diff("x.json", ['"deal": "a",', '"stage": "b"'])) == [])
+_st = tempfile.mkdtemp(prefix="exp-shape-")
+try:
+    def g(*a):
+        return subprocess.run(["git"] + list(a), cwd=_st, capture_output=True, text=True)
+
+    def put(path, text, msg):
+        full = os.path.join(_st, path)
+        os.makedirs(os.path.dirname(full) or _st, exist_ok=True)
+        if text is None:
+            g("rm", "-q", path)
+        else:
+            with open(full, "w") as f:
+                f.write(text)
+            g("add", path)
+        g("commit", "-qm", msg)
+        return g("rev-parse", "HEAD").stdout.strip()
+
+    g("init", "-q", "-b", "main")
+    g("config", "user.email", "t@example.com")
+    g("config", "user.name", "t")
+    base = put("README.md", "x\n", "seed")
+    SH = "pipeline-shape"
+    c = put("s/a.json", '{"p": {"deal": "Alpha Flex", "stage": "LOI"}}\n', "a")
+    expect("shape: deal+stage json blocks", elc.shape_hits("%s..%s" % (base, c), _st) == [("s/a.json", SH)])
+    c2 = put("s/b.json", '{"stage": "build"}\n', "b")
+    expect("shape: stage-only json passes", elc.shape_hits("%s..%s" % (c, c2), _st) == [])
+    c3 = put("docs/x.md", '"deal": "a"\n"stage": "b"\n', "md")
+    expect("shape: .md is out of scope", elc.shape_hits("%s..%s" % (c2, c3), _st) == [])
+    c4 = put("s/C.JSON", '{"Deal": "a", "STAGE": "b"}\n', "case")
+    expect("shape: mixed-case keys and .JSON block", elc.shape_hits("%s..%s" % (c3, c4), _st) == [("s/C.JSON", SH)])
+    c5 = put("s/r.jsonl", '{"id": 1, "deal": "a", "stage": "b"}\n', "jsonl")
+    expect("shape: .jsonl blocks", elc.shape_hits("%s..%s" % (c4, c5), _st) == [("s/r.jsonl", SH)])
+    # split across two PUSHES: push 1 = deal only; push 2 adds stage above the unchanged deal line
+    p1 = put("s/split.json", '{"p": {\n"deal": "Alpha Flex"\n}}\n', "push1")
+    expect("shape: push 1 (deal only) passes", elc.shape_hits("%s..%s" % (c5, p1), _st) == [])
+    p2 = put("s/split.json", '{"p": {\n"stage": "LOI",\n"deal": "Alpha Flex"\n}}\n', "push2")
+    expect("shape: keys split across two pushes are caught on push 2",
+           elc.shape_hits("%s..%s" % (p1, p2), _st) == [("s/split.json", SH)])
+    # two commits in one push
+    t1 = put("s/two.json", '{"p": {"deal": "a"}}\n', "t1")
+    t2 = put("s/two.json", '{"p": {"deal": "a", "stage": "b"}}\n', "t2")
+    expect("shape: keys added in two commits of one push are caught",
+           elc.shape_hits("%s..%s" % (p2, t2), _st) == [("s/two.json", SH)])
+    # add deal, remove it, add stage: the keys never coexist -> no false positive
+    a1 = put("s/cfg.json", '{"deal": "a"}\n', "a1")
+    a2 = put("s/cfg.json", '{}\n', "a2")
+    a3 = put("s/cfg.json", '{"stage": "build"}\n', "a3")
+    expect("shape: deal removed before stage added is NOT flagged", elc.shape_hits("%s..%s" % (t2, a3), _st) == [])
+    # deal in one file, stage in another -> no false positive
+    d1 = put("s/tasks.json", '{"deal": "a"}\n', "d1")
+    d2 = put("s/ci.json", '{"stage": "b"}\n', "d2")
+    expect("shape: keys in two different files are NOT combined", elc.shape_hits("%s..%s" % (a3, d2), _st) == [])
+    # deleting a shaped file passes
+    x1 = put("s/a.json", None, "delete")
+    expect("shape: deleting a shaped file passes", elc.shape_hits("%s..%s" % (d2, x1), _st) == [])
+    # git failure -> ShapeScanError (caller blocks)
+    try:
+        elc.shape_hits("deadbeef..%s" % x1, _st)
+        expect("shape: bad range raises ShapeScanError", False)
+    except elc.ShapeScanError:
+        expect("shape: bad range raises ShapeScanError", True)
+finally:
+    shutil.rmtree(_st, ignore_errors=True)
 
 # --- rule 4: debt figures -----------------------------------------------------------------
 tmp = tempfile.mkdtemp(prefix="exp-leak-")
@@ -193,7 +252,8 @@ try:
     expect("denylist entries under 4 chars are ignored",
            elc.scan_diff(diff("docs/x.md", ["about this"]), nd) == [])
     for label, txt in (("longer number", "11111110"), ("decimal tail", "1111111.5"),
-                       ("group tail", "1,111,111,000"), ("leading digit", "21111111")):
+                       ("group tail", "1,111,111,000"), ("leading digit", "21111111"),
+                       ("leading decimal", "ver 0.1111111"), ("leading group", "ids 7,1111111")):
         expect("no debt false positive: %s" % label, elc.scan_diff(diff("docs/x.md", [txt]), n) == [],
                elc.scan_diff(diff("docs/x.md", [txt]), n))
     msg = "\n".join([C1, "", "    land 1,111,111 refi", ""]) + "\n"
@@ -205,6 +265,11 @@ try:
     os.environ.pop("ORA_LOAN_TERMS_PATH", None)
     os.environ.pop("ORA_EXPOSURE_DENYLIST", None)
     os.environ["HOME"] = os.environ["USERPROFILE"] = fake_home
+    try:
+        elc.load_needles(loan_terms_path=missing)
+        expect("explicit missing loan source -> error", False)
+    except elc.ExposureSourceError:
+        expect("explicit missing loan source -> error", True)
     sub = os.path.join(tmp, "gitrepo")
     subprocess.run(["git", "init", "-q", sub], capture_output=True)
     expect("no sources -> None (skip)", elc.load_needles(start_dir=sub) is None)
@@ -460,6 +525,45 @@ try:
         os.environ.update(saved[3])
     expect("e2e: failed exposure git log blocks the push", rc == 1
            and "cannot check for pipeline, PII or debt data" in err, err[:400])
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+
+    # pipeline shape split across two real pushes (existing-ref push): blocked on push 2
+    os.makedirs(os.path.join(repo, "data"), exist_ok=True)
+    with open(os.path.join(repo, "data", "pipe.json"), "w") as f:
+        f.write('{"p1": {\n"deal": "Synth Park"\n}}\n')
+    sh(["git", "add", "data/pipe.json"], repo)
+    sh(["git", "commit", "-qm", "push 1"], repo)
+    r = push_scan()
+    expect("e2e: push 1 (deal only) passes", r.returncode == 0, r.stderr[:400])
+    advance()
+    with open(os.path.join(repo, "data", "pipe.json"), "w") as f:
+        f.write('{"p1": {\n"stage": "LOI",\n"deal": "Synth Park"\n}}\n')
+    sh(["git", "commit", "-qam", "push 2"], repo)
+    r = push_scan()
+    expect("e2e: shape split across two pushes is blocked on push 2",
+           r.returncode == 1 and "pipe.json -> pipeline-shape" in r.stderr, r.stderr[:400])
+    expect("e2e: shape values not echoed", "Synth Park" not in r.stderr and "LOI" not in r.stderr)
+    sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
+
+    # the exposure module failing to import must block the push (fail closed), and must not
+    # skip the other scans: copy hooks with the lib replaced by a raising stub
+    broken = os.path.join(tmp, "hooks_broken")
+    shutil.copytree(hooks_copy, broken)
+    with open(os.path.join(broken, "lib", "exposure_leak_check.py"), "w") as f:
+        f.write("raise ImportError('simulated import failure')\n")
+    with open(os.path.join(repo, "harmless.md"), "w") as f:
+        f.write("ok\n")
+    sh(["git", "add", "harmless.md"], repo)
+    sh(["git", "commit", "-qm", "harmless"], repo)
+    head = sh(["git", "rev-parse", "HEAD"], repo).stdout.strip()
+    base = sh(["git", "rev-parse", "origin/main"], repo).stdout.strip()
+    r = subprocess.run([sys.executable, os.path.join(broken, "git-prepush-confidential-scan.py"),
+                        "origin", origin], cwd=repo,
+                       input="refs/heads/main %s refs/heads/main %s\n" % (head, base),
+                       capture_output=True, text=True, env=env)
+    expect("e2e: exposure module import failure blocks the push (rc 1)",
+           r.returncode == 1 and "exposure_leak_check.py could not be imported" in r.stderr,
+           "rc=%r %s" % (r.returncode, r.stderr[:300]))
     sh(["git", "reset", "-q", "--hard", "origin/main"], repo)
 
     # debt figure in a new file: blocked with a loan-terms source
