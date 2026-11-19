@@ -377,7 +377,9 @@ def _git_ignored(names):
     try:
         # -z + bytes: in text mode Windows writes "\r\n", git then looks up "name\r" and
         # nothing ever matches (caught by the fixture test).
-        r = subprocess.run(["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=MEM,
+        # No --no-index (merge gate round 2): a file that matches an ignore rule but IS
+        # tracked reaches every clone, so it is not local-only and must stay a finding.
+        r = subprocess.run(["git", "check-ignore", "-z", "--stdin"], cwd=MEM,
                            input=b"\0".join(n.encode("utf-8") for n in sorted(names)) + b"\0",
                            capture_output=True, timeout=30)
     except Exception:
