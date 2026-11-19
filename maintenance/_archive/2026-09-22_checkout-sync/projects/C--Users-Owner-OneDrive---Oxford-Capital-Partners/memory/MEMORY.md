@@ -6,8 +6,8 @@
 
 ## Firm & people
 - [Firm Context](firm.md) — entity, portfolio, team, investment criteria/governor, ops footprint
-- [Gabriel Goldberg — Profile](user.md) — role, expertise, working style, contact, surfaces
-- [People](people.md) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
+- Gabriel Goldberg — Profile (`user.md`, local only, gitignored) — role, expertise, working style, contact, surfaces
+- People (`people.md`, local only, gitignored) — Eric, Gabriel, Philip Collins (counsel), Tamara Lucas (title); brokers/lenders/vendors
 
 ## Projects & system
 - **→ [Projects & system sub-index](INDEX_projects_system.md)** — audit revisions 7–12, oxfordra.net, Command Center, platform/governance, PFI, landed + closed work. **Not auto-loaded** — open it before starting project/audit/website/CC work

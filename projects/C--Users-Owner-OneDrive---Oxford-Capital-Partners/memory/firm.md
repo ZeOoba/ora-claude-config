@@ -23,7 +23,7 @@ metadata:
 - **Gabriel Goldberg** — VP Acquisitions (Cornell, economics). Drives acquisitions, underwriting, operations, financial analysis end-to-end. ggoldberg@oxfordra.net
 - **Philip Collins** — Transaction counsel (Collins Real Estate Law), engaged per-deal.
 
-(Full contacts incl. counsel + title in [people.md](people.md); Gabriel's profile in [user.md](user.md).)
+(Full contacts incl. counsel + title in people.md (`people.md`, local only, gitignored); Gabriel's profile in user.md (`user.md`, local only, gitignored).)
 
 ## Investment criteria / governor
 - Below-replacement-cost, value-add **Class B/C shallow-bay industrial & flex.**

@@ -199,6 +199,72 @@ expect("baseline: no back-link, all committed -> no orphans", got == [], "got %r
 got = _orphans_in(backlink=False, root_self_link=True)
 expect("MEMORY.md linking itself is NOT reported as an orphan", got == [], "got %r" % got)
 
+# _git_ignored (2026-11-18): gitignored local-only files are deliberately unindexed.
+_gtmp = tempfile.mkdtemp(prefix="mip_ignored_")
+try:
+    _build_repo(_gtmp, backlink=False)
+    with open(os.path.join(_gtmp, ".gitignore"), "w", encoding="utf-8") as fh:
+        fh.write("people.md\n*.local.md\n")
+    for _n in ("people.md", "contacts.local.md", "stray.md"):
+        with open(os.path.join(_gtmp, _n), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+    _saved_mem = mip.MEM
+    try:
+        mip.MEM = _gtmp
+        got = mip._git_ignored({"people.md", "contacts.local.md", "stray.md"})
+        expect("_git_ignored returns exactly the ignored names",
+               got == {"people.md", "contacts.local.md"}, "got %r" % got)
+        expect("_git_ignored with nothing ignored -> empty set (exit 1 is an answer)",
+               mip._git_ignored({"stray.md"}) == set())
+        # a file that matches an ignore rule but IS tracked reaches every clone: not local-only
+        with open(os.path.join(_gtmp, "people_tracked.local.md"), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+        subprocess.run(["git", "add", "-f", "people_tracked.local.md"], cwd=_gtmp, check=True,
+                       capture_output=True)
+        subprocess.run(["git", "commit", "-qm", "tracked"], cwd=_gtmp, check=True, capture_output=True)
+        got = mip._git_ignored({"people_tracked.local.md", "contacts.local.md"})
+        expect("_git_ignored never reports a TRACKED file as local-only",
+               got == {"contacts.local.md"}, "got %r" % got)
+    finally:
+        mip.MEM = _saved_mem
+    _nonrepo = tempfile.mkdtemp(prefix="mip_nonrepo_")
+    _saved_mem = mip.MEM
+    mip.MEM = _nonrepo
+    try:
+        expect("_git_ignored in an existing non-repo dir (git exits 128) -> empty set",
+               mip._git_ignored({"people.md", "stray.md"}) == set())
+    finally:
+        mip.MEM = _saved_mem
+        __import__("shutil").rmtree(_nonrepo, ignore_errors=True)
+
+    # main() wiring, end to end: ignored local-only file not 'unlisted'; a real stray still is;
+    # a link to a missing ignored file is still an orphan.
+    _probe = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "memory-integrity-probe.py")
+    with open(os.path.join(_gtmp, "MEMORY.md"), "a", encoding="utf-8") as fh:
+        fh.write("- [gone](gone.local.md)\n")
+    _env = dict(os.environ, ORA_MEMORY_DIR=_gtmp)
+    _r = subprocess.run([sys.executable, _probe], env=_env, capture_output=True, text=True,
+                        encoding="utf-8", errors="replace", timeout=120)
+    _out = _r.stdout + _r.stderr
+    expect("main: ignored people.md is NOT reported unlisted",
+           "unlisted file (present but not in MEMORY.md): people.md" not in _out, _out[-600:])
+    expect("main: ignored contacts.local.md is NOT reported unlisted",
+           "unlisted file (present but not in MEMORY.md): contacts.local.md" not in _out, _out[-600:])
+    expect("main: a real unindexed stray.md IS still reported",
+           "unlisted file (present but not in MEMORY.md): stray.md" in _out, _out[-600:])
+    expect("main: a link to a missing ignored file is still an orphan",
+           "orphan index link (file missing): gone.local.md" in _out, _out[-600:])
+    _saved_mem = mip.MEM
+    mip.MEM = os.path.join(_gtmp, "no-such-dir")
+    try:
+        expect("_git_ignored when git cannot run -> empty set (never hides findings)",
+               mip._git_ignored({"people.md"}) == set())
+    finally:
+        mip.MEM = _saved_mem
+finally:
+    __import__("shutil").rmtree(_gtmp, ignore_errors=True)
+
 # The point of the check must survive the fix: a committed pointer to an uncommitted file
 # is still caught, and is not masked by the back-link handling.
 got = _orphans_in(backlink=True, commit_note_b=False)

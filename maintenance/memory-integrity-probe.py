@@ -364,6 +364,32 @@ def _git(*args):
     return r.stdout if r.returncode == 0 else None
 
 
+def _git_ignored(names):
+    """Subset of `names` (basenames in MEM) that git IGNORES -- local-only files by design
+    (contacts.local.md, deal-figures.local.md, and since 2026-11-18 people.md / user.md /
+    the tenant default memo, untracked because this repo is public). Such a file is not an
+    unindexed memory and not a dangling committed pointer: it is deliberately absent from
+    every clone. Empty set when git cannot answer (not a repo, no git): report-only probe,
+    never crash, and never hide findings it could not prove are local-only.
+    `git check-ignore` exits 1 when NOTHING is ignored, so 0 and 1 are both answers."""
+    if not names:
+        return set()
+    try:
+        # -z + bytes: in text mode Windows writes "\r\n", git then looks up "name\r" and
+        # nothing ever matches (caught by the fixture test).
+        # No --no-index (merge gate round 2): a file that matches an ignore rule but IS
+        # tracked reaches every clone, so it is not local-only and must stay a finding.
+        r = subprocess.run(["git", "check-ignore", "-z", "--stdin"], cwd=MEM,
+                           input=b"\0".join(n.encode("utf-8") for n in sorted(names)) + b"\0",
+                           capture_output=True, timeout=30)
+    except Exception:
+        return set()
+    if r.returncode not in (0, 1):
+        return set()
+    out = r.stdout.decode("utf-8", "replace").split("\0")
+    return {os.path.basename(p) for p in out if p} & set(names)
+
+
 SUBINDEX_PREFIX = "INDEX_"   # top-level sub-index files, e.g. INDEX_reference.md
 _LINK_RE = re.compile(r"\]\(([A-Za-z0-9_./-]+\.md)\)")
 
@@ -583,6 +609,8 @@ def head_orphans():
     # erased from "present", and got reported as a pointer a clone would find broken.
     # It never was. See _tests/test_memory_integrity_probe.py.
     head_linked.discard("MEMORY.md")
+    # A committed pointer to a GITIGNORED file is still broken for a clone, so it stays a
+    # finding: link local-only files as plain text, never as a markdown link.
     return sorted(head_linked - head_files)
 
 
@@ -633,7 +661,8 @@ def main():
     linked.discard("MEMORY.md")
 
     orphans = sorted(linked - present)          # linked but missing
-    unlisted = sorted(present - linked)          # present but not indexed
+    # Gitignored local-only files (2026-11-18) are deliberately unindexed: never "unlisted".
+    unlisted = sorted((present - linked) - _git_ignored(present - linked))
     for o in orphans:
         issues.append("orphan index link (file missing): %s" % o)
     for u in unlisted:
