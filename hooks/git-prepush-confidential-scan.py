@@ -91,6 +91,15 @@ except Exception as _e:  # pragma: no cover
     _rct = None
     _RCT_ERR = str(_e)
 
+# EXPOSURE LEAK CHECK (2026-11-18, cross-repo audit; Gabriel ruling "untrack + guard now"):
+# blocks re-publishing the untracked pipeline snapshot / PII memory files, phone numbers in
+# memory, the {deal, stage} pipeline shape, and loan figures (hooks/lib/exposure_leak_check.py).
+try:
+    import exposure_leak_check as _exp
+except Exception as _e:  # pragma: no cover
+    _exp = None
+    _EXP_ERR = str(_e)
+
 
 def _read_json(path):
     """Parsed JSON from path, or None on any read/parse error."""
@@ -557,6 +566,22 @@ def main():
         sys.stderr.write("pre-push WARNING: RCT leak check is running on the superseded-values "
                          "denylist ONLY -- the current private RCT table was not found, so the "
                          "current figures are not checked.\n")
+    if _exp is None:
+        sys.stderr.write("pre-push BLOCKED (fail-closed): hooks/lib/exposure_leak_check.py "
+                         "could not be imported (%s) -- cannot check for pipeline, PII or debt "
+                         "data.\n" % _EXP_ERR)
+        return 1
+    try:
+        exp_needles = _exp.load_needles()
+    except _exp.ExposureSourceError as e:
+        sys.stderr.write("pre-push BLOCKED (fail-closed): a private debt-figure source exists "
+                         "but is unusable (%s) -- fix it or move it aside; an absent file skips "
+                         "the debt-figure rule, a broken one blocks.\n" % e)
+        return 1
+    if exp_needles is None:
+        sys.stderr.write("pre-push note: debt-figure rule skipped -- no data/loan-terms.json or "
+                         "~/.ora-private/exposure-denylist.json on this machine (path, phone and "
+                         "pipeline-shape rules still run).\n")
     # NOTE: there is deliberately NO `if not terms: return 0` early exit any more. It used
     # to short-circuit the whole hook whenever no deal was active -- which is the state
     # TODAY -- so a credential scan placed after it would have been dead on arrival. The
@@ -654,6 +679,34 @@ def main():
                                  "message if it is listed.\n"
                                  % (local_ref, rng, "; ".join(rct_paths)))
                 bad = True
+        # Exposure rules: own --text pass, for the same reason as the RCT pass above, with the
+        # diff prefixes, path quoting and textconv pinned (exposure_leak_check.GIT_LOG_ARGS)
+        # so a host's diff.noprefix / textconv config cannot blind the path rules.
+        pe = subprocess.run(["git"] + _exp.GIT_LOG_ARGS + [rng], capture_output=True)
+        if pe.returncode != 0:
+            sys.stderr.write("pre-push BLOCKED (fail-closed): `git log --text %s` failed for "
+                             "%s -- cannot check for pipeline, PII or debt data.\n"
+                             % (rng, local_ref))
+            bad = True
+            continue
+        e_hits = _exp.scan_diff(pe.stdout.decode("utf-8", "ignore"), exp_needles)
+        # Rule 3 reads file CONTENTS at every pushed commit (exposure_leak_check.shape_hits).
+        try:
+            e_hits = sorted(set(e_hits) | set(_exp.shape_hits(rng)))
+        except _exp.ShapeScanError as e:
+            sys.stderr.write("pre-push BLOCKED (fail-closed): could not read the pushed .json "
+                             "files on %s (%s) -- cannot check for the pipeline-snapshot "
+                             "shape.\n" % (local_ref, e))
+            bad = True
+            continue
+        if e_hits:
+            sys.stderr.write("pre-push BLOCKED: pipeline / PII / debt data ADDED on %s (range "
+                             "%s): %s. Values are not echoed. This repo is PUBLIC: keep the "
+                             "file untracked (gitignored), move contacts to contacts.local.md "
+                             "and loan figures to data/loan-terms.json, and reword the commit "
+                             "message if it is listed.\n"
+                             % (local_ref, rng, "; ".join("%s -> %s" % h for h in e_hits)))
+            bad = True
         # Compressed and UTF-16 blobs: invisible to `git log -p` (see scan_compressed).
         c_hits, c_leaks, c_bad = scan_compressed(rng, terms)
         if c_hits:
