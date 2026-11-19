@@ -60,7 +60,10 @@ import subprocess
 # Arguments the caller MUST use for the `git log` whose output feeds scan_diff().
 GIT_LOG_ARGS = ["-c", "core.quotePath=false", "log", "-p", "--cc", "--text", "--no-color",
                 "--no-textconv", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/",
-                "--no-abbrev-commit", "--pretty=medium", "-M", "-C"]
+                "--no-abbrev-commit", "--pretty=medium", "--no-renames"]
+# --no-renames (REFUTE round 2): with -M/-C a copy or rename shows the moved lines as
+# unchanged CONTEXT, so a phone copied into memory, or a file renamed onto people.md with
+# edits, was never scanned. Without rename detection the target is a full add.
 
 # Rule 1. Lower-case fnmatch patterns over the lower-cased repo-relative path; the leading
 # '*' (which crosses '/') makes each one match at any depth. Keep in step with .gitignore.
