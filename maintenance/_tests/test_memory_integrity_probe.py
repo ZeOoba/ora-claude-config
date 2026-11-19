@@ -199,6 +199,35 @@ expect("baseline: no back-link, all committed -> no orphans", got == [], "got %r
 got = _orphans_in(backlink=False, root_self_link=True)
 expect("MEMORY.md linking itself is NOT reported as an orphan", got == [], "got %r" % got)
 
+# _git_ignored (2026-11-18): gitignored local-only files are deliberately unindexed.
+_gtmp = tempfile.mkdtemp(prefix="mip_ignored_")
+try:
+    _build_repo(_gtmp, backlink=False)
+    with open(os.path.join(_gtmp, ".gitignore"), "w", encoding="utf-8") as fh:
+        fh.write("people.md\n*.local.md\n")
+    for _n in ("people.md", "contacts.local.md", "stray.md"):
+        with open(os.path.join(_gtmp, _n), "w", encoding="utf-8") as fh:
+            fh.write("x\n")
+    _saved_mem = mip.MEM
+    try:
+        mip.MEM = _gtmp
+        got = mip._git_ignored({"people.md", "contacts.local.md", "stray.md"})
+        expect("_git_ignored returns exactly the ignored names",
+               got == {"people.md", "contacts.local.md"}, "got %r" % got)
+        expect("_git_ignored with nothing ignored -> empty set (exit 1 is an answer)",
+               mip._git_ignored({"stray.md"}) == set())
+    finally:
+        mip.MEM = _saved_mem
+    _saved_mem = mip.MEM
+    mip.MEM = os.path.join(_gtmp, "no-such-dir")
+    try:
+        expect("_git_ignored when git cannot run -> empty set (never hides findings)",
+               mip._git_ignored({"people.md"}) == set())
+    finally:
+        mip.MEM = _saved_mem
+finally:
+    __import__("shutil").rmtree(_gtmp, ignore_errors=True)
+
 # The point of the check must survive the fix: a committed pointer to an uncommitted file
 # is still caught, and is not masked by the back-link handling.
 got = _orphans_in(backlink=True, commit_note_b=False)
