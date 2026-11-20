@@ -36,6 +36,8 @@ _ROSTER_ONLY_DRIFT = (
     "DOCTRINE DRIFT: 1 unresolved reference(s)",
     "  - confidential-terms.json (file %s)" % LIVE_TERMS_JSON,
 )
+LIVE_MEMORY_DIR = os.path.join(os.path.expanduser("~"), ".claude", "projects",
+                               "C--Users-Owner-OneDrive---Oxford-Capital-Partners", "memory")
 # Live inputs this run could not reach -- (check, reason) pairs, reported by main() as
 # ENV-SKIP only after every assertion has passed.
 LIVE_INPUT_SKIPS = []
@@ -99,28 +101,82 @@ def probe_degraded_for(r, kind, token, check):
     return hit
 
 
+def _live_tolerated_refs(live_mode=True, tech_md_overridden=False):
+    """Unresolved-reference lines (DRIFT list item, [MISSING] line) a clean checkout is
+    ALLOWED to report, each keyed to an input whose absence THIS process verifies with
+    os.path -- never inferred from the probe's own output (the probe is under test)."""
+    out = []
+    if live_mode and not os.path.exists(LIVE_TERMS_JSON):
+        out.append(("doctrine roster reference resolves",
+                    "live %s absent" % LIVE_TERMS_JSON,
+                    _ROSTER_ONLY_DRIFT[1],
+                    "  [MISSING] confidential-terms.json -> %s" % LIVE_TERMS_JSON))
+    # Memory folder is local-only since PR 476 (gitignored, private backup), so a clean
+    # checkout has neither event_log.md nor tech.md (check 11's guard-list source).
+    if not os.path.isdir(LIVE_MEMORY_DIR):
+        ev = os.path.join(LIVE_MEMORY_DIR, "event_log.md")
+        out.append(("doctrine memory/event_log.md resolves",
+                    "live memory folder %s absent (local-only)" % LIVE_MEMORY_DIR,
+                    "  - memory/event_log.md (file %s)" % ev,
+                    "  [MISSING] memory/event_log.md -> %s" % ev))
+        # Only when check 11 actually consulted the LIVE tech.md: a caller passing
+        # --tech-md= is testing fail-closed on its own fixture and must keep exit 1.
+        if not tech_md_overridden:
+            out.append(("doctrine guard-liveness list resolves",
+                        "live memory folder %s absent (local-only)" % LIVE_MEMORY_DIR,
+                        "  - guard-liveness guard list (CLAUDE.md Guards: line / tech.md 3f)",
+                        "  [MISSING] guard-liveness: no guard list -- CLAUDE.md's EOS "
+                        "section has no 'Guards:' line naming a guard and %s has no"
+                        % os.path.join(LIVE_MEMORY_DIR, "tech.md")))
+    return out
+
+
 def run_probe(argv=None):
     cmd = [sys.executable, PROBE]
     if argv:
         cmd += argv
     r = subprocess.run(cmd, capture_output=True, text=True)
     # Live mode only (no positional doc path; --memory-index= still audits the live
-    # CLAUDE.md), and ONLY when the roster file is genuinely absent: if
-    # the probe's sole unresolved reference is that file, treat the run as its exit 0 so
-    # every OTHER live assertion still runs; main() then reports ENV-SKIP for the one
-    # check that could not be made. Any second unresolved reference, or the roster
-    # missing from the report, keeps the real exit code and fails as before.
+    # CLAUDE.md). When EVERY unresolved reference the probe lists is one whose machine-
+    # local input this process has verified absent (the gitignored roster, the local-only
+    # memory folder), treat the run as exit 0 so every OTHER live assertion still runs;
+    # main() then reports ENV-SKIP for each check that could not be made. A further
+    # unresolved reference, a count mismatch, or a tolerated item missing from the
+    # report keeps the real exit code and fails as before.
+    # The memory items apply to fixture runs too: check 11 reads the LIVE tech.md for its
+    # guard list whenever --tech-md= is not passed, so a fixture with no Guards: line
+    # reports it unresolved on any machine without the local-only memory folder.
     live_mode = not any(not a.startswith("--") for a in (argv or []))
-    if (live_mode and r.returncode == 1 and not os.path.exists(LIVE_TERMS_JSON)
-            and _ROSTER_ONLY_DRIFT[0] in r.stdout
-            and _ROSTER_ONLY_DRIFT[1] in r.stdout.splitlines()):
-        skip_live("doctrine roster reference resolves",
-                  "live %s absent" % LIVE_TERMS_JSON)
-        r.returncode = 0
-        # Drop only the roster's own [MISSING] line, so "no [MISSING]" assertions keep
-        # guarding every other reference.
-        roster_missing = "  [MISSING] confidential-terms.json -> %s" % LIVE_TERMS_JSON
-        r.stdout = "\n".join(l for l in r.stdout.split("\n") if l != roster_missing)
+    if r.returncode != 1:
+        return r
+    lines = r.stdout.splitlines()
+    m = re.search(r"DOCTRINE DRIFT: (\d+) unresolved reference\(s\)", r.stdout)
+    if not m:
+        return r
+    n = int(m.group(1))
+    start = next(i for i, l in enumerate(lines) if l.startswith("DOCTRINE DRIFT:"))
+    items = []
+    for l in lines[start + 1:]:
+        if not l.startswith("  - "):
+            break
+        items.append(l)
+    tolerated = _live_tolerated_refs(
+        live_mode, any(a.startswith("--tech-md=") for a in (argv or [])))
+    by_item = {t[2]: t for t in tolerated}
+    if len(items) != n or not items or not all(i in by_item for i in items):
+        return r
+    for i in items:
+        check, reason, _item, missing_prefix = by_item[i]
+        if not any(l.startswith(missing_prefix) for l in lines):
+            return r
+    for i in items:
+        check, reason, _item, missing_prefix = by_item[i]
+        skip_live(check, reason)
+    r.returncode = 0
+    # Drop only the tolerated items' own [MISSING] lines, so "no [MISSING]" assertions
+    # keep guarding every other reference.
+    drop = tuple(by_item[i][3] for i in items)
+    r.stdout = "\n".join(l for l in r.stdout.split("\n") if not l.startswith(drop))
     return r
 
 
@@ -907,6 +963,11 @@ def test_guard_liveness_real_no_orphans():
     runner (e.g. the ora-doctrine-integrity-guard scheduled-task SKILL.md that wires
     governor-drift-probe.py went missing) -- both are real signals, not noise to mute.
     """
+    if not os.path.isdir(LIVE_MEMORY_DIR):
+        # Guard list comes from memory/tech.md 3f; memory is local-only (PR 476).
+        skip_live("guard liveness, real doctrine",
+                  "live memory folder %s absent (local-only)" % LIVE_MEMORY_DIR)
+        return
     r = run_probe()  # defaults to the real CLAUDE.md (live mode)
     assert r.returncode == 0, (
         "expected exit 0 against real CLAUDE.md, got %d\nSTDOUT:\n%s\nSTDERR:\n%s"
@@ -1027,7 +1088,14 @@ def test_guard_liveness_falls_back_to_tech_md():
         for l in skipped:
             m = re.search(r"skipped.*not found: (.+)$", l)
             missing_file = m.group(1).strip() if m else ""
-            if not (missing_file and os.path.normcase(missing_file) in local_files
+            # ...or a file in the local-only memory folder (PR 476) when that folder is
+            # genuinely absent here.
+            in_absent_memory = (
+                missing_file and not os.path.isdir(LIVE_MEMORY_DIR)
+                and os.path.normcase(os.path.dirname(missing_file))
+                == os.path.normcase(LIVE_MEMORY_DIR))
+            if not (missing_file and (os.path.normcase(missing_file) in local_files
+                                      or in_absent_memory)
                     and not os.path.exists(missing_file)):
                 unexplained.append(l)
         assert not unexplained, (

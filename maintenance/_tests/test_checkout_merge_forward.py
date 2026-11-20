@@ -113,6 +113,41 @@ with tempfile.TemporaryDirectory() as td:
     r2 = cmf.sync(local, "main")
     check("merge: second run is NOOP_CLEAN", r2["status"] == "NOOP_CLEAN", repr(r2))
 
+# --- PR 476 merge gate round 6: an IGNORED local file the merge would write ---------
+# Live has the memory folder untracked + ignored; a canonical that still tracks and edits
+# it would overwrite the local copy, and the conflict path's `merge --abort` then deleted
+# it (reviewer fixture mf2). The merge must never be attempted.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    os.makedirs(os.path.join(origin, "mem"))
+    commit(origin, "track mem note", fname="mem/note.md")
+    run(local, "pull", "-q", "--no-rebase", "origin", "main")
+    run(local, "rm", "-q", "--cached", "mem/note.md")
+    write(local, ".gitignore", "/mem/**\n")
+    run(local, "add", ".gitignore")
+    run(local, "commit", "-q", "-m", "untrack mem", "--no-verify")
+    write(local, "mem/note.md", "LOCAL ONLY newest\n")
+    write(origin, "mem/note.md", "origin edit\n")
+    run(origin, "commit", "-q", "-am", "origin edits mem", "--no-verify")
+    head_before = run(local, "rev-parse", "HEAD").stdout.strip()
+    r = cmf.sync(local, "main")
+    check("ignored overlap: BLOCKED_DIRTY_OVERLAP naming the ignored path",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP" and "mem/note.md" in (r.get("blocked_paths") or []),
+          repr(r))
+    check("ignored overlap: local-only file kept verbatim",
+          open(os.path.join(local, "mem", "note.md")).read() == "LOCAL ONLY newest\n")
+    check("ignored overlap: HEAD unchanged, no merge in progress",
+          run(local, "rev-parse", "HEAD").stdout.strip() == head_before
+          and run(local, "rev-parse", "-q", "--verify", "MERGE_HEAD", check_rc=False).returncode != 0)
+
+# --- an untracked file origin does NOT touch never blocks --------------------------
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(local, "scratch.local", "untracked, not incoming\n")
+    commit(origin, "origin unrelated", fname="unrelated.txt")
+    r = cmf.sync(local, "main")
+    check("untracked non-incoming: still MERGED", r["status"] == "MERGED", repr(r))
+
 # --- dirty overlap: local uncommitted change to a path origin also touches ---------
 with tempfile.TemporaryDirectory() as td:
     local, origin = make_pair(td)

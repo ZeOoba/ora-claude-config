@@ -432,3 +432,17 @@ deal-figures.local.md
 /maintenance/_archive/**/user_gabriel_consolidated_*.md
 /maintenance/_state/_archive/**/projects/*/memory/people.md
 /maintenance/_state/_archive/**/projects/*/memory/user.md
+# Tenant delinquency/eviction/attorney-status record (named tenants), untracked 2026-11-19 (PR 476 gate, OI-408). Kept on disk.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_delinquency_report_collection_status_blindspot.md
+# Loan worksheets / individual-tenant notes, untracked 2026-11-19 (PR 476 gate round 2). Kept on disk.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_workbook_annual_debt_service_366day_overcapture.md
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/project_northwood_egflc_loan_miscategorized_2026-07-27.md
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/reference_2207_northwood_mtm_tenants_not_holdover_2026-09-18.md
+/_scheduled_tasks_backup/_archive_2026-06-09_retired/ora-monthly-close-kickoff/SKILL.md
+# Archived memory snapshots (event_log rollovers, tracker backups, consolidated notes) and
+# archived memory copies: local-only from 2026-11-19 (PR 476, Gabriel: "Redesign: archives local"). Kept on disk.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/_archive/
+/maintenance/_archive/**/projects/*/memory/
+/maintenance/_archive/**/projects/*/memory/**
+# Memory folder: local-only from 2026-11-20 (PR 476, Gabriel: "Memory local-only"); private backup in ZeOoba/ora-memory-private.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/**

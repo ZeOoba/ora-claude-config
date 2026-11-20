@@ -141,6 +141,20 @@ def test_missing_baseline_file_does_not_block_everything():
                r["violations"] == [] and r.get("skipped"), r)
 
 
+def test_missing_tracker_reports_skipped_not_clean():
+    """Memory is local-only (PR 476): no tracker must read SKIPPED, never a vacuous
+    '0 violations, clean'."""
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        r = m.enforce(os.path.join(td, "absent.md"), os.path.join(td, "r.log"), baseline=69)
+        expect("absent tracker -> skipped with a tracker reason, no violations",
+               r.get("skipped") is True and r["violations"] == []
+               and "tracker" in r.get("reason", ""), r)
+        expect("absent tracker formats as SKIPPED",
+               m.format_enforcement(r).startswith("OI-id enforcement: SKIPPED"),
+               m.format_enforcement(r))
+
+
 def test_section_only_new_id_also_enforced():
     m = load()
     with tempfile.TemporaryDirectory() as td:
@@ -196,18 +210,11 @@ def test_block_mode_still_blocks():
 
 
 def main():
-    test_mode_defaults_to_warn_when_unreadable()
-    test_warn_mode_exits_zero_but_still_reports()
-    test_block_mode_still_blocks()
-    test_grandfathered_ids_pass()
-    test_new_id_without_reservation_is_a_violation()
-    test_new_id_with_reservation_passes()
-    test_backfill_clears_a_violation()
-    test_backfill_is_recorded_distinguishably()
-    test_backfill_refuses_a_duplicate()
-    test_violation_message_names_the_remedy()
-    test_missing_baseline_file_does_not_block_everything()
-    test_section_only_new_id_also_enforced()
+    # Every test_* function, in definition order. A hand-kept list let a test be
+    # written and never run (PR 476 merge gate round 6).
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
     passed = sum(1 for ok, _ in results if ok)
     print("\noi-id enforcement tests: %d/%d passed" % (passed, len(results)))
     sys.exit(0 if passed == len(results) else 1)
