@@ -11,6 +11,9 @@ work to lose:
   * `git clean -f` (not `-n`)           -> anything `git clean -n` would remove
     (ignored paths are exempt as build output, EXCEPT in the claude-home config repo and
     for any ignored path whose name is sensitive -- see _protected_ignored, audit M01)
+  * `git checkout|switch <commit>` / `git reset --hard|--keep|--merge <commit>` in the
+    claude-home repo onto a commit that still TRACKS the local-only memory folder
+    -> the local memory files (see memory_hazard, PR 476)
 
 WHY (2026-09-22, /insights remediation): a stray `git checkout --` reverted reviewed
 correctness fixes mid-session and they had to be rewritten. CLAUDE.md invariant 6
@@ -202,6 +205,63 @@ def at_risk(repo, kind, spec):
                     and not _protected_ignored(ln[len(prefix):]))]
 
 
+# PR 476 (2026-11-20): the memory folder is LOCAL-ONLY (gitignored, untracked) in the
+# claude-home repo, but every commit before the untrack still TRACKS it. Moving the live
+# checkout onto such a commit makes git overwrite the ignored memory files with that old
+# snapshot (ignored files are expendable to git), and moving forward again DELETES them
+# (tracked there, untracked here). No status probe sees it: nothing is "dirty".
+MEMORY_REL = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory"
+
+
+def _target_commits(sub, args):
+    """Positional refs a checkout/switch/reset would move HEAD or the worktree onto.
+    Over-inclusive on purpose; the caller keeps only those that resolve to a commit."""
+    pre, post = _split_dashdash(args)
+    longs = set(a.split("=", 1)[0] for a in pre if a.startswith("--"))
+    vals = []
+    skip_next = False
+    for a in pre:
+        if skip_next:
+            skip_next = False
+            continue
+        if a in ("-b", "-B", "-c", "-C", "--orphan", "--create", "--force-create"):
+            skip_next = True  # the NEW branch name, not a target
+            continue
+        if not a.startswith("-"):
+            vals.append(a)
+    if sub == "checkout":
+        return [] if post and vals else vals  # `checkout <ref> -- <p>`: paths only
+    if sub == "switch":
+        return vals
+    if sub == "reset":
+        return vals if longs & {"--hard", "--keep", "--merge"} else []
+    return []
+
+
+def memory_hazard(repo, sub, args):
+    """Lines naming target commits that still TRACK the local-only memory folder, when
+    `repo` is the claude-home repo and local memory exists. [] otherwise or on any doubt
+    that is not affirmative evidence (fail-open, like the rest of this guard)."""
+    if sub not in ("checkout", "switch", "reset"):
+        return []
+    top = _git(repo, "rev-parse", "--show-toplevel")
+    if not top or not _is_claude_home_repo(top[0]):
+        return []
+    if not os.path.isdir(os.path.join(top[0], *MEMORY_REL.split("/"))):
+        return []
+    out = []
+    for ref in _target_commits(sub, list(args)):
+        sha = _git(top[0], "rev-parse", "--verify", "-q", ref + "^{commit}")
+        if not sha:
+            continue
+        tracked = _git(top[0], "ls-tree", "--name-only", sha[0], "--", MEMORY_REL + "/")
+        if tracked:
+            out.append("%s (%s) still tracks %d path(s) under %s/ -- checking it out "
+                       "overwrites the local-only memory with that snapshot, and leaving it "
+                       "deletes them" % (ref, sha[0][:12], len(tracked), MEMORY_REL))
+    return out
+
+
 def _norm(p):
     return os.path.normcase(os.path.realpath(p)).rstrip("\/")
 
@@ -277,13 +337,19 @@ def findings(cmd, cwd):
         if not sa:
             continue
         sub, args = sa
-        c = classify(sub, list(args))
-        if not c:
-            continue
         cdir = _git_c_dir(seg)
         where = _resolve_dir(cdir, here) if cdir else here
         if where is None:
             continue  # unresolvable directory -> no information -> allow
+        try:
+            mem = memory_hazard(where, sub, list(args))
+        except Exception:
+            mem = []
+        if mem:
+            out.append((" ".join(["git", sub] + list(args))[:200], where, mem))
+        c = classify(sub, list(args))
+        if not c:
+            continue
         try:
             lost = at_risk(where, c[0], c[1])
         except Exception:

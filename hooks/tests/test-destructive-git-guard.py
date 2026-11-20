@@ -81,6 +81,66 @@ def check(name, cmd, cwd, expect_block, vias=("script",), env=None):
                 name, via, "BLOCK" if expect_block else "ALLOW", rc, err[-300:]))
 
 
+def memory_checkout_checks():
+    """PR 476 (2026-11-20): memory is local-only in claude-home but every older commit
+    still TRACKS it. Moving the live checkout onto such a commit overwrites the ignored
+    local memory (git treats ignored files as expendable) and leaving it deletes them --
+    nothing is "dirty", so only a tree check can see it. Synthetic fixture only."""
+    home = tempfile.mkdtemp(prefix="dgg-mem-")
+    ch = os.path.join(home, ".claude")
+    mem_rel = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory"
+    mem = os.path.join(ch, *mem_rel.split("/"))
+    os.makedirs(mem)
+    git(ch, "init", "-q", "-b", "main")
+    git(ch, "config", "user.email", "t@t")
+    git(ch, "config", "user.name", "t")
+    git(ch, "config", "core.autocrlf", "false")
+    with open(os.path.join(mem, "note.md"), "w") as f:
+        f.write("old\n")
+    with open(os.path.join(ch, "README"), "w") as f:
+        f.write("r\n")
+    git(ch, "add", "-A")
+    git(ch, "commit", "-qm", "tracks memory")
+    git(ch, "branch", "old")
+    git(ch, "rm", "-q", "--cached", "-r", mem_rel)
+    with open(os.path.join(ch, ".gitignore"), "w") as f:
+        f.write("/%s/**\n" % mem_rel)
+    git(ch, "add", ".gitignore")
+    git(ch, "commit", "-qm", "untrack memory")
+    git(ch, "branch", "new")
+    env = dict(os.environ, USERPROFILE=home, HOME=home)
+    try:
+        both = ("script", "dispatcher")
+        check("memory: checkout old branch", "git checkout old", ch, True, both, env)
+        check("memory: checkout old sha", "git checkout HEAD~1", ch, True, env=env)
+        check("memory: switch old", "git switch old", ch, True, both, env)
+        check("memory: switch --detach old", "git switch --detach old", ch, True, env=env)
+        check("memory: reset --hard old", "git reset --hard HEAD~1", ch, True, env=env)
+        check("memory: reset --keep old", "git reset --keep old", ch, True, env=env)
+        check("memory: checkout -b x old", "git checkout -b x old", ch, True, env=env)
+        check("memory: git -C from elsewhere", "git -C %s checkout old"
+              % ch.replace("\\", "/"), home, True, env=env)
+        # ALLOW: targets that do not track memory, index-only resets, path checkouts.
+        check("memory: checkout new branch", "git checkout new", ch, False, both, env)
+        check("memory: switch -c fresh (from HEAD)", "git switch -c fresh", ch, False, env=env)
+        check("memory: reset --soft old (index/HEAD only)", "git reset --soft HEAD~1", ch,
+              False, env=env)
+        check("memory: checkout old -- README (paths only)", "git checkout old -- README",
+              ch, False, env=env)
+        check("memory: log old (not a move)", "git log -1 old", ch, False, env=env)
+        # No local memory folder -> nothing to protect -> ALLOW.
+        shutil.rmtree(os.path.join(ch, "projects"))
+        check("memory: no local memory -> allow", "git checkout old", ch, False, env=env)
+        # Not claude-home: an ordinary repo with the same layout is not protected.
+        os.makedirs(mem)
+        other_env = dict(os.environ, USERPROFILE=tempfile.gettempdir(),
+                         HOME=tempfile.gettempdir())
+        check("memory: not claude-home -> allow", "git checkout old", ch, False,
+              env=other_env)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+
+
 def claude_home_checks():
     """AUDIT M01 (2026-11-12): ~/.claude is a DEFAULT-DENY repo -- its ignored files are the
     live untracked state (the confidential roster, .credentials.json, session state), not
@@ -216,6 +276,7 @@ def main():
         os.remove(os.path.join(d, ".env"))
         check("clean -fdX ignored build output still allowed", "git clean -fdX", d, False)
         claude_home_checks()
+        memory_checkout_checks()
 
         # --- override token (60 min, multi-use) lets it through
         tokdir = tempfile.mkdtemp(prefix="dgg-sess-")
