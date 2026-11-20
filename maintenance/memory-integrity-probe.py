@@ -364,30 +364,121 @@ def _git(*args):
     return r.stdout if r.returncode == 0 else None
 
 
-def _git_ignored(names):
-    """Subset of `names` (basenames in MEM) that git IGNORES -- local-only files by design
-    (contacts.local.md, deal-figures.local.md, and since 2026-11-18 people.md / user.md /
-    the tenant default memo, untracked because this repo is public). Such a file is not an
-    unindexed memory and not a dangling committed pointer: it is deliberately absent from
-    every clone. Empty set when git cannot answer (not a repo, no git): report-only probe,
-    never crash, and never hide findings it could not prove are local-only.
-    `git check-ignore` exits 1 when NOTHING is ignored, so 0 and 1 are both answers."""
-    if not names:
-        return set()
+def _check_ignore(cwd, rel_names, extra=()):
+    """Names (as given) git reports ignored from `cwd`, or None when git cannot answer.
+    -z + bytes: in text mode Windows writes "\r\n", git then looks up "name\r" and
+    nothing ever matches (caught by the fixture test). `check-ignore` exits 1 when
+    NOTHING is ignored, so 0 and 1 are both answers."""
     try:
-        # -z + bytes: in text mode Windows writes "\r\n", git then looks up "name\r" and
-        # nothing ever matches (caught by the fixture test).
-        # No --no-index (merge gate round 2): a file that matches an ignore rule but IS
-        # tracked reaches every clone, so it is not local-only and must stay a finding.
-        r = subprocess.run(["git", "check-ignore", "-z", "--stdin"], cwd=MEM,
-                           input=b"\0".join(n.encode("utf-8") for n in sorted(names)) + b"\0",
+        r = subprocess.run(["git", "check-ignore", "-z", "--stdin"] + list(extra), cwd=cwd,
+                           input=b"\0".join(n.encode("utf-8") for n in rel_names) + b"\0",
                            capture_output=True, timeout=30)
     except Exception:
-        return set()
+        return None
     if r.returncode not in (0, 1):
+        return None
+    return {p for p in r.stdout.decode("utf-8", "replace").split("\0") if p}
+
+
+def _git_at(cwd, *args):
+    try:
+        r = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, timeout=30)
+    except Exception:
+        return None
+    return r.stdout.decode("utf-8", "replace").strip() if r.returncode == 0 else None
+
+
+_FOLDER_PROBE = "zz-folder-wide-rule-probe-0f3c9a.md"
+
+
+def _ignored_without_folder_wide_rule(names):
+    """Subset of `names` still ignored once every rule that ignores the WHOLE memory
+    folder is removed -- i.e. files a SPECIFIC rule makes local-only (people.md,
+    *.local.md, ...). Since PR 476 one rule ignores every memory file, so 'ignored'
+    alone no longer means 'local-only by design' and would silence the unlisted check
+    for every file (merge gate round 5). A folder-wide rule is found by asking git which
+    rule decides a synthetic name nobody would write a specific rule for; it is removed
+    from a scratch copy of that ignore file and the question re-asked there, with real
+    git semantics. Returns None when this cannot be proven (caller then exempts
+    nothing -- never hide a finding it could not prove is local-only)."""
+    import tempfile, shutil
+    top = _git_at(MEM, "rev-parse", "--show-toplevel")
+    if not top:
+        return None
+    rel = os.path.relpath(MEM, top).replace(os.sep, "/")
+    rel = "" if rel == "." else rel + "/"
+    excl = _git_at(MEM, "rev-parse", "--path-format=absolute", "--git-path", "info/exclude")
+    sources = {"gitignore": os.path.join(top, ".gitignore"), "exclude": excl}
+    texts = {}
+    for k, path in sources.items():
+        try:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                texts[k] = fh.read().split("\n")
+        except (OSError, TypeError):
+            texts[k] = []
+    tmp = tempfile.mkdtemp(prefix="mip_rules_")
+    try:
+        if _git_at(tmp, "init", "-q") is None:
+            return None
+        tmp_excl = os.path.join(tmp, ".git", "info", "exclude")
+        os.makedirs(os.path.dirname(tmp_excl), exist_ok=True)
+        for _ in range(8):  # bounded: each pass removes one deciding folder-wide line
+            with open(os.path.join(tmp, ".gitignore"), "w", encoding="utf-8") as fh:
+                fh.write("\n".join(texts["gitignore"]))
+            with open(tmp_excl, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(texts["exclude"]))
+            try:
+                r = subprocess.run(["git", "check-ignore", "-v", "-z", "--no-index",
+                                    "--stdin"], cwd=tmp, capture_output=True, timeout=30,
+                                   input=(rel + _FOLDER_PROBE).encode("utf-8") + b"\0")
+            except Exception:
+                return None
+            if r.returncode == 1:
+                break  # no rule ignores the folder wholesale any more
+            if r.returncode != 0:
+                return None
+            src, line = r.stdout.decode("utf-8", "replace").split("\0")[:2]
+            srcn = src.replace("\\", "/")
+            if srcn == ".gitignore":
+                key = "gitignore"
+            elif srcn.endswith("info/exclude"):
+                key = "exclude"
+            else:
+                return None  # nested or global ignore file: cannot rewrite it, prove nothing
+            idx = int(line) - 1
+            if not (0 <= idx < len(texts[key])):
+                return None
+            texts[key][idx] = ""
+        else:
+            return None
+        got = _check_ignore(tmp, [rel + n for n in sorted(names)], extra=["--no-index"])
+        if got is None:
+            return None
+        return {os.path.basename(p) for p in got} & set(names)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _git_ignored(names):
+    """Subset of `names` (basenames in MEM) that are LOCAL-ONLY BY DESIGN: ignored by
+    git, untracked, AND matched by a rule more specific than the folder-wide one
+    (contacts.local.md, deal-figures.local.md, people.md / user.md / the tenant default
+    memo -- untracked because this repo is public). Such a file is not an unindexed
+    memory and not a dangling committed pointer: it is deliberately absent from every
+    clone. Empty set when git cannot answer (not a repo, no git): report-only probe,
+    never crash, and never hide findings it could not prove are local-only."""
+    if not names:
         return set()
-    out = r.stdout.decode("utf-8", "replace").split("\0")
-    return {os.path.basename(p) for p in out if p} & set(names)
+    # No --no-index (merge gate round 2): a file that matches an ignore rule but IS
+    # tracked reaches every clone, so it is not local-only and must stay a finding.
+    real = _check_ignore(MEM, sorted(names))
+    if not real:
+        return set()
+    real = {os.path.basename(p) for p in real} & set(names)
+    specific = _ignored_without_folder_wide_rule(real)
+    if specific is None:
+        return set()
+    return real & specific
 
 
 SUBINDEX_PREFIX = "INDEX_"   # top-level sub-index files, e.g. INDEX_reference.md
