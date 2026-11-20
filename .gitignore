@@ -444,3 +444,5 @@ deal-figures.local.md
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/_archive/
 /maintenance/_archive/**/projects/*/memory/
 /maintenance/_archive/**/projects/*/memory/**
+# Memory folder: local-only from 2026-11-20 (PR 476, Gabriel: "Memory local-only"); private backup in ZeOoba/ora-memory-private.
+/projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/**
