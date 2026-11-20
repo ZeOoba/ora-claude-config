@@ -189,7 +189,9 @@ def _locate(path):
     entries = [e for e in out.split("\0") if e] if rc == 0 else []
     if len(entries) != 1:
         # check-ignore takes paths, not pathspecs, and refuses --literal-pathspecs (128).
-        irc, _, _ = _git(repo, "check-ignore", "-q", "--", rel, literal=False)
+        # LOCAL_ONLY only inside the memory folder: any other ignored file stays ERROR.
+        irc, _, _ = (_git(repo, "check-ignore", "-q", "--", rel, literal=False)
+                     if rel.startswith(MEMORY_PREFIX) else (1, "", ""))
         if irc == 0:
             return None, _LocalOnly("%s is local-only (git-ignored; memory is not committed to "
                                     "this public repo); nothing to commit" % rel)

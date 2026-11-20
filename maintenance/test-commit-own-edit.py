@@ -249,6 +249,17 @@ def test_local_only_memory_file_is_local_only_not_error(f):
 
 
 @_fixture_test
+def test_ignored_file_outside_memory_is_an_error_not_local_only(f):
+    # LOCAL_ONLY is for the local-only MEMORY folder alone (merge gate round 6).
+    with open(f.p(".gitignore"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("secret.txt\n")
+    f.write("secret.txt", "x\n")
+    for r in (f.begin(rel="secret.txt"), f.land(rel="secret.txt")):
+        _status(r, "ERROR", 2)
+        assert "local-only" not in r["reason"], r
+
+
+@_fixture_test
 def test_untracked_but_not_ignored_is_still_an_error(f):
     # The LOCAL_ONLY exit is only for a file git IGNORES; a merely untracked file stays ERROR.
     f.write(MEM + "brand-new.md", "x\n")
@@ -1311,6 +1322,7 @@ TESTS = [
     test_commits_sole_owner_edit_and_only_that_path,
     test_lands_despite_stale_foreign_touches_after_a_clean_begin,
     test_local_only_memory_file_is_local_only_not_error,
+    test_ignored_file_outside_memory_is_an_error_not_local_only,
     test_untracked_but_not_ignored_is_still_an_error,
     test_nothing_to_commit_when_file_matches_head,
     test_other_staged_paths_stay_staged_and_uncommitted,
