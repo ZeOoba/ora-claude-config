@@ -60,7 +60,7 @@ else:
 # The one tolerated skip: the tracker is genuinely absent (memory folder is local-only
 # since PR 476, so CI / a clean checkout has none) -- verified HERE with os.path, not
 # taken from enforce()'s own reason string.
-if r.get("skipped") and not os.path.isfile(m.DEFAULT_TRACKER):
+if not os.path.isfile(m.DEFAULT_TRACKER):
     print("  ENV-SKIP oi-id enforcement: %s absent (memory folder is local-only)"
           % m.DEFAULT_TRACKER)
     expect("enforce() reports SKIPPED (not a vacuous clean pass) without a tracker",
