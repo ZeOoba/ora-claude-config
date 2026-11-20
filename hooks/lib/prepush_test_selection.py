@@ -85,9 +85,13 @@ LIGHT = "light"
 #     anything it names) changes.
 #   * test-git-prepush-scan.py (221s) and this gate's own test (72-143s) -- the files
 #     they cover are FULL triggers, so a change to them already runs everything.
+#   * test-memory-sidecar-hygiene.py (<1s) IS here since PR 476: it is the control that
+#     the memory folder stays local-only in this PUBLIC repo, and the files that can break
+#     that (.gitignore, a stray `git add -f`) select no test on their own.
 ALWAYS_RUN = (
     "hooks/tests/test-prepush-test-selection.py",
     "maintenance/test-governor-drift-probe.py",
+    "hooks/tests/test-memory-sidecar-hygiene.py",
 )
 
 FULL_TRIGGER_FILES = frozenset((
