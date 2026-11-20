@@ -15,6 +15,19 @@ PY = C:/Users/Owner/AppData/Local/Programs/Python/Python313/python.exe (bare `py
 BUILDER = C:/Users/Owner/.claude/scheduled-tasks/ora-portfolio-desk-refresh/build_datasets.py
 OUT = C:/Users/Owner/AppData/Local/Temp/ora-portfolio-desk
 
+DOUBLE-FIRE ENTRY GUARD (added 2026-11-14; run FIRST, before step 1; see scheduled-tasks/_shared/README-DOUBLE-FIRE-GUARD.md):
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-portfolio-desk-refresh --block main --run-id <session run_id> --ttl-min 30 --period week
+- Exit 0 (PROCEED): this run owns the claim and MUST end in `complete` or `fail` below.
+- Exit 10 (SKIP_ALREADY_COMPLETE): this week's run already completed. Skip the whole task (no writes, no email) and report a normal skip.
+- Exit 11 (STAND_DOWN_IN_PROGRESS): another run holds the claim. Stand down and report it.
+- Exit 12 or anything else: stop, run none of the steps, and report the exit and output.
+Terminal call, after step 6 (or after the FAILURE alert):
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-portfolio-desk-refresh --block main --run-id <run_id> --period week
+(append `--email-sent-at <ISO time>` when the FAILURE alert was sent).
+If the run cannot finish (any step fails and the task stops), release the claim instead:
+python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-portfolio-desk-refresh --block main --run-id <run_id> --period week --error "<one line>"
+Never pass --force from a scheduled fire.
+
 STEPS
 1. Build: run `"$PY" "$BUILDER" --out "$OUT"` and read stdout + exit code.
    - Exit 10: nothing changed since the last upload. Report "no change; snapshot asOf <asOf>, generatedAt <generatedAt>" in your final summary and STOP. No uploads, no writes, no email.
@@ -31,7 +44,7 @@ STEPS
 FAILURE
 Email an alert via the SOLE send path: write the body to a temp file, then run
 `powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "[ALERT] ora-portfolio-desk-refresh — <one-line reason> — <run date>" -BodyFile "<temp file>"`
-TO ggoldberg@oxfordra.net ONLY, no cc. Body: which step failed, the exact error text quoted verbatim, what was and was not written to the artifact, and a QUESTIONS FOR GABRIEL list for anything needing his call. On COM exit 2 or 4 retry once, then flag in the summary; on exit 5 or 6 never retry or resend (send state unknown) and flag loudly. Do not halt on a send failure — report it in the final summary.
+TO ggoldberg@oxfordra.net ONLY, no cc. Body: which step failed, the exact error text quoted verbatim, what was and was not written to the artifact, and a QUESTIONS FOR GABRIEL list for anything needing his call. Retry only on exit 2 or 4, once, then flag in the summary; never resend after any other exit (send state unknown), and flag that loudly. Do not halt on a send failure — report it in the final summary.
 
 GUARDS
 - If the Artifact or ArtifactData tool is unavailable or a call is refused for permissions, that is a FAILURE (say so plainly); do not improvise another upload path.

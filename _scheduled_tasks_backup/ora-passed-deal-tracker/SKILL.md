@@ -57,7 +57,9 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    **Watch for duplicate rows.** The Sourcing Log carries more than one row for
    at least one deal (`511 Industrial Mile Road` — `3446ecd8…` Status=Reviewing
    and `37c6ecd8…` Status=Dead, differing broker names, same address and SF).
-   Match on normalized address, not on row identity, and never count two rows as
+   Match on the same-unit test defined under 2d below (normalized address plus the
+   same suite or building, revised 2026-11-06), not on row identity, so two suites at
+   one street address are two deals, never one. Never count two rows as
    two losses. Surface any newly-detected duplicate in the QUESTIONS FOR GABRIEL
    block rather than silently merging.
 
@@ -69,7 +71,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    how the three `3849 N Richardt Ave` rows all entered the 2026-09-19 read-back. SQL
    form: `coalesce("Exclude from Calibration",'__NO__') <> '__YES__'` (verified
    2026-09-19: 146 rows without the clause, 123 with it, the 23 flagged rows
-   dropped). Canonical rows stay unflagged and stay on the list. The address-match
+   dropped). Canonical rows stay unflagged and stay on the list. The same-unit match
    and QUESTIONS-FOR-GABRIEL instruction above remains the backstop for any duplicate
    not yet flagged — never count two rows as two losses. Do not clear or set the
    checkbox from this task; flagging is Gabriel-directed or `deal-retirement` step 3a.
@@ -104,10 +106,45 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    `deal-retirement`. A row that is plainly ORA's acquisition but is not yet `WON` is
    reported under QUESTIONS FOR GABRIEL (see the Step 4 ORA-grantee rule), never classified.
 
-   **Address-level, not row-level.** Matching on normalized address (the Step 2 duplicate rule), also drop every
-   row whose normalized address matches ANY row carrying `WON` — an older sighting, a
-   later re-listing or an unflagged duplicate of a property ORA owns is not a passed deal.
-   Name each address dropped this way in the run summary so the drop stays visible.
+   **Address-level drop: exact suite or building match only (revised 2026-11-06, Gabriel
+   in-turn "Require a suite match, and report drops").** Also drop a row that carries no
+   `WON` when it is the same unit as a row carrying `WON`: an older sighting, a later
+   re-listing or an unflagged duplicate of a unit ORA owns is not a passed deal. Same unit
+   means ALL of:
+   - **Same normalized street address.** Normalized = street number + street name +
+     city + state, casefolded, punctuation dropped, with the directional (`N`/`North`)
+     and the street type (`Ave`/`Avenue`, `Rd`/`Road`) folded to one form.
+   - **Same suite, unit or building designator.** Fold labels only within a class:
+     `Suite`/`Ste`/`Unit`/`#` are one class (`Ste 200` = `Suite 200` = `Unit 200` =
+     `#200`), and `Bldg`/`Building` are another (`Bldg B` = `Building B`). Never fold
+     across classes: `Suite B` is not `Building B`. No other folding applies to the
+     address or designator.
+   - **Same parcel id** wherever both rows carry one.
+   - **If neither row carries a designator, the same parcel id on both rows is
+     required, and it is the only corroboration accepted.** A pair that matches only on
+     building SF, or that lacks a parcel id on either row, is a near-miss (below), never
+     a match: the rows may be different buildings in a park that shares one street
+     address. (Step 2's duplicate merge may still use building SF; this 2d drop may not.)
+
+   Anything short of that is NOT a match, and the row stays on every arm above, including
+   the 3b re-marketing and 4d RE-CHECK passes: different suites or buildings at one
+   address, one row with a designator and the other without, a different building in the
+   same multi-building park or on the same parcel, address ranges or variants
+   (`1200-1250` vs `1220`), and differing parcel ids. Step 3a's ambiguity rule applies
+   here too: an ambiguous match is a null, not a guess, so it never drops a row. List each
+   such near-miss under QUESTIONS FOR GABRIEL as a possible duplicate of the named `WON`
+   row, so Gabriel can flag it through `Exclude from Calibration` or `deal-retirement`.
+   A near-miss row stays live, so a trade search on the shared street address can hit
+   ORA's own deed on the sister unit. When it does, the Step 4 ORA-grantee rule still
+   records nothing. Its question names the `WON` sister row and asks whether this row is
+   the same unit; it never asks to stamp this row `WON` on that evidence alone.
+
+   **Report every address-level drop on the Ops Hub note this sweep posts** (Step 6 or
+   Step 7, and in the Step 7 email too when that path runs). Use one `WON ADDRESS DROP:`
+   line per dropped row, giving the dropped row's page id and address, the `WON` row's
+   page id, and the matched address, designator and parcel id. Give the drop count in
+   the Step 10 run summary as well. The run summary alone is not enough, because nobody
+   reviews it.
 3. For each (batch by market): check for a sale/trade since last run via
    (a) the **County Sales Comps** Notion database FIRST — see below — then
    (b) `CoStar Exports\` folder under `Investment Candidates -- 2026\`
@@ -151,7 +188,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    own documented next phase.
 
    **3b — RE-MARKETED PASSES (added 2026-09-22).** For every watch-list row (after the
-   duplicate-address merge), search the Outlook inbox with `outlook_email_search`
+   same-unit duplicate merge, Step 2), search the Outlook inbox with `outlook_email_search`
    over the trailing 35 days, once for the street address (street number + street
    name) and once for the property name if the row has one. Never open links.
    - Ignore ORA's own mail: any @oxfordra.net sender AND the Exchange
@@ -193,7 +230,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    is UNCONFIRMED and goes to QUESTIONS FOR GABRIEL. On a roster match: record
    nothing on the row (no clearing or winning price, no `Loss Class`, no 4b fields),
    and route the row to QUESTIONS FOR GABRIEL so it can be stamped `WON` through
-   `deal-retirement` step 2b. This backs up 2d for a closing not yet stamped. An
+   `deal-retirement` step 2b, except a 2d near-miss row (see 2d). This backs up 2d for a closing not yet stamped. An
    ORA-grantee match is not a trade: on the zero-trades branch (Step 6) it rides the
    Ops Hub note as a one-line "stamp WON" question, so it is never silently lost.
 
@@ -286,10 +323,11 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    - **A malformed or unparseable `RE-CHECK:` line is reported verbatim under QUESTIONS FOR
      GABRIEL, never silently dropped and never date-guessed.**
    - **Scope limit, stated so it is not mistaken for coverage:** this scan changes nothing
-     about when this task sends. A sweep with zero trades and zero overdue 4c ticklers still
-     takes the Step 6 no-email branch even if a `RE-CHECK` line is due — the due list then
-     rides the one-line Ops Hub note. Widening the Step 6 gate is a separate, deliberate
-     change and is not made here.
+     about when this task sends. Since 2026-11-05 every sweep takes the Step 7 email path
+     anyway, because Step 5b's back-test block (or its WARN line) promotes it; see the last
+     Step 6 exception. A due `RE-CHECK` list therefore rides that email's PASSED-DEAL
+     RE-CHECKS DUE section and the Ops Hub post. A due `RE-CHECK` line on its own still
+     promotes nothing.
 
    **4e — DILIGENCE-EXIT classifier (added 2026-09-19, Gabriel-directed). Requires NO
    competitor price.** For every row that arrived via the Step 2c arm, produce the block
@@ -371,11 +409,71 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 5. Each logged trade calibrates two things (report, do not auto-adjust — this is a HARD RULE, not a suggestion):
    - RCT: implied $/SF vs RCT v02 point ± band for that market (flag if outside band);
    - P(exec) bands: did deals in each seller-signal band trade near ORA's walk?
-   Tabulate cumulative evidence; recommendations go to the December back-test, run
-   from `~/ora-skills/annual-cycle/SKILL.md` — weights and bands move ONLY there,
-   and only with Gabriel's explicit sign-off. Do not duplicate the back-test in
-   this task, and never write to any governor constant or Buy Box weight/band
-   file directly from this task.
+   Tabulate cumulative evidence ONLY over rows that pass 2b and 2d, including 2d's
+   address-level drop (`Exclude from Calibration` unchecked, `LOI Outcome` not `WON`, not
+   the same unit as a `WON` row). A clearing or winning price already logged on a row
+   that is now `WON` or address-dropped is ORA's own purchase, or a duplicate of it, not
+   market evidence. Leave it out of the cumulative RCT and P(exec) evidence and do not
+   clear the field from this task. Recommendations go to the back-test (Step 5b below).
+   Weights and bands move ONLY with Gabriel's explicit sign-off, never from this task.
+   Never write to any governor constant or Buy Box weight/band file directly from this
+   task.
+
+   **"The December back-test" (named in Steps 4b and 4e and in other specs) means Step
+   5b's 2026-12-15 run, reviewed with Gabriel** (added 2026-11-05). Until then the phrase
+   pointed at `~/ora-skills/annual-cycle/SKILL.md`, which never carried a back-test step and
+   moved its year-in-review to late February (annual-cycle v1.2, 2026-10-30), so every
+   recommendation routed there had no destination.
+
+5b. **SOURCING BACK-TEST (monthly; added 2026-11-05, Gabriel in-turn "Monthly back-test
+   block").** Report-only: it reads nine read-only exports and computes calibration
+   evidence. It never writes Notion, a weight, a band, a gate or a doctrine file, and never
+   sets a Verdict or Loss Class. Run it on every sweep, after Step 4 and before Step 6/7. The
+   engine is `C:/Users/Owner/.claude/maintenance/funnel-backtest.py`; its docstring holds the
+   nine queries verbatim (`QUERY_A` once per partition value, `QUERY_B`, `QUERY_P`,
+   `QUERY_N`, `QUERY_D`). Copy them from there, never from memory.
+   (i) Make the folder `C:/Users/Owner/AppData/Local/Temp/ora-backtest-YYYY-MM-DD/`, where
+   YYYY-MM-DD is the run date's date part only (the same date the Step 7 subject uses; never
+   the weekday). Run each query with `notion-query-data-sources` against
+   `collection://9a6ae219-85a3-4621-899c-c757fd062f8b`, and write each RESPONSE OBJECT
+   verbatim (Write tool, UTF-8, keeping its `has_more` key) into that folder:
+   `a_t1.json`, `a_t2.json`, `a_pass.json`, `a_killed.json`, `a_none.json` (QUERY_A with
+   params `["T1 PURSUE"]`, `["T2 WATCH"]`, `["PASS"]`, `["KILLED"]`, `["(none)"]`),
+   `b_t1rows.json` (QUERY_B), `p_pexec.json` (QUERY_P), `n_count.json` (QUERY_N, the
+   log's total row count, which the engine reconciles against the five partitions) and
+   `d_dups.json` (QUERY_D, every row in a duplicate set: the engine excludes each row whose
+   `Duplicate Of` is set and gives the kept row its set's earliest first-sighting
+   prediction, because the writers never move those write-once fields; added 2026-11-06,
+   Gabriel in-turn "Redesign"). Do not
+   edit, merge, drop or reorder anything. If a query errors (quota, schema), stop 5b and
+   record one WARN line naming the query and the error; never re-run a query to get it right.
+   (ii) Run, from that folder:
+
+   ```bash
+   cd C:/Users/Owner/AppData/Local/Temp/ora-backtest-YYYY-MM-DD
+   python C:/Users/Owner/.claude/maintenance/funnel-backtest.py --rows a_t1.json --rows a_t2.json --rows a_pass.json --rows a_killed.json --rows a_none.json --t1-rows b_t1rows.json --pexec-rows p_pexec.json --expect-rows n_count.json --dup-rows d_dups.json --out-md backtest.md
+   ```
+
+   Exit 0: `backtest.md` goes verbatim into the Step 7 email as its SOURCING BACK-TEST
+   section and onto the Ops Hub post. Exit 2: record one WARN line quoting its `[FATAL]` line
+   verbatim; never hand-fix an input file and re-run.
+   (iii) Any change the block prompts (a gate, a weight, a band, a doctrine edit) is a
+   proposal for Gabriel, listed under QUESTIONS FOR GABRIEL, never an action.
+   (iv) **Unflagged-duplicate sweep (report-only; added 2026-11-06).** A scan and a Code
+   session can each create a row for the same parcel, and the scan's own dedupe skips rows
+   that are `Dead` or `Passed`, so nobody notices. Run this one read-only query across
+   EVERY `Status`:
+
+   ```sql
+   SELECT lower(trim("Deal Name / Address")) AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce(trim("Deal Name / Address"),'') <> '' AND coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1 UNION ALL SELECT "Listing URL" AS k, COUNT(*) AS n, group_concat(url, ' ') AS urls FROM "collection://9a6ae219-85a3-4621-899c-c757fd062f8b" WHERE coalesce("Listing URL",'') <> '' AND coalesce("Duplicate Of",'') = '' AND coalesce("Exclude from Calibration",'__NO__') <> '__YES__' GROUP BY 1 HAVING COUNT(*) > 1
+   ```
+
+   Each result is a POSSIBLE duplicate set: same exact name, or same `Listing URL`, with no
+   row flagged. List every set (key, count, urls) in the Step 7 email under QUESTIONS FOR
+   GABRIEL as "possible unflagged duplicates: resolve with deal-retirement step 3a". This
+   step never flags, excludes, merges or edits a row. It catches exact-text duplicates
+   only; a spelling variant ("S 6th St" vs "South 6th Street") still needs a human eye. If
+   the query errors, record one WARN line and continue.
 
    **Repo path, not a skill name (2026-08-05):** `annual-cycle` was unpublished
    from the skill store (audit-driven fleet cleanup — usageCount 1 lifetime), so
@@ -384,31 +482,40 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    expecting the model to discover it by name.
 
 ## Output
-6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`, full UUID) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
+6. If zero trades detected: one-line "no trades" note to Ops Hub; NO email, unless an exception below promotes the sweep to Step 7. Since 2026-11-05 one always does (Step 5b's back-test block or its WARN line; see the last exception), so this no-email branch now applies only when Step 5b did not run at all. **Ops Hub create (this note and Step 7's block):** if the create returns a grace/quota notice or no page ID, look for it — `notion-fetch` the Ops Hub parent (`32b6ecd8-9e59-81f2-b329-df3fd0e25062`, full UUID) for an exact-title child, then search by the exact title (search lags: a miss alone is not proof) — a match created at/after the create call is this run's page, use it (its id is the `--notion-page-id`); never blind-retry a create (it produced a duplicate). After a grace/quota notice with no match, do not retry: the create is UNVERIFIED — close with `complete` (no `--notion-page-id`), stating UNVERIFIED in the run summary and the email body — never `fail`, which would release the claim and invite a duplicate create on the next fire. Quota errors → `notion-quota-fallback` skill. **If Step 4d
    found any passed-deal `RE-CHECK:` line due or overdue, carry that list on the Ops Hub
    note** (added 2026-09-19) — it is the only surface this branch writes, and a due
    re-check that lands nowhere is the same silent-loss failure 4d was added to close.
    **Carry any Step 4e DILIGENCE-EXIT block on that same Ops Hub note** (added
-   2026-09-19), one line per row, same rule.
+   2026-09-19), one line per row, same rule. **Carry every 2d `WON ADDRESS DROP:` line on
+   that same note too** (added 2026-11-06), so a dropped row is never visible only in the
+   run summary.
 
    **The send gate is NOT widened by 4e. Stated explicitly so a later reader does not
    "fix" it:** a diligence exit is a post-mortem on a decision ORA already made and
-   already acted on — it carries no live clock, unlike 4c's re-engagement tickler, which
-   is the ONLY condition that promotes a zero-trades sweep to the Step 7 email path. A
-   sweep with zero trades and zero overdue ticklers still takes this branch even when a
-   4e block was produced this month. Zero trades AND zero overdue ticklers → this branch,
-   unchanged.
+   already acted on — it carries no live clock. Exactly two conditions promote a zero-trades
+   sweep to the Step 7 email path: 4c's overdue re-engagement tickler, and (since
+   2026-11-05) Step 5b's back-test block or WARN line. A 4e block on its own never does.
 
    **Exception (added 2026-08-16): an overdue re-engagement tickler still emails.**
    Before taking this branch, check for Sourcing Log rows where
    `Re-Engagement Flag` is ticked, `Re-Engagement Tickler Date` has passed, and
    the row passes 2b and 2d (`Exclude from Calibration` unchecked, `LOI Outcome` not
-   `WON`, address not carrying a `WON` row — a deal ORA bought, or a duplicate of one,
+   `WON`, not the same unit as a `WON` row per 2d's address-level drop — a deal ORA bought, or a duplicate of one,
    has no re-engagement to chase). A
    bust-and-re-engage window is time-sensitive and does not depend on a new trade
    being detected, so if any such row exists, take the Step 7 path instead and
    report it — otherwise the one output with a live clock is the one output that
-   silently never sends. Zero trades AND zero overdue ticklers → this branch.
+   silently never sends. Zero trades AND zero overdue ticklers → this branch, unless the
+   next exception applies.
+
+   **Exception (added 2026-11-05, Gabriel in-turn "Monthly back-test block"): a Step 5b
+   block or WARN line also takes the Step 7 path,** so the back-test reaches Gabriel by
+   email every month even when nothing traded. Step 5b produces one or the other on every
+   sweep, so in practice every sweep now emails; this branch's Ops Hub rules carry over to the
+   Step 7 post unchanged. On a zero-trades sweep, Step 7's email opens with
+   `No trades detected this sweep.` in place of the trades block. This is the one deliberate
+   widening of the send gate. 4e still does not widen it.
 
    **Close the entry guard on this path too.** This is the easy one to miss: the zero-trades branch sends nothing, so there is no send step to hang the terminal call off, and a run that ends here still holds the claim it took at Step 0. Once the Ops Hub note lands:
 
@@ -432,6 +539,11 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    evidence citation. Also list any row whose `Re-Engagement Tickler Date` has
    passed with `Re-Engagement Flag` still ticked (same 2b/2d filter as the Step 6 exception). **If nothing resolved, print
    nothing** — no "no post-mortems this month" filler, no synthetic content.
+
+   **"SOURCING BACK-TEST" section (added 2026-11-05).** Step 5b's `backtest.md` verbatim,
+   or its WARN line. Always printed, every month: it is the calibration record that the
+   scan doctrine's evidence tags and P(exec) bands are judged against. Do not summarize,
+   re-round or re-label its numbers.
 
    **RE-MARKETED PASSES** — table: Property · Flag · Ask · Last ask · Max Defensible ·
    Broker/sender · Email date. Omit the section when there are no hits; UNCONFIRMED
@@ -462,7 +574,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
 
    **MANDATORY sample-size banner.** While the count of rows with a `Loss Class`
    other than UNCLASSIFIED — counting only rows that pass 2b and 2d (`Exclude from
-   Calibration` unchecked, `LOI Outcome` not `WON`) — is **under 10**, every LOI POST-MORTEMS section must
+   Calibration` unchecked, `LOI Outcome` not `WON`, not the same unit as a `WON` row per
+   2d's address-level drop) — is **under 10**, every LOI POST-MORTEMS section must
    open with, verbatim:
 
    ```

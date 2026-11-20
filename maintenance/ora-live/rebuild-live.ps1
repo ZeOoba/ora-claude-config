@@ -45,8 +45,14 @@ $side = Join-Path $here 'dist-next'
 Push-Location $wt
 try {
   Write-Host 'Building...'
-  & $node node_modules/vite/bin/vite.js build --config vite.live.config.ts --outDir $side --emptyOutDir 2>&1 | Select-Object -Last 6
-  if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $side 'index.html'))) { throw 'Build failed - served dist left untouched.' }
+  # 'Continue' for the native call only: under Windows PowerShell 5.1 redirected stderr is a terminating error when
+  # the preference is 'Stop', so vite's Browserslist warning aborted the build (2026-11-03). Success is judged
+  # by the exit code and the built index.html below, not by stderr.
+  $ErrorActionPreference = 'Continue'
+  & $node node_modules/vite/bin/vite.js build --config vite.live.config.ts --outDir $side --emptyOutDir 2>&1 | ForEach-Object { "$_" } | Select-Object -Last 6
+  $buildExit = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($buildExit -ne 0 -or -not (Test-Path (Join-Path $side 'index.html'))) { throw 'Build failed - served dist left untouched.' }
 } finally { Pop-Location }
 
 $dist = Join-Path $wt 'dist'
