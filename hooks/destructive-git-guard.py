@@ -213,57 +213,162 @@ def at_risk(repo, kind, spec):
 MEMORY_REL = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory"
 
 
-def _target_commits(sub, args):
-    """Positional refs a checkout/switch/reset would move HEAD or the worktree onto.
-    Over-inclusive on purpose; the caller keeps only those that resolve to a commit."""
+MEMORY_SUBS = ("checkout", "switch", "reset", "restore", "merge", "pull", "rebase",
+               "cherry-pick", "revert", "read-tree")
+# Options whose VALUE is a separate argument (so it is not mistaken for a ref or path).
+_VALUE_OPTS = {
+    "checkout": {"-b", "-B", "--orphan", "--conflict"},
+    "switch": {"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"},
+    "restore": {"-s", "--source", "--conflict"},
+    "merge": {"-m", "-s", "--strategy", "-X", "--strategy-option", "-F", "--file",
+              "--into-name", "--cleanup"},
+    "pull": {"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen",
+             "--shallow-since", "--shallow-exclude", "-o", "--server-option", "--upload-pack",
+             "--negotiation-tip", "--cleanup"},
+    "rebase": {"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec",
+               "-C", "--whitespace", "--empty"},
+    "cherry-pick": {"-m", "--mainline", "-s", "--strategy", "-X", "--strategy-option",
+                    "--cleanup"},
+    "revert": {"-m", "--mainline", "-s", "--strategy", "-X", "--strategy-option",
+               "--cleanup"},
+    "read-tree": {"--prefix", "--index-output"},
+}
+_STOP_OPS = {"--abort", "--continue", "--quit", "--skip", "--edit-todo", "--show-current-patch"}
+
+
+def _parse_args(sub, args):
+    """(positionals, post_dashdash, {option: value}, flags) for one invocation. A bare "-"
+    is the previous branch (@{-1}); options that take a value consume it."""
+    vopts = _VALUE_OPTS.get(sub, set())
     pre, post = _split_dashdash(args)
-    longs = set(a.split("=", 1)[0] for a in pre if a.startswith("--"))
-    vals = []
-    skip_next = False
-    for a in pre:
-        if skip_next:
-            skip_next = False
-            continue
-        if a in ("-b", "-B", "-c", "-C", "--orphan", "--create", "--force-create"):
-            skip_next = True  # the NEW branch name, not a target
-            continue
-        if not a.startswith("-"):
-            vals.append(a)
+    pos, vals, flags = [], {}, set()
+    i = 0
+    while i < len(pre):
+        a = pre[i]
+        if a == "-":
+            pos.append("@{-1}")
+        elif a.startswith("--"):
+            k, eq, v = a.partition("=")
+            flags.add(k)
+            if eq:
+                vals[k] = v
+            elif k in vopts and i + 1 < len(pre):
+                vals[k] = pre[i + 1]
+                i += 1
+        elif a.startswith("-") and len(a) > 1:
+            flags.update("-" + c for c in a[1:])
+            k = "-" + a[1]
+            if k in vopts:
+                if len(a) > 2:
+                    vals[k] = a[2:]
+                elif i + 1 < len(pre):
+                    vals[k] = pre[i + 1]
+                    i += 1
+        else:
+            pos.append(a)
+        i += 1
+    return pos, post, vals, flags
+
+
+def memory_plans(sub, args, is_commit):
+    """[(mode, ref, paths)] -- what this command would write into the worktree.
+    'tree':   the worktree becomes ref's tree;            'paths': ref's content for paths;
+    'merge':  ref's changes since the merge-base merge in; 'commit': a commit/range applies.
+    `is_commit(ref)` resolves refs against the repo."""
+    pos, post, vals, flags = _parse_args(sub, list(args))
+    if flags & _STOP_OPS:
+        return []
     if sub == "checkout":
-        return [] if post and vals else vals  # `checkout <ref> -- <p>`: paths only
+        # A new-branch option's value is a NAME; the start point is the next positional.
+        if post:
+            return [("paths", pos[0], post)] if pos and is_commit(pos[0]) else []
+        if not pos or not is_commit(pos[0]):
+            return []  # nothing, or paths restored from the index
+        return [("tree", pos[0], None)] if len(pos) == 1 else [("paths", pos[0], pos[1:])]
     if sub == "switch":
-        return vals
+        return [("tree", r, None) for r in pos if is_commit(r)]
     if sub == "reset":
-        return vals if longs & {"--hard", "--keep", "--merge"} else []
+        if post or not flags & {"--hard", "--keep", "--merge"}:
+            return []
+        return [("tree", r, None) for r in pos if is_commit(r)]
+    if sub == "restore":
+        src = vals.get("--source") or vals.get("-s")
+        staged_only = bool(flags & {"--staged", "-S"}) and not flags & {"--worktree", "-W"}
+        paths = post or pos
+        if not src or staged_only or not paths or not is_commit(src):
+            return []
+        return [("paths", src, paths)]
+    if sub == "merge":
+        return [("merge", r, None) for r in pos if is_commit(r)]
+    if sub == "pull":
+        if len(pos) <= 1:
+            refs = ["@{u}"]
+        else:
+            refs = []
+            for spec in pos[1:]:
+                src = spec.lstrip("+").split(":", 1)[0]
+                if not src:
+                    refs.append("@{u}")
+                elif pos[0] == ".":
+                    refs.append(src)  # `pull . <branch>`: a local branch
+                else:
+                    refs.append("%s/%s" % (pos[0], src))
+        mode = "tree" if flags & {"--rebase", "-r"} else "merge"
+        return [(mode, r, None) for r in refs if is_commit(r)]
+    if sub == "rebase":
+        refs = ([vals["--onto"]] if "--onto" in vals else []) + pos[:2]
+        return [("tree", r, None) for r in refs if is_commit(r)]
+    if sub in ("cherry-pick", "revert"):
+        return [("commit", r, None) for r in pos if ".." in r or is_commit(r)]
+    if sub == "read-tree":
+        if "-u" not in flags or "--prefix" in flags:
+            return []
+        return [("tree", r, None) for r in pos if is_commit(r)]
     return []
 
 
 def memory_hazard(repo, sub, args):
-    """Lines naming target commits that still TRACK the local-only memory folder, when
+    """Lines naming what this command would write into the local-only memory folder, when
     `repo` is the claude-home repo and local memory exists. [] otherwise or on any doubt
     that is not affirmative evidence (fail-open, like the rest of this guard)."""
-    if sub not in ("checkout", "switch", "reset"):
+    if sub not in MEMORY_SUBS:
         return []
     top = _git(repo, "rev-parse", "--show-toplevel")
     if not top or not _is_claude_home_repo(top[0]):
         return []
-    if not os.path.isdir(os.path.join(top[0], *MEMORY_REL.split("/"))):
+    root = top[0]
+    if not os.path.isdir(os.path.join(root, *MEMORY_REL.split("/"))):
         return []
+
+    def is_commit(ref):
+        return bool(_git(root, "rev-parse", "--verify", "-q", ref + "^{commit}"))
+
+    mem = MEMORY_REL + "/"
     out = []
-    for ref in _target_commits(sub, list(args)):
-        sha = _git(top[0], "rev-parse", "--verify", "-q", ref + "^{commit}")
-        if not sha:
-            continue
-        tracked = _git(top[0], "ls-tree", "--name-only", sha[0], "--", MEMORY_REL + "/")
-        if tracked:
-            out.append("%s (%s) still tracks %d path(s) under %s/ -- checking it out "
-                       "overwrites the local-only memory with that snapshot, and leaving it "
-                       "deletes them" % (ref, sha[0][:12], len(tracked), MEMORY_REL))
+    for mode, ref, paths in memory_plans(sub, args, is_commit):
+        if mode == "tree":
+            hit = _git(root, "ls-tree", "--name-only", ref, "--", mem)
+        elif mode == "paths":
+            # Pathspecs are relative to the command's own directory, as git reads them.
+            hit = [x for x in (_git(repo, "ls-tree", "-r", "--full-name", "--name-only", ref,
+                                    "--", *paths) or []) if x.startswith(mem)]
+        elif mode == "merge":
+            base = _git(root, "merge-base", "HEAD", ref)
+            hit = _git(root, "diff", "--name-only", base[0], ref, "--", mem) if base else None
+        elif ".." in ref:
+            hit = _git(root, "log", "--format=%H", ref, "--", mem)
+        else:
+            hit = _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root",
+                       ref, "--", mem)
+        if hit:
+            out.append("%s %s would write %d path(s) under %s/ into the worktree -- that "
+                       "overwrites the local-only memory with an old copy (and a later move "
+                       "or abort deletes them)" % (sub, ref, len(hit), MEMORY_REL))
     return out
 
 
 def _norm(p):
-    return os.path.normcase(os.path.realpath(p)).rstrip("\/")
+    return os.path.normcase(os.path.realpath(p)).rstrip("\\/")
 
 
 def _is_claude_home_repo(repo):
@@ -371,7 +476,9 @@ def main():
     cmd = (payload.get("tool_input") or {}).get("command") or ""
     if not cmd or _parse is None:
         return 0
-    if not any(w in cmd for w in ("checkout", "restore", "switch", "reset", "clean")):
+    if not any(w in cmd for w in ("checkout", "restore", "switch", "reset", "clean",
+                                   "merge", "pull", "rebase", "cherry-pick", "revert",
+                                   "read-tree")):
         return 0
     cwd = payload.get("cwd") or os.getcwd()
     hits = findings(cmd, cwd)
