@@ -538,35 +538,125 @@ finally:
     shutil.rmtree(_repo7, ignore_errors=True)
 
 
-# overlay_local_memory (2026-11-20): memory is local-only (gitignored), so the gate copies
-# the local projects/<scope>/memory/ into the scratch tree -- but never over a memory folder
-# the pushed commit itself carries.
+# overlay_local_memory (2026-11-20, rev. merge-gate round 5): memory is local-only (gitignored),
+# so the gate copies the MAIN checkout's projects/<MEMORY_SCOPE>/memory into the scratch tree --
+# only that scope, never over a memory folder the pushed commit carries, and a copy failure
+# fails closed with the scratch worktree removed.
+_SC = dg.MEMORY_SCOPE
 _src8 = tempfile.mkdtemp(prefix="dg-ovl-src-")
 _dst8 = tempfile.mkdtemp(prefix="dg-ovl-dst-")
 try:
-    os.makedirs(os.path.join(_src8, "projects", "scopeA", "memory"))
-    with open(os.path.join(_src8, "projects", "scopeA", "memory", "event_log.md"), "w") as _f:
-        _f.write("local\n")
-    with open(os.path.join(_src8, "projects", "scopeA", "memory", "event_log.md.lock"), "w") as _f:
-        _f.write("lock\n")
-    os.makedirs(os.path.join(_src8, "projects", "scopeB", "memory"))
-    with open(os.path.join(_src8, "projects", "scopeB", "memory", "MEMORY.md"), "w") as _f:
-        _f.write("local B\n")
-    os.makedirs(os.path.join(_dst8, "projects", "scopeB", "memory"))
-    with open(os.path.join(_dst8, "projects", "scopeB", "memory", "MEMORY.md"), "w") as _f:
-        _f.write("pushed B\n")
+    os.makedirs(os.path.join(_src8, "projects", _SC, "memory", "_archive"))
+    for _n, _t in (("event_log.md", "local\n"), ("event_log.md.lock", "lock\n")):
+        with open(os.path.join(_src8, "projects", _SC, "memory", _n), "w") as _f:
+            _f.write(_t)
+    with open(os.path.join(_src8, "projects", _SC, "memory", "_archive", "old.md"), "w") as _f:
+        _f.write("old\n")
+    _long = "C--" + "x" * 150
+    os.makedirs(os.path.join(_src8, "projects", _long, "memory"))
+    with open(os.path.join(_src8, "projects", _long, "memory", "a.md"), "w") as _f:
+        _f.write("other scope\n")
     _n8 = dg.overlay_local_memory(_dst8, repo_root=_src8)
-    expect("overlay: copies a memory folder the pushed tree lacks", _n8 == 1 and os.path.isfile(
-        os.path.join(_dst8, "projects", "scopeA", "memory", "event_log.md")), "n=%r" % _n8)
-    expect("overlay: skips lock/sidecar files", not os.path.exists(
-        os.path.join(_dst8, "projects", "scopeA", "memory", "event_log.md.lock")))
-    with open(os.path.join(_dst8, "projects", "scopeB", "memory", "MEMORY.md")) as _f:
-        expect("overlay: never overwrites memory the pushed commit carries", _f.read() == "pushed B\n")
-    expect("overlay: no projects dir -> 0, no error",
+    expect("overlay: copies the probe's memory scope", _n8 == 1 and os.path.isfile(
+        os.path.join(_dst8, "projects", _SC, "memory", "event_log.md")), "n=%r" % _n8)
+    expect("overlay: does NOT copy other (long-named) scopes",
+           not os.path.exists(os.path.join(_dst8, "projects", _long)))
+    expect("overlay: skips lock/sidecar files and _archive",
+           not os.path.exists(os.path.join(_dst8, "projects", _SC, "memory", "event_log.md.lock"))
+           and not os.path.exists(os.path.join(_dst8, "projects", _SC, "memory", "_archive")))
+    with open(os.path.join(_dst8, "projects", _SC, "memory", "event_log.md"), "w") as _f:
+        _f.write("pushed\n")
+    expect("overlay: never overwrites memory the pushed commit carries",
+           dg.overlay_local_memory(_dst8, repo_root=_src8) == 0
+           and open(os.path.join(_dst8, "projects", _SC, "memory", "event_log.md")).read() == "pushed\n")
+    expect("overlay: no memory at the source -> 0, no error",
            dg.overlay_local_memory(_dst8, repo_root=os.path.join(_src8, "nope")) == 0)
 finally:
     shutil.rmtree(_src8, ignore_errors=True)
     shutil.rmtree(_dst8, ignore_errors=True)
+
+# Default source = the MAIN checkout, also when called from a linked worktree.
+_repo9, _probe9 = make_throwaway_repo()
+_wt9 = None
+try:
+    write_claude_md(_repo9, CLEAN_CLAUDE_MD)
+    commit_all(_repo9, "base")
+    os.makedirs(os.path.join(_repo9, "projects", _SC, "memory"))
+    with open(os.path.join(_repo9, "projects", _SC, "memory", "event_log.md"), "w") as _f:
+        _f.write("main checkout memory\n")
+    _wt9 = tempfile.mkdtemp(prefix="dg-lw-")
+    os.rmdir(_wt9)
+    _run(["git", "worktree", "add", "--detach", "--quiet", _wt9, "HEAD"], cwd=_repo9)
+    expect("main checkout resolved from a linked worktree",
+           os.path.normcase(os.path.realpath(dg._main_checkout(_wt9)))
+           == os.path.normcase(os.path.realpath(_repo9)), "got %r" % dg._main_checkout(_wt9))
+    _dst9 = tempfile.mkdtemp(prefix="dg-lw-dst-")
+    try:
+        _saved = dg.CLAUDE_DIR
+        dg.CLAUDE_DIR = _wt9
+        try:
+            _n9 = dg.overlay_local_memory(_dst9)
+        finally:
+            dg.CLAUDE_DIR = _saved
+        expect("overlay from a linked worktree reads the MAIN checkout's memory", _n9 == 1
+               and os.path.isfile(os.path.join(_dst9, "projects", _SC, "memory", "event_log.md")),
+               "n=%r" % _n9)
+    finally:
+        shutil.rmtree(_dst9, ignore_errors=True)
+finally:
+    if _wt9:
+        _run(["git", "worktree", "remove", "--force", _wt9], cwd=_repo9)
+    shutil.rmtree(_repo9, ignore_errors=True)
+
+# Wiring: run_doctrine_probe() calls the overlay; a copy failure fails closed and the scratch
+# worktree is removed; on success the overlaid memory reaches the probe.
+_repo10, _ = make_throwaway_repo()
+_fake = os.path.join(tempfile.mkdtemp(prefix="dg-fake-"), "fake_probe.py")
+with open(_fake, "w") as _f:
+    _f.write("import os,sys\n"
+             "root=[a.split('=',1)[1] for a in sys.argv if a.startswith('--live-root=')][0]\n"
+             "p=os.path.join(root,'projects',%r,'memory','event_log.md')\n"
+             "print('MEMSEEN' if os.path.isfile(p) else 'MEMMISSING')\n"
+             "sys.exit(0 if os.path.isfile(p) else 1)\n" % _SC)
+try:
+    write_claude_md(_repo10, CLEAN_CLAUDE_MD)
+    commit_all(_repo10, "base")
+    os.makedirs(os.path.join(_repo10, "projects", _SC, "memory"))
+    with open(os.path.join(_repo10, "projects", _SC, "memory", "event_log.md"), "w") as _f:
+        _f.write("x\n")
+    dg.REPO_ROOT_OVERRIDE = _repo10
+    dg.PROBE_SCRIPT_OVERRIDE = _fake
+    _made = []
+    _real_mat = dg.materialize_pushed_commit
+
+    def _spy_mat(*a, **k):
+        r = _real_mat(*a, **k)
+        _made.append(r[0])
+        return r
+    dg.materialize_pushed_commit = _spy_mat
+    try:
+        _rc10, _out10 = dg.run_doctrine_probe()
+        expect("wiring: overlaid memory reaches the probe (rc 0)", _rc10 == 0 and "MEMSEEN" in _out10,
+               "rc=%r out=%r" % (_rc10, _out10[-200:]))
+        _real_ct = dg.shutil.copytree
+
+        def _boom(*a, **k):
+            raise OSError("simulated copy failure")
+        dg.shutil.copytree = _boom
+        try:
+            _rc11, _ = dg.run_doctrine_probe()
+        finally:
+            dg.shutil.copytree = _real_ct
+        expect("wiring: an overlay copy failure fails closed (rc 1)", _rc11 == 1, "rc=%r" % _rc11)
+        expect("wiring: the scratch worktree is removed after the failure",
+               len(_made) == 2 and _made[1] and not os.path.exists(_made[1]), "made=%r" % _made)
+    finally:
+        dg.materialize_pushed_commit = _real_mat
+        dg.REPO_ROOT_OVERRIDE = None
+        dg.PROBE_SCRIPT_OVERRIDE = None
+finally:
+    shutil.rmtree(_repo10, ignore_errors=True)
+    shutil.rmtree(os.path.dirname(_fake), ignore_errors=True)
 
 
 passed = sum(1 for ok, _ in results if ok)
