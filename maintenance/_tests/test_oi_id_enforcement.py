@@ -141,6 +141,20 @@ def test_missing_baseline_file_does_not_block_everything():
                r["violations"] == [] and r.get("skipped"), r)
 
 
+def test_missing_tracker_reports_skipped_not_clean():
+    """Memory is local-only (PR 476): no tracker must read SKIPPED, never a vacuous
+    '0 violations, clean'."""
+    m = load()
+    with tempfile.TemporaryDirectory() as td:
+        r = m.enforce(os.path.join(td, "absent.md"), os.path.join(td, "r.log"), baseline=69)
+        expect("absent tracker -> skipped with a tracker reason, no violations",
+               r.get("skipped") is True and r["violations"] == []
+               and "tracker" in r.get("reason", ""), r)
+        expect("absent tracker formats as SKIPPED",
+               m.format_enforcement(r).startswith("OI-id enforcement: SKIPPED"),
+               m.format_enforcement(r))
+
+
 def test_section_only_new_id_also_enforced():
     m = load()
     with tempfile.TemporaryDirectory() as td:
