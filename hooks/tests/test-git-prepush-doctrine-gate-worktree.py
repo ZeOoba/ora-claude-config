@@ -573,6 +573,33 @@ try:
            and open(os.path.join(_dst8, "projects", _SC, "memory", "event_log.md")).read() == "pushed\n")
     expect("overlay: no memory at the source -> 0, no error",
            dg.overlay_local_memory(_dst8, repo_root=os.path.join(_src8, "nope")) == 0)
+    # Writer temp files are skipped, and a file a writer removes mid-copy is not an error
+    # (merge gate round 6: the push was refused as drift when MEMORY.md.tmp-upsert vanished).
+    for _n in ("MEMORY.md.tmp-upsert", "event_log.md.tmp-rollover", "x.partial", "gone.md"):
+        with open(os.path.join(_src8, "projects", _SC, "memory", _n), "w") as _f:
+            _f.write("t\n")
+    _dst9 = tempfile.mkdtemp(prefix="dg-ovl-dst9-")
+    _real_copy2 = dg.shutil.copy2
+
+    def _vanishing_copy2(s, d, *a, **k):
+        if os.path.basename(s) == "gone.md":
+            raise FileNotFoundError(2, "vanished mid-copy", s)
+        return _real_copy2(s, d, *a, **k)
+
+    dg.shutil.copy2 = _vanishing_copy2
+    try:
+        _n9 = dg.overlay_local_memory(_dst9, repo_root=_src8)
+    except Exception as _e:
+        _n9 = "raised %r" % _e
+    finally:
+        dg.shutil.copy2 = _real_copy2
+    _m9 = os.path.join(_dst9, "projects", _SC, "memory")
+    expect("overlay: a file vanishing mid-copy is skipped, not an error", _n9 == 1, "got %r" % _n9)
+    expect("overlay: writer temp files (.tmp-upsert/.tmp-rollover/.partial) are skipped",
+           os.path.isdir(_m9) and not any(os.path.exists(os.path.join(_m9, x)) for x in (
+               "MEMORY.md.tmp-upsert", "event_log.md.tmp-rollover", "x.partial", "gone.md"))
+           and os.path.isfile(os.path.join(_m9, "event_log.md")))
+    shutil.rmtree(_dst9, ignore_errors=True)
 finally:
     shutil.rmtree(_src8, ignore_errors=True)
     shutil.rmtree(_dst8, ignore_errors=True)
