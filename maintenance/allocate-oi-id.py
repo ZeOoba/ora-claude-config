@@ -308,6 +308,13 @@ def enforce(tracker_path=None, ledger_path=None, baseline=None, history_path=Non
     if baseline is None:
         return {"violations": [], "skipped": True,
                 "reason": "no readable baseline -- enforcement skipped, not asserted"}
+    if not os.path.isfile(tracker_path):
+        # Memory folder is local-only (PR 476): a clean clone, CI runner or a
+        # worktree without the overlay has no tracker. "0 violations" there would
+        # be a vacuous pass, so report SKIPPED instead of asserting clean.
+        return {"violations": [], "skipped": True,
+                "reason": "tracker not present (%s) -- enforcement skipped, not asserted"
+                          % tracker_path}
     taken = _taken_tracker_ids(tracker_path, history_path)
     reserved = ledger_ids(_read(ledger_path)) if os.path.isfile(ledger_path) else set()
     violations = [{"id": "OI-%03d" % n} for n in sorted(taken)
