@@ -120,16 +120,39 @@ def test_no_sidecar_is_tracked():
         "an already-tracked file; run `git rm --cached`):\n  %s" % "\n  ".join(tracked))
 
 
-def test_memory_files_are_not_ignored():
-    """Control: the sidecar checks only mean something if ordinary memory files are
-    NOT ignored. Otherwise a parent rule hiding all of memory/ (with a lone
-    !event_log.md re-include) would make every sidecar read as 'ignored' for the
-    wrong reason. check-ignore exits 1 for not-ignored; 128 is a git error and
-    must not read as a pass."""
-    for p in (LOG_REL, MEM_REL + "/MEMORY.md", MEM_REL + "/zz_probe_new_note_2026.md"):
+def test_memory_folder_is_local_only():
+    """Policy since 2026-11-20 (PR 476, Gabriel: "Memory local-only"): this repo is
+    PUBLIC and the memory folder holds figures, contacts and tenant records, so EVERY
+    memory file is git-ignored and none is tracked (private backup: ZeOoba/ora-memory-
+    private). This replaces the old control that required memory files NOT to be
+    ignored; under the new policy the sidecar checks above pass for the folder-wide
+    reason, which is now the intended one. A rule that re-includes memory (a
+    "!...memory/..." negation) fails here. check-ignore exits 0 for ignored; 128 is a
+    git error and must not read as a pass."""
+    # One probe per naming family the memory folder actually uses (memory-policy prefixes,
+    # sub-indexes, deal/tenant notes, the local-only files, a nested dir) so a negation
+    # aimed at one family cannot slip past a single generic probe.
+    probes = [LOG_REL, MEM_REL + "/MEMORY.md", MEM_REL + "/zz_probe_new_note_2026.md",
+              MEM_REL + "/_archive/event_log_2099-01-01.md"]
+    probes += [MEM_REL + "/%s" % n for n in (
+        "reference_zz_probe.md", "feedback_zz_probe.md", "project_zz_probe.md",
+        "user.md", "user_zz_probe.md", "deal_zz_probe.md", "tenant_zz_probe.md",
+        "INDEX_zz_probe.md", "open-items-tracker.md", "tech.md", "rules.md",
+        "people.md", "contacts.local.md", "deal-figures.local.md", "zz_probe.json",
+        "sub/zz_probe.md")]
+    for p in probes:
         rc, _ = git("check-ignore", "-q", "--no-index", p)
         assert rc != 128, "git check-ignore errored on %s" % p
-        assert rc == 1, "%s is git-ignored -- a rule is too broad" % p
+        assert rc == 0, "%s is NOT git-ignored -- memory would reach the public repo" % p
+    rc, out = git("ls-files", "--", MEM_REL)
+    assert rc == 0 and not out.strip(), "memory files are tracked: %s" % out.strip()[:200]
+    # Every memory file that EXISTS on this disk must be ignored too (catches a real file
+    # a rule misses even if no probe name above resembles it). Clean checkouts have none.
+    rc, out = git("ls-files", "--others", "--exclude-standard", "--", MEM_REL)
+    assert rc == 0, "git ls-files --others failed"
+    assert not out.strip(), (
+        "memory file(s) on disk that git would ADD (untracked, not ignored):\n  %s"
+        % "\n  ".join(out.splitlines()[:20]))
 
 
 def main():

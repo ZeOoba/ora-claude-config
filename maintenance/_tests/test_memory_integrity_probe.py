@@ -113,26 +113,31 @@ expect("valid kind=registry_disabled_count evaluates True when it matches", resu
 # tracker -- parsing the tracker alone would show it as absent (None), not as the
 # CLOSED status this test exists to confirm. combined_items mirrors exactly what
 # main()'s own check 4 does (parse each file separately, tracker wins on conflict).
-real_text = open(mip.TRACKER, encoding="utf-8").read()
-real_items = mip.parse_open_items(real_text)
-real_history_items = {}
-if os.path.isfile(mip.TRACKER_HISTORY):
-    real_history_items = mip.parse_open_items(
-        open(mip.TRACKER_HISTORY, encoding="utf-8").read())
-combined_real_items = dict(real_history_items)
-combined_real_items.update(real_items)
-real_open_autochecks = {oid for oid, it in combined_real_items.items()
-                        if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]}
-previously_affected = {"OI-009", "OI-016", "OI-021", "OI-022", "OI-024", "OI-025"}
-expect("none of the previously-affected OI rows are in the live tracker's open_autochecks now",
-       real_open_autochecks.isdisjoint(previously_affected),
-       "got overlap %r" % (real_open_autochecks & previously_affected))
-expect("OI-016 now parses as CLOSED (tracker+history combined, post-split)",
-       combined_real_items.get("OI-016", {}).get("status") == "CLOSED",
-       "got %r" % combined_real_items.get("OI-016"))
-expect("OI-016's section actually lives in the history file now, not the live tracker",
-       "OI-016" in real_history_items and "OI-016" not in real_items,
-       "history has it: %r, tracker has it: %r" % ("OI-016" in real_history_items, "OI-016" in real_items))
+if not os.path.isfile(mip.TRACKER):
+    # Memory is local-only since PR 476: clean checkout / CI has no tracker.
+    print("  ENV-SKIP canonical-tracker checks: %s absent (memory folder is local-only)"
+          % mip.TRACKER)
+else:
+    real_text = open(mip.TRACKER, encoding="utf-8").read()
+    real_items = mip.parse_open_items(real_text)
+    real_history_items = {}
+    if os.path.isfile(mip.TRACKER_HISTORY):
+        real_history_items = mip.parse_open_items(
+            open(mip.TRACKER_HISTORY, encoding="utf-8").read())
+    combined_real_items = dict(real_history_items)
+    combined_real_items.update(real_items)
+    real_open_autochecks = {oid for oid, it in combined_real_items.items()
+                            if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]}
+    previously_affected = {"OI-009", "OI-016", "OI-021", "OI-022", "OI-024", "OI-025"}
+    expect("none of the previously-affected OI rows are in the live tracker's open_autochecks now",
+           real_open_autochecks.isdisjoint(previously_affected),
+           "got overlap %r" % (real_open_autochecks & previously_affected))
+    expect("OI-016 now parses as CLOSED (tracker+history combined, post-split)",
+           combined_real_items.get("OI-016", {}).get("status") == "CLOSED",
+           "got %r" % combined_real_items.get("OI-016"))
+    expect("OI-016's section actually lives in the history file now, not the live tracker",
+           "OI-016" in real_history_items and "OI-016" not in real_items,
+           "history has it: %r, tracker has it: %r" % ("OI-016" in real_history_items, "OI-016" in real_items))
 
 # --- head_orphans: a back-link to MEMORY.md is not an orphan pointer ----------------
 # Regression guard for a false FAIL observed live on the 2026-08-05 ora-health-guard run,
@@ -227,6 +232,48 @@ try:
                got == {"contacts.local.md"}, "got %r" % got)
     finally:
         mip.MEM = _saved_mem
+    # Folder-wide rule (PR 476 memory local-only): "/mem/**" ignores EVERY memory file, so
+    # ignored alone must no longer mean local-only-by-design -- only a SPECIFIC rule does,
+    # whether it sits before or after the folder-wide one, in .gitignore or info/exclude.
+    _fw = tempfile.mkdtemp(prefix="mip_folderwide_")
+    _saved_mem = mip.MEM
+    try:
+        subprocess.run(["git", "init", "-q"], cwd=_fw, check=True, capture_output=True)
+        _fmem = os.path.join(_fw, "mem")
+        os.makedirs(_fmem)
+        for _n in ("people.md", "contacts.local.md", "stray.md", "excluded.md"):
+            with open(os.path.join(_fmem, _n), "w", encoding="utf-8") as fh:
+                fh.write("x\n")
+        with open(os.path.join(_fmem, "MEMORY.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Memory\n")
+        mip.MEM = _fmem
+        for _order in ("people.md\n/mem/**\n*.local.md\n", "/mem/**\npeople.md\n*.local.md\n",
+                       "people.md\n*.local.md\n/mem/**\n"):
+            with open(os.path.join(_fw, ".gitignore"), "w", encoding="utf-8") as fh:
+                fh.write(_order)
+            got = mip._git_ignored({"people.md", "contacts.local.md", "stray.md"})
+            expect("folder-wide rule: only specifically-ignored names are local-only (%r)"
+                   % _order, got == {"people.md", "contacts.local.md"}, "got %r" % got)
+        with open(os.path.join(_fw, ".git", "info", "exclude"), "a", encoding="utf-8") as fh:
+            fh.write("\nexcluded.md\n")
+        got = mip._git_ignored({"excluded.md", "stray.md"})
+        expect("folder-wide rule: a specific info/exclude rule still counts as local-only",
+               got == {"excluded.md"}, "got %r" % got)
+        with open(os.path.join(_fw, ".gitignore"), "w", encoding="utf-8") as fh:
+            fh.write("/mem/**\n/mem/*\nmem/\n")
+        got = mip._git_ignored({"stray.md"})
+        expect("several stacked folder-wide rules exempt nothing", got == set(), "got %r" % got)
+        _r = subprocess.run([sys.executable, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "memory-integrity-probe.py")], env=dict(os.environ, ORA_MEMORY_DIR=_fmem),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        expect("main under a folder-wide rule: stray.md IS still reported unlisted",
+               "unlisted file (present but not in MEMORY.md): stray.md" in _r.stdout + _r.stderr,
+               (_r.stdout + _r.stderr)[-600:])
+    finally:
+        mip.MEM = _saved_mem
+        __import__("shutil").rmtree(_fw, ignore_errors=True)
+
     _nonrepo = tempfile.mkdtemp(prefix="mip_nonrepo_")
     _saved_mem = mip.MEM
     mip.MEM = _nonrepo
@@ -401,63 +448,68 @@ expect("a LOCKED sub-index IS reported as unstattable -- coverage loss must not 
 #
 # What is actually being verified is the WIRING -- that the root is gated first and that
 # nothing outside the adopted sub-index set sneaks in. Both hold regardless of a race.
-live_idx = open(mip.INDEX, encoding="utf-8").read()
-_, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
-live_sized, live_unstattable = mip.sized_index_files(
-    mip.MEM, os.path.getsize(mip.INDEX), live_subs)
-expect("live run gates the root FIRST",
-       live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
-expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
-       len(live_sized) <= 1 + len(live_subs)
-       and all(n == "MEMORY.md" or n in live_subs for n, _ in live_sized),
-       "subs=%r sized=%r" % (live_subs, live_sized))
-expect("every gated entry carries a non-negative byte size",
-       all(isinstance(b, int) and b >= 0 for _, b in live_sized), "got %r" % (live_sized,))
+if not os.path.isfile(mip.INDEX):
+    # Memory is local-only since PR 476: a clean checkout / CI has no MEMORY.md.
+    print("  ENV-SKIP live-corpus sub-index checks: %s absent (memory folder is "
+          "local-only)" % mip.INDEX)
+else:
+    live_idx = open(mip.INDEX, encoding="utf-8").read()
+    _, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
+    live_sized, live_unstattable = mip.sized_index_files(
+        mip.MEM, os.path.getsize(mip.INDEX), live_subs)
+    expect("live run gates the root FIRST",
+           live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
+    expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
+           len(live_sized) <= 1 + len(live_subs)
+           and all(n == "MEMORY.md" or n in live_subs for n, _ in live_sized),
+           "subs=%r sized=%r" % (live_subs, live_sized))
+    expect("every gated entry carries a non-negative byte size",
+           all(isinstance(b, int) and b >= 0 for _, b in live_sized), "got %r" % (live_sized,))
 
-# The `<=` above is deliberately weak, so on its own it would still pass if
-# sized_index_files() regressed to returning the root alone -- i.e. the exact defect this
-# whole change fixes. The deterministic fixture cases above catch that, and so does this:
-# every sub-index that can still be MEASURED must have been gated.
-#
-# The predicate is os.path.getsize in a try/except -- NOT os.path.exists. That distinction
-# is the whole point: sized_index_files() skips on a stat FAILURE, and "missing" is only
-# one way to fail. A file locked mid-os.replace, or held by an AV or indexer, raises
-# PermissionError while remaining perfectly present, so exists() answers True about a file
-# that could not be measured and the assertion fails on a healthy tree. Asking the same
-# question the code asks is what makes this sound; an earlier version asked a different one
-# and claimed, wrongly, that the two could not diverge.
-#
-# THE CLAIM IS AGAINST BOTH CHANNELS, and a leftover gets ONE re-observation.
-#
-# Two earlier versions of this assertion raced, in the same way each time: they compared a
-# set observed INSIDE sized_index_files (call it T2) against a fresh filesystem sweep taken
-# afterwards (T3), so any file whose state differed between T2 and T3 failed the test on a
-# healthy tree. Re-sweeping with getsize instead of exists narrowed the window but did not
-# close it -- a sub-index locked at T2 lands in `unstattable`, and if the lock clears by T3
-# it looks measurable-but-ungated. The unstattable channel was in the failure MESSAGE but
-# not in the PREDICATE, which is precisely the gap.
-#
-# So: a sub-index is satisfied if it appears in EITHER channel -- gated, or reported
-# unstattable. Anything still missing gets one re-observation, which distinguishes the two
-# things that produce a leftover:
-#   * a RACE (lock, or a delete-then-rename save that leaves a GONE window) -- self-clearing,
-#     so the second call covers it and the claim passes;
-#   * a real REGRESSION to root-only collection -- populates NEITHER channel, on both calls,
-#     so the leftover survives and the test fails. The guard keeps its teeth.
-live_gated = {n for n, _ in live_sized}
-live_unstat = {n for n, _ in live_unstattable}
-missing = [n for n in live_subs if n not in live_gated and n not in live_unstat]
-if missing:
-    _sized2, _unstat2 = mip.sized_index_files(mip.MEM, os.path.getsize(mip.INDEX), live_subs)
-    _covered2 = {n for n, _ in _sized2} | {n for n, _ in _unstat2}
-    missing = [n for n in missing if n not in _covered2]
-expect("every adopted sub-index was gated or reported unstattable (regression guard)",
-       not missing,
-       "missing=%r gated=%r unstattable=%r" % (
-           missing, sorted(live_gated), live_unstattable))
-expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
-       not ({n for n, _ in live_unstattable} & live_gated),
-       "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
+    # The `<=` above is deliberately weak, so on its own it would still pass if
+    # sized_index_files() regressed to returning the root alone -- i.e. the exact defect this
+    # whole change fixes. The deterministic fixture cases above catch that, and so does this:
+    # every sub-index that can still be MEASURED must have been gated.
+    #
+    # The predicate is os.path.getsize in a try/except -- NOT os.path.exists. That distinction
+    # is the whole point: sized_index_files() skips on a stat FAILURE, and "missing" is only
+    # one way to fail. A file locked mid-os.replace, or held by an AV or indexer, raises
+    # PermissionError while remaining perfectly present, so exists() answers True about a file
+    # that could not be measured and the assertion fails on a healthy tree. Asking the same
+    # question the code asks is what makes this sound; an earlier version asked a different one
+    # and claimed, wrongly, that the two could not diverge.
+    #
+    # THE CLAIM IS AGAINST BOTH CHANNELS, and a leftover gets ONE re-observation.
+    #
+    # Two earlier versions of this assertion raced, in the same way each time: they compared a
+    # set observed INSIDE sized_index_files (call it T2) against a fresh filesystem sweep taken
+    # afterwards (T3), so any file whose state differed between T2 and T3 failed the test on a
+    # healthy tree. Re-sweeping with getsize instead of exists narrowed the window but did not
+    # close it -- a sub-index locked at T2 lands in `unstattable`, and if the lock clears by T3
+    # it looks measurable-but-ungated. The unstattable channel was in the failure MESSAGE but
+    # not in the PREDICATE, which is precisely the gap.
+    #
+    # So: a sub-index is satisfied if it appears in EITHER channel -- gated, or reported
+    # unstattable. Anything still missing gets one re-observation, which distinguishes the two
+    # things that produce a leftover:
+    #   * a RACE (lock, or a delete-then-rename save that leaves a GONE window) -- self-clearing,
+    #     so the second call covers it and the claim passes;
+    #   * a real REGRESSION to root-only collection -- populates NEITHER channel, on both calls,
+    #     so the leftover survives and the test fails. The guard keeps its teeth.
+    live_gated = {n for n, _ in live_sized}
+    live_unstat = {n for n, _ in live_unstattable}
+    missing = [n for n in live_subs if n not in live_gated and n not in live_unstat]
+    if missing:
+        _sized2, _unstat2 = mip.sized_index_files(mip.MEM, os.path.getsize(mip.INDEX), live_subs)
+        _covered2 = {n for n, _ in _sized2} | {n for n, _ in _unstat2}
+        missing = [n for n in missing if n not in _covered2]
+    expect("every adopted sub-index was gated or reported unstattable (regression guard)",
+           not missing,
+           "missing=%r gated=%r unstattable=%r" % (
+               missing, sorted(live_gated), live_unstattable))
+    expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
+           not ({n for n, _ in live_unstattable} & live_gated),
+           "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
 
 # --- check 4a: dead pointers across the tracker/history split (2026-09-06, R22-4) ---
 # OI_REF_RE now captures WHICH filename a reference names; a reference naming the

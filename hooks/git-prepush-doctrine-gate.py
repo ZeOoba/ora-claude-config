@@ -464,6 +464,61 @@ def run_buybox_advisory(worktree_path, timeout=BUYBOX_TIMEOUT_S):
         return None
 
 
+# The one memory scope the doctrine probe reads (doctrine-integrity-probe.py MEMORY_DIR).
+MEMORY_SCOPE = "C--Users-Owner-OneDrive---Oxford-Capital-Partners"
+
+
+def _main_checkout(repo_root):
+    """Root of the MAIN worktree of repo_root's repository (parent of the shared git dir).
+    The pre-push shim runs this gate from the pushing checkout, which for a linked worktree
+    has no local-only memory; the live memory sits in the main checkout. Falls back to
+    repo_root when git cannot answer."""
+    try:
+        p = subprocess.run(["git", "-C", repo_root, "rev-parse", "--path-format=absolute",
+                            "--git-common-dir"], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", env=_clean_git_env(), timeout=30)
+        if p.returncode == 0 and p.stdout.strip():
+            return os.path.dirname(os.path.normpath(p.stdout.strip()))
+    except Exception:
+        pass
+    return repo_root
+
+
+def overlay_local_memory(worktree_path, repo_root=None):
+    """Copy the local memory folder into the scratch worktree when the pushed commit does not
+    carry it (2026-11-20, PR 476: the memory folder is local-only -- gitignored in this public
+    repo, backed up privately). CLAUDE.md and the probe's guard list resolve memory files
+    (event_log.md, tech.md, rules.md, MEMORY.md), so without this every push would fail closed
+    on references that are deliberately not in git.
+      * Source: the MAIN checkout of the repository (a push from a linked worktree has no
+        memory of its own); an explicit repo_root / REPO_ROOT_OVERRIDE is used as given.
+      * Scope: only MEMORY_SCOPE, the one the probe reads. Other projects/<scope>/memory
+        folders (scratch-session scopes with ~150-char names) would push copied paths past
+        Windows' 260-char limit and are irrelevant to doctrine.
+      * Memory a pushed commit DOES carry is left untouched (that commit's content wins).
+    Returns the number of folders copied (0 or 1). Raises on a copy failure -- the caller
+    fails closed."""
+    if repo_root is None:
+        repo_root = REPO_ROOT_OVERRIDE or _main_checkout(CLAUDE_DIR)
+    src = os.path.join(repo_root, "projects", MEMORY_SCOPE, "memory")
+    dst = os.path.join(worktree_path, "projects", MEMORY_SCOPE, "memory")
+    if not os.path.isdir(src) or os.path.exists(dst):
+        return 0
+    def _copy(s, d):
+        # A memory writer may atomically replace or remove a file between the listing
+        # and the copy (merge gate round 6: MEMORY.md.tmp-upsert vanished mid-copy and the
+        # push was refused as "drift"). A file gone mid-copy is not drift: skip it.
+        try:
+            return shutil.copy2(s, d)
+        except FileNotFoundError:
+            return d
+
+    shutil.copytree(src, dst, copy_function=_copy, ignore=shutil.ignore_patterns(
+        "*.lock", "*.tmp-append*", "*.tmp-upsert*", "*.tmp-rollover*", "*.partial",
+        "*.pending", "*.inplace-backup", "_archive"))
+    return 1
+
+
 def run_doctrine_probe():
     """Materialize the commit about to be pushed into a scratch worktree (see
     materialize_pushed_commit()) and run the probe against it with --live-root=, so it
@@ -499,6 +554,14 @@ def run_doctrine_probe():
         sys.stderr.write(
             "pre-push doctrine gate: could not materialize the pushed commit (%s) - "
             "treating as drift (fail-closed).\n" % err)
+        return 1, ""
+    try:
+        overlay_local_memory(worktree_path)
+    except Exception as e:
+        remove_worktree(worktree_path)
+        sys.stderr.write(
+            "pre-push doctrine gate: could not overlay the local memory folder (%s) - "
+            "treating as drift (fail-closed).\n" % e)
         return 1, ""
     try:
         probe_script = PROBE_SCRIPT_OVERRIDE or PROBE_SCRIPT

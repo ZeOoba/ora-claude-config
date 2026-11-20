@@ -286,6 +286,22 @@ def incoming_paths(repo, target_sha):
     return [n for n in names.split("\0") if n] + conflicted
 
 
+def untracked_incoming(repo, incoming):
+    """Incoming paths present on disk but NOT tracked here (untracked, including ignored),
+    or None when the tracked set cannot be read. Read-only."""
+    rc, out, _ = _git(["ls-files", "-z", "--full-name"], repo)
+    if rc != 0:
+        return None
+    tracked = set(p for p in out.split("\0") if p)
+    hits = []
+    for p in incoming:
+        if p in tracked:
+            continue
+        if os.path.lexists(os.path.join(repo, *p.split("/"))):
+            hits.append(p)
+    return hits
+
+
 def expected_merge_tree(repo, head0, target_sha):
     """Tree sha of the CLEAN merge of target_sha into the pinned commit head0 (never the
     symbolic HEAD), computed without touching the index or working tree, or None
@@ -550,6 +566,17 @@ def sync(repo=None, canonical=None):
                                              "ls-files" if hidden is None else "merge-tree/diff"))
         return out
     overlap = overlapping_paths(parse_porcelain_v2_z(status_out) + hidden, incoming)
+    if not overlap:
+        # PR 476 merge gate round 6: an incoming path that exists here as an UNTRACKED file
+        # -- above all a git-ignored one, like the local-only memory folder -- is invisible to
+        # `git status`, yet the merge writes over it (git treats ignored files as
+        # expendable) and an abort then deletes it. Never invoke the merge over one.
+        untracked = untracked_incoming(repo, incoming)
+        if untracked is None:
+            out["status"] = "ERROR"
+            out["detail"] = "cannot list tracked paths (ls-files failed) -- not merging"
+            return out
+        overlap = untracked
     if overlap:
         out["status"] = "BLOCKED_DIRTY_OVERLAP"
         out["blocked_paths"] = overlap

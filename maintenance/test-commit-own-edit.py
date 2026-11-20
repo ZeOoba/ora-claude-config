@@ -225,6 +225,50 @@ def test_lands_despite_stale_foreign_touches_after_a_clean_begin(f):
 
 
 @_fixture_test
+def test_local_only_memory_file_is_local_only_not_error(f):
+    # PR 476: the memory folder is untracked + git-ignored in the public repo. Landing an edit
+    # there must report LOCAL_ONLY (exit 0) -- not ERROR, which made ora-appsec-sweep raise a
+    # false failure email -- and must commit nothing.
+    git(f.repo, "rm", "-q", "--cached", TRACKER)
+    with open(f.p(".gitignore"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("/projects/**/memory/**\n")
+    git(f.repo, "add", ".gitignore")
+    git(f.repo, "commit", "-q", "-m", "untrack memory", dated=True)
+    before, idx = f.head(), git(f.repo, "ls-files", "-s")
+    f.append(TRACKER, "| OI-003 | local |\n")
+    f.touch(MINE, TRACKER)
+    _status(f.begin(), "LOCAL_ONLY", 0)
+    r = f.land()
+    _status(r, "LOCAL_ONLY", 0)
+    assert "local-only" in r["reason"], r
+    assert f.head() == before and git(f.repo, "ls-files", "-s") == idx, "something was committed"
+    p = f.cli("--path", f.p(TRACKER), "--session", MINE, "--message", "m",
+              "--sessions-dir", f.sessions, "--claims-dir", f.claims,
+              "--transcripts-dir", f.transcripts, "--quiet-seconds", "0")
+    assert p.returncode == 0 and "LOCAL_ONLY" in p.stdout, (p.returncode, p.stdout, p.stderr)
+
+
+@_fixture_test
+def test_ignored_file_outside_memory_is_an_error_not_local_only(f):
+    # LOCAL_ONLY is for the local-only MEMORY folder alone (merge gate round 6).
+    with open(f.p(".gitignore"), "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("secret.txt\n")
+    f.write("secret.txt", "x\n")
+    for r in (f.begin(rel="secret.txt"), f.land(rel="secret.txt")):
+        _status(r, "ERROR", 2)
+        assert "local-only" not in r["reason"], r
+
+
+@_fixture_test
+def test_untracked_but_not_ignored_is_still_an_error(f):
+    # The LOCAL_ONLY exit is only for a file git IGNORES; a merely untracked file stays ERROR.
+    f.write(MEM + "brand-new.md", "x\n")
+    r = f.land(rel=MEM + "brand-new.md")
+    _status(r, "ERROR", 2)
+    assert "not a tracked file" in r["reason"], r
+
+
+@_fixture_test
 def test_nothing_to_commit_when_file_matches_head(f):
     before = f.head()
     r = f.land()
@@ -1277,6 +1321,9 @@ def test_cli_help_touches_nothing(f):
 TESTS = [
     test_commits_sole_owner_edit_and_only_that_path,
     test_lands_despite_stale_foreign_touches_after_a_clean_begin,
+    test_local_only_memory_file_is_local_only_not_error,
+    test_ignored_file_outside_memory_is_an_error_not_local_only,
+    test_untracked_but_not_ignored_is_still_an_error,
     test_nothing_to_commit_when_file_matches_head,
     test_other_staged_paths_stay_staged_and_uncommitted,
     test_own_claim_does_not_block,
