@@ -504,8 +504,18 @@ def overlay_local_memory(worktree_path, repo_root=None):
     dst = os.path.join(worktree_path, "projects", MEMORY_SCOPE, "memory")
     if not os.path.isdir(src) or os.path.exists(dst):
         return 0
-    shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
-        "*.lock", "*.tmp-append*", "*.pending", "*.inplace-backup", "_archive"))
+    def _copy(s, d):
+        # A memory writer may atomically replace or remove a file between the listing
+        # and the copy (merge gate round 6: MEMORY.md.tmp-upsert vanished mid-copy and the
+        # push was refused as "drift"). A file gone mid-copy is not drift: skip it.
+        try:
+            return shutil.copy2(s, d)
+        except FileNotFoundError:
+            return d
+
+    shutil.copytree(src, dst, copy_function=_copy, ignore=shutil.ignore_patterns(
+        "*.lock", "*.tmp-append*", "*.tmp-upsert*", "*.tmp-rollover*", "*.partial",
+        "*.pending", "*.inplace-backup", "_archive"))
     return 1
 
 
