@@ -113,26 +113,31 @@ expect("valid kind=registry_disabled_count evaluates True when it matches", resu
 # tracker -- parsing the tracker alone would show it as absent (None), not as the
 # CLOSED status this test exists to confirm. combined_items mirrors exactly what
 # main()'s own check 4 does (parse each file separately, tracker wins on conflict).
-real_text = open(mip.TRACKER, encoding="utf-8").read()
-real_items = mip.parse_open_items(real_text)
-real_history_items = {}
-if os.path.isfile(mip.TRACKER_HISTORY):
-    real_history_items = mip.parse_open_items(
-        open(mip.TRACKER_HISTORY, encoding="utf-8").read())
-combined_real_items = dict(real_history_items)
-combined_real_items.update(real_items)
-real_open_autochecks = {oid for oid, it in combined_real_items.items()
-                        if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]}
-previously_affected = {"OI-009", "OI-016", "OI-021", "OI-022", "OI-024", "OI-025"}
-expect("none of the previously-affected OI rows are in the live tracker's open_autochecks now",
-       real_open_autochecks.isdisjoint(previously_affected),
-       "got overlap %r" % (real_open_autochecks & previously_affected))
-expect("OI-016 now parses as CLOSED (tracker+history combined, post-split)",
-       combined_real_items.get("OI-016", {}).get("status") == "CLOSED",
-       "got %r" % combined_real_items.get("OI-016"))
-expect("OI-016's section actually lives in the history file now, not the live tracker",
-       "OI-016" in real_history_items and "OI-016" not in real_items,
-       "history has it: %r, tracker has it: %r" % ("OI-016" in real_history_items, "OI-016" in real_items))
+if not os.path.isfile(mip.TRACKER):
+    # Memory is local-only since PR 476: clean checkout / CI has no tracker.
+    print("  ENV-SKIP canonical-tracker checks: %s absent (memory folder is local-only)"
+          % mip.TRACKER)
+else:
+    real_text = open(mip.TRACKER, encoding="utf-8").read()
+    real_items = mip.parse_open_items(real_text)
+    real_history_items = {}
+    if os.path.isfile(mip.TRACKER_HISTORY):
+        real_history_items = mip.parse_open_items(
+            open(mip.TRACKER_HISTORY, encoding="utf-8").read())
+    combined_real_items = dict(real_history_items)
+    combined_real_items.update(real_items)
+    real_open_autochecks = {oid for oid, it in combined_real_items.items()
+                            if it["status"] == "OPEN" and it["autocheck"] and "kind=" in it["autocheck"]}
+    previously_affected = {"OI-009", "OI-016", "OI-021", "OI-022", "OI-024", "OI-025"}
+    expect("none of the previously-affected OI rows are in the live tracker's open_autochecks now",
+           real_open_autochecks.isdisjoint(previously_affected),
+           "got overlap %r" % (real_open_autochecks & previously_affected))
+    expect("OI-016 now parses as CLOSED (tracker+history combined, post-split)",
+           combined_real_items.get("OI-016", {}).get("status") == "CLOSED",
+           "got %r" % combined_real_items.get("OI-016"))
+    expect("OI-016's section actually lives in the history file now, not the live tracker",
+           "OI-016" in real_history_items and "OI-016" not in real_items,
+           "history has it: %r, tracker has it: %r" % ("OI-016" in real_history_items, "OI-016" in real_items))
 
 # --- head_orphans: a back-link to MEMORY.md is not an orphan pointer ----------------
 # Regression guard for a false FAIL observed live on the 2026-08-05 ora-health-guard run,
@@ -227,6 +232,48 @@ try:
                got == {"contacts.local.md"}, "got %r" % got)
     finally:
         mip.MEM = _saved_mem
+    # Folder-wide rule (PR 476 memory local-only): "/mem/**" ignores EVERY memory file, so
+    # ignored alone must no longer mean local-only-by-design -- only a SPECIFIC rule does,
+    # whether it sits before or after the folder-wide one, in .gitignore or info/exclude.
+    _fw = tempfile.mkdtemp(prefix="mip_folderwide_")
+    _saved_mem = mip.MEM
+    try:
+        subprocess.run(["git", "init", "-q"], cwd=_fw, check=True, capture_output=True)
+        _fmem = os.path.join(_fw, "mem")
+        os.makedirs(_fmem)
+        for _n in ("people.md", "contacts.local.md", "stray.md", "excluded.md"):
+            with open(os.path.join(_fmem, _n), "w", encoding="utf-8") as fh:
+                fh.write("x\n")
+        with open(os.path.join(_fmem, "MEMORY.md"), "w", encoding="utf-8") as fh:
+            fh.write("# Memory\n")
+        mip.MEM = _fmem
+        for _order in ("people.md\n/mem/**\n*.local.md\n", "/mem/**\npeople.md\n*.local.md\n",
+                       "people.md\n*.local.md\n/mem/**\n"):
+            with open(os.path.join(_fw, ".gitignore"), "w", encoding="utf-8") as fh:
+                fh.write(_order)
+            got = mip._git_ignored({"people.md", "contacts.local.md", "stray.md"})
+            expect("folder-wide rule: only specifically-ignored names are local-only (%r)"
+                   % _order, got == {"people.md", "contacts.local.md"}, "got %r" % got)
+        with open(os.path.join(_fw, ".git", "info", "exclude"), "a", encoding="utf-8") as fh:
+            fh.write("\nexcluded.md\n")
+        got = mip._git_ignored({"excluded.md", "stray.md"})
+        expect("folder-wide rule: a specific info/exclude rule still counts as local-only",
+               got == {"excluded.md"}, "got %r" % got)
+        with open(os.path.join(_fw, ".gitignore"), "w", encoding="utf-8") as fh:
+            fh.write("/mem/**\n/mem/*\nmem/\n")
+        got = mip._git_ignored({"stray.md"})
+        expect("several stacked folder-wide rules exempt nothing", got == set(), "got %r" % got)
+        _r = subprocess.run([sys.executable, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "memory-integrity-probe.py")], env=dict(os.environ, ORA_MEMORY_DIR=_fmem),
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
+        expect("main under a folder-wide rule: stray.md IS still reported unlisted",
+               "unlisted file (present but not in MEMORY.md): stray.md" in _r.stdout + _r.stderr,
+               (_r.stdout + _r.stderr)[-600:])
+    finally:
+        mip.MEM = _saved_mem
+        __import__("shutil").rmtree(_fw, ignore_errors=True)
+
     _nonrepo = tempfile.mkdtemp(prefix="mip_nonrepo_")
     _saved_mem = mip.MEM
     mip.MEM = _nonrepo
