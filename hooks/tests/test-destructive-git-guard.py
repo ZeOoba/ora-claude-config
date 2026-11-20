@@ -108,8 +108,61 @@ def memory_checkout_checks():
     git(ch, "add", ".gitignore")
     git(ch, "commit", "-qm", "untrack memory")
     git(ch, "branch", "new")
+    # `stale`: a pre-untrack branch that EDITS memory (merge/pull/cherry-pick write it in).
+    git(ch, "checkout", "-q", "-b", "stale", "old")
+    with open(os.path.join(mem, "note.md"), "w") as f:
+        f.write("stale edit\n")
+    git(ch, "commit", "-qam", "stale memory edit")
+    # `side`: a pre-untrack branch that changes only README (merging it writes no memory).
+    git(ch, "checkout", "-q", "-b", "side", "old")
+    with open(os.path.join(ch, "README"), "w") as f:
+        f.write("side\n")
+    git(ch, "commit", "-qam", "side readme")
+    # Leave @{-1} = old for the `checkout -` / `switch -` cases, then restore local memory
+    # (switching away from a memory-tracking commit deletes it -- the hazard itself).
+    git(ch, "checkout", "-q", "old")
+    git(ch, "checkout", "-q", "main")
+    os.makedirs(mem, exist_ok=True)
+    with open(os.path.join(mem, "note.md"), "w") as f:
+        f.write("local only\n")
+    git(ch, "config", "branch.main.remote", ".")
+    git(ch, "config", "branch.main.merge", "refs/heads/stale")  # @{u} = stale
     env = dict(os.environ, USERPROFILE=home, HOME=home)
     try:
+        both = ("script", "dispatcher")
+        # Round-6 findings: every command that writes an old tree, path or diff into the
+        # worktree, not only checkout/switch/reset.
+        check("memory: checkout - (previous branch)", "git checkout -", ch, True, both, env)
+        check("memory: switch - (previous branch)", "git switch -", ch, True, env=env)
+        check("memory: checkout old -- . (paths)", "git checkout old -- .", ch, True, env=env)
+        check("memory: checkout old -- projects", "git checkout old -- projects", ch, True,
+              env=env)
+        check("memory: restore --source=old -- .", "git restore --source=old -- .", ch, True,
+              both, env)
+        check("memory: restore -s old -W projects", "git restore -s old -W projects", ch,
+              True, env=env)
+        check("memory: merge stale (edits memory)", "git merge stale", ch, True, both, env)
+        check("memory: pull (upstream edits memory)", "git pull", ch, True, env=env)
+        check("memory: pull . stale (local branch)", "git pull . stale", ch, True, env=env)
+        check("memory: pull --rebase . old", "git pull --rebase . old", ch, True, env=env)
+        check("memory: rebase old", "git rebase old", ch, True, env=env)
+        check("memory: rebase --onto old new", "git rebase --onto old new", ch, True, env=env)
+        check("memory: cherry-pick stale", "git cherry-pick stale", ch, True, env=env)
+        check("memory: cherry-pick range", "git cherry-pick old..stale", ch, True, env=env)
+        check("memory: revert the untrack commit", "git revert new", ch, True, env=env)
+        check("memory: read-tree -u --reset old", "git read-tree -u --reset old", ch, True,
+              env=env)
+        # ALLOW: forms that write no memory.
+        check("memory: checkout old README (path, no --)", "git checkout old README", ch,
+              False, env=env)
+        check("memory: restore --source=old README", "git restore --source=old README", ch,
+              False, env=env)
+        check("memory: restore --staged --source=old .", "git restore --staged --source=old .",
+              ch, False, env=env)
+        check("memory: merge side (no memory change)", "git merge side", ch, False, env=env)
+        check("memory: merge --abort", "git merge --abort", ch, False, env=env)
+        check("memory: cherry-pick side", "git cherry-pick side", ch, False, env=env)
+        check("memory: read-tree without -u", "git read-tree old", ch, False, env=env)
         both = ("script", "dispatcher")
         check("memory: checkout old branch", "git checkout old", ch, True, both, env)
         check("memory: checkout old sha", "git checkout HEAD~1", ch, True, env=env)
