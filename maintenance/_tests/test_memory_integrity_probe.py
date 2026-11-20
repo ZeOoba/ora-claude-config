@@ -448,63 +448,68 @@ expect("a LOCKED sub-index IS reported as unstattable -- coverage loss must not 
 #
 # What is actually being verified is the WIRING -- that the root is gated first and that
 # nothing outside the adopted sub-index set sneaks in. Both hold regardless of a race.
-live_idx = open(mip.INDEX, encoding="utf-8").read()
-_, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
-live_sized, live_unstattable = mip.sized_index_files(
-    mip.MEM, os.path.getsize(mip.INDEX), live_subs)
-expect("live run gates the root FIRST",
-       live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
-expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
-       len(live_sized) <= 1 + len(live_subs)
-       and all(n == "MEMORY.md" or n in live_subs for n, _ in live_sized),
-       "subs=%r sized=%r" % (live_subs, live_sized))
-expect("every gated entry carries a non-negative byte size",
-       all(isinstance(b, int) and b >= 0 for _, b in live_sized), "got %r" % (live_sized,))
+if not os.path.isfile(mip.INDEX):
+    # Memory is local-only since PR 476: a clean checkout / CI has no MEMORY.md.
+    print("  ENV-SKIP live-corpus sub-index checks: %s absent (memory folder is "
+          "local-only)" % mip.INDEX)
+else:
+    live_idx = open(mip.INDEX, encoding="utf-8").read()
+    _, live_subs = mip.collect_indexed_links(live_idx, mip.MEM)
+    live_sized, live_unstattable = mip.sized_index_files(
+        mip.MEM, os.path.getsize(mip.INDEX), live_subs)
+    expect("live run gates the root FIRST",
+           live_sized and live_sized[0][0] == "MEMORY.md", "got %r" % (live_sized,))
+    expect("live run gates only the root plus sub-indexes MEMORY.md adopts (race-tolerant)",
+           len(live_sized) <= 1 + len(live_subs)
+           and all(n == "MEMORY.md" or n in live_subs for n, _ in live_sized),
+           "subs=%r sized=%r" % (live_subs, live_sized))
+    expect("every gated entry carries a non-negative byte size",
+           all(isinstance(b, int) and b >= 0 for _, b in live_sized), "got %r" % (live_sized,))
 
-# The `<=` above is deliberately weak, so on its own it would still pass if
-# sized_index_files() regressed to returning the root alone -- i.e. the exact defect this
-# whole change fixes. The deterministic fixture cases above catch that, and so does this:
-# every sub-index that can still be MEASURED must have been gated.
-#
-# The predicate is os.path.getsize in a try/except -- NOT os.path.exists. That distinction
-# is the whole point: sized_index_files() skips on a stat FAILURE, and "missing" is only
-# one way to fail. A file locked mid-os.replace, or held by an AV or indexer, raises
-# PermissionError while remaining perfectly present, so exists() answers True about a file
-# that could not be measured and the assertion fails on a healthy tree. Asking the same
-# question the code asks is what makes this sound; an earlier version asked a different one
-# and claimed, wrongly, that the two could not diverge.
-#
-# THE CLAIM IS AGAINST BOTH CHANNELS, and a leftover gets ONE re-observation.
-#
-# Two earlier versions of this assertion raced, in the same way each time: they compared a
-# set observed INSIDE sized_index_files (call it T2) against a fresh filesystem sweep taken
-# afterwards (T3), so any file whose state differed between T2 and T3 failed the test on a
-# healthy tree. Re-sweeping with getsize instead of exists narrowed the window but did not
-# close it -- a sub-index locked at T2 lands in `unstattable`, and if the lock clears by T3
-# it looks measurable-but-ungated. The unstattable channel was in the failure MESSAGE but
-# not in the PREDICATE, which is precisely the gap.
-#
-# So: a sub-index is satisfied if it appears in EITHER channel -- gated, or reported
-# unstattable. Anything still missing gets one re-observation, which distinguishes the two
-# things that produce a leftover:
-#   * a RACE (lock, or a delete-then-rename save that leaves a GONE window) -- self-clearing,
-#     so the second call covers it and the claim passes;
-#   * a real REGRESSION to root-only collection -- populates NEITHER channel, on both calls,
-#     so the leftover survives and the test fails. The guard keeps its teeth.
-live_gated = {n for n, _ in live_sized}
-live_unstat = {n for n, _ in live_unstattable}
-missing = [n for n in live_subs if n not in live_gated and n not in live_unstat]
-if missing:
-    _sized2, _unstat2 = mip.sized_index_files(mip.MEM, os.path.getsize(mip.INDEX), live_subs)
-    _covered2 = {n for n, _ in _sized2} | {n for n, _ in _unstat2}
-    missing = [n for n in missing if n not in _covered2]
-expect("every adopted sub-index was gated or reported unstattable (regression guard)",
-       not missing,
-       "missing=%r gated=%r unstattable=%r" % (
-           missing, sorted(live_gated), live_unstattable))
-expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
-       not ({n for n, _ in live_unstattable} & live_gated),
-       "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
+    # The `<=` above is deliberately weak, so on its own it would still pass if
+    # sized_index_files() regressed to returning the root alone -- i.e. the exact defect this
+    # whole change fixes. The deterministic fixture cases above catch that, and so does this:
+    # every sub-index that can still be MEASURED must have been gated.
+    #
+    # The predicate is os.path.getsize in a try/except -- NOT os.path.exists. That distinction
+    # is the whole point: sized_index_files() skips on a stat FAILURE, and "missing" is only
+    # one way to fail. A file locked mid-os.replace, or held by an AV or indexer, raises
+    # PermissionError while remaining perfectly present, so exists() answers True about a file
+    # that could not be measured and the assertion fails on a healthy tree. Asking the same
+    # question the code asks is what makes this sound; an earlier version asked a different one
+    # and claimed, wrongly, that the two could not diverge.
+    #
+    # THE CLAIM IS AGAINST BOTH CHANNELS, and a leftover gets ONE re-observation.
+    #
+    # Two earlier versions of this assertion raced, in the same way each time: they compared a
+    # set observed INSIDE sized_index_files (call it T2) against a fresh filesystem sweep taken
+    # afterwards (T3), so any file whose state differed between T2 and T3 failed the test on a
+    # healthy tree. Re-sweeping with getsize instead of exists narrowed the window but did not
+    # close it -- a sub-index locked at T2 lands in `unstattable`, and if the lock clears by T3
+    # it looks measurable-but-ungated. The unstattable channel was in the failure MESSAGE but
+    # not in the PREDICATE, which is precisely the gap.
+    #
+    # So: a sub-index is satisfied if it appears in EITHER channel -- gated, or reported
+    # unstattable. Anything still missing gets one re-observation, which distinguishes the two
+    # things that produce a leftover:
+    #   * a RACE (lock, or a delete-then-rename save that leaves a GONE window) -- self-clearing,
+    #     so the second call covers it and the claim passes;
+    #   * a real REGRESSION to root-only collection -- populates NEITHER channel, on both calls,
+    #     so the leftover survives and the test fails. The guard keeps its teeth.
+    live_gated = {n for n, _ in live_sized}
+    live_unstat = {n for n, _ in live_unstattable}
+    missing = [n for n in live_subs if n not in live_gated and n not in live_unstat]
+    if missing:
+        _sized2, _unstat2 = mip.sized_index_files(mip.MEM, os.path.getsize(mip.INDEX), live_subs)
+        _covered2 = {n for n, _ in _sized2} | {n for n, _ in _unstat2}
+        missing = [n for n in missing if n not in _covered2]
+    expect("every adopted sub-index was gated or reported unstattable (regression guard)",
+           not missing,
+           "missing=%r gated=%r unstattable=%r" % (
+               missing, sorted(live_gated), live_unstattable))
+    expect("nothing reported unstattable also appears in the sized set (channels are disjoint)",
+           not ({n for n, _ in live_unstattable} & live_gated),
+           "unstattable=%r gated=%r" % (live_unstattable, sorted(live_gated)))
 
 # --- check 4a: dead pointers across the tracker/history split (2026-09-06, R22-4) ---
 # OI_REF_RE now captures WHICH filename a reference names; a reference naming the
