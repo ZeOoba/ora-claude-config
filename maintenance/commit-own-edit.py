@@ -95,7 +95,7 @@ PREFLIGHT = os.path.join(HERE, "preflight-shared-checkout.py")
 # Must equal land-live-commits.py's MEMORY (pinned by test_memory_prefix_matches_land_live_commits).
 MEMORY_PREFIX = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/"
 
-EXIT = {"COMMITTED": 0, "NOTHING_TO_COMMIT": 0, "BEGUN": 0,
+EXIT = {"COMMITTED": 0, "NOTHING_TO_COMMIT": 0, "BEGUN": 0, "LOCAL_ONLY": 0,
         "LEFT_FOR_SWEEP": 1, "DIRTY_AT_BEGIN": 1, "ERROR": 2,
         "UNDONE": 3, "COMMITTED_UNVERIFIED": 3}
 
@@ -133,11 +133,14 @@ def _env(extra=None):
     return env
 
 
-def _git(repo, *args, timeout=GIT_TIMEOUT, extra_env=None):
+def _git(repo, *args, timeout=GIT_TIMEOUT, extra_env=None, literal=True):
     """(returncode, stdout, stderr). returncode is None when git could not run or timed out.
-    --literal-pathspecs: every path argument is a file name, never a glob."""
+    --literal-pathspecs: every path argument is a file name, never a glob. literal=False only
+    for commands that reject pathspec magic outright (check-ignore exits 128 with it) and
+    take plain paths anyway."""
     try:
-        p = subprocess.run(["git", "--literal-pathspecs"] + list(args), cwd=repo,
+        p = subprocess.run(["git"] + (["--literal-pathspecs"] if literal else []) + list(args),
+                           cwd=repo,
                            capture_output=True, text=True, encoding="utf-8",
                            errors="replace", timeout=timeout, env=_env(extra_env))
     except (OSError, subprocess.SubprocessError, ValueError) as exc:
@@ -157,8 +160,15 @@ def _default_sessions_dir():
             or os.path.join(os.path.expanduser("~"), ".claude", "hooks", "sessions"))
 
 
+class _LocalOnly(str):
+    """A _locate() 'reason' meaning the file is git-ignored on purpose: since 2026-11-20 the
+    memory folder is local-only in this public repo (private backup: ZeOoba/ora-memory-
+    private), so there is nothing to commit. Callers report LOCAL_ONLY (exit 0), not ERROR."""
+
+
 def _locate(path):
-    """({full, repo, rel}, None) for a tracked file under MEMORY_PREFIX, else (None, reason)."""
+    """({full, repo, rel}, None) for a tracked file under MEMORY_PREFIX, else (None, reason).
+    The reason is a _LocalOnly when the file is untracked AND git-ignored."""
     try:
         full = os.path.realpath(os.path.abspath(path))
     except (OSError, ValueError) as exc:
@@ -178,6 +188,11 @@ def _locate(path):
     rc, out, _ = _git(repo, "ls-files", "-z", "--full-name", "--", rel)
     entries = [e for e in out.split("\0") if e] if rc == 0 else []
     if len(entries) != 1:
+        # check-ignore takes paths, not pathspecs, and refuses --literal-pathspecs (128).
+        irc, _, _ = _git(repo, "check-ignore", "-q", "--", rel, literal=False)
+        if irc == 0:
+            return None, _LocalOnly("%s is local-only (git-ignored; memory is not committed to "
+                                    "this public repo); nothing to commit" % rel)
         return None, "not a tracked file: %s" % rel
     rel = entries[0]  # the index's own spelling
     if not rel.startswith(MEMORY_PREFIX):
@@ -446,6 +461,8 @@ def begin(path, session=None, sessions_dir=None):
     if not session:
         return done("ERROR", "no session id (pass --session or set CLAUDE_CODE_SESSION_ID)")
     loc, err = _locate(path)
+    if isinstance(err, _LocalOnly):
+        return done("LOCAL_ONLY", err)
     if err:
         return done("ERROR", err)
     repo, rel = loc["repo"], loc["rel"]
@@ -507,6 +524,8 @@ def land(path, message, session=None, sessions_dir=None, claims_dir=None,
     if not (isinstance(quiet_seconds, (int, float)) and 0 <= quiet_seconds < float("inf")):
         return done("ERROR", "quiet_seconds must be a finite number >= 0")
     loc, err = _locate(path)
+    if isinstance(err, _LocalOnly):
+        return done("LOCAL_ONLY", err)
     if err:
         return done("ERROR", err)
     full, repo, rel = loc["full"], loc["repo"], loc["rel"]
