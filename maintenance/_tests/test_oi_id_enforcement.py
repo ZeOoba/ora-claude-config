@@ -210,18 +210,11 @@ def test_block_mode_still_blocks():
 
 
 def main():
-    test_mode_defaults_to_warn_when_unreadable()
-    test_warn_mode_exits_zero_but_still_reports()
-    test_block_mode_still_blocks()
-    test_grandfathered_ids_pass()
-    test_new_id_without_reservation_is_a_violation()
-    test_new_id_with_reservation_passes()
-    test_backfill_clears_a_violation()
-    test_backfill_is_recorded_distinguishably()
-    test_backfill_refuses_a_duplicate()
-    test_violation_message_names_the_remedy()
-    test_missing_baseline_file_does_not_block_everything()
-    test_section_only_new_id_also_enforced()
+    # Every test_* function, in definition order. A hand-kept list let a test be
+    # written and never run (PR 476 merge gate round 6).
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            fn()
     passed = sum(1 for ok, _ in results if ok)
     print("\noi-id enforcement tests: %d/%d passed" % (passed, len(results)))
     sys.exit(0 if passed == len(results) else 1)
