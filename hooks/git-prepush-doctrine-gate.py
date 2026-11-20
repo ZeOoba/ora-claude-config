@@ -464,6 +464,29 @@ def run_buybox_advisory(worktree_path, timeout=BUYBOX_TIMEOUT_S):
         return None
 
 
+def overlay_local_memory(worktree_path, repo_root=None):
+    """Copy each local projects/<scope>/memory/ folder into the scratch worktree when the
+    pushed commit does not carry it (2026-11-20, PR 476: the memory folder is local-only --
+    gitignored in this public repo, backed up privately). CLAUDE.md and the probe's guard
+    list resolve memory files (event_log.md, tech.md, rules.md, MEMORY.md), so without this
+    every push would fail closed on references that are deliberately not in git. Memory a
+    pushed commit DOES carry is left untouched (that commit's content wins). Returns the
+    number of folders copied. Raises on a copy failure -- the caller fails closed."""
+    repo_root = repo_root or REPO_ROOT_OVERRIDE or CLAUDE_DIR
+    src_projects = os.path.join(repo_root, "projects")
+    copied = 0
+    if not os.path.isdir(src_projects):
+        return copied
+    for scope in sorted(os.listdir(src_projects)):
+        src = os.path.join(src_projects, scope, "memory")
+        dst = os.path.join(worktree_path, "projects", scope, "memory")
+        if os.path.isdir(src) and not os.path.exists(dst):
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
+                "*.lock", "*.tmp-append*", "*.pending", "*.inplace-backup"))
+            copied += 1
+    return copied
+
+
 def run_doctrine_probe():
     """Materialize the commit about to be pushed into a scratch worktree (see
     materialize_pushed_commit()) and run the probe against it with --live-root=, so it
@@ -499,6 +522,14 @@ def run_doctrine_probe():
         sys.stderr.write(
             "pre-push doctrine gate: could not materialize the pushed commit (%s) - "
             "treating as drift (fail-closed).\n" % err)
+        return 1, ""
+    try:
+        overlay_local_memory(worktree_path)
+    except Exception as e:
+        remove_worktree(worktree_path)
+        sys.stderr.write(
+            "pre-push doctrine gate: could not overlay the local memory folder (%s) - "
+            "treating as drift (fail-closed).\n" % e)
         return 1, ""
     try:
         probe_script = PROBE_SCRIPT_OVERRIDE or PROBE_SCRIPT
