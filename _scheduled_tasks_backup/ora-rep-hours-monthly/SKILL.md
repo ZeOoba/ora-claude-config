@@ -5,7 +5,7 @@ description: Monthly real estate professional (REP) hour-log check — tallies t
 
 # ORA monthly REP hour-log check
 
-Why it exists: REP status keeps roughly $1.2M a year of rental income out of NIIT (about $45K a year) and made the 2024 Northwood loss deductible. The IRS sustains REP claims on contemporaneous logs, not reconstructions.
+Why it exists: REP status keeps roughly [figure: private] a year of rental income out of NIIT (about [figure: private] a year) and made the 2024 Northwood loss deductible. The IRS sustains REP claims on contemporaneous logs, not reconstructions.
 
 ## Run date and guard
 Compute once: `date '+%A %Y-%m-%d'`. Exit silently unless today is the first weekday (Mon–Fri) of the month.
