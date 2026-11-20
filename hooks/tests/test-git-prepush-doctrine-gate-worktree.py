@@ -538,6 +538,37 @@ finally:
     shutil.rmtree(_repo7, ignore_errors=True)
 
 
+# overlay_local_memory (2026-11-20): memory is local-only (gitignored), so the gate copies
+# the local projects/<scope>/memory/ into the scratch tree -- but never over a memory folder
+# the pushed commit itself carries.
+_src8 = tempfile.mkdtemp(prefix="dg-ovl-src-")
+_dst8 = tempfile.mkdtemp(prefix="dg-ovl-dst-")
+try:
+    os.makedirs(os.path.join(_src8, "projects", "scopeA", "memory"))
+    with open(os.path.join(_src8, "projects", "scopeA", "memory", "event_log.md"), "w") as _f:
+        _f.write("local\n")
+    with open(os.path.join(_src8, "projects", "scopeA", "memory", "event_log.md.lock"), "w") as _f:
+        _f.write("lock\n")
+    os.makedirs(os.path.join(_src8, "projects", "scopeB", "memory"))
+    with open(os.path.join(_src8, "projects", "scopeB", "memory", "MEMORY.md"), "w") as _f:
+        _f.write("local B\n")
+    os.makedirs(os.path.join(_dst8, "projects", "scopeB", "memory"))
+    with open(os.path.join(_dst8, "projects", "scopeB", "memory", "MEMORY.md"), "w") as _f:
+        _f.write("pushed B\n")
+    _n8 = dg.overlay_local_memory(_dst8, repo_root=_src8)
+    expect("overlay: copies a memory folder the pushed tree lacks", _n8 == 1 and os.path.isfile(
+        os.path.join(_dst8, "projects", "scopeA", "memory", "event_log.md")), "n=%r" % _n8)
+    expect("overlay: skips lock/sidecar files", not os.path.exists(
+        os.path.join(_dst8, "projects", "scopeA", "memory", "event_log.md.lock")))
+    with open(os.path.join(_dst8, "projects", "scopeB", "memory", "MEMORY.md")) as _f:
+        expect("overlay: never overwrites memory the pushed commit carries", _f.read() == "pushed B\n")
+    expect("overlay: no projects dir -> 0, no error",
+           dg.overlay_local_memory(_dst8, repo_root=os.path.join(_src8, "nope")) == 0)
+finally:
+    shutil.rmtree(_src8, ignore_errors=True)
+    shutil.rmtree(_dst8, ignore_errors=True)
+
+
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-doctrine-gate-worktree tests: %d/%d passed" % (passed, len(results)))
 sys.exit(0 if passed == len(results) else 1)
