@@ -57,7 +57,16 @@ else:
            True)
 
 # A skipped run must be loud. Silent skipping is how a gate rots into decoration.
-expect("enforcement actually ran (did not skip)", not r.get("skipped"), r)
+# The one tolerated skip: the tracker is genuinely absent (memory folder is local-only
+# since PR 476, so CI / a clean checkout has none) -- verified HERE with os.path, not
+# taken from enforce()'s own reason string.
+if r.get("skipped") and not os.path.isfile(m.DEFAULT_TRACKER):
+    print("  ENV-SKIP oi-id enforcement: %s absent (memory folder is local-only)"
+          % m.DEFAULT_TRACKER)
+    expect("enforce() reports SKIPPED (not a vacuous clean pass) without a tracker",
+           r.get("skipped") is True and not r["violations"] and "tracker" in r.get("reason", ""), r)
+else:
+    expect("enforcement actually ran (did not skip)", not r.get("skipped"), r)
 
 passed = sum(1 for ok, _ in results if ok)
 print("\noi-id enforcement (live) tests: %d/%d passed" % (passed, len(results)))
