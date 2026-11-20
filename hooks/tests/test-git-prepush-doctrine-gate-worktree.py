@@ -552,14 +552,16 @@ try:
             _f.write(_t)
     with open(os.path.join(_src8, "projects", _SC, "memory", "_archive", "old.md"), "w") as _f:
         _f.write("old\n")
-    _long = "C--" + "x" * 150
+    # A second scope must not be copied. Short name on purpose: under the gate's own
+    # TEMP a 150-char name hit MAX_PATH in the FIXTURE itself (WinError 206).
+    _long = "C--other-scope"
     os.makedirs(os.path.join(_src8, "projects", _long, "memory"))
     with open(os.path.join(_src8, "projects", _long, "memory", "a.md"), "w") as _f:
         _f.write("other scope\n")
     _n8 = dg.overlay_local_memory(_dst8, repo_root=_src8)
     expect("overlay: copies the probe's memory scope", _n8 == 1 and os.path.isfile(
         os.path.join(_dst8, "projects", _SC, "memory", "event_log.md")), "n=%r" % _n8)
-    expect("overlay: does NOT copy other (long-named) scopes",
+    expect("overlay: does NOT copy other scopes",
            not os.path.exists(os.path.join(_dst8, "projects", _long)))
     expect("overlay: skips lock/sidecar files and _archive",
            not os.path.exists(os.path.join(_dst8, "projects", _SC, "memory", "event_log.md.lock"))
