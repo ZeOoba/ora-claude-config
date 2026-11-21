@@ -22,6 +22,10 @@ if (Test-Path $canonEnv) {
   $pinLine = Get-Content $canonEnv | Where-Object { $_ -match '^RCT_PIN_KEY=' } | Select-Object -First 1
   if ($pinLine) { $env:RCT_PIN_KEY = ($pinLine -replace '^RCT_PIN_KEY=', '').Trim().Trim('"') }
 }
+# The write-back overlay (acquisition inputs, tenant arrears, deal comps, renewal stages) lives in the shared checkout's
+# gitignored data/overlay.json; main-live has none, and the server's default is <cwd>\data\overlay.json. Point at the
+# shared file explicitly (2026-11-21: a restart left the live server on an empty overlay).
+$env:OVERLAY_PATH = 'C:\Users\Owner\oxford-command-center\data\overlay.json'
 $node = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $node) { $node = (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\OpenJS.NodeJS.LTS_*\node-*\node.exe" | Select-Object -First 1).FullName }
 function Log($m) { "[$(Get-Date -Format s)] $m" | Add-Content $log }
