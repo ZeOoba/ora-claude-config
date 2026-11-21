@@ -286,19 +286,61 @@ def incoming_paths(repo, target_sha):
     return [n for n in names.split("\0") if n] + conflicted
 
 
+def ignored_paths(repo, paths):
+    """The subset of `paths` git's ignore rules match (`check-ignore --no-index`, so a path
+    is judged by the rules alone, tracked or not), or None when check-ignore fails.
+    NUL-separated both ways: newline stdin is CRLF-translated on Windows."""
+    if not paths:
+        return set()
+    try:
+        p = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=repo,
+            input="\0".join(paths) + "\0", capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60,
+            env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode not in (0, 1):  # 1 = nothing ignored
+        return None
+    return set(x for x in (p.stdout or "").split("\0") if x)
+
+
 def untracked_incoming(repo, incoming):
-    """Incoming paths present on disk but NOT tracked here (untracked, including ignored),
-    or None when the tracked set cannot be read. Read-only."""
+    """Incoming paths the merge would write over or newly track without `git status` ever
+    showing local work there, de-duplicated, or None when the tracked or ignored set cannot
+    be read. Read-only. Blocks on, for each incoming path not tracked here:
+      * the path present on disk (untracked, including ignored);
+      * the path git-IGNORED, even when absent locally -- the merge would re-track a
+        local-only location (the memory folder), and judging the rules rather than the
+        disk closes the race with a file created between this check and the merge;
+      * a parent directory of it present on disk as an untracked FILE -- the incoming
+        directory displaces it (OI-409)."""
     rc, out, _ = _git(["ls-files", "-z", "--full-name"], repo)
     if rc != 0:
         return None
     tracked = set(p for p in out.split("\0") if p)
+    candidates = [p for p in incoming if p not in tracked]
+    ignored = ignored_paths(repo, candidates)
+    if ignored is None:
+        return None
     hits = []
-    for p in incoming:
-        if p in tracked:
-            continue
-        if os.path.lexists(os.path.join(repo, *p.split("/"))):
+
+    def add(p):
+        if p not in hits:
             hits.append(p)
+
+    for p in candidates:
+        if p in ignored or os.path.lexists(os.path.join(repo, *p.split("/"))):
+            add(p)
+        parts = p.split("/")
+        for i in range(1, len(parts)):
+            parent = "/".join(parts[:i])
+            if parent in tracked:
+                continue  # a tracked file there is git's own conflict, visible to it
+            fp = os.path.join(repo, *parts[:i])
+            if os.path.islink(fp) or (os.path.lexists(fp) and not os.path.isdir(fp)):
+                add(parent)
+                break
     return hits
 
 
@@ -574,10 +616,12 @@ def sync(repo=None, canonical=None):
         untracked = untracked_incoming(repo, incoming)
         if untracked is None:
             out["status"] = "ERROR"
-            out["detail"] = "cannot list tracked paths (ls-files failed) -- not merging"
+            out["detail"] = ("cannot list tracked or ignored paths (ls-files/check-ignore "
+                             "failed) -- not merging")
             return out
         overlap = untracked
     if overlap:
+        overlap = list(dict.fromkeys(overlap))  # a conflicted path is also a diff name
         out["status"] = "BLOCKED_DIRTY_OVERLAP"
         out["blocked_paths"] = overlap
         out["detail"] = ("%d local path(s) overlap %s; git merge not attempted, tree "

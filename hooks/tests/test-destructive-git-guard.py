@@ -118,6 +118,23 @@ def memory_checkout_checks():
     with open(os.path.join(ch, "README"), "w") as f:
         f.write("side\n")
     git(ch, "commit", "-qam", "side readme")
+    # OI-409 fixtures. `mrg`: a merge commit whose first-parent diff edits memory.
+    git(ch, "checkout", "-q", "-b", "mrg", "side")
+    git(ch, "merge", "-q", "--no-ff", "--no-edit", "stale")
+    # `er`: a range whose net diff is zero -- an edit to memory, then its revert.
+    git(ch, "checkout", "-q", "-b", "er", "old")
+    with open(os.path.join(mem, "note.md"), "w") as f:
+        f.write("er edit\n")
+    git(ch, "commit", "-qam", "er memory edit")
+    git(ch, "revert", "--no-edit", "HEAD")
+    # `del`: a pre-untrack branch that only DELETES memory (merging it writes nothing).
+    git(ch, "checkout", "-q", "-b", "del", "old")
+    git(ch, "rm", "-q", "--cached", "-r", mem_rel)
+    git(ch, "commit", "-qm", "delete memory")
+    git(ch, "tag", "tstale", "stale")
+    git(ch, "checkout", "-q", "-f", "main")
+    git(ch, "remote", "add", "self", ch)
+    git(ch, "fetch", "-q", "self")
     # Leave @{-1} = old for the `checkout -` / `switch -` cases, then restore local memory
     # (switching away from a memory-tracking commit deletes it -- the hazard itself).
     git(ch, "checkout", "-q", "old")
@@ -181,6 +198,7 @@ def memory_checkout_checks():
         check("memory: checkout old -- README (paths only)", "git checkout old -- README",
               ch, False, env=env)
         check("memory: log old (not a move)", "git log -1 old", ch, False, env=env)
+        oi409_checks(ch, home, env)
         # No local memory folder -> nothing to protect -> ALLOW.
         shutil.rmtree(os.path.join(ch, "projects"))
         check("memory: no local memory -> allow", "git checkout old", ch, False, env=env)
@@ -192,6 +210,91 @@ def memory_checkout_checks():
               env=other_env)
     finally:
         shutil.rmtree(home, ignore_errors=True)
+
+
+def oi409_checks(ch, home, env):
+    """OI-409 (PR 476 merge gate round 7): the forms the first memory check missed."""
+    both = ("script", "dispatcher")
+    # Short-flag clusters hiding an option value.
+    check("oi409: checkout -qb x old", "git checkout -qb x old", ch, True, both, env)
+    check("oi409: restore -qs old -- .", "git restore -qs old -- .", ch, True, env=env)
+    check("oi409: restore -Ws old projects", "git restore -Ws old projects", ch, True, env=env)
+    check("oi409: restore -qWsold projects", "git restore -qWsold projects", ch, True, env=env)
+    # Glob / magic pathspecs (ls-tree matched literal prefixes only).
+    check("oi409: checkout old -- '*.md'", "git checkout old -- '*.md'", ch, True, both, env)
+    check("oi409: checkout old -- ':(glob)**'", "git checkout old -- ':(glob)**'", ch, True,
+          env=env)
+    check("oi409: checkout old '*.md' (no --)", "git checkout old '*.md'", ch, True, env=env)
+    check("oi409: restore --source=old ':/projects'", "git restore --source=old ':/projects'",
+          ch, True, env=env)
+    check("oi409: checkout old -- '*.txt' (no memory match)", "git checkout old -- '*.txt'",
+          ch, False, env=env)
+    # From a subdirectory, a relative pathspec only covers that subdirectory.
+    sub = os.path.join(ch, "projects")
+    check("oi409: subdir checkout old -- . (covers memory)", "git checkout old -- .", sub,
+          True, env=env)
+    check("oi409: restore --pathspec-from-file --source=old",
+          "git restore --pathspec-from-file=list.txt --source=old", ch, True, env=env)
+    # cherry-pick / revert of a merge commit with -m N, and X^! single-commit ranges.
+    check("oi409: cherry-pick -m 1 mrg", "git cherry-pick -m 1 mrg", ch, True, both, env)
+    check("oi409: cherry-pick -m1 mrg", "git cherry-pick -m1 mrg", ch, True, env=env)
+    check("oi409: revert -m 1 mrg", "git revert -m 1 mrg", ch, True, env=env)
+    check("oi409: cherry-pick stale^!", "git cherry-pick stale^!", ch, True, env=env)
+    check("oi409: cherry-pick stale ^old", "git cherry-pick stale ^old", ch, True, env=env)
+    check("oi409: cherry-pick side^!", "git cherry-pick side^!", ch, False, env=env)
+    # A range whose net diff is zero still writes memory commit by commit.
+    check("oi409: cherry-pick old..er (edit + revert)", "git cherry-pick old..er", ch, True,
+          env=env)
+    # Bare merge / rebase act on @{u} (= stale here).
+    check("oi409: bare merge (@{u})", "git merge", ch, True, both, env)
+    check("oi409: bare rebase (@{u})", "git rebase", ch, True, env=env)
+    check("oi409: bare merge --ff-only (@{u})", "git merge --ff-only", ch, True, env=env)
+    # pull.rebase / branch.<b>.rebase config turns a pull into a rebase.
+    check("oi409: pull . old (merge: nothing new)", "git pull . old", ch, False, env=env)
+    git(ch, "config", "pull.rebase", "true")
+    check("oi409: pull . old with pull.rebase=true", "git pull . old", ch, True, env=env)
+    check("oi409: pull --no-rebase . old overrides config", "git pull --no-rebase . old", ch,
+          False, env=env)
+    check("oi409: pull --rebase=false . old", "git pull --rebase=false . old", ch, False,
+          env=env)
+    git(ch, "config", "pull.rebase", "false")
+    git(ch, "config", "branch.main.rebase", "true")
+    check("oi409: pull . old with branch.main.rebase=true", "git pull . old", ch, True,
+          env=env)
+    git(ch, "config", "--unset", "branch.main.rebase")
+    git(ch, "config", "--unset", "pull.rebase")
+    # refs/heads/ and refs/tags/ pull specs.
+    check("oi409: pull self refs/heads/stale", "git pull self refs/heads/stale", ch, True,
+          env=env)
+    check("oi409: pull self +refs/heads/stale:refs/remotes/self/stale",
+          "git pull self +refs/heads/stale:refs/remotes/self/stale", ch, True, env=env)
+    check("oi409: pull . refs/tags/tstale", "git pull . refs/tags/tstale", ch, True, env=env)
+    check("oi409: pull self tag tstale", "git pull self tag tstale", ch, True, env=env)
+    check("oi409: pull self refs/heads/side (no memory)", "git pull self refs/heads/side", ch,
+          False, env=env)
+    # Targets only known after the fetch: block while local memory exists.
+    check("oi409: pull self unfetched branch", "git pull self nosuch", ch, True, env=env)
+    check("oi409: pull path remote", "git pull ../elsewhere main", ch, True, env=env)
+    check("oi409: fetch && merge FETCH_HEAD", "git fetch self stale && git merge FETCH_HEAD",
+          ch, True, both, env)
+    check("oi409: fetch src:dst && merge dst", "git fetch self stale:tmp && git merge tmp", ch,
+          True, env=env)
+    check("oi409: fetch && merge unresolvable", "git fetch self && git merge self/nosuch", ch,
+          True, env=env)
+    check("oi409: fetch && reset --hard FETCH_HEAD",
+          "git fetch self stale && git reset --hard FETCH_HEAD", ch, True, env=env)
+    check("oi409: fetch && merge side (resolved, no memory)", "git fetch self && git merge side",
+          ch, False, env=env)
+    check("oi409: merge FETCH_HEAD with no fetch (pre-existing ref)", "git merge nosuch", ch,
+          False, env=env)
+    # --diff-filter=d: a ref that only DELETES memory writes nothing when HEAD lacks it.
+    check("oi409: merge del (deletes memory only)", "git merge del", ch, False, env=env)
+    check("oi409: cherry-pick del (deletes memory only)", "git cherry-pick del", ch, False,
+          env=env)
+    check("oi409: revert del (re-adds memory)", "git revert del", ch, True, env=env)
+    # read-tree two-tree merge with -u.
+    check("oi409: read-tree -u -m HEAD old", "git read-tree -u -m HEAD old", ch, True, both,
+          env)
 
 
 def claude_home_checks():

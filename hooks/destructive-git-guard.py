@@ -13,7 +13,12 @@ work to lose:
     for any ignored path whose name is sensitive -- see _protected_ignored, audit M01)
   * `git checkout|switch <commit>` / `git reset --hard|--keep|--merge <commit>` in the
     claude-home repo onto a commit that still TRACKS the local-only memory folder
-    -> the local memory files (see memory_hazard, PR 476)
+    -> the local memory files (see memory_hazard, PR 476). OI-409 widened it to every
+    form that writes an old tree, path or diff (clustered short flags, glob/magic
+    pathspecs, `-m N` and `X^!` picks, bare merge/rebase, config-driven pull rebases,
+    refs/heads|tags pull specs) and BLOCKS a pull/fetch-then-merge target that only
+    resolves after the fetch -- the one place this guard is not fail-open, because it
+    applies only while local memory exists and nothing about the target is knowable.
 
 WHY (2026-09-22, /insights remediation): a stray `git checkout --` reverted reviewed
 correctness fixes mid-session and they had to be rewritten. CLAUDE.md invariant 6
@@ -217,9 +222,12 @@ MEMORY_SUBS = ("checkout", "switch", "reset", "restore", "merge", "pull", "rebas
                "cherry-pick", "revert", "read-tree")
 # Options whose VALUE is a separate argument (so it is not mistaken for a ref or path).
 _VALUE_OPTS = {
-    "checkout": {"-b", "-B", "--orphan", "--conflict"},
+    "checkout": {"-b", "-B", "--orphan", "--conflict", "--pathspec-from-file"},
     "switch": {"-c", "-C", "--create", "--force-create", "--orphan", "--conflict"},
-    "restore": {"-s", "--source", "--conflict"},
+    "restore": {"-s", "--source", "--conflict", "--pathspec-from-file"},
+    "fetch": {"--depth", "--deepen", "--shallow-since", "--shallow-exclude", "-o",
+              "--server-option", "--upload-pack", "--negotiation-tip", "-j", "--jobs",
+              "--refmap", "--recurse-submodules-default", "--submodule-prefix"},
     "merge": {"-m", "-s", "--strategy", "-X", "--strategy-option", "-F", "--file",
               "--into-name", "--cleanup"},
     "pull": {"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen",
@@ -256,81 +264,186 @@ def _parse_args(sub, args):
                 vals[k] = pre[i + 1]
                 i += 1
         elif a.startswith("-") and len(a) > 1:
-            flags.update("-" + c for c in a[1:])
-            k = "-" + a[1]
-            if k in vopts:
-                if len(a) > 2:
-                    vals[k] = a[2:]
-                elif i + 1 < len(pre):
-                    vals[k] = pre[i + 1]
-                    i += 1
+            # A short-flag CLUSTER: walk every letter. The first value-taking letter takes
+            # the rest of the cluster as its value, or the next argument (OI-409: `-qb x
+            # old` and `-qs old` used to hide the option behind the leading `-q`).
+            for j in range(1, len(a)):
+                k = "-" + a[j]
+                flags.add(k)
+                if k in vopts:
+                    if j + 1 < len(a):
+                        vals[k] = a[j + 1:]
+                    elif i + 1 < len(pre):
+                        vals[k] = pre[i + 1]
+                        i += 1
+                    break
         else:
             pos.append(a)
         i += 1
     return pos, post, vals, flags
 
 
-def memory_plans(sub, args, is_commit):
+_REBASE_TRUE = {"true", "1", "yes", "on", "merges", "m", "interactive", "i", "preserve", "p"}
+# A pathspec that names every path in the repo, whatever the command's directory.
+_ALL_PATHS = [":/"]
+
+
+def _strip_refspec(name):
+    """`refs/heads/X` / `refs/tags/X` -> X (how a fetched branch or tag is named locally)."""
+    for p in ("refs/heads/", "refs/tags/"):
+        if name.startswith(p):
+            return name[len(p):]
+    return name
+
+
+def fetch_targets(args):
+    """Names a `git fetch` in an earlier segment of the same command may (re)point, so a
+    later merge/rebase/reset of them reads PRE-fetch state: FETCH_HEAD plus every refspec
+    destination."""
+    pos, _post, _vals, _flags = _parse_args("fetch", list(args))
+    out = {"FETCH_HEAD"}
+    for spec in pos[1:]:
+        if ":" in spec:
+            dst = spec.lstrip("+").split(":", 1)[1]
+            if dst:
+                out.update((dst, _strip_refspec(dst)))
+    return out
+
+
+def memory_plans(sub, args, is_commit, config=None, fetched=None):
     """[(mode, ref, paths)] -- what this command would write into the worktree.
     'tree':   the worktree becomes ref's tree;            'paths': ref's content for paths;
-    'merge':  ref's changes since the merge-base merge in; 'commit': a commit/range applies.
-    `is_commit(ref)` resolves refs against the repo."""
+    'merge':  ref's changes since the merge-base merge in; 'commit': a commit/range applies
+              (paths carries the mainline parent number for `-m N`, else None);
+    'unresolved': a target that cannot be resolved NOW but will exist once a fetch in this
+              same command (or the pull itself) has run -- nothing can be verified.
+    `is_commit(ref)` resolves refs against the repo; `config(key)` reads git config (None
+    when unset); `fetched` is the set of names an earlier fetch in this command re-points,
+    or None when no fetch precedes this segment."""
     pos, post, vals, flags = _parse_args(sub, list(args))
     if flags & _STOP_OPS:
         return []
+    cfg = config or (lambda key: None)
+
+    def target(ref, mode, paths=None, fetchable=True):
+        """One plan for `ref`, or None. After a fetch in this command, a ref it re-points
+        (or, for fetchable targets, any unresolvable ref) is 'unresolved'."""
+        if fetched is not None and (ref in fetched or _strip_refspec(ref) in fetched):
+            return ("unresolved", ref, None)
+        if is_commit(ref):
+            return (mode, ref, paths)
+        if fetched is not None and fetchable:
+            return ("unresolved", ref, None)
+        return None
+
+    def plans(items):
+        return [p for p in items if p]
+
     if sub == "checkout":
         # A new-branch option's value is a NAME; the start point is the next positional.
-        if post:
-            return [("paths", pos[0], post)] if pos and is_commit(pos[0]) else []
-        if not pos or not is_commit(pos[0]):
-            return []  # nothing, or paths restored from the index
-        return [("tree", pos[0], None)] if len(pos) == 1 else [("paths", pos[0], pos[1:])]
+        from_file = "--pathspec-from-file" in flags
+        if post or from_file:
+            if not pos:
+                return []
+            return plans([target(pos[0], "paths", post or _ALL_PATHS, fetchable=False)])
+        if not pos:
+            return []
+        if len(pos) == 1:
+            return plans([target(pos[0], "tree", fetchable=False)])
+        if not is_commit(pos[0]):
+            return []  # paths restored from the index
+        return [("paths", pos[0], pos[1:])]
     if sub == "switch":
-        return [("tree", r, None) for r in pos if is_commit(r)]
+        return plans([target(r, "tree", fetchable=False) for r in pos])
     if sub == "reset":
         if post or not flags & {"--hard", "--keep", "--merge"}:
             return []
-        return [("tree", r, None) for r in pos if is_commit(r)]
+        return plans([target(r, "tree") for r in pos])
     if sub == "restore":
         src = vals.get("--source") or vals.get("-s")
         staged_only = bool(flags & {"--staged", "-S"}) and not flags & {"--worktree", "-W"}
-        paths = post or pos
-        if not src or staged_only or not paths or not is_commit(src):
+        # `--pathspec-from-file`: the paths are in a file this guard does not read -- all.
+        paths = _ALL_PATHS if "--pathspec-from-file" in flags else (post or pos)
+        if not src or staged_only or not paths:
             return []
-        return [("paths", src, paths)]
+        return plans([target(src, "paths", paths, fetchable=False)])
     if sub == "merge":
-        return [("merge", r, None) for r in pos if is_commit(r)]
+        # Bare `git merge` merges the upstream (merge.defaultToUpstream, on by default).
+        return plans([target(r, "merge") for r in (pos or ["@{u}"])])
     if sub == "pull":
         if len(pos) <= 1:
             refs = ["@{u}"]
         else:
-            refs = []
-            for spec in pos[1:]:
+            refs, specs, i = [], pos[1:], 0
+            while i < len(specs):
+                spec = specs[i]
+                i += 1
+                if spec == "tag" and i < len(specs):
+                    refs.append(specs[i])  # `pull <remote> tag <name>`
+                    i += 1
+                    continue
                 src = spec.lstrip("+").split(":", 1)[0]
                 if not src:
                     refs.append("@{u}")
+                elif src.startswith("refs/tags/"):
+                    refs.append(src[len("refs/tags/"):])
                 elif pos[0] == ".":
-                    refs.append(src)  # `pull . <branch>`: a local branch
+                    refs.append(_strip_refspec(src))  # `pull . <branch>`: a local branch
                 else:
-                    refs.append("%s/%s" % (pos[0], src))
-        mode = "tree" if flags & {"--rebase", "-r"} else "merge"
-        return [(mode, r, None) for r in refs if is_commit(r)]
+                    refs.append("%s/%s" % (pos[0], _strip_refspec(src)))
+        rebase_opt = vals.get("--rebase")
+        if "--no-rebase" in flags or (rebase_opt or "").lower() in ("false", "no", "off", "0"):
+            rebase = False
+        elif "--rebase" in flags or "-r" in flags:
+            rebase = True
+        else:
+            branch = cfg("@branch")
+            setting = (cfg("branch.%s.rebase" % branch) if branch else None)
+            if setting is None:
+                setting = cfg("pull.rebase")
+            rebase = (setting or "").strip().lower() in _REBASE_TRUE
+        mode = "tree" if rebase else "merge"
+        # The pull fetches first: a target that cannot be resolved NOW (a refs/heads or tag
+        # spec, a path remote, an unfetched branch) is only known after the fetch -- with
+        # local memory present that is not an "allow" (OI-409).
+        return [(mode, r, None) if is_commit(r) else ("unresolved", r, None) for r in refs]
     if sub == "rebase":
         refs = ([vals["--onto"]] if "--onto" in vals else []) + pos[:2]
-        return [("tree", r, None) for r in refs if is_commit(r)]
+        if not refs and "--root" not in flags:
+            refs = ["@{u}"]  # bare `git rebase` rebases onto the upstream
+        return plans([target(r, "tree") for r in refs])
     if sub in ("cherry-pick", "revert"):
-        return [("commit", r, None) for r in pos if ".." in r or is_commit(r)]
+        mainline = vals.get("-m") or vals.get("--mainline")
+        mainline = mainline if (mainline or "").isdigit() else None
+        if any(r.startswith("^") for r in pos):
+            # `A ^B` / `^B A`: one revision walk, like a range.
+            return [("commit", " ".join(pos), mainline)]
+        out = []
+        for r in pos:
+            if ".." in r or r.endswith(("^!", "^@")) or "^-" in r:
+                out.append(("commit", r, mainline))
+            else:
+                p = target(r, "commit", mainline)
+                if p:
+                    out.append(p)
+        return out
     if sub == "read-tree":
         if "-u" not in flags or "--prefix" in flags:
             return []
-        return [("tree", r, None) for r in pos if is_commit(r)]
+        return plans([target(r, "tree") for r in pos])
     return []
 
 
-def memory_hazard(repo, sub, args):
+_EMPTY_TREE = {"sha1": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+               "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"}
+
+
+def memory_hazard(repo, sub, args, fetched=None):
     """Lines naming what this command would write into the local-only memory folder, when
     `repo` is the claude-home repo and local memory exists. [] otherwise or on any doubt
-    that is not affirmative evidence (fail-open, like the rest of this guard)."""
+    that is not affirmative evidence (fail-open, like the rest of this guard) -- except a
+    target that only exists after a fetch in the same command, which cannot be checked at
+    all while local memory is at stake (OI-409)."""
     if sub not in MEMORY_SUBS:
         return []
     top = _git(repo, "rev-parse", "--show-toplevel")
@@ -343,23 +456,53 @@ def memory_hazard(repo, sub, args):
     def is_commit(ref):
         return bool(_git(root, "rev-parse", "--verify", "-q", ref + "^{commit}"))
 
+    def config(key):
+        if key == "@branch":
+            b = _git(root, "symbolic-ref", "--short", "-q", "HEAD")
+            return b[0] if b else None
+        v = _git(root, "config", "--get", key)
+        return v[0] if v else None
+
     mem = MEMORY_REL + "/"
+    # When HEAD does not track memory, a change that only DELETES memory writes nothing
+    # into the worktree (OI-409 LOW: false block). For a revert the direction flips: a
+    # reverted ADDITION is the deletion.
+    head_tracks = bool(_git(root, "ls-tree", "--name-only", "HEAD", "--", mem))
+    keep = [] if head_tracks else ["--diff-filter=%s" % ("a" if sub == "revert" else "d")]
     out = []
-    for mode, ref, paths in memory_plans(sub, args, is_commit):
+    for mode, ref, paths in memory_plans(sub, args, is_commit, config, fetched):
+        if mode == "unresolved":
+            out.append("%s target %s cannot be resolved until the fetch in this command has "
+                       "run, so it cannot be checked for old copies of %s/ -- fetch first, "
+                       "then re-run the %s on its own" % (sub, ref, MEMORY_REL, sub))
+            continue
         if mode == "tree":
             hit = _git(root, "ls-tree", "--name-only", ref, "--", mem)
         elif mode == "paths":
-            # Pathspecs are relative to the command's own directory, as git reads them.
-            hit = [x for x in (_git(repo, "ls-tree", "-r", "--full-name", "--name-only", ref,
-                                    "--", *paths) or []) if x.startswith(mem)]
+            # Full pathspec rules (globs, magic, directory-relative), exactly as git reads
+            # them from the command's own directory: everything in `ref` matching them.
+            fmt = _git(root, "rev-parse", "--show-object-format") or ["sha1"]
+            empty = _EMPTY_TREE.get(fmt[0], _EMPTY_TREE["sha1"])
+            hit = [x for x in (_git(repo, "-c", "core.quotepath=off", "diff", "--name-only",
+                                    "--no-renames", empty, ref, "--", *paths) or [])
+                   if x.startswith(mem)]
         elif mode == "merge":
             base = _git(root, "merge-base", "HEAD", ref)
-            hit = _git(root, "diff", "--name-only", base[0], ref, "--", mem) if base else None
-        elif ".." in ref:
-            hit = _git(root, "log", "--format=%H", ref, "--", mem)
+            hit = (_git(root, "diff", "--name-only", "--no-renames", *(keep + [base[0], ref,
+                                                                              "--", mem]))
+                   if base else None)
+        elif " " in ref or ".." in ref or ref.endswith(("^!", "^@")) or "^-" in ref:
+            # A range: every commit in it applies in turn, so an edit later reverted in the
+            # same range still writes memory -- per-commit log, never the net diff.
+            hit = _git(root, "log", "--format=%H", *(["-m"] if paths else []),
+                       *(keep + ref.split() + ["--", mem]))
+        elif paths:
+            # `-m N` of a merge: the change applied is the diff against parent N.
+            hit = _git(root, "diff", "--name-only", "--no-renames",
+                       *(keep + ["%s^%s" % (ref, paths), ref, "--", mem]))
         else:
             hit = _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--root",
-                       ref, "--", mem)
+                       *(keep + [ref, "--", mem]))
         if hit:
             out.append("%s %s would write %d path(s) under %s/ into the worktree -- that "
                        "overwrites the local-only memory with an old copy (and a later move "
@@ -432,6 +575,7 @@ def findings(cmd, cwd):
     except Exception:
         return out
     here = cwd
+    fetched = None  # names a fetch earlier in this command re-points (OI-409)
     for seg in segs:
         if not seg:
             continue
@@ -442,12 +586,20 @@ def findings(cmd, cwd):
         if not sa:
             continue
         sub, args = sa
+        if sub in ("fetch", "pull"):
+            try:
+                names = fetch_targets(args) if sub == "fetch" else {"FETCH_HEAD"}
+            except Exception:
+                names = {"FETCH_HEAD"}
+            fetched = (fetched or set()) | names
+            if sub == "fetch":
+                continue
         cdir = _git_c_dir(seg)
         where = _resolve_dir(cdir, here) if cdir else here
         if where is None:
             continue  # unresolvable directory -> no information -> allow
         try:
-            mem = memory_hazard(where, sub, list(args))
+            mem = memory_hazard(where, sub, list(args), fetched)
         except Exception:
             mem = []
         if mem:
