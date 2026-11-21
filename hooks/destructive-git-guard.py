@@ -244,10 +244,17 @@ _VALUE_OPTS = {
 _STOP_OPS = {"--abort", "--continue", "--quit", "--skip", "--edit-todo", "--show-current-patch"}
 
 
-def _parse_args(sub, args):
+def _parse_args(sub, args, every=None):
     """(positionals, post_dashdash, {option: value}, flags) for one invocation. A bare "-"
-    is the previous branch (@{-1}); options that take a value consume it."""
+    is the previous branch (@{-1}); options that take a value consume it. `vals` keeps the
+    LAST value of a repeated option; pass a dict as `every` to also collect all of them."""
     vopts = _VALUE_OPTS.get(sub, set())
+
+    def put(k, v):
+        vals[k] = v
+        if every is not None:
+            every.setdefault(k, []).append(v)
+
     pre, post = _split_dashdash(args)
     pos, vals, flags = [], {}, set()
     i = 0
@@ -259,9 +266,9 @@ def _parse_args(sub, args):
             k, eq, v = a.partition("=")
             flags.add(k)
             if eq:
-                vals[k] = v
+                put(k, v)
             elif k in vopts and i + 1 < len(pre):
-                vals[k] = pre[i + 1]
+                put(k, pre[i + 1])
                 i += 1
         elif a.startswith("-") and len(a) > 1:
             # A short-flag CLUSTER: walk every letter. The first value-taking letter takes
@@ -272,9 +279,9 @@ def _parse_args(sub, args):
                 flags.add(k)
                 if k in vopts:
                     if j + 1 < len(a):
-                        vals[k] = a[j + 1:]
+                        put(k, a[j + 1:])
                     elif i + 1 < len(pre):
-                        vals[k] = pre[i + 1]
+                        put(k, pre[i + 1])
                         i += 1
                     break
         else:
@@ -286,75 +293,318 @@ def _parse_args(sub, args):
 _REBASE_TRUE = {"true", "1", "yes", "on", "merges", "m", "interactive", "i", "preserve", "p"}
 # A pathspec that names every path in the repo, whatever the command's directory.
 _ALL_PATHS = [":/"]
+_UNRESOLVED = object()
+# The ONLY options under which `git rebase <ancestor-of-HEAD>` is still the "Current branch
+# is up to date" no-op. An allowlist: many options force a real rebase (--signoff,
+# --ignore-date, --whitespace=..., -i, -f, --onto, ...), which checks out the old tree.
+_REBASE_NOOP_OPTS = {"-q", "--quiet", "-v", "--verbose", "-n", "--no-stat", "--stat",
+                     "--autostash", "--no-autostash", "--no-verify", "--verify"}
+# Same for `git pull --rebase <ancestor>` (pull's own options it does not pass on).
+_PULL_NOOP_OPTS = _REBASE_NOOP_OPTS | {"--rebase", "-r"}
+_ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def _strip_refspec(name):
-    """`refs/heads/X` / `refs/tags/X` -> X (how a fetched branch or tag is named locally)."""
-    for p in ("refs/heads/", "refs/tags/"):
+    """`refs/heads/X` / `refs/tags/X` -> X, `refs/remotes/R/X` -> R/X (how a ref is named
+    for rev-parse)."""
+    for p in ("refs/heads/", "refs/tags/", "refs/remotes/"):
         if name.startswith(p):
             return name[len(p):]
     return name
 
 
-def fetch_targets(args):
-    """Names a `git fetch` in an earlier segment of the same command may (re)point, so a
-    later merge/rebase/reset of them reads PRE-fetch state: FETCH_HEAD plus every refspec
-    destination."""
-    pos, _post, _vals, _flags = _parse_args("fetch", list(args))
-    out = {"FETCH_HEAD"}
-    for spec in pos[1:]:
-        if ":" in spec:
-            dst = spec.lstrip("+").split(":", 1)[1]
-            if dst:
-                out.update((dst, _strip_refspec(dst)))
+def _is_network_url(url):
+    """True for a URL git reaches over the network (https://, ssh://, git@host:path);
+    False for a local path, `file://` or `.` -- whose refs can hold ANY old history."""
+    u = (url or "").strip()
+    if not u or u.startswith("file://"):
+        return False
+    if "://" in u:
+        return True
+    return bool(re.match(r"^[^/\\:]+:", u)) and not re.match(r"^[A-Za-z]:", u)
+
+
+def _norm_key(key):
+    """git config key normalization: section and variable are case-insensitive, a
+    subsection (branch name) is not."""
+    parts = key.split(".")
+    if len(parts) >= 3:
+        return ".".join([parts[0].lower()] + parts[1:-1] + [parts[-1].lower()])
+    return key.lower()
+
+
+def segment_config(seg):
+    """{normalized key: value} from `git -c k=v` options in this segment; None when the
+    segment sets git config through the environment (GIT_CONFIG_*, --config-env), which
+    this guard does not model -- callers then assume the worst case."""
+    out = {}
+    i = 0
+    while i < len(seg) and _ENV_ASSIGN.match(seg[i]):
+        if seg[i].upper().startswith("GIT_CONFIG"):
+            return None
+        i += 1
+    if i >= len(seg) or seg[i] != "git":
+        return out
+    i += 1
+    while i < len(seg) and seg[i].startswith("-"):
+        t = seg[i]
+        if t.startswith("--config-env"):
+            return None
+        if t == "-c" and i + 1 < len(seg):
+            k, eq, v = seg[i + 1].partition("=")
+            out[_norm_key(k)] = v if eq else "true"
+            i += 2
+        elif t in ("-C", "--git-dir", "--work-tree", "--namespace"):
+            i += 2
+        else:
+            i += 1
     return out
 
 
-def memory_plans(sub, args, is_commit, config=None, fetched=None):
+class _Repo(object):
+    """Read-only git probes for one claude-home repo, with this segment's `-c` overrides
+    (None = config set through the environment: unknown)."""
+
+    def __init__(self, root, overrides):
+        self.root = root
+        self.overrides = overrides
+
+    def config(self, key):
+        if self.overrides and _norm_key(key) in self.overrides:
+            return self.overrides[_norm_key(key)]
+        v = _git(self.root, "config", "--get", key)
+        return v[0] if v else None
+
+    def branch(self):
+        b = _git(self.root, "symbolic-ref", "--short", "-q", "HEAD")
+        return b[0] if b else None
+
+    def is_commit(self, ref):
+        return bool(_git(self.root, "rev-parse", "--verify", "-q", ref + "^{commit}"))
+
+    def is_treeish(self, ref):
+        return bool(_git(self.root, "rev-parse", "--verify", "-q", ref + "^{tree}"))
+
+    def is_ancestor(self, ref):
+        return _git(self.root, "merge-base", "--is-ancestor", ref, "HEAD") is not None
+
+    def upstream_name(self):
+        u = _git(self.root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+        return u[0] if u else None
+
+    def remote_is_local(self, name):
+        """A configured remote (or a URL/path given in its place) that is NOT a network
+        remote. Since the 2026-11-20 history purge no network remote (GitHub) carries
+        memory, so its remote-tracking refs are judged as they stand before a fetch; a
+        LOCAL remote can serve any old branch, so what it fetches is unknowable."""
+        if name == ".":
+            return True
+        url = self.config("remote.%s.url" % name)
+        return not _is_network_url(url if url is not None else name)
+
+    def dwim_remote_refs(self, name):
+        """`git checkout|switch <name>` with no local <name>: git creates it from
+        refs/remotes/<remote>/<name> (--guess, the default)."""
+        out = []
+        for full in (_git(self.root, "for-each-ref", "--format=%(refname)",
+                          "refs/remotes/*/" + name) or []):
+            parts = full.split("/")
+            if len(parts) >= 4 and full == "refs/remotes/%s/%s" % (parts[2], name):
+                out.append(full[len("refs/remotes/"):])
+        return out
+
+
+def _ref_candidates(name):
+    """Every full ref name git's revision rules may resolve `name` to (gitrevisions(7):
+    <name>, refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>,
+    refs/remotes/<name>/HEAD). Matching fetch state against ALL of them covers every
+    spelling of a ref (`imp/x`, `heads/imp/x`, `refs/heads/imp/x`, `remotes/r/x`) at once,
+    instead of normalizing spellings one by one (merge gate N1-N3)."""
+    if name.startswith("refs/"):
+        return [name]
+    return [name, "refs/" + name, "refs/tags/" + name, "refs/heads/" + name,
+            "refs/remotes/" + name, "refs/remotes/%s/HEAD" % name]
+
+
+def _full_dst(dst):
+    """A fetch refspec destination as full ref name(s). git DWIMs a bare destination to a
+    branch or a tag (by the source's type): cover both."""
+    if dst.startswith("refs/"):
+        return [dst]
+    return ["refs/heads/" + dst, "refs/tags/" + dst]
+
+
+def fetch_effects(repo, sub, args, state):
+    """Fold one `git fetch` / `git pull` segment into `state`, the record of what later
+    segments of the same command must treat as re-pointed (OI-409):
+      unresolved -- FULL ref names (and FETCH_HEAD) whose post-fetch value is unknowable;
+      prefixes   -- FULL ref-name prefixes re-pointed wholesale: every remote-tracking ref
+                    of a LOCAL remote (`refs/remotes/self/`), or a glob destination;
+      aliases    -- FETCH_HEAD and network refspec destinations (full names) -> the
+                    remote-tracking ref they will equal, judged pre-fetch."""
+    pos, post, _vals, flags = _parse_args(sub, list(args))
+    pos = pos + post  # fetch/pull take no pathspecs: words after `--` are remote + refspecs
+    state["unresolved"].add("FETCH_HEAD")
+    if flags & {"--all", "--multiple"}:
+        # --all: every remote. --multiple: each word is a remote OR a remote group; a name
+        # that is not a configured remote (a group, a path) cannot be ruled out -- local.
+        for r in (_git(repo.root, "remote") or []) if ("--all" in flags or not pos) else []:
+            if repo.remote_is_local(r):
+                state["prefixes"].add("refs/remotes/%s/" % r)
+                state["local"] = True
+        for r in pos if "--all" not in flags else []:
+            if repo.config("remote.%s.url" % r) is None or repo.remote_is_local(r):
+                state["prefixes"].add("refs/remotes/%s/" % r)
+                state["local"] = True
+        return
+    br = repo.branch()
+    remote = pos[0] if pos else (repo.config("branch.%s.remote" % br) if br else None)
+    remote = remote or "origin"
+    specs = pos[1:]
+
+    def mark_dsts():
+        for spec in specs:
+            if ":" in spec:
+                dst = spec.lstrip("+").split(":", 1)[1]
+                if "*" in dst:
+                    # A glob destination (`refs/remotes/gh/*`) re-points every ref under
+                    # its prefix: track the prefix, not the literal pattern.
+                    state["prefixes"].update(_full_dst(dst.split("*", 1)[0]))
+                elif dst:
+                    state["unresolved"].update(_full_dst(dst))
+
+    if remote == "." or repo.remote_is_local(remote):
+        # A LOCAL fetch can re-point any ref, under any spelling git accepts (prefixes,
+        # globs, `heads/`, `^0`, `~0`, `^{commit}`...): matching names one form at a time
+        # never converged (merge gate N1-N4). After one, every later write target in the
+        # same command is unknowable; the prefixes/unresolved below are kept as detail.
+        state["local"] = True
+        if remote != "." and repo.config("remote.%s.url" % remote) is not None:
+            state["prefixes"].add("refs/remotes/%s/" % remote)
+        mark_dsts()
+        return
+    if sub == "pull":
+        return
+    configured = repo.config("remote.%s.url" % remote) is not None
+
+    def tracking(src):
+        if src.startswith("refs/tags/"):
+            return src[len("refs/tags/"):]
+        return "%s/%s" % (remote, _strip_refspec(src)) if configured else _UNRESOLVED
+
+    first = None
+    i = 0
+    while i < len(specs):
+        spec = specs[i]
+        i += 1
+        if spec == "tag" and i < len(specs):
+            src, dst = "refs/tags/" + specs[i], None
+            i += 1
+        else:
+            src, _c, dst = spec.lstrip("+").partition(":")
+        t = tracking(src) if src else _UNRESOLVED
+        if first is None:
+            first = t
+        if dst:
+            for full in _full_dst(dst):
+                state["aliases"][full] = t
+    if first is None:
+        up = repo.upstream_name()
+        bremote = repo.config("branch.%s.remote" % br) if br else None
+        first = up if (up and bremote == remote) else _UNRESOLVED
+    state["aliases"]["FETCH_HEAD"] = first
+    state["unresolved"].discard("FETCH_HEAD")
+
+
+def memory_plans(sub, args, repo, fetched=None):
     """[(mode, ref, paths)] -- what this command would write into the worktree.
     'tree':   the worktree becomes ref's tree;            'paths': ref's content for paths;
     'merge':  ref's changes since the merge-base merge in; 'commit': a commit/range applies
               (paths carries the mainline parent number for `-m N`, else None);
-    'unresolved': a target that cannot be resolved NOW but will exist once a fetch in this
-              same command (or the pull itself) has run -- nothing can be verified.
-    `is_commit(ref)` resolves refs against the repo; `config(key)` reads git config (None
-    when unset); `fetched` is the set of names an earlier fetch in this command re-points,
-    or None when no fetch precedes this segment."""
-    pos, post, vals, flags = _parse_args(sub, list(args))
+    'unresolved': a target that cannot be known NOW -- it comes from a local remote, or
+              from a fetch earlier in this same command -- so nothing can be verified.
+    `repo` is a _Repo; `fetched` is the fetch_effects state of earlier segments, or None
+    when no fetch precedes this segment."""
+    every = {}
+    pos, post, vals, flags = _parse_args(sub, list(args), every)
     if flags & _STOP_OPS:
         return []
-    cfg = config or (lambda key: None)
 
-    def target(ref, mode, paths=None, fetchable=True):
-        """One plan for `ref`, or None. After a fetch in this command, a ref it re-points
-        (or, for fetchable targets, any unresolvable ref) is 'unresolved'."""
-        if fetched is not None and (ref in fetched or _strip_refspec(ref) in fetched):
-            return ("unresolved", ref, None)
-        if is_commit(ref):
-            return (mode, ref, paths)
+    def target(ref, mode, paths=None, fetchable=True, tree=False):
+        """One plan for `ref`, or None (not a ref: git fails or reads it as a path)."""
+        ev = ref
+        if fetched is not None:
+            if fetched.get("local"):
+                return ("unresolved", ref, None)
+            # Match on the ref's BASE name: `FETCH_HEAD^0`, `x~2`, `t^{commit}` and `x:path`
+            # name the same re-pointed ref (merge gate N4).
+            if ref.startswith(("@{u}", "@{upstream}")):
+                base = "@{u}"
+                suffix = ref[len("@{upstream}" if ref.startswith("@{upstream}") else "@{u}"):]
+            else:
+                base = re.split(r"[~^:]|@\{", ref, 1)[0] or ref
+                suffix = ref[len(base):]
+            cands = _ref_candidates(base)
+            al = next((fetched["aliases"][c] for c in cands if c in fetched["aliases"]), None)
+            if al is _UNRESOLVED:
+                return ("unresolved", ref, None)
+            if al:
+                ev = al + suffix
+                base = al
+                cands = _ref_candidates(al)
+            if base in ("@{u}", "@{upstream}"):
+                up = repo.upstream_name()
+                cands = _ref_candidates(up) if up else []
+            if any(c in fetched["unresolved"]
+                   or any(c.startswith(p) for p in fetched["prefixes"]) for c in cands):
+                return ("unresolved", ref, None)
+        if repo.is_treeish(ev) if tree else repo.is_commit(ev):
+            return (mode, ev, paths)
         if fetched is not None and fetchable:
             return ("unresolved", ref, None)
         return None
+
+    def switch_target(ref, guess):
+        p = target(ref, "tree", fetchable=False)
+        if p or not guess:
+            return [p] if p else []
+        # --guess (the default): no local <ref>, so git creates it from
+        # refs/remotes/*/<ref> and writes that tree.
+        guessed = repo.dwim_remote_refs(ref)
+        if not guessed and fetched is not None and (
+                fetched["prefixes"]
+                or any(n.endswith("/" + ref) for n in fetched["unresolved"])):
+            # A fetch from a LOCAL remote earlier in this command may create
+            # refs/remotes/<remote>/<ref> (its own namespace, or a `src:dst` into another
+            # remote's), which DWIM would then check out.
+            return [("unresolved", ref, None)]
+        return [q for q in (target(r, "tree", fetchable=False) for r in guessed) if q]
 
     def plans(items):
         return [p for p in items if p]
 
     if sub == "checkout":
         # A new-branch option's value is a NAME; the start point is the next positional.
-        from_file = "--pathspec-from-file" in flags
-        if post or from_file:
+        if post or "--pathspec-from-file" in flags:
             if not pos:
                 return []
-            return plans([target(pos[0], "paths", post or _ALL_PATHS, fetchable=False)])
+            return plans([target(pos[0], "paths", post or _ALL_PATHS, fetchable=False,
+                                 tree=True)])
         if not pos:
             return []
         if len(pos) == 1:
-            return plans([target(pos[0], "tree", fetchable=False)])
-        if not is_commit(pos[0]):
-            return []  # paths restored from the index
-        return [("paths", pos[0], pos[1:])]
+            guess = not (flags & {"--no-guess", "-b", "-B", "--orphan", "--detach"})
+            return switch_target(pos[0], guess)
+        # `checkout <tree-ish> <paths>`; a non-tree-ish first word means paths from index.
+        return plans([target(pos[0], "paths", pos[1:], fetchable=False, tree=True)])
     if sub == "switch":
-        return plans([target(r, "tree", fetchable=False) for r in pos])
+        guess = len(pos) == 1 and not (flags & {"--no-guess", "-c", "-C", "--create",
+                                                "--force-create", "--orphan", "-d",
+                                                "--detach"})
+        out = []
+        for r in pos:
+            out.extend(switch_target(r, guess))
+        return out
     if sub == "reset":
         if post or not flags & {"--hard", "--keep", "--merge"}:
             return []
@@ -366,12 +616,22 @@ def memory_plans(sub, args, is_commit, config=None, fetched=None):
         paths = _ALL_PATHS if "--pathspec-from-file" in flags else (post or pos)
         if not src or staged_only or not paths:
             return []
-        return plans([target(src, "paths", paths, fetchable=False)])
+        return plans([target(src, "paths", paths, fetchable=False, tree=True)])
     if sub == "merge":
+        # `-s ours` keeps HEAD's tree exactly: nothing is written.
+        strategies = every.get("-s", []) + every.get("--strategy", [])
+        if strategies and all(x == "ours" for x in strategies):
+            return []
         # Bare `git merge` merges the upstream (merge.defaultToUpstream, on by default).
         return plans([target(r, "merge") for r in (pos or ["@{u}"])])
     if sub == "pull":
-        if len(pos) <= 1:
+        pos = pos + post  # no pathspecs: words after `--` are remote + refspecs
+        br = repo.branch()
+        implicit = len(pos) <= 1
+        remote = pos[0] if pos else (repo.config("branch.%s.remote" % br) if br else None)
+        if remote is None:
+            return []  # no upstream: git refuses the pull
+        if implicit:
             refs = ["@{u}"]
         else:
             refs, specs, i = [], pos[1:], 0
@@ -387,31 +647,57 @@ def memory_plans(sub, args, is_commit, config=None, fetched=None):
                     refs.append("@{u}")
                 elif src.startswith("refs/tags/"):
                     refs.append(src[len("refs/tags/"):])
-                elif pos[0] == ".":
+                elif remote == ".":
                     refs.append(_strip_refspec(src))  # `pull . <branch>`: a local branch
                 else:
-                    refs.append("%s/%s" % (pos[0], _strip_refspec(src)))
-        rebase_opt = vals.get("--rebase")
-        if "--no-rebase" in flags or (rebase_opt or "").lower() in ("false", "no", "off", "0"):
-            rebase = False
+                    refs.append("%s/%s" % (remote, _strip_refspec(src)))
+        rebase_opt = (vals.get("--rebase") or "").lower()
+        if "--no-rebase" in flags or rebase_opt in ("false", "no", "off", "0"):
+            modes = ["merge"]
         elif "--rebase" in flags or "-r" in flags:
-            rebase = True
+            modes = ["tree"]
+        elif repo.overrides is None:
+            modes = ["merge", "tree"]  # config set through the environment: assume either
+            rebase_opt = "unknown"
         else:
-            branch = cfg("@branch")
-            setting = (cfg("branch.%s.rebase" % branch) if branch else None)
+            setting = repo.config("branch.%s.rebase" % br) if br else None
             if setting is None:
-                setting = cfg("pull.rebase")
-            rebase = (setting or "").strip().lower() in _REBASE_TRUE
-        mode = "tree" if rebase else "merge"
-        # The pull fetches first: a target that cannot be resolved NOW (a refs/heads or tag
-        # spec, a path remote, an unfetched branch) is only known after the fetch -- with
-        # local memory present that is not an "allow" (OI-409).
-        return [(mode, r, None) if is_commit(r) else ("unresolved", r, None) for r in refs]
+                setting = repo.config("pull.rebase")
+            rebase_opt = (setting or "").strip().lower()
+            modes = ["tree"] if rebase_opt in _REBASE_TRUE else ["merge"]
+        plain_rebase = (rebase_opt in ("", "true", "1", "yes", "on")
+                        and flags <= _PULL_NOOP_OPTS)
+        # A LOCAL remote can serve any old branch: what the pull fetches is unknowable.
+        # A network remote (no memory since the purge) is judged by its remote-tracking
+        # ref before the fetch; a target that does not resolve yet is unknowable too.
+        local_remote = remote != "." and repo.remote_is_local(remote)
+        out = []
+        for r in refs:
+            if local_remote:
+                out.append(("unresolved", "%s %s" % (remote, r), None))
+                continue
+            if not repo.is_commit(r):
+                if not implicit:
+                    out.append(("unresolved", r, None))
+                continue
+            for mode in modes:
+                if mode == "tree" and plain_rebase and repo.is_ancestor(r):
+                    continue  # rebasing onto an ancestor of HEAD is a no-op
+                out.append((mode, r, None))
+        return out
     if sub == "rebase":
         refs = ([vals["--onto"]] if "--onto" in vals else []) + pos[:2]
         if not refs and "--root" not in flags:
-            refs = ["@{u}"]  # bare `git rebase` rebases onto the upstream
-        return plans([target(r, "tree") for r in refs])
+            refs = ["@{u}"]  # bare `git rebase` rebases onto the upstream (fork-point)
+        noop_ok = len(pos) == 1 and flags <= _REBASE_NOOP_OPTS
+        out = []
+        for r in refs:
+            p = target(r, "tree")
+            if p and noop_ok and p[0] == "tree" and repo.is_ancestor(p[1]):
+                continue  # `git rebase <ancestor of HEAD>`: "Current branch is up to date"
+            if p:
+                out.append(p)
+        return out
     if sub in ("cherry-pick", "revert"):
         mainline = vals.get("-m") or vals.get("--mainline")
         mainline = mainline if (mainline or "").isdigit() else None
@@ -430,7 +716,7 @@ def memory_plans(sub, args, is_commit, config=None, fetched=None):
     if sub == "read-tree":
         if "-u" not in flags or "--prefix" in flags:
             return []
-        return plans([target(r, "tree") for r in pos])
+        return plans([target(r, "tree", tree=True) for r in pos])
     return []
 
 
@@ -438,12 +724,14 @@ _EMPTY_TREE = {"sha1": "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
                "sha256": "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321"}
 
 
-def memory_hazard(repo, sub, args, fetched=None):
+def memory_hazard(repo, sub, args, fetches=None, overrides=None):
     """Lines naming what this command would write into the local-only memory folder, when
     `repo` is the claude-home repo and local memory exists. [] otherwise or on any doubt
     that is not affirmative evidence (fail-open, like the rest of this guard) -- except a
-    target that only exists after a fetch in the same command, which cannot be checked at
-    all while local memory is at stake (OI-409)."""
+    target whose content cannot be known before the command runs (a local remote, or a
+    fetch earlier in the same command), which cannot be checked at all while local memory
+    is at stake (OI-409). `fetches` lists the (sub, args) of earlier fetch/pull segments;
+    `overrides` is this segment's `git -c` config (None = set through the environment)."""
     if sub not in MEMORY_SUBS:
         return []
     top = _git(repo, "rev-parse", "--show-toplevel")
@@ -452,16 +740,12 @@ def memory_hazard(repo, sub, args, fetched=None):
     root = top[0]
     if not os.path.isdir(os.path.join(root, *MEMORY_REL.split("/"))):
         return []
-
-    def is_commit(ref):
-        return bool(_git(root, "rev-parse", "--verify", "-q", ref + "^{commit}"))
-
-    def config(key):
-        if key == "@branch":
-            b = _git(root, "symbolic-ref", "--short", "-q", "HEAD")
-            return b[0] if b else None
-        v = _git(root, "config", "--get", key)
-        return v[0] if v else None
+    rp = _Repo(root, overrides)
+    fetched = None
+    for fsub, fargs in (fetches or []):
+        fetched = fetched or {"unresolved": set(), "prefixes": set(), "aliases": {},
+                              "local": False}
+        fetch_effects(_Repo(root, {}), fsub, fargs, fetched)
 
     mem = MEMORY_REL + "/"
     # When HEAD does not track memory, a change that only DELETES memory writes nothing
@@ -470,11 +754,12 @@ def memory_hazard(repo, sub, args, fetched=None):
     head_tracks = bool(_git(root, "ls-tree", "--name-only", "HEAD", "--", mem))
     keep = [] if head_tracks else ["--diff-filter=%s" % ("a" if sub == "revert" else "d")]
     out = []
-    for mode, ref, paths in memory_plans(sub, args, is_commit, config, fetched):
+    for mode, ref, paths in memory_plans(sub, args, rp, fetched):
         if mode == "unresolved":
-            out.append("%s target %s cannot be resolved until the fetch in this command has "
-                       "run, so it cannot be checked for old copies of %s/ -- fetch first, "
-                       "then re-run the %s on its own" % (sub, ref, MEMORY_REL, sub))
+            out.append("%s target %s cannot be known before the command runs (a local "
+                       "remote, or a fetch earlier in this command), so it cannot be checked "
+                       "for old copies of %s/ -- fetch on its own first, then re-run the %s "
+                       "against the fetched ref" % (sub, ref, MEMORY_REL, sub))
             continue
         if mode == "tree":
             hit = _git(root, "ls-tree", "--name-only", ref, "--", mem)
@@ -575,7 +860,7 @@ def findings(cmd, cwd):
     except Exception:
         return out
     here = cwd
-    fetched = None  # names a fetch earlier in this command re-points (OI-409)
+    fetches = []  # (sub, args) of fetch/pull segments earlier in this command (OI-409)
     for seg in segs:
         if not seg:
             continue
@@ -586,24 +871,29 @@ def findings(cmd, cwd):
         if not sa:
             continue
         sub, args = sa
-        if sub in ("fetch", "pull"):
-            try:
-                names = fetch_targets(args) if sub == "fetch" else {"FETCH_HEAD"}
-            except Exception:
-                names = {"FETCH_HEAD"}
-            fetched = (fetched or set()) | names
-            if sub == "fetch":
-                continue
+        if sub == "fetch":
+            fetches.append((sub, list(args)))
+            continue
+        words = [a for a in args if not a.startswith("-")] if sub == "remote" else []
+        if words and words[0] == "update":
+            # `git remote [-v] update [<remote|group>...]` fetches them all (merge gate N5,
+            # N7): the subcommand is the first non-option word.
+            names = words[1:]
+            fetches.append(("fetch", ["--multiple"] + names if names else ["--all"]))
+            continue
         cdir = _git_c_dir(seg)
         where = _resolve_dir(cdir, here) if cdir else here
         if where is None:
             continue  # unresolvable directory -> no information -> allow
         try:
-            mem = memory_hazard(where, sub, list(args), fetched)
+            mem = memory_hazard(where, sub, list(args), list(fetches),
+                                segment_config(seg))
         except Exception:
             mem = []
         if mem:
             out.append((" ".join(["git", sub] + list(args))[:200], where, mem))
+        if sub == "pull":
+            fetches.append((sub, list(args)))
         c = classify(sub, list(args))
         if not c:
             continue

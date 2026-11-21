@@ -152,12 +152,21 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 
 DEFAULT_REPO = r"C:\Users\Owner\.claude"
 DEFAULT_CANONICAL = "main"
+# PR 476 / OI-409: the memory folder is LOCAL-ONLY (gitignored, untracked) in this public
+# repo; an incoming commit that tracks anything under it must never be merged. Same
+# constant as hooks/destructive-git-guard.py MEMORY_REL.
+MEMORY_REL = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory"
+# Names that mark a file as secret or local-only wherever it sits (the destructive guard's
+# sensitive-name family plus the `*.local.*` convention used by contacts.local.md etc.).
+LOCAL_ONLY_NAME_RE = re.compile(r"(credentials|\.env|password|confidential-terms|\.local\.)",
+                                re.I)
 SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
 # Second header: origin turns a tracked directory into a file while local
 # untracked files sit inside it.
@@ -305,22 +314,35 @@ def ignored_paths(repo, paths):
     return set(x for x in (p.stdout or "").split("\0") if x)
 
 
+def _local_only_location(path):
+    """A path that must stay local-only in this public repo: anything under the memory
+    folder, or a file whose NAME marks it as secret/local (same family as the destructive
+    guard's sensitive-name rule, plus the `*.local.*` convention)."""
+    return path.startswith(MEMORY_REL + "/") or bool(
+        LOCAL_ONLY_NAME_RE.search(path.rsplit("/", 1)[-1]))
+
+
 def untracked_incoming(repo, incoming):
     """Incoming paths the merge would write over or newly track without `git status` ever
     showing local work there, de-duplicated, or None when the tracked or ignored set cannot
     be read. Read-only. Blocks on, for each incoming path not tracked here:
       * the path present on disk (untracked, including ignored);
-      * the path git-IGNORED, even when absent locally -- the merge would re-track a
-        local-only location (the memory folder), and judging the rules rather than the
-        disk closes the race with a file created between this check and the merge;
+      * the path under the local-only memory folder, even when absent locally -- the merge
+        would re-track memory in this public repo -- and a local-only-NAMED path the local
+        ignore rules cover, also when absent. For these, judging the path and the rules
+        rather than the disk closes the race with a file created between this check and
+        the merge, as long as the ignore rules themselves do not change in that window;
       * a parent directory of it present on disk as an untracked FILE -- the incoming
-        directory displaces it (OI-409)."""
+        directory displaces it (OI-409).
+    Any OTHER ignored-but-absent incoming path is ordinary history in this default-deny
+    repo (a new file plus its `!` rule, a force-added archive): blocking it would pin the
+    checkout for good, since the local rules only change when a merge lands."""
     rc, out, _ = _git(["ls-files", "-z", "--full-name"], repo)
     if rc != 0:
         return None
     tracked = set(p for p in out.split("\0") if p)
     candidates = [p for p in incoming if p not in tracked]
-    ignored = ignored_paths(repo, candidates)
+    ignored = ignored_paths(repo, [p for p in candidates if _local_only_location(p)])
     if ignored is None:
         return None
     hits = []
@@ -330,7 +352,8 @@ def untracked_incoming(repo, incoming):
             hits.append(p)
 
     for p in candidates:
-        if p in ignored or os.path.lexists(os.path.join(repo, *p.split("/"))):
+        if (p.startswith(MEMORY_REL + "/") or p in ignored
+                or os.path.lexists(os.path.join(repo, *p.split("/")))):
             add(p)
         parts = p.split("/")
         for i in range(1, len(parts)):
@@ -621,7 +644,6 @@ def sync(repo=None, canonical=None):
             return out
         overlap = untracked
     if overlap:
-        overlap = list(dict.fromkeys(overlap))  # a conflicted path is also a diff name
         out["status"] = "BLOCKED_DIRTY_OVERLAP"
         out["blocked_paths"] = overlap
         out["detail"] = ("%d local path(s) overlap %s; git merge not attempted, tree "
