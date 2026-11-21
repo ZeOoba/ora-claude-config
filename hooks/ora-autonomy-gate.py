@@ -66,9 +66,12 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
            address, or any stray address outside the prose fields, that is not one plain
            @oxfordra.net address needs an external-send token naming it; no external address ->
            pass. update (UPDATE or RSVP): always gated, existing attendees are invisible to the
-           hook; the token names `event:<eventId>` for every update in the call (plus any external
-           attendee). Unknown keys and malformed shapes fail closed. cancel-events is ids-only and
-           belongs to mcp-delete-guard. Override: allow-external-send (same tier as GATE 1).
+           hook; the token names `ncal-<update|rsvp>:<eventId>:<sha256[:16] of the whole input>`
+           for every update in the call and nothing else (Gate 1d parity), so an approval for one
+           call cannot be spent on another or on a subset; outside parties the call names are
+           shown in the block message, display-only. An eventId outside printable ASCII, or with
+           a space (leading/trailing included), ',' or ';', fails closed. Unknown keys and malformed shapes fail closed.
+           cancel-events is ids-only and belongs to mcp-delete-guard. Override: allow-external-send (same tier as GATE 1).
   Gates 1b/1c/1d/1e/1f/1g/3/3b match on the tool-name SUFFIX after the last "__", so a reinstalled
   connector with a new id stays gated. They fail CLOSED on any anomaly once a gated tool is
   named, including a payload too malformed to parse. This gate covers Claude Code sessions
@@ -100,8 +103,8 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
          outlook_send_mail recipient also authorizes teams_create_chat naming that same address.
          (A send into the resulting chat still needs its own `teams:<chatId>` token.) Gate 1d's
          update/delete/respond, vacation and filter tokens ARE bound to the operation and the
-         exact input (digest); create_event, Gate 1b/1e/1f recipient tokens, `draft:` / `teams:`
-         id tokens and Gate 1g's Notion `event:<eventId>` tokens are not.
+         exact input (digest), as are Gate 1g's Notion update/RSVP tokens; create_event, Notion
+         create-events, Gate 1b/1e/1f recipient tokens and `draft:` / `teams:` id tokens are not.
        - A `teams:<chatId>` token does not bind the message text.
        - A GUID member token approves an opaque identity, so the id-not-contents caveat moves
          onto the GUID; Gate 1f only forces a human to name it.
@@ -1450,6 +1453,12 @@ _NCAL_UPDATE_FIELDS = frozenset(("summary", "description", "location", "period",
                                  "resources", "addConferencing", "recurrenceRules"))
 _NCAL_PERSON_KEYS = frozenset(("email", "displayName", "isOptional"))
 _NCAL_PROSE = frozenset(("summary", "description", "displayName", "eventSummary", "comment"))
+# An eventId is printed in the BLOCKED line and the hint line, ahead of the real token: a newline
+# in it could start a forged "exactly: x@evil.com" line, and a comma or semicolon would read as a
+# token separator. Printable ASCII without space, ',' or ';' only, checked on the RAW id (no
+# strip, so leading/trailing whitespace or control characters fail closed too, and the id the
+# approver reads is byte-identical to the id the call targets -- REFUTE 2026-11-21, C7).
+_NCAL_EVENT_ID = re.compile(r"[!-+\--:<-~]+")
 
 
 def _ncal_people(event):
@@ -1517,7 +1526,8 @@ def _check_notion_calendar(short, tool_name, tool_input, session_id):
         updates = tool_input.get("updates")
         if set(tool_input) - _NCAL_TOP_UPDATE or not isinstance(updates, list) or not updates:
             block_shape(tool_name, session_id)
-        events = []
+        digest = _input_digest(tool_input)
+        outside = []
         for u in updates:
             if not isinstance(u, dict):
                 block_shape(tool_name, session_id)
@@ -1525,7 +1535,10 @@ def _check_notion_calendar(short, tool_name, tool_input, session_id):
             ev = u.get("event")
             body = u.get("update") if kind == "UPDATE" else u.get("rsvp")
             allowed = {"updateType", "event", "update" if kind == "UPDATE" else "rsvp"}
-            if kind not in ("UPDATE", "RSVP") or set(u) - allowed or not isinstance(ev, dict)                     or not isinstance(body, dict) or not _nonblank(ev.get("eventId"))                     or set(ev) - {"calendar", "eventId", "eventSummary"}:
+            if kind not in ("UPDATE", "RSVP") or set(u) - allowed or not isinstance(ev, dict) \
+                    or not isinstance(body, dict) or not _nonblank(ev.get("eventId")) \
+                    or set(ev) - {"calendar", "eventId", "eventSummary"} \
+                    or not _NCAL_EVENT_ID.fullmatch(ev["eventId"]):
                 block_shape(tool_name, session_id)
             if kind == "UPDATE":
                 if set(body) - _NCAL_UPDATE_FIELDS:
@@ -1533,15 +1546,28 @@ def _check_notion_calendar(short, tool_name, tool_input, session_id):
                 people = _ncal_people(body)
                 if people is None:
                     block_shape(tool_name, session_id)
-                external += [a for a in people if not _INTERNAL_ADDRESS.fullmatch(a)]
+                outside += [a for a in people if not _INTERNAL_ADDRESS.fullmatch(a)]
             elif set(body) - {"responseStatus", "comment"}:
                 block_shape(tool_name, session_id)
-            external += _ncal_stray(body) + _ncal_stray(ev)
-            events.append("event:" + ev["eventId"].strip())
-        external = _dedupe(events + external)
+            outside += _ncal_stray(body) + _ncal_stray(ev)
+            external.append("ncal-%s:%s:%s" % (kind.lower(), ev["eventId"], digest))
+        # Bound tokens ONLY (Gate 1d parity, PR #477): each names the update type, the event and
+        # a digest of the WHOLE call, so an approval for one call (an accept, a time change)
+        # cannot be spent on another (a decline with other comment text, a re-timed update, an
+        # attendee-list replacement that cancels an outside attendee, or a subset of a
+        # multi-update call). The digest names every attendee, so NO bare address is added: a
+        # bare address is a tool-unbound recipient token that would also authorize a send_mail,
+        # Notion create or Teams chat to it.
+        external = _dedupe(external)
         reason = ("%s notifies the event's attendees or organizer (existing attendees are not in "
                   "the input)" % short)
-        hint = "Name every event in `recipients:` exactly: %s\n" % ", ".join(events)
+        hint = "Name every event in `recipients:` exactly: %s\n" % ", ".join(external)
+        # DISPLAY ONLY, after the hint line and ascii()-escaped, exactly as Gate 1d: the token is
+        # an opaque digest, so say who outside the firm this call names; text from the call can
+        # neither start a forged "exactly:" line nor precede the real token.
+        outside = _dedupe(outside)
+        hint += "[outside parties named in this call: %s]\n" % (
+            ", ".join(ascii(a) for a in outside) if outside else "none")
     if not override_active(session_id, EXTERNAL_SEND, external):
         block("%s: %s" % (reason, ", ".join(external)), EXTERNAL_SEND, session_id, extra=hint)
 
