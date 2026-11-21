@@ -96,13 +96,12 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
      token names the chat id, so approve a send only into a chat whose members you have read.
      Gate 1f closes the creation path only.
    * TOKEN BINDING IS NARROWER ON PAPER THAN THE NAMES SUGGEST (Opus 5.5 review, 2026-10-01):
-       - A token is not bound to a TOOL: one minted for an outlook_send_mail recipient also
-         authorizes teams_create_chat naming that same address. (A send into the resulting chat
-         still needs its own `teams:<chatId>` token.)
-       - Gate 1d event tokens name `event:<eventId>` only: one minted to approve an accept can be
-         spent on delete_event (any comment text) or update_event (an attendee-list replacement
-         that cancels every removed outside attendee) on the same id. Vacation tokens name only
-         the audience, not the message or schedule. Filter tokens ARE bound (digest of the input).
+       - A token is not bound to a TOOL where it names only addresses: one minted for an
+         outlook_send_mail recipient also authorizes teams_create_chat naming that same address.
+         (A send into the resulting chat still needs its own `teams:<chatId>` token.) Gate 1d's
+         update/delete/respond, vacation and filter tokens ARE bound to the operation and the
+         exact input (digest); create_event, Gate 1b/1e/1f recipient tokens, `draft:` / `teams:`
+         id tokens and Gate 1g's Notion `event:<eventId>` tokens are not.
        - A `teams:<chatId>` token does not bind the message text.
        - A GUID member token approves an opaque identity, so the id-not-contents caveat moves
          onto the GUID; Gate 1f only forces a human to name it.
@@ -118,9 +117,11 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
    * GATE 1d -- ms365 outlook_create_event / update_event / delete_event / respond_to_event /
      set_vacation / create_filter. create_event: external attendee needs an external-send token
      naming it. update/delete/respond: always (existing attendees are invisible to the hook);
-     token names event:<eventId>. set_vacation: unless externalAudience is exactly "none" (or the
-     call disables auto-replies); token names vacation:<audience>. create_filter: always (standing
-     rule); token names filter:<sha256[:16] of the input>. Input keys VERIFIED 2026-10-01 against the live
+     token names event-<update|delete|respond>:<eventId>:<sha256[:16] of the whole input>, so an
+     approval for one action cannot be spent on another. set_vacation: unless externalAudience is
+     exactly "none" (or the call disables auto-replies); token names
+     vacation:<audience>:<sha256[:16] of the whole input>. create_filter: always (standing rule);
+     token names filter:<sha256[:16] of the whole input>. Input keys VERIFIED 2026-10-01 against the live
      connector schemas (all additionalProperties:false); unknown keys fail closed. Live-schema
      fixtures are pinned in the test suite (test_live_schema_*).
    * The confidentiality-guard matcher in settings.json names the retired Composio tools
@@ -1339,21 +1340,38 @@ def _vacation_is_disabled(tool_input):
     return status == "disabled" and enabled in (None, False)
 
 
+_EVENT_TOKEN_OPS = {"outlook_update_event": "event-update", "outlook_delete_event": "event-delete",
+                    "outlook_respond_to_event": "event-respond"}
+
+
+def _input_digest(tool_input):
+    """16 hex chars of sha256 over the canonical JSON of the WHOLE tool input (sorted keys, no
+    padding, ASCII-escaped). A token that names it authorizes this exact call and no other. The
+    token matcher (email_send_tier.recipients_authorized) compares case-insensitively; the digest
+    is what keeps a case-sensitive Graph eventId exact."""
+    blob = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(blob.encode("ascii")).hexdigest()[:16]
+
+
 def _check_calendar(short, tool_name, tool_input, session_id):
     """GATE 1d -- ms365 calendar / vacation / filter tools that email or auto-reply to outside
-    parties or install a standing rule. Same token tier and recipient binding as Gate 1b.
+    parties or install a standing rule. Same token tier as Gate 1b.
 
     The hook sees only the call, never the stored event, so update/delete/respond are gated on
     every call: an update or cancellation notifies the event's EXISTING attendees, which the
-    input does not list. The token names `event:<eventId>` (plus any external attendee address)."""
+    input does not list. The token is bound to the OPERATION, the event id and a digest of the
+    whole input -- `event-<op>:<eventId>:<digest>` and nothing else -- so an approval for one
+    action cannot be spent on another (Opus 5.5 review, 2026-10-01, C9): an accept cannot become
+    a delete with arbitrary comment text, nor an attendee-list replacement that cancels outside
+    attendees; and since no bare address is added, it cannot be spent as a send to an attendee
+    either. Vacation tokens are `vacation:<audience>:<digest>`; filter tokens `filter:<digest>`."""
     if short == "outlook_create_filter":
         # A filter is a standing rule (CLAUDE.md: forwarding/auto-reply/filter rules need explicit
         # permission). Its body is irrelevant: gated on every call, whatever the shape.
         # The token names a digest of the WHOLE input, so approving one rule (move to Archive)
         # cannot authorize a different one (forward to an outside address) -- adversarial review
         # C6a. Schema-independent: it binds to whatever the call says, whatever the keys are.
-        blob = json.dumps(tool_input, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-        external = ["filter:" + hashlib.sha256(blob.encode("ascii")).hexdigest()[:16]]
+        external = ["filter:" + _input_digest(tool_input)]
         reason = "Outlook filter rule creation (standing rule)"
         hint = "Name this exact rule in `recipients:` exactly: %s\n" % external[0]
     else:
@@ -1377,17 +1395,30 @@ def _check_calendar(short, tool_name, tool_input, session_id):
             event_id = tool_input.get("eventId")
             if keys - allowed or not _nonblank(event_id):
                 block_shape(tool_name, session_id)
-            external = ["event:" + event_id.strip()]
-            if short == "outlook_update_event":
-                attendees = _attendee_addresses(tool_input)
-                if attendees is None:
-                    block_shape(tool_name, session_id)
-                external = _dedupe(external
-                                   + [a for a in attendees if not _INTERNAL_ADDRESS.fullmatch(a)]
-                                   + _stray_addresses(tool_input))
+            external = ["%s:%s:%s" % (_EVENT_TOKEN_OPS[short], event_id.strip(),
+                                      _input_digest(tool_input))]
+            if short == "outlook_update_event" and _attendee_addresses(tool_input) is None:
+                # Shape check only. The attendees and every other field are already named by the
+                # digest above, so NO bare address is added to the token list: a bare address is
+                # a tool-unbound recipient token that would also authorize a send_mail,
+                # create_event or teams_create_chat to that address (Opus 5.5 re-review, C1).
+                block_shape(tool_name, session_id)
             reason = ("%s notifies the event's attendees (existing ones are not in the input)"
                       % short)
             hint = "Name the event in `recipients:` exactly: %s\n" % external[0]
+            if short == "outlook_update_event":
+                # DISPLAY ONLY (REFUTE 2026-11-20, C4): the token is an opaque digest, so say who
+                # outside the firm this call names, so the approval is informed. Never added to
+                # `external` -- see the shape-check comment above for why. Printed AFTER the hint
+                # line, and ascii()-escaped (newlines, control and non-ASCII characters), so text
+                # from the call can neither start a forged "exactly: <address>" line nor precede
+                # the real token for a reader that takes the first "exactly:" it finds (REFUTE
+                # re-checks 2026-11-20).
+                outside = _dedupe([a for a in _attendee_addresses(tool_input)
+                                   if not _INTERNAL_ADDRESS.fullmatch(a)]
+                                  + _stray_addresses(tool_input))
+                hint += "[outside parties named in this call: %s]\n" % (
+                    ", ".join(ascii(a) for a in outside) if outside else "none")
         else:  # outlook_set_vacation
             if keys - _VACATION_KEYS:
                 block_shape(tool_name, session_id)
@@ -1398,9 +1429,10 @@ def _check_calendar(short, tool_name, tool_input, session_id):
                 return  # exact-case: Graph's own "no external replies" value
             if not isinstance(audience, str):
                 block_shape(tool_name, session_id)
-            external = ["vacation:" + (audience.strip() or "unspecified")]
+            external = ["vacation:%s:%s" % ((audience.strip() or "unspecified"),
+                                            _input_digest(tool_input))]
             reason = "Outlook auto-reply to external senders (externalAudience=%r)" % audience
-            hint = ("An omitted externalAudience is not \"none\"; name the audience in "
+            hint = ("An omitted externalAudience is not \"none\"; name this exact call in "
                     "`recipients:` exactly: %s\n" % external[0])
     if not override_active(session_id, EXTERNAL_SEND, external):
         block("%s: %s" % (reason, ", ".join(external)), EXTERNAL_SEND, session_id, extra=hint)
