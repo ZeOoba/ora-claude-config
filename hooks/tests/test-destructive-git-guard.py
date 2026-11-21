@@ -146,7 +146,7 @@ def memory_checkout_checks():
     git(ch, "remote", "add", "self", ch)
     git(ch, "fetch", "-q", "self")
     git(ch, "remote", "add", "gh", "https://example.invalid/ora.git")
-    for b in ("stale", "side", "oldfeat"):
+    for b in ("stale", "side", "oldfeat", "new"):
         git(ch, "update-ref", "refs/remotes/gh/" + b, "old" if b == "oldfeat" else b)
     os.makedirs(os.path.join(ch, "docs"))  # a subdirectory that holds no memory
     # `loc`: a second LOCAL remote whose `lfeat` (at old) has never been fetched here.
@@ -244,7 +244,7 @@ def oi409_checks(ch, home, env):
     check("oi409: checkout old -- ':(glob)**'", "git checkout old -- ':(glob)**'", ch, True,
           env=env)
     check("oi409: checkout old '*.md' (no --)", "git checkout old '*.md'", ch, True, env=env)
-    check("oi409: restore --source=old ':/projects'", "git restore --source=old ':/projects'",
+    check("oi409: restore --source=old ':/projects' (top magic)", "git restore --source=old ':/projects'",
           ch, True, env=env)
     check("oi409: checkout old -- '*.txt' (no memory match)", "git checkout old -- '*.txt'",
           ch, False, env=env)
@@ -266,6 +266,9 @@ def oi409_checks(ch, home, env):
           "git cherry-pick ^old er2", ch, True, env=env)
     check("oi409: cherry-pick er2 alone (README-only tip)", "git cherry-pick er2", ch, False,
           env=env)
+    # `side` carries no memory of its own: only the walk over side..er2 reaches the edit.
+    check("oi409: cherry-pick ^side er2 (walk is the only path to memory)",
+          "git cherry-pick ^side er2", ch, True, env=env)
     check("oi409: cherry-pick side^!", "git cherry-pick side^!", ch, False, env=env)
     # A range whose net diff is zero still writes memory commit by commit.
     check("oi409: cherry-pick old..er (edit + revert)", "git cherry-pick old..er", ch, True,
@@ -299,11 +302,14 @@ def oi409_checks(ch, home, env):
     check("oi409: GIT_CONFIG_PARAMETERS pull . side (unknown config: assume rebase)",
           "GIT_CONFIG_PARAMETERS=\"'pull.rebase=true'\" git pull . side", ch, True, env=env)
     # R1-06: no-op forms write nothing.
-    check("oi409: pull --rebase . old (ancestor: no-op)", "git pull --rebase . old", ch, False,
-          env=env)
-    check("oi409: rebase old (ancestor: no-op)", "git rebase old", ch, False, env=env)
+    # R2-09: rebasing onto an ancestor of HEAD is usually a no-op but is NOT exempted: HEAD
+    # can move between the hook and the command, and options can force a real rebase.
+    check("oi409: pull --rebase . old (ancestor: still checked)", "git pull --rebase . old", ch,
+          True, env=env)
+    check("oi409: rebase old (ancestor: still checked)", "git rebase old", ch, True, env=env)
     check("oi409: rebase -i old (not a no-op)", "git rebase -i old", ch, True, env=env)
-    check("oi409: rebase -q old (still a no-op)", "git rebase -q old", ch, False, env=env)
+    check("oi409: rebase -q old (ancestor: still checked)", "git rebase -q old", ch, True,
+          env=env)
     check("oi409: rebase --signoff old (forces a rebase)", "git rebase --signoff old", ch,
           True, env=env)
     check("oi409: rebase --whitespace=fix old", "git rebase --whitespace=fix old", ch, True,
@@ -354,17 +360,17 @@ def oi409_checks(ch, home, env):
     git(ch, "config", "branch.main.remote", ".")
     git(ch, "config", "branch.main.merge", "refs/heads/stale")
     # Fetch earlier in the same command.
-    check("oi409: fetch self && merge FETCH_HEAD", "git fetch self stale && git merge FETCH_HEAD",
+    check("oi409: fetch self && merge FETCH_HEAD [local-fetch rule]", "git fetch self stale && git merge FETCH_HEAD",
           ch, True, both, env)
-    check("oi409: fetch self src:dst && merge dst (dst already exists)",
+    check("oi409: fetch self src:dst && merge dst (dst already exists) [local-fetch rule]",
           "git fetch self stale:tmp && git merge tmp", ch, True, env=env)
-    check("oi409: fetch self && merge self/side (local remote re-points it)",
+    check("oi409: fetch self && merge self/side (local remote re-points it) [local-fetch rule]",
           "git fetch self && git merge self/side", ch, True, env=env)
-    check("oi409: fetch self && merge unresolvable", "git fetch self && git merge self/nosuch",
+    check("oi409: fetch self && merge unresolvable [local-fetch rule]", "git fetch self && git merge self/nosuch",
           ch, True, env=env)
-    check("oi409: fetch self && reset --hard FETCH_HEAD",
+    check("oi409: fetch self && reset --hard FETCH_HEAD [local-fetch rule]",
           "git fetch self stale && git reset --hard FETCH_HEAD", ch, True, env=env)
-    check("oi409: fetch self && merge side (any write after a LOCAL fetch blocks)",
+    check("oi409: fetch self && merge side (any write after a LOCAL fetch blocks) [local-fetch rule]",
           "git fetch self && git merge side", ch, True, env=env)
     check("oi409: fetch gh && merge side (after a network fetch: judged normally)",
           "git fetch gh && git merge side", ch, False, env=env)
@@ -376,6 +382,12 @@ def oi409_checks(ch, home, env):
           env=env)
     check("oi409: fetch gh side:tmp && merge tmp (network: = gh/side)",
           "git fetch gh side:tmp && git merge tmp", ch, False, env=env)
+    check("oi409: fetch gh +stale:tmp && merge tmp (network: = gh/stale; tmp is at side now)",
+          "git fetch gh +stale:tmp && git merge tmp", ch, True, env=env)
+    check("oi409: fetch gh new && reset --hard FETCH_HEAD~1 (suffix kept: new~1 tracks memory)",
+          "git fetch gh new && git reset --hard FETCH_HEAD~1", ch, True, env=env)
+    check("oi409: fetch gh new && reset --hard FETCH_HEAD (no memory)",
+          "git fetch gh new && git reset --hard FETCH_HEAD", ch, False, env=env)
     check("oi409: fetch unconfigured URL && merge FETCH_HEAD",
           "git fetch https://example.invalid/x.git side && git merge FETCH_HEAD", ch, True,
           env=env)
@@ -388,47 +400,47 @@ def oi409_checks(ch, home, env):
     check("oi409: checkout --no-guess oldfeat", "git checkout --no-guess oldfeat", ch, False,
           env=env)
     # A branch that only a LOCAL remote's fetch earlier in the command creates.
-    check("oi409: fetch loc && checkout lfeat (DWIM after a local fetch)",
+    check("oi409: fetch loc && checkout lfeat (DWIM after a local fetch) [local-fetch rule]",
           "git fetch loc && git checkout lfeat", ch, True, both, env)
-    check("oi409: fetch loc && switch lfeat", "git fetch loc && git switch lfeat", ch, True,
+    check("oi409: fetch loc && switch lfeat [local-fetch rule]", "git fetch loc && git switch lfeat", ch, True,
           env=env)
-    check("oi409: fetch <local path> src:refs/remotes/gh/x && checkout x (DWIM)",
+    check("oi409: fetch <local path> src:refs/remotes/gh/x && checkout x (DWIM) [local-fetch rule]",
           "git fetch %s lfeat:refs/remotes/gh/lfeat && git checkout lfeat"
           % os.path.join(home, "loc.git").replace("\\", "/"), ch, True, env=env)
     locp = os.path.join(home, "loc.git").replace("\\", "/")
-    check("oi409: fetch <local path> glob into gh/lf* && switch lfeat",
+    check("oi409: fetch <local path> glob into gh/lf* && switch lfeat [local-fetch rule]",
           "git fetch %s '+refs/heads/lf*:refs/remotes/gh/lf*' && git switch lfeat" % locp, ch,
           True, env=env)
-    check("oi409: fetch <local path> glob into gh/* && merge gh/side",
+    check("oi409: fetch <local path> glob into gh/* && merge gh/side [local-fetch rule]",
           "git fetch %s '+refs/heads/*:refs/remotes/gh/*' && git merge gh/side" % locp, ch,
           True, env=env)
-    check("oi409: fetch <local path> glob into refs/heads/imp/* && checkout imp/lfeat",
+    check("oi409: fetch <local path> glob into refs/heads/imp/* && checkout imp/lfeat [local-fetch rule]",
           "git fetch %s '+refs/heads/*:refs/heads/imp/*' && git checkout imp/lfeat" % locp,
           ch, True, env=env)
     # Every spelling of a re-pointed ref (N3): heads/, tags/, an existing destination.
     git(ch, "branch", "imp/side", "side")
     git(ch, "tag", "tgx", "side")
-    check("oi409: fetch <local path> glob && merge heads/imp/side",
+    check("oi409: fetch <local path> glob && merge heads/imp/side [local-fetch rule]",
           "git fetch %s '+refs/heads/*:refs/heads/imp/*' && git merge heads/imp/side" % locp,
           ch, True, env=env)
-    check("oi409: fetch <local path> side:refs/heads/imp/side && merge heads/imp/side",
+    check("oi409: fetch <local path> side:refs/heads/imp/side && merge heads/imp/side [local-fetch rule]",
           "git fetch %s +side:refs/heads/imp/side && git merge heads/imp/side" % locp, ch,
           True, env=env)
-    check("oi409: fetch <local path> side:refs/tags/tgx && merge tags/tgx",
+    check("oi409: fetch <local path> side:refs/tags/tgx && merge tags/tgx [local-fetch rule]",
           "git fetch %s +refs/heads/side:refs/tags/tgx && git merge tags/tgx" % locp, ch,
           True, env=env)
     check("oi409: merge heads/imp/side with no fetch (no memory)", "git merge heads/imp/side",
           ch, False, env=env)
     # Revision suffixes name the same re-pointed ref (N4); after a LOCAL fetch every later
     # write target in the command blocks, whatever its spelling.
-    check("oi409: fetch loc side && merge FETCH_HEAD^0", "git fetch loc side && git merge "
+    check("oi409: fetch loc side && merge FETCH_HEAD^0 [local-fetch rule]", "git fetch loc side && git merge "
           "FETCH_HEAD^0", ch, True, both, env)
-    check("oi409: fetch loc side && merge FETCH_HEAD~0", "git fetch loc side && git merge "
+    check("oi409: fetch loc side && merge FETCH_HEAD~0 [local-fetch rule]", "git fetch loc side && git merge "
           "FETCH_HEAD~0", ch, True, env=env)
-    check("oi409: fetch <local path> side:imp/side && merge imp/side~0",
+    check("oi409: fetch <local path> side:imp/side && merge imp/side~0 [local-fetch rule]",
           "git fetch %s +side:refs/heads/imp/side && git merge imp/side~0" % locp, ch, True,
           env=env)
-    check("oi409: fetch <local path> side:tags/tgx && merge tgx^{commit}",
+    check("oi409: fetch <local path> side:tags/tgx && merge tgx^{commit} [local-fetch rule]",
           "git fetch %s +refs/heads/side:refs/tags/tgx && git merge 'tgx^{commit}'" % locp,
           ch, True, env=env)
     check("oi409: fetch gh stale && merge FETCH_HEAD^0 (network alias, suffix kept)",
@@ -436,26 +448,35 @@ def oi409_checks(ch, home, env):
     check("oi409: fetch gh side && merge FETCH_HEAD^0 (network alias, no memory)",
           "git fetch gh side && git merge FETCH_HEAD^0", ch, False, env=env)
     # Other fetch carriers (N5, N6).
-    check("oi409: remote update loc && checkout lfeat", "git remote update loc && git "
+    check("oi409: remote update loc && checkout lfeat [local-fetch rule]", "git remote update loc && git "
           "checkout lfeat", ch, True, both, env)
-    check("oi409: remote update && merge loc/side", "git remote update && git merge loc/side",
+    check("oi409: remote update && merge loc/side [local-fetch rule]", "git remote update && git merge loc/side",
           ch, True, env=env)
-    check("oi409: remote update <unconfigured group> && merge side",
+    check("oi409: remote update <unconfigured group> && merge side [local-fetch rule]",
           "git remote update grp && git merge side", ch, True, env=env)
-    check("oi409: fetch -- loc side && merge FETCH_HEAD", "git fetch -- loc side && git merge "
-          "FETCH_HEAD", ch, True, env=env)
-    check("oi409: pull -- loc side", "git pull -- loc side", ch, True, env=env)
+    git(ch, "config", "branch.main.remote", "gh")
+    git(ch, "config", "branch.main.merge", "refs/heads/side")
+    check("oi409: fetch -- loc side && merge FETCH_HEAD (network upstream)",
+          "git fetch -- loc side && git merge FETCH_HEAD", ch, True, env=env)
+    check("oi409: pull -- loc side (network upstream)", "git pull -- loc side", ch, True,
+          env=env)
+    git(ch, "config", "branch.main.remote", ".")
+    git(ch, "config", "branch.main.merge", "refs/heads/stale")
     check("oi409: remote -v (not a fetch)", "git remote -v && git merge side", ch, False,
           env=env)
-    check("oi409: remote -v update loc && merge loc/side", "git remote -v update loc && git "
+    check("oi409: remote -v update loc && merge loc/side [local-fetch rule]", "git remote -v update loc && git "
           "merge loc/side", ch, True, env=env)
     check("oi409: remote --verbose update loc && checkout lfeat", "git remote --verbose "
           "update loc && git checkout lfeat", ch, True, env=env)
-    check("oi409: fetch --all && checkout lfeat", "git fetch --all && git checkout lfeat", ch,
-          True, env=env)
+    git(ch, "config", "branch.main.remote", "gh")
+    git(ch, "config", "branch.main.merge", "refs/heads/side")
+    check("oi409: fetch --all && checkout lfeat (network upstream)",
+          "git fetch --all && git checkout lfeat", ch, True, env=env)
+    git(ch, "config", "branch.main.remote", ".")
+    git(ch, "config", "branch.main.merge", "refs/heads/stale")
     check("oi409: checkout lfeat with no fetch (git fails: no such ref)",
           "git checkout lfeat", ch, False, env=env)
-    check("oi409: fetch loc && merge remotes/loc/side",
+    check("oi409: fetch loc && merge remotes/loc/side [local-fetch rule]",
           "git fetch loc && git merge remotes/loc/side", ch, True, env=env)
     check("oi409: switch -c oldfeat2 (new branch from HEAD)", "git switch -c oldfeat2", ch,
           False, env=env)

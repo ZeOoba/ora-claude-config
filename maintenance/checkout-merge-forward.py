@@ -314,12 +314,17 @@ def ignored_paths(repo, paths):
     return set(x for x in (p.stdout or "").split("\0") if x)
 
 
+def _under_memory(path):
+    """Case-insensitively under the memory folder: on Windows (core.ignorecase) git writes
+    `PROJECTS/.../Memory/x.md` into the same local folder (merge gate R2-04)."""
+    return path.casefold().startswith(MEMORY_REL.casefold() + "/")
+
+
 def _local_only_location(path):
     """A path that must stay local-only in this public repo: anything under the memory
     folder, or a file whose NAME marks it as secret/local (same family as the destructive
     guard's sensitive-name rule, plus the `*.local.*` convention)."""
-    return path.startswith(MEMORY_REL + "/") or bool(
-        LOCAL_ONLY_NAME_RE.search(path.rsplit("/", 1)[-1]))
+    return _under_memory(path) or bool(LOCAL_ONLY_NAME_RE.search(path.rsplit("/", 1)[-1]))
 
 
 def untracked_incoming(repo, incoming):
@@ -352,7 +357,7 @@ def untracked_incoming(repo, incoming):
             hits.append(p)
 
     for p in candidates:
-        if (p.startswith(MEMORY_REL + "/") or p in ignored
+        if (_under_memory(p) or p in ignored
                 or os.path.lexists(os.path.join(repo, *p.split("/")))):
             add(p)
         parts = p.split("/")

@@ -1112,6 +1112,31 @@ for label, ignore in (("ignored", True), ("not ignored", False)):
         check("memory absent incoming (%s): nothing written locally" % label,
               not os.path.lexists(os.path.join(local, *MEM_NEW.split("/"))))
 
+# Case variants of the memory path land in the same local folder on Windows
+# (core.ignorecase): blocked too (merge gate R2-04).
+for variant in ("PROJECTS/" + cmf.MEMORY_REL.split("/", 1)[1],
+                cmf.MEMORY_REL[: -len("memory")] + "Memory"):
+    with tempfile.TemporaryDirectory() as td:
+        local, origin = make_pair(td)
+        os.makedirs(os.path.join(origin, *variant.split("/")))
+        commit(origin, "origin adds case-variant memory", fname=variant + "/new.md")
+        r = cmf.sync(local, "main")
+        check("memory case variant %s: BLOCKED" % variant.split("/")[0][:8],
+              r["status"] == "BLOCKED_DIRTY_OVERLAP"
+              and r.get("blocked_paths") == [variant + "/new.md"], repr(r))
+
+# Routine history: a new file inside an EXISTING tracked directory must merge. (The parent
+# walk must skip parents that are directories, or every such commit would pin the
+# corrector -- merge gate R2-08.)
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    os.makedirs(os.path.join(origin, "hooks"))
+    commit(origin, "origin adds hooks/a.py", fname="hooks/a.py")
+    run(local, "pull", "-q", "--no-rebase", "origin", "main")
+    commit(origin, "origin adds hooks/b.py", fname="hooks/b.py")
+    r = cmf.sync(local, "main")
+    check("new file in existing tracked dir: MERGED", r["status"] == "MERGED", repr(r))
+
 # A local-only-NAMED incoming path the local rules ignore, absent locally: blocked.
 with tempfile.TemporaryDirectory() as td:
     local, origin = make_pair(td)
@@ -1199,7 +1224,8 @@ with tempfile.TemporaryDirectory() as td:
           repr(cmf.untracked_incoming(local, ["base_commit.txt/inner.txt"])))
 
 # sync() reports each blocked path once even when incoming lists it twice (a conflicted
-# path is also a diff name).
+# path is also a diff name). End-to-end only: this case is stopped by the git-status
+# overlap check; untracked_incoming's own dedupe is covered by the unit test above.
 with tempfile.TemporaryDirectory() as td:
     local, origin = make_pair(td)
     commit(origin, "origin adds twice", fname="twice.txt")

@@ -294,13 +294,6 @@ _REBASE_TRUE = {"true", "1", "yes", "on", "merges", "m", "interactive", "i", "pr
 # A pathspec that names every path in the repo, whatever the command's directory.
 _ALL_PATHS = [":/"]
 _UNRESOLVED = object()
-# The ONLY options under which `git rebase <ancestor-of-HEAD>` is still the "Current branch
-# is up to date" no-op. An allowlist: many options force a real rebase (--signoff,
-# --ignore-date, --whitespace=..., -i, -f, --onto, ...), which checks out the old tree.
-_REBASE_NOOP_OPTS = {"-q", "--quiet", "-v", "--verbose", "-n", "--no-stat", "--stat",
-                     "--autostash", "--no-autostash", "--no-verify", "--verify"}
-# Same for `git pull --rebase <ancestor>` (pull's own options it does not pass on).
-_PULL_NOOP_OPTS = _REBASE_NOOP_OPTS | {"--rebase", "-r"}
 _ENV_ASSIGN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 
 
@@ -384,9 +377,6 @@ class _Repo(object):
 
     def is_treeish(self, ref):
         return bool(_git(self.root, "rev-parse", "--verify", "-q", ref + "^{tree}"))
-
-    def is_ancestor(self, ref):
-        return _git(self.root, "merge-base", "--is-ancestor", ref, "HEAD") is not None
 
     def upstream_name(self):
         u = _git(self.root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
@@ -658,15 +648,11 @@ def memory_plans(sub, args, repo, fetched=None):
             modes = ["tree"]
         elif repo.overrides is None:
             modes = ["merge", "tree"]  # config set through the environment: assume either
-            rebase_opt = "unknown"
         else:
             setting = repo.config("branch.%s.rebase" % br) if br else None
             if setting is None:
                 setting = repo.config("pull.rebase")
-            rebase_opt = (setting or "").strip().lower()
-            modes = ["tree"] if rebase_opt in _REBASE_TRUE else ["merge"]
-        plain_rebase = (rebase_opt in ("", "true", "1", "yes", "on")
-                        and flags <= _PULL_NOOP_OPTS)
+            modes = ["tree"] if (setting or "").strip().lower() in _REBASE_TRUE else ["merge"]
         # A LOCAL remote can serve any old branch: what the pull fetches is unknowable.
         # A network remote (no memory since the purge) is judged by its remote-tracking
         # ref before the fetch; a target that does not resolve yet is unknowable too.
@@ -680,24 +666,18 @@ def memory_plans(sub, args, repo, fetched=None):
                 if not implicit:
                     out.append(("unresolved", r, None))
                 continue
+            # A rebase onto an ancestor of HEAD is usually a no-op, but NOT skipped: HEAD can
+            # move between this probe and the command (another session's switch), and many
+            # options force a real rebase (merge gate R2-09). A false block here is safe.
             for mode in modes:
-                if mode == "tree" and plain_rebase and repo.is_ancestor(r):
-                    continue  # rebasing onto an ancestor of HEAD is a no-op
                 out.append((mode, r, None))
         return out
     if sub == "rebase":
         refs = ([vals["--onto"]] if "--onto" in vals else []) + pos[:2]
         if not refs and "--root" not in flags:
             refs = ["@{u}"]  # bare `git rebase` rebases onto the upstream (fork-point)
-        noop_ok = len(pos) == 1 and flags <= _REBASE_NOOP_OPTS
-        out = []
-        for r in refs:
-            p = target(r, "tree")
-            if p and noop_ok and p[0] == "tree" and repo.is_ancestor(p[1]):
-                continue  # `git rebase <ancestor of HEAD>`: "Current branch is up to date"
-            if p:
-                out.append(p)
-        return out
+        # No "ancestor of HEAD = no-op" skip: see the pull branch above (R2-09).
+        return plans([target(r, "tree") for r in refs])
     if sub in ("cherry-pick", "revert"):
         mainline = vals.get("-m") or vals.get("--mainline")
         mainline = mainline if (mainline or "").isdigit() else None
