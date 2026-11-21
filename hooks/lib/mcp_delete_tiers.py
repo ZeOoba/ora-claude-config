@@ -116,7 +116,7 @@ TIERS = {
     "manage_segment": (_BY_INPUT, True, "decided by operation.type"),
     "manage_campaign_objects": (_BY_INPUT, True, "decided by assetOperations[].action"),
     "outlook_delete_event": (EXEMPT, False,
-                             "owned by ora-autonomy-gate Gate 1d (token event:<eventId>)"),
+                             "owned by ora-autonomy-gate Gate 1d (token event-delete:<eventId>:<input digest>)"),
     "image_remove_background": (EXEMPT, True,
                                 "Adobe image edit that returns a new image; deletes nothing"),
     "outlook_untrash_thread": (_BY_INPUT, False,
