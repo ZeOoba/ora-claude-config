@@ -325,6 +325,22 @@ def oi409_checks(ch, home, env):
           env=env)
     git(ch, "config", "--unset", "branch.main.rebase")
     git(ch, "config", "--unset", "pull.rebase")
+    # Pull rebase-mode parsing with NO repo pull.rebase in force, so config cannot supply the
+    # rebase mode and mask the parser (round 3b test-validity R3b-01..05).
+    check("oi409: pull --refm=x --rebase . side (unknown option: both modes, config unset)",
+          "git pull --refm=x --rebase . side", ch, True, env=env)
+    check("oi409: pull --reb . side (abbreviated --rebase, config unset)",
+          "git pull --reb . side", ch, True, env=env)
+    check("oi409: -c pull.rebase=true pull --negotiation-include --no-rebase . side",
+          "git -c pull.rebase=true pull --negotiation-include --no-rebase . side", ch, True,
+          env=env)
+    check("oi409: -c pull.rebase=true pull --negotiation-restrict --no-rebase . side",
+          "git -c pull.rebase=true pull --negotiation-restrict --no-rebase . side", ch, True,
+          env=env)
+    check("oi409: pull --refmap x --no-rebase . side (--refmap eats x; merge)",
+          "git pull --refmap x --no-rebase . side", ch, False, env=env)
+    check("oi409: pull -q --no-rebase . side (known short flag; merge)",
+          "git pull -q --no-rebase . side", ch, False, env=env)
     # R1-03: config given on the command line or through the environment.
     check("oi409: git -c pull.rebase=true pull . side", "git -c pull.rebase=true pull . side",
           ch, True, both, env)
