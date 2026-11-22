@@ -163,6 +163,9 @@ def memory_checkout_checks():
         f.write("local only\n")
     git(ch, "config", "branch.main.remote", ".")
     git(ch, "config", "branch.main.merge", "refs/heads/stale")  # @{u} = stale
+    # Pin pull.rebase in the repo: the system gitconfig still applies to these fixtures, and
+    # a Git for Windows install can set pull.rebase=true there (round 3c R3c-01 / R3d-01).
+    git(ch, "config", "pull.rebase", "false")
     env = dict(os.environ, USERPROFILE=home, HOME=home)
     try:
         both = ("script", "dispatcher")
@@ -324,12 +327,14 @@ def oi409_checks(ch, home, env):
     check("oi409: pull . side with branch.main.rebase=true", "git pull . side", ch, True,
           env=env)
     git(ch, "config", "--unset", "branch.main.rebase")
-    git(ch, "config", "--unset", "pull.rebase")
-    # Pull rebase-mode parsing with NO repo pull.rebase in force, so config cannot supply the
-    # rebase mode and mask the parser (round 3b test-validity R3b-01..05).
-    check("oi409: pull --refm=x --rebase . side (unknown option: both modes, config unset)",
+    # An explicit false, not --unset: the system gitconfig still applies after an unset, and
+    # a Git for Windows install can set pull.rebase=true there (round 3c R3c-01).
+    git(ch, "config", "pull.rebase", "false")
+    # Pull rebase-mode parsing with repo pull.rebase=false in force, so config cannot supply
+    # the rebase mode and mask the parser (round 3b test-validity R3b-01..05).
+    check("oi409: pull --refm=x --rebase . side (unknown option: both modes, pull.rebase=false)",
           "git pull --refm=x --rebase . side", ch, True, env=env)
-    check("oi409: pull --reb . side (abbreviated --rebase, config unset)",
+    check("oi409: pull --reb . side (abbreviated --rebase, pull.rebase=false)",
           "git pull --reb . side", ch, True, env=env)
     check("oi409: -c pull.rebase=true pull --negotiation-include --no-rebase . side",
           "git -c pull.rebase=true pull --negotiation-include --no-rebase . side", ch, True,
