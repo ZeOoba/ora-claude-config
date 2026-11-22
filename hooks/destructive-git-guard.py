@@ -232,7 +232,8 @@ _VALUE_OPTS = {
               "--into-name", "--cleanup"},
     "pull": {"-s", "--strategy", "-X", "--strategy-option", "--depth", "--deepen",
              "--shallow-since", "--shallow-exclude", "-o", "--server-option", "--upload-pack",
-             "--negotiation-tip", "--cleanup"},
+             "--negotiation-tip", "--cleanup", "--refmap", "--negotiation-restrict",
+             "--negotiation-include"},
     "rebase": {"--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec",
                "-C", "--whitespace", "--empty"},
     "cherry-pick": {"-m", "--mainline", "-s", "--strategy", "-X", "--strategy-option",
@@ -506,6 +507,69 @@ def fetch_effects(repo, sub, args, state):
     state["unresolved"].discard("FETCH_HEAD")
 
 
+# Pull options this guard can classify with certainty: flags without a value, and the
+# value options it consumes. Anything else on a pull command line (an abbreviation other
+# than of --rebase/--no-rebase, -S/-j with attached values, options added by a newer git)
+# makes the rebase mode UNKNOWN, and the pull is checked as both merge and rebase. Matching
+# more spellings one by one never converged (pre-commit review R4/R5).
+_PULL_PLAIN_FLAGS = {"-q", "--quiet", "-v", "--verbose", "-n", "--stat", "--no-stat",
+                     "--ff", "--no-ff", "--ff-only", "--commit", "--no-commit", "--edit",
+                     "--no-edit", "--squash", "--no-squash", "--autostash", "--no-autostash",
+                     "--verify", "--no-verify", "--tags", "--no-tags", "--prune", "-p",
+                     "--progress", "--no-progress", "--log", "--no-log", "--signoff",
+                     "--no-signoff", "--allow-unrelated-histories", "--set-upstream"}
+_PULL_SHORT_PLAIN = {"q", "v", "n", "p"}
+
+
+def _pull_rebase_flag(args):
+    """'tree' (rebase) / 'merge' from the LAST of `--rebase[=v]`, `-r[v]` and `--no-rebase`
+    on a pull command line, as git reads them (merge gate R3-01: any `--no-rebase` used to
+    win); None when none is given; 'unknown' when any option cannot be classified with
+    certainty -- callers then check both modes."""
+    vopts = _VALUE_OPTS.get("pull", set())
+    pre, _post = _split_dashdash(list(args))
+    false_words = ("", "false", "no", "off", "0")
+
+    def is_abbrev(name, full, shortest):
+        # git accepts any unique prefix of a long option; `--reb`/`--no-reb` are the
+        # shortest unambiguous ones for pull (`--re`/`--no-re` are ambiguous and fail).
+        return len(name) >= len(shortest) and full.startswith(name)
+
+    last, i = None, 0
+    while i < len(pre):
+        a = pre[i]
+        name, eq, val = a.partition("=")
+        if not a.startswith("-") or a == "-":
+            pass  # positional
+        elif a.startswith("--") and is_abbrev(name, "--no-rebase", "--no-reb") and not eq:
+            last = "merge"
+        elif a.startswith("--") and is_abbrev(name, "--rebase", "--reb"):
+            # `--rebase` alone = true; `--rebase=` (empty) and false words = merge.
+            last = "merge" if (eq and val.strip().lower() in false_words) else "tree"
+        elif a.startswith("--"):
+            if name in vopts:
+                if not eq:
+                    i += 1  # its value is the next word
+            elif name not in _PULL_PLAIN_FLAGS or eq:
+                return "unknown"
+        else:
+            for j in range(1, len(a)):
+                c = a[j]
+                if c == "r":
+                    # `-r` takes an OPTIONAL attached value: the rest of the cluster.
+                    rest = a[j + 1:].strip().lower()
+                    last = "merge" if (rest and rest in false_words) else "tree"
+                    break
+                if "-" + c in vopts:
+                    if j + 1 == len(a):
+                        i += 1  # value is the next word
+                    break  # the rest of the cluster is the value
+                if c not in _PULL_SHORT_PLAIN:
+                    return "unknown"
+        i += 1
+    return last
+
+
 def memory_plans(sub, args, repo, fetched=None):
     """[(mode, ref, paths)] -- what this command would write into the worktree.
     'tree':   the worktree becomes ref's tree;            'paths': ref's content for paths;
@@ -641,11 +705,11 @@ def memory_plans(sub, args, repo, fetched=None):
                     refs.append(_strip_refspec(src))  # `pull . <branch>`: a local branch
                 else:
                     refs.append("%s/%s" % (remote, _strip_refspec(src)))
-        rebase_opt = (vals.get("--rebase") or "").lower()
-        if "--no-rebase" in flags or rebase_opt in ("false", "no", "off", "0"):
-            modes = ["merge"]
-        elif "--rebase" in flags or "-r" in flags:
-            modes = ["tree"]
+        last = _pull_rebase_flag(args)
+        if last == "unknown":
+            modes = ["merge", "tree"]
+        elif last is not None:
+            modes = [last]
         elif repo.overrides is None:
             modes = ["merge", "tree"]  # config set through the environment: assume either
         else:

@@ -286,6 +286,39 @@ def oi409_checks(ch, home, env):
           False, env=env)
     check("oi409: pull --rebase=false . side", "git pull --rebase=false . side", ch, False,
           env=env)
+    # R3-01: git takes the LAST rebase flag.
+    check("oi409: pull --no-rebase --rebase . side (last flag: rebase)",
+          "git pull --no-rebase --rebase . side", ch, True, env=env)
+    check("oi409: pull --rebase=false --rebase . side", "git pull --rebase=false --rebase . side",
+          ch, True, env=env)
+    check("oi409: pull --rebase=false -r . side", "git pull --rebase=false -r . side", ch, True,
+          env=env)
+    check("oi409: pull --rebase --no-rebase . side (last flag: merge)",
+          "git pull --rebase --no-rebase . side", ch, False, env=env)
+    check("oi409: pull --no-rebase -sresolve . side (the r is -s's value, not -r)",
+          "git pull --no-rebase -sresolve . side", ch, False, env=env)
+    # git accepts unique prefixes of long options, value options eat the next word, and `-r`
+    # takes an optional attached value (pre-commit review R4-01..03).
+    check("oi409: pull --reb . side (abbreviated --rebase)", "git pull --reb . side", ch, True,
+          env=env)
+    check("oi409: pull --no-rebase --reb . side", "git pull --no-rebase --reb . side", ch, True,
+          env=env)
+    check("oi409: pull --rebase --no-reb . side (abbreviated --no-rebase)",
+          "git pull --rebase --no-reb . side", ch, False, env=env)
+    check("oi409: -c pull.rebase=true pull --refmap --no-rebase . side (value of --refmap)",
+          "git -c pull.rebase=true pull --refmap --no-rebase . side", ch, True, env=env)
+    check("oi409: pull -rfalse . side (-r with value false)", "git pull -rfalse . side", ch,
+          False, env=env)
+    check("oi409: pull --rebase= . side (empty value = false)", "git pull --rebase= . side", ch,
+          False, env=env)
+    # Options the guard cannot classify make the mode unknown: both modes are checked
+    # (pre-commit review R5-01/02).
+    check("oi409: -c pull.rebase=true pull --refm --no-rebase . side (abbreviated --refmap)",
+          "git -c pull.rebase=true pull --refm --no-rebase . side", ch, True, env=env)
+    check("oi409: -c pull.rebase=true pull -Srfalse . side (-S value, not -r)",
+          "git -c pull.rebase=true pull -Srfalse . side", ch, True, env=env)
+    check("oi409: pull --no-rebase --ff-only . side (known flags: merge only)",
+          "git pull --no-rebase --ff-only . side", ch, False, env=env)
     git(ch, "config", "pull.rebase", "false")
     git(ch, "config", "branch.main.rebase", "true")
     check("oi409: pull . side with branch.main.rebase=true", "git pull . side", ch, True,
