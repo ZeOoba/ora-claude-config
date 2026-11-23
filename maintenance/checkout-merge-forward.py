@@ -152,12 +152,21 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 
 DEFAULT_REPO = r"C:\Users\Owner\.claude"
 DEFAULT_CANONICAL = "main"
+# PR 476 / OI-409: the memory folder is LOCAL-ONLY (gitignored, untracked) in this public
+# repo; an incoming commit that tracks anything under it must never be merged. Same
+# constant as hooks/destructive-git-guard.py MEMORY_REL.
+MEMORY_REL = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory"
+# Names that mark a file as secret or local-only wherever it sits (the destructive guard's
+# sensitive-name family plus the `*.local.*` convention used by contacts.local.md etc.).
+LOCAL_ONLY_NAME_RE = re.compile(r"(credentials|\.env|password|confidential-terms|\.local\.)",
+                                re.I)
 SYNCED_STATUSES = ("MERGED", "NOOP_CLEAN")
 # Second header: origin turns a tracked directory into a file while local
 # untracked files sit inside it.
@@ -286,19 +295,80 @@ def incoming_paths(repo, target_sha):
     return [n for n in names.split("\0") if n] + conflicted
 
 
+def ignored_paths(repo, paths):
+    """The subset of `paths` git's ignore rules match (`check-ignore --no-index`, so a path
+    is judged by the rules alone, tracked or not), or None when check-ignore fails.
+    NUL-separated both ways: newline stdin is CRLF-translated on Windows."""
+    if not paths:
+        return set()
+    try:
+        p = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-z", "--stdin"], cwd=repo,
+            input="\0".join(paths) + "\0", capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=60,
+            env=dict(os.environ, LC_ALL="C", LANGUAGE="C"))
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if p.returncode not in (0, 1):  # 1 = nothing ignored
+        return None
+    return set(x for x in (p.stdout or "").split("\0") if x)
+
+
+def _under_memory(path):
+    """Case-insensitively under the memory folder: on Windows (core.ignorecase) git writes
+    `PROJECTS/.../Memory/x.md` into the same local folder (merge gate R2-04)."""
+    return path.casefold().startswith(MEMORY_REL.casefold() + "/")
+
+
+def _local_only_location(path):
+    """A path that must stay local-only in this public repo: anything under the memory
+    folder, or a file whose NAME marks it as secret/local (same family as the destructive
+    guard's sensitive-name rule, plus the `*.local.*` convention)."""
+    return _under_memory(path) or bool(LOCAL_ONLY_NAME_RE.search(path.rsplit("/", 1)[-1]))
+
+
 def untracked_incoming(repo, incoming):
-    """Incoming paths present on disk but NOT tracked here (untracked, including ignored),
-    or None when the tracked set cannot be read. Read-only."""
+    """Incoming paths the merge would write over or newly track without `git status` ever
+    showing local work there, de-duplicated, or None when the tracked or ignored set cannot
+    be read. Read-only. Blocks on, for each incoming path not tracked here:
+      * the path present on disk (untracked, including ignored);
+      * the path under the local-only memory folder, even when absent locally -- the merge
+        would re-track memory in this public repo -- and a local-only-NAMED path the local
+        ignore rules cover, also when absent. For these, judging the path and the rules
+        rather than the disk closes the race with a file created between this check and
+        the merge, as long as the ignore rules themselves do not change in that window;
+      * a parent directory of it present on disk as an untracked FILE -- the incoming
+        directory displaces it (OI-409).
+    Any OTHER ignored-but-absent incoming path is ordinary history in this default-deny
+    repo (a new file plus its `!` rule, a force-added archive): blocking it would pin the
+    checkout for good, since the local rules only change when a merge lands."""
     rc, out, _ = _git(["ls-files", "-z", "--full-name"], repo)
     if rc != 0:
         return None
     tracked = set(p for p in out.split("\0") if p)
+    candidates = [p for p in incoming if p not in tracked]
+    ignored = ignored_paths(repo, [p for p in candidates if _local_only_location(p)])
+    if ignored is None:
+        return None
     hits = []
-    for p in incoming:
-        if p in tracked:
-            continue
-        if os.path.lexists(os.path.join(repo, *p.split("/"))):
+
+    def add(p):
+        if p not in hits:
             hits.append(p)
+
+    for p in candidates:
+        if (_under_memory(p) or p in ignored
+                or os.path.lexists(os.path.join(repo, *p.split("/")))):
+            add(p)
+        parts = p.split("/")
+        for i in range(1, len(parts)):
+            parent = "/".join(parts[:i])
+            if parent in tracked:
+                continue  # a tracked file there is git's own conflict, visible to it
+            fp = os.path.join(repo, *parts[:i])
+            if os.path.islink(fp) or (os.path.lexists(fp) and not os.path.isdir(fp)):
+                add(parent)
+                break
     return hits
 
 
@@ -574,7 +644,8 @@ def sync(repo=None, canonical=None):
         untracked = untracked_incoming(repo, incoming)
         if untracked is None:
             out["status"] = "ERROR"
-            out["detail"] = "cannot list tracked paths (ls-files failed) -- not merging"
+            out["detail"] = ("cannot list tracked or ignored paths (ls-files/check-ignore "
+                             "failed) -- not merging")
             return out
         overlap = untracked
     if overlap:
