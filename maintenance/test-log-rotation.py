@@ -68,7 +68,7 @@ $L = [System.Management.Automation.Language.FunctionDefinitionAst]
 $tok = $null; $perr = $null
 $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tok, [ref]$perr)
 function InFunction($n) { $p = $n.Parent; while ($p) { if ($p -is $L) { return $true }; $p = $p.Parent }; $false }
-function IsLogVar($n) { $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -eq 'log' }
+function IsLogVar($n) { $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -match '^(script:)?log$' }
 function IsLogAssign($n) {
     if ($n -isnot [System.Management.Automation.Language.AssignmentStatementAst]) { return $false }
     $l = $n.Left; if ($l -is [System.Management.Automation.Language.ConvertExpressionAst]) { $l = $l.Child }
@@ -96,9 +96,15 @@ if ($callIdx -ge 0) {
         foreach ($n in $s.FindAll({ param($n) -not (InFunction $n) }, $true)) {
             if ($n -is [System.Management.Automation.Language.ReturnStatementAst] -or
                 $n -is [System.Management.Automation.Language.ExitStatementAst] -or
-                $n -is [System.Management.Automation.Language.ThrowStatementAst]) { $earlyExit += $n.Extent.StartLineNumber }
+                $n -is [System.Management.Automation.Language.ThrowStatementAst] -or
+                $n -is [System.Management.Automation.Language.BreakStatementAst] -or
+                $n -is [System.Management.Automation.Language.ContinueStatementAst]) { $earlyExit += $n.Extent.StartLineNumber }
             if ($n -is [System.Management.Automation.Language.CommandAst]) {
                 $nm = $n.GetCommandName()
+                # an alias outranks the function; Set-Variable can repoint $log unseen by the assignment scan
+                if (@('Set-Alias','New-Alias','Set-Variable','New-Variable','Remove-Variable','Remove-Item') -contains $nm -and
+                    @($n.CommandElements | Where-Object { $_.Extent.Text -match '(?i)^[''"]?(Invoke-LogRotation|log|alias:\S*Invoke-LogRotation|function:\S*Invoke-LogRotation|variable:\S*log)[''"]?$' }).Count -gt 0) {
+                    $earlyExit += $n.Extent.StartLineNumber }
                 if ($nm -eq 'Log' -or (@('Out-File','Add-Content','Set-Content','Tee-Object') -contains $nm -and
                     @($n.CommandElements | Where-Object { IsLogVar $_ }).Count -gt 0)) { $earlyWrite += $n.Extent.StartLineNumber }
             }
@@ -165,7 +171,8 @@ def check_wiring(label, path):
         errs.append("%s: $log must be assigned exactly once, at top level, before rotation "
                     "(top-level statement indexes %r, rotation at %d; -1 = nested)" % (label, assigns, call))
     if a["early_exit"]:
-        errs.append("%s: return/exit/throw before rotation (line %s) can skip it"
+        errs.append("%s: return/exit/throw/break/continue, or an alias/variable override of "
+                    "Invoke-LogRotation or $log, before rotation (line %s) can skip or misdirect it"
                     % (label, a["early_exit"]))
     if a["early_write"]:
         errs.append("%s: log written (line %s) before rotation (line %s)"
