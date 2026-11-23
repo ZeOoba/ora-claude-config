@@ -6,8 +6,11 @@ Lesson 2026-06-11 (incident, same-day remediation): the first push of this repo
 carried pre-scrub commits with confidential deal terms in their diffs. A clean HEAD
 does not mean a clean push. This hook runs `git log -p` over every ref range being
 pushed and BLOCKS if any active always-term from hooks/confidential-terms.json
-appears anywhere in that range. Terms are never echoed — only deal-relative
-indices are reported. Compressed blobs (.gz / .tgz / .zip, detected by magic bytes),
+appears anywhere in that range, or any active context-term appears with one of its
+anchors in the same window (one whole commit: header, message and patch; one blob view;
+the full content of a file a pushed commit adds or modifies). Each window is also scanned URL-decoded (%XX and +, bounded rounds). See
+_roster_entries() and scan_text() (Defect 2, 2026-11-12). Terms are never echoed — only
+roster-entry indices are reported. Compressed blobs (.gz / .tgz / .zip, detected by magic bytes),
 which `git log -p` shows only as "Binary files differ", are decompressed in memory and
 scanned too -- see scan_compressed() (audit finding 2026-11-08).
 
@@ -56,6 +59,7 @@ Exit 0 = allow push. Exit 1 = block (git pre-push convention).
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -147,23 +151,69 @@ def _main_worktree_terms_file():
     return candidate
 
 
+class RosterShapeError(Exception):
+    pass
+
+
+def _str_list(deal, field):
+    """The deal's `field` as a list of strings, [] when absent. RAISES RosterShapeError when the
+    field is present but not a list, or holds a non-string entry: a roster we cannot read
+    completely cannot prove a push clean (a bare string used to be iterated per CHARACTER)."""
+    value = deal.get(field)
+    if value is None:
+        return []
+    if not isinstance(value, list) or any(not isinstance(t, str) for t in value):
+        raise RosterShapeError("%s is not a list of strings" % field)
+    return value
+
+
+def _roster_entries(d):
+    """Scan entries for every active deal. A plain lowercase str is an `always` term; a tuple
+    (term, anchors) is a `context` term that counts only when one of `anchors` co-occurs in the
+    same scanned window (see scan_text). anchors == () means ANCHORLESS -> the term counts on its
+    own.
+
+    CONTEXT TERMS (Defect 2a, 2026-11-12): this gate used to read `always` only, so an active deal
+    carrying only `context` / `context_requires_any` added nothing and main()'s `if terms:` skipped
+    the terms scan outright -- allow-without-scan. Anchor rule mirrors confidentiality-guard.py
+    find_hit(): any blank anchor leaves the group unanchored. DELIBERATE DIVERGENCE from find_hit():
+    a MISSING / empty / non-list / non-string `context_requires_any` is ALSO unanchored here
+    (fail-closed), where find_hit() never matches those context terms at all. Same rule as the
+    ora-skills port (tools/prepush_confidential_scan.py)."""
+    out = []
+    for key, deal in d.items():
+        if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
+            continue
+        out.extend(t.lower() for t in _str_list(deal, "always") if t.strip())
+        ctx = [t.lower() for t in _str_list(deal, "context") if t.strip()]
+        if not ctx:
+            continue
+        raw = deal.get("context_requires_any")
+        if (isinstance(raw, list) and raw
+                and all(isinstance(a, str) and a.strip() for a in raw)):
+            anchors = tuple(a.lower() for a in raw)
+        else:
+            anchors = ()  # anchorless or malformed anchors: fail closed
+        out.extend((t, anchors) for t in ctx)
+    return out
+
+
 def load_terms():
-    """Lowercased active always-terms, or None if unreadable both in this
-    checkout and (falling back) in the main worktree's copy (fail-closed)."""
+    """Scan entries for every active deal (see _roster_entries), or None -- fail-closed -- when
+    the roster is unreadable both in this checkout and (falling back) in the main worktree's copy,
+    or when it parses but is malformed (RosterShapeError; no fallback for that: a malformed local
+    roster is a real defect to fix, not a missing gitignored file)."""
     d = _read_json(TERMS_FILE)
     if d is None:
         fallback = _main_worktree_terms_file()
         if fallback is not None:
             d = _read_json(fallback)
-    if d is None:
+    if not isinstance(d, dict):
         return None
-    out = []
-    for key, deal in d.items():
-        if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
-            continue
-        out.extend(t.lower() for t in deal.get("always", [])
-                   if isinstance(t, str) and t.strip())
-    return out
+    try:
+        return _roster_entries(d)
+    except RosterShapeError:
+        return None
 
 
 def _is_sha(s):
@@ -271,10 +321,105 @@ def rev_range(local_sha, remote_sha, baseline):
     return "%s..%s" % (baseline, local_sha)
 
 
+# URL-ENCODED VIEWS (Defect 2b, 2026-11-12): a roster term pasted into a URL or query string --
+# `Quiet%20Marsh%20Park`, `Quiet+Marsh+Park`, or double-encoded `Quiet%2520Marsh%2520Park` -- never
+# matched the plain lowercase substring scan. Every window is now ALSO scanned through two decode
+# chains, unquote and unquote_plus, each applied up to URL_DECODE_MAX_ROUNDS times (stopping early
+# once a round changes nothing). Over-decoding can only ADD matches -- the fail-closed direction --
+# so the chains are not "smart" about which round is the real one. RESIDUAL: encodings nested deeper
+# than the bound, and other encodings (base64, HTML entities, \uXXXX escapes) are not decoded.
+URL_DECODE_MAX_ROUNDS = 4
+
+
+def _decoded_views(low):
+    """Distinct lowercase views of `low` (already lowercase): itself, then each round of the
+    unquote and unquote_plus chains. Decoding is skipped when there is nothing to decode."""
+    from urllib.parse import unquote, unquote_plus
+    views = [low]
+    if "%" not in low and "+" not in low:
+        return views
+    for fn in (unquote, unquote_plus):
+        cur = low
+        for _ in range(URL_DECODE_MAX_ROUNDS):
+            nxt = fn(cur).lower()  # %4D -> "M": decoded bytes can carry uppercase
+            if nxt == cur:
+                break
+            if nxt not in views:
+                views.append(nxt)
+            cur = nxt
+    return views
+
+
+def _entry_term(entry):
+    return entry if isinstance(entry, str) else entry[0]
+
+
+def _in_any(needle, views):
+    return any(needle in v for v in views)
+
+
 def scan_text(text, terms):
-    """Sorted indices of terms present in text (never the terms themselves)."""
-    low = text.lower()
-    return sorted(i for i, t in enumerate(terms) if t in low)
+    """Sorted indices of roster entries present in ONE window of text (never the terms
+    themselves). `terms` holds always-terms (str) and context entries ((term, anchors) tuples).
+    A context entry needs an anchor in the SAME window; term and anchor may each match in ANY
+    decoded view of it (REFUTE E: an anchor holding a literal '+' or '%' and a '+'-encoded term
+    never share one view). anchors == () is ANCHORLESS: the term counts on its own (fail-closed,
+    see _roster_entries)."""
+    views = _decoded_views(text.lower())
+    hits = []
+    for i, e in enumerate(terms):
+        if not _in_any(_entry_term(e), views):
+            continue
+        if isinstance(e, str) or not e[1] or any(_in_any(a, views) for a in e[1]):
+            hits.append(i)
+    return hits
+
+
+def mentions_term(text, terms):
+    """True when `text` contains ANY roster term string in any decoded view, IGNORING anchors.
+    Used to withhold a reported path: printing a path that carries a context term next to
+    "confidential term(s)" discloses the term even when the path alone is not a hit (REFUTE C5b)."""
+    views = _decoded_views(text.lower())
+    return any(_in_any(_entry_term(e), views) for e in terms)
+
+
+# WINDOWS (Defect 2a, 2026-11-12): a context term's anchor must co-occur in the same window, and
+# the whole `git log -p` output of a push is NOT one window -- an anchor in one commit and a term in
+# an unrelated commit would otherwise combine. Window = ONE WHOLE COMMIT: its `commit <sha>`
+# header, message and patch together (REFUTE 2026-11-23, A3: the message and the patch are
+# published together, so a term in the message and its anchor in the patch -- or in a file NAME
+# -- must block; the 2026-11-12 split into [message, patch] let them pass). For compressed /
+# UTF-16 blobs, each text view scan_compressed() produces is a window, and so is the full
+# content of every plain file a pushed commit adds or modifies (B1/B2, see scan_compressed).
+# `git log` (pinned --pretty=medium) indents message lines by four spaces and prefixes every
+# patch line, so a line starting with `commit <40 hex>` can only be git's own header.
+_COMMIT_HEADER_RE = re.compile(r"^commit [0-9a-f]{40}", re.M)
+
+
+def _log_windows(body):
+    """Split `git log -p` output into windows: one per commit (header + message + patch)."""
+    starts = [m.start() for m in _COMMIT_HEADER_RE.finditer(body)]
+    if not starts or starts[0] != 0:
+        starts.insert(0, 0)
+    return [body[a:b] for a, b in zip(starts, starts[1:] + [len(body)]) if body[a:b]]
+
+
+_WITHHELD = "<path withheld: contains a confidential term>"
+
+
+def _withhold(path, terms):
+    """`path`, or a placeholder when it carries any roster term (anchors ignored, any decoded
+    view). Every block message that prints a path goes through this (REFUTE 2026-11-23, C5:
+    the credential / RCT / exposure reports printed term-bearing paths verbatim)."""
+    return _WITHHELD if terms and mentions_term(path, terms) else path
+
+
+def scan_log(body, terms):
+    """Sorted roster-entry indices hit in any window of a `git log -p` body."""
+    hits = set()
+    for w in _log_windows(body):
+        hits.update(scan_text(w, terms))
+    return sorted(hits)
 
 
 # --- Compressed blobs (audit finding prepush-scan-blind-to-compressed-transcripts, 2026-11-08) ---
@@ -496,8 +641,24 @@ def scan_compressed(rng, terms, cwd=None):
     term_hits, cred_leaks, unscannable = [], [], []
 
     def _shown(path):
-        return "<path withheld: contains a confidential term>" if terms and scan_text(path, terms) \
-            else path
+        return _withhold(path, terms)
+
+    # FULL FILE CONTENT windows (REFUTE 2026-11-23, B1/B2): the diff scan sees only ADDED lines
+    # plus 3 lines of context, so a context term added to a file in one commit (or push) and its
+    # anchor added far away in a later one never shared a window -- yet the pushed file holds
+    # both. Every plain blob a pushed commit adds or modifies is therefore also scanned whole,
+    # for ANCHORED context entries only: always-terms and anchorless context terms are fully
+    # caught by the diff scan already (any occurrence is an added line somewhere), so scanning
+    # them here would only repeat those reports. Same reasoning as
+    # exposure_leak_check.shape_hits (rule 3).
+    # ACCEPTED COST (fail-safe, REFUTE 2026-11-23 E13/E14): this window reads the WHOLE file, so
+    # a file that ALREADY holds an anchored term and its anchor on the remote blocks on ANY later
+    # edit or rename of it -- and a later scrub commit in the same push does not clear it (the
+    # touching commit is still in the range): remove the term or anchor in a commit of its own
+    # first, or rewrite the history. The combination is already public in that case, so blocking
+    # is the right direction. Not covered (residual): submodule gitlinks and Git LFS pointers
+    # (no content in git), and no size cap -- a multi-hundred-MB plain blob is decoded in memory.
+    anchored = set(i for i, e in enumerate(terms or ()) if not isinstance(e, str) and e[1])
 
     try:
         blobs = _range_blobs(rng, cwd)
@@ -507,11 +668,16 @@ def scan_compressed(rng, terms, cwd=None):
         for sha, blob in _iter_blobs(sorted(paths_by_sha), cwd):
             path = paths_by_sha[sha][0]
             if not _is_compressed(blob):
+                views = _text_views(blob)
+                if anchored:
+                    whole = [i for i in scan_text(views[0], terms) if i in anchored]
+                    if whole:
+                        term_hits.append(("%s [full file content]" % _shown(path), whole))
                 # A bare UTF-16 file (BOM or NUL-heavy; Windows PowerShell 5.1's `>` and
                 # Out-File write UTF-16LE by default) is "Binary files differ" to `git log -p`,
                 # so only its UTF-16 views are scanned here -- the utf-8 view is the diff scan's
                 # (REFUTE 2026-11-08, E6 residual).
-                texts = _text_views(blob)[1:]
+                texts = views[1:]
                 if not texts:
                     continue
             else:
@@ -546,7 +712,8 @@ def main():
     terms = load_terms()
     if terms is None:
         sys.stderr.write("pre-push BLOCKED (fail-closed): confidential-terms.json "
-                         "unreadable — cannot prove the push is clean.\n")
+                         "unreadable or malformed (an always / context field that is not a "
+                         "list of strings) — cannot prove the push is clean.\n")
         return 1
     if _rct is None:
         sys.stderr.write("pre-push BLOCKED (fail-closed): hooks/lib/rct_leak_check.py could "
@@ -633,6 +800,11 @@ def main():
         #                    keys commit-message scanning on (REFUTE 2026-11-13, C9);
         #   fixed a/ b/ prefixes + core.quotePath=false   per-path rules see real paths.
         # It also replaces three separate full-range passes with one.
+        # _log_windows() (context-term windows, Defect 2a) ALSO relies on the pinned
+        # --pretty=medium layout: a `commit <40hex>` header and message lines indented four
+        # spaces. A pusher's own format.pretty (e.g. %H%n%B) would leave a message line
+        # `diff --git ...` unindented and let it split a term from its anchor (REFUTE F,
+        # 2026-11-12), so the format must stay pinned in GIT_LOG_ARGS, never inherited.
         p = subprocess.run(["git"] + _exp.GIT_LOG_ARGS + [rng], capture_output=True)
         if p.returncode != 0:
             sys.stderr.write("pre-push BLOCKED (fail-closed): `git log -p %s` failed "
@@ -643,7 +815,7 @@ def main():
             continue
         body = p.stdout.decode("utf-8", "ignore")
         if terms:
-            hits = scan_text(body, terms)
+            hits = scan_log(body, terms)
             if hits:
                 sys.stderr.write("pre-push BLOCKED: %d confidential term(s) (indices %s) "
                                  "found in the HISTORY being pushed on %s (range %s). A "
@@ -656,7 +828,7 @@ def main():
         # only; the matched value is never echoed into the terminal or a CI log.
         leaks = _sp.scan_diff(body)
         if leaks:
-            detail = "; ".join("%s -> %s" % (path, ", ".join(labels))
+            detail = "; ".join("%s -> %s" % (_withhold(path, terms), ", ".join(labels))
                                for path, labels in leaks)
             sys.stderr.write("pre-push BLOCKED: credential-shaped string(s) in the HISTORY "
                              "being pushed on %s (range %s): %s. Values are not echoed. "
@@ -673,7 +845,8 @@ def main():
                                  "echoed. This repo is PUBLIC: replace each with a pointer to the "
                                  "private RCT file (~/.ora-private/rct/), and reword the commit "
                                  "message if it is listed.\n"
-                                 % (local_ref, rng, "; ".join(rct_paths)))
+                                 % (local_ref, rng,
+                                    "; ".join(_withhold(rp, terms) for rp in rct_paths)))
                 bad = True
         # Exposure rules over the same pinned body (prefixes, path quoting and textconv are
         # pinned so a host's diff.noprefix / textconv config cannot blind the path rules).
@@ -693,12 +866,14 @@ def main():
                              "file untracked (gitignored), move contacts to contacts.local.md "
                              "and loan figures to data/loan-terms.json, and reword the commit "
                              "message if it is listed.\n"
-                             % (local_ref, rng, "; ".join("%s -> %s" % h for h in e_hits)))
+                             % (local_ref, rng, "; ".join("%s -> %s" % (_withhold(h[0], terms),
+                                                                         h[1]) for h in e_hits)))
             bad = True
         # Compressed and UTF-16 blobs: invisible to `git log -p` (see scan_compressed).
         c_hits, c_leaks, c_bad = scan_compressed(rng, terms)
         if c_hits:
             sys.stderr.write("pre-push BLOCKED: confidential term(s) inside COMPRESSED / UTF-16 file(s) "
+                             "or a pushed file's full file content "
                              "being pushed on %s (range %s): %s. Terms are not echoed.\n"
                              % (local_ref, rng, "; ".join("%s -> indices %s" % (p, i)
                                                           for p, i in c_hits)))
