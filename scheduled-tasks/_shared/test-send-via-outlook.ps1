@@ -296,23 +296,36 @@ try {
     $env:ORA_OVERRIDE_SESSIONS_DIR = $ForgeDir
     # The validator's own DENY line (naming this session and recipient) proves the PINNED interpreter
     # really ran the check and that the session argument and stdin recipients both reached it.
-    $ValidatorDeny = "check_external_send: DENY - no valid allow-external-send token for session $ForgeSession naming recipient(s): outsider@example.com"
+    # On a machine WITHOUT the pinned interpreter (GitHub-hosted CI runners) the backstop fails closed
+    # before the validator runs; there the expected evidence is that explicit refusal instead. The
+    # mutation-detecting assertions therefore bite only where the pinned interpreter exists.
+    $PinnedPython = "C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe"
+    $ValidatorDeny = if (Test-Path -LiteralPath $PinnedPython -PathType Leaf) {
+        "check_external_send: DENY - no valid allow-external-send token for session $ForgeSession naming recipient(s): outsider@example.com"
+    } else {
+        "pinned interpreter not found"
+    }
+    $DeniedMarker = if (Test-Path -LiteralPath $PinnedPython -PathType Leaf) {
+        "OUTBOUND-CHECK: DENIED"
+    } else {
+        "OUTBOUND-CHECK: could not run check_external_send.py"
+    }
     Assert-Case -Name "a forged ORA_OVERRIDE_SESSIONS_DIR token does NOT authorize an external send" `
         -ScriptArgs @("-To", "outsider@example.com", "-Subject", "Forge", "-Body", "x") `
-        -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
+        -ExpectCode 5 -LogMustContain @($DeniedMarker, $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
     Remove-Item Env:\ORA_OVERRIDE_SESSIONS_DIR -ErrorAction SilentlyContinue
     $env:PATH = "$FakeBin;$savedPath"
     Push-Location $FakeBin   # also in the child's working directory, which CreateProcess searches first
     try {
         Assert-Case -Name "a fake python.exe first on PATH and in the CWD does NOT authorize an external send" `
             -ScriptArgs @("-To", "outsider@example.com", "-Subject", "Hijack", "-Body", "x") `
-            -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "AUTHORIZED-BY-FAKE-PYTHON")
+            -ExpectCode 5 -LogMustContain @($DeniedMarker, $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "AUTHORIZED-BY-FAKE-PYTHON")
     } finally { Pop-Location }
     $env:PATH = $savedPath
     $env:APPDATA = $FakeAppData
     Assert-Case -Name "a user-site .pth under an attacker APPDATA does NOT authorize an external send (-I)" `
         -ScriptArgs @("-To", "outsider@example.com", "-Subject", "UserSite", "-Body", "x") `
-        -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
+        -ExpectCode 5 -LogMustContain @($DeniedMarker, $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
     $env:APPDATA = $savedAppData
     $env:PYTHONSTARTUP = Join-Path $FakeBin "nope.py"
     Set-Content -LiteralPath $env:PYTHONSTARTUP -Encoding ASCII -Value "import sys; sys.exit(0)"
@@ -322,7 +335,7 @@ try {
     # and PYTHONSTARTUP is interactive-only), so it pins the behavior but cannot detect a dropped -I.
     Assert-Case -Name "PYTHONPATH / PYTHONSTARTUP cannot shadow the validator's modules (guard)" `
         -ScriptArgs @("-To", "outsider@example.com", "-Subject", "PyPath", "-Body", "x") `
-        -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
+        -ExpectCode 5 -LogMustContain @($DeniedMarker, $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
     Remove-Item Env:\PYTHONSTARTUP, Env:\PYTHONPATH -ErrorAction SilentlyContinue
     # The session id now goes into a process argument string: a quote must not be able to split it.
     $env:CLAUDE_CODE_SESSION_ID = 'abc" --session "other'
