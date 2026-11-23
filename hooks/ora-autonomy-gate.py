@@ -465,6 +465,15 @@ except Exception:
     def _recipients_authorized(fields, external):
         return False  # no validator -> no grant, ever (mirrors token_grants above)
 
+# Display-only (PR #481 follow-up): names a claim left by a gate-pass killed mid-spend, which
+# otherwise refuses a valid-looking token on every retry with no explanation. Imported on its
+# own so a module without it costs the note, never the gate (it cannot grant anything).
+try:
+    from override_tokens import stuck_claim_note  # noqa: E402
+except Exception:
+    def stuck_claim_note(session_id, tier):
+        return ""
+
 WEBSITE_WRITE = Tier("allow-website-write", "website-write", 3600)
 # HubSpot CMS pages/posts are public-facing content (CLAUDE.md: publishing or modifying public
 # content needs explicit permission). Multi-use on purpose: a page edit is several calls that
@@ -603,9 +612,10 @@ def block(reason, tier, session_id, extra=""):
         "  path: %s\n"
         "  valid: %d min%s\n"
         "  content:\n%s"
+        "%s"
         % (reason, extra, where, tier.ttl // 60,
            ", SINGLE-USE (consumed by one gate-pass)" if tier.single_use else ", multi-use",
-           body)
+           body, stuck_claim_note(session_id, tier) if TOKEN_CONTRACT_LOADED else "")
     )
     sys.exit(2)
 
