@@ -890,9 +890,13 @@ EGRESS_CODE = re.compile(
     r"\bfetch\s*\(|\baxios\b|\bXMLHttpRequest\b|\bWebSocket\b|\bsendBeacon\b|\bEventSource\b|"
     r"\bnodemailer\b|\bundici\b|\b(?:https?|http2)\.(?:request|get|connect)\s*\(|"
     r"\bnet\.(?:connect|createConnection|Socket)\b|\btls\.connect\b|\bdgram\.createSocket\b|"
-    # The quote may be backslash-escaped: `node -e "require(\"https\")"` (REFUTE 2026-11-23, C1b).
-    r"\b(?:require\s*\(|from|import\s*\(?)\s*\\?" + _JSQ + r"(?:" + _NET_JS_MODULES + r")\\?"
-    + _JSQ + "|"
+    # The quote may be escaped by the enclosing shell string: backslashes (`require(\"https\")`,
+    # double-escaped `\\\"` under `bash -c`; REFUTE 2026-11-23, C1b), a PowerShell backtick
+    # (`require(`"https`")`) or a PowerShell doubled quote (`require(""https"")`,
+    # `require(''https'')`). `{0,8}` is a bounded run of escape characters (room for 3-level
+    # `bash -c` nesting), so the match stays linear.
+    r"\b(?:require\s*\(|from|import\s*\(?)\s*[\\`\"']{0,8}" + _JSQ + r"(?:" + _NET_JS_MODULES
+    + r")[\\`\"']{0,8}" + _JSQ + "|"
     # PowerShell / .NET (EGRESS_BASH already has iwr/irm/WebClient/HttpClient/BITS/Upload*).
     # Method names cover an object built in an EARLIER call of a persistent terminal / REPL.
     r"\bdownload(?:string|file|data)(?:async|taskasync)?\b|\bopenread(?:async|taskasync)?\b|"
@@ -905,7 +909,7 @@ EGRESS_CODE = re.compile(
     r"\b(?:ncat|netcat|socat|telnet|rclone|azcopy|gsutil|s3cmd)\b|\baws\s+s3\b|"
     r"\baz\s+storage\b|\bgcloud\s+storage\b|(?<![\w.-])nc(?:\.exe)?[ \t]+(?:-|[\w.-]+[ \t]+\d)|"
     # `(?<=-M)`: `perl -MLWP::Simple` has no word boundary before the module (REFUTE 2026-11-23).
-    r"(?:\b|(?<=-M))(?:net::(?:http|smtp|ftp)\b|lwp::|io::socket\b|http::tiny\b)|"
+    r"(?:\b|(?<=-M))(?:net::(?:https?|smtp|ftp)\b|lwp::|io::socket\b|http::tiny\b)|"
     r"\bopen-uri\b|\bnet/http\b",
     re.I,
 )
