@@ -108,6 +108,14 @@ except BaseException:
     def token_path(session_id, name):
         return None
 
+# Display-only (PR #481 follow-up): names a claim left by a gate-pass killed mid-spend.
+# Imported separately so a module without it costs the note, never the gate.
+try:
+    from override_tokens import stuck_claim_note  # noqa: E402
+except BaseException:
+    def stuck_claim_note(session_id, tier):
+        return ""
+
 try:
     import guard_telemetry as _telemetry  # noqa: E402
 except BaseException:
@@ -311,9 +319,9 @@ def _block_irreversible(short, reason, sid, target):
         "    session: %s\n"
         "    targets: %s\n"
         "    reason: <why Gabriel approved this>\n"
-        "Any change to the call's input changes the target digest and needs a new token."
+        "Any change to the call's input changes the target digest and needs a new token.\n%s"
         % (short, reason, where, MCP_DELETE.ttl // 60, MCP_DELETE.scope, sid or "<none>",
-           target))
+           target, stuck_claim_note(sid, MCP_DELETE) if TOKEN_CONTRACT_LOADED else ""))
 
 
 def main():

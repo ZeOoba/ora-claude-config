@@ -3576,6 +3576,35 @@ def test_ncal_create_unchanged_by_the_binding():
     print("PASS test_ncal_create_unchanged_by_the_binding")
 
 
+def _plant_stuck_claim(token_file, age_seconds=60):
+    """Leave the claim a caller killed mid-spend would leave behind (override_tokens' layout:
+    <sid>/override-claims/<name>.<ino>-<mtime_ns>-<size>.lock), aged past a live spend."""
+    st = os.stat(token_file)
+    d = os.path.join(os.path.dirname(os.path.dirname(token_file)), "override-claims")
+    os.makedirs(d, exist_ok=True)
+    claim = os.path.join(d, "%s.%d-%d-%d.lock" % (os.path.basename(token_file), st.st_ino,
+                                                  st.st_mtime_ns, st.st_size))
+    open(claim, "w").close()
+    old = time.time() - age_seconds
+    os.utime(claim, (old, old))
+    return claim
+
+
+def test_stuck_claim_is_named_in_the_block_message():
+    """PR #481 follow-up: a claim left by a caller killed mid-spend keeps refusing a valid
+    token. The block message must say so, or the operator rewrites nothing and retries forever."""
+    tool = "outlook_delete_event"
+    ti = {"eventId": "E-stuck"}
+    d = fresh_sessions_dir()
+    tok = mint(d, "allow-external-send", "external-send", recipients=[_event_dest(tool, ti)])
+    _plant_stuck_claim(tok)
+    rc, _, err = run_hook(cal(tool, **ti), sessions_dir=d)
+    assert rc == 2, "a stuck-claimed token must still refuse (fail closed), got %s" % rc
+    assert "STUCK CLAIM" in err, "block message must name the stuck claim: %s" % err[-600:]
+    assert os.path.exists(tok), "the refused token must not be burned"
+    print("PASS test_stuck_claim_is_named_in_the_block_message")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     try:
