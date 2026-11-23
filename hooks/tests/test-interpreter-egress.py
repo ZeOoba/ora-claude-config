@@ -299,6 +299,10 @@ def test_speed():
         "drive-sep-run": lambda n: "'C:" + "\\" * n,
         "send-underscore": lambda n: ".send_" + "a" * n,
         "sock-names": lambda n: "sockx " * (n // 6),
+        # 2026-11-23: bounded escape run around the JS module quote, Net::HTTPS
+        "require-escape-run": lambda n: "require(" + "\\`\"" * (n // 3),
+        "require-escaped-junk": lambda n: "require(`\"https`\"x " * (n // 20),
+        "net-https-run": lambda n: "-MNet::HTTPSx " * (n // 14),
     }
     send = getattr(conf, "REPL_SEND_SHAPE", None)
 
@@ -486,6 +490,34 @@ def test_refute_port():
            {"command": "perl -MPOSIX -e 'print 1' %s" % TERM2}, 0)
 
 
+# ------------------------------------------------------------------ I10 escape forms (2026-11-23)
+def test_escape_forms():
+    # PowerShell escapes a double quote as `" (backtick) or "" (doubled) inside a "..." string.
+    for tool, cmd in (
+            ("PowerShell", 'node -e "require(`"https`").get(\'x\'); \'%s\'"'),
+            ("PowerShell", 'node -e "require(""https"").get(\'x\'); \'%s\'"'),
+            ("PowerShell", 'node -e "import(`"node:https`").then(h => h.get(\'%s\'))"'),
+            (TERMINAL, 'node -e "const W = require(""ws""); new W(\'x\' + \'%s\')"'),
+            ("Bash", 'bash -c "node -e \\"require(\\\\\\"https\\\\\\").get(1); \'%s\'\\""'),
+            ("PowerShell", "node -e 'require(''https'').get({host: ''x''}); ''%s'''"),
+            ("Bash", 'node -e "require(\\\\\\\\\\"https\\\\\\\\\\").get(1); \'%s\'"'),
+            ("Bash", 'node -e "require(\\\\\\\\\\\\\\"https\\\\\\\\\\\\\\").get(1); \'%s\'"')):
+        expect("I10.q %s: %s" % (tool[-10:], cmd[:40]), tool, {"command": cmd % TERM2}, 2)
+    # perl Net::HTTPS (and the plain forms it sits beside).
+    for cmd in ("perl -MNet::HTTPS -e 'print 1' %s",
+                "perl -e 'use Net::HTTPS; Net::HTTPS->new(Host => q{x})' %s"):
+        expect("I10.p Bash %s" % cmd[:30], "Bash", {"command": cmd % TERM2}, 2)
+    # Negatives: the same escape forms on a non-network module stay local work.
+    expect("I10.n PowerShell backtick-escaped fs require", "PowerShell",
+           {"command": 'node -e "require(`"fs`").readFileSync(\'%s\')"' % TERM2}, 0)
+    expect("I10.n PowerShell doubled single-quote fs require", "PowerShell",
+           {"command": "node -e 'require(''fs'').readFileSync(''%s'')'" % TERM2}, 0)
+    expect("I10.n PowerShell doubled-quote fs require", "PowerShell",
+           {"command": 'node -e "require(""path"").join(\'%s\')"' % TERM2}, 0)
+    expect("I10.n Bash perl Net::Domain (not a client)", "Bash",
+           {"command": "perl -MNet::Domain -e 'print 1' %s" % TERM2}, 0)
+
+
 def _load_conf():
     spec = importlib.util.spec_from_file_location("_conf_interp", CONF)
     mod = importlib.util.module_from_spec(spec)
@@ -507,6 +539,7 @@ def main():
         test_refute_round2()
         test_precommit_review()
         test_refute_port()
+        test_escape_forms()
     finally:
         shutil.rmtree(TMP, ignore_errors=True)
     if FAILS:
