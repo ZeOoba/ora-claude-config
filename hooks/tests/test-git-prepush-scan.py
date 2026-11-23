@@ -976,6 +976,43 @@ expect("require-refs: a real clean ref line still passes", _rc == 0, _err[:200])
 _rc, _err = _with_env("0", lambda: _main_inproc(_repo, "", []))
 expect("require-refs=0 is off (only the exact value 1 opts in)", _rc == 0, _err[:200])
 
+# --- Pinned log pass (audit 2026-11-23, HIGH #2) ------------------------------------
+# The terms + credential scans read an unpinned `git log -p`. git renders a text file with
+# one NUL byte, or a path marked `-diff`, as "Binary files differ"; a local textconv rewrites
+# what it shows; log.showRoot=false hides a root commit's diff. Each hid a term or a key.
+_KEY = "sk-ant-api03-" + "z" * 20
+
+
+def _cfg(repo, *kv):
+    subprocess.run(["git", "-C", repo, "config"] + list(kv), check=True, capture_output=True)
+    return repo
+
+
+_PIN_CASES = [
+    ("term in a text file carrying one NUL byte", {"notes.md": b"zephyr corp teaser\x00\n"}, None, TERMS, 1),
+    ("credential in a text file carrying one NUL byte", {"notes.md": ("k " + _KEY + "\x00\n").encode()}, None, [], 1),
+    ("term in a path marked -diff by .gitattributes",
+     {".gitattributes": b"*.md -diff\n", "notes.md": b"zephyr corp teaser\n"}, None, TERMS, 1),
+    ("credential in a path marked -diff by .gitattributes",
+     {".gitattributes": b"*.md -diff\n", "notes.md": ("k " + _KEY + "\n").encode()}, None, [], 1),
+    ("term hidden by a local textconv driver",
+     {".gitattributes": b"*.md diff=hide\n", "notes.md": b"zephyr corp teaser\n"},
+     ("diff.hide.textconv", "git hash-object"), TERMS, 1),
+    ("term in a root commit with log.showRoot=false",
+     {"notes.md": b"zephyr corp teaser\n"}, ("log.showRoot", "false"), TERMS, 1),
+    ("clean binary blob with NUL bytes is still allowed", {"img/x.bin": b"\x89PNG\x00\x01\x02 plain"}, None, TERMS, 0),
+    ("clean -diff text is still allowed",
+     {".gitattributes": b"*.md -diff\n", "notes.md": b"quarterly summary\n"}, None, TERMS, 0),
+]
+for _lbl, _files, _conf, _terms, _want in _PIN_CASES:
+    _repo, _stdin = _mk_repo_bytes(_files)
+    if _conf:
+        _cfg(_repo, *_conf)
+    _rc, _err = _main_inproc(_repo, _stdin, _terms)
+    expect("pinned log: %s -> exit %d" % (_lbl, _want), _rc == _want, "rc=%s err=%s" % (_rc, _err[:300]))
+    expect("pinned log: %s -> never echoes a term or key" % _lbl,
+           "sk-ant-api03" not in _err and not any(t in _err.lower() for t in TERMS), _err[:300])
+
 passed = sum(1 for ok, _ in results if ok)
 print("\ngit-prepush-scan tests: %d/%d passed" % (passed, len(results)))
 if passed != len(results):

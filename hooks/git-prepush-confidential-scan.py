@@ -620,18 +620,25 @@ def main():
                              "first.\n" % local_ref)
             bad = True
             continue
-        # --cc: a merge commit also shows its dense combined diff, so content introduced only
-        # by a conflict resolution is scanned (audit prepush-scan-skips-merge-commit-diffs).
-        # --no-abbrev-commit --pretty=medium: pinned so a host's log.abbrevCommit / format
-        # config cannot change the "commit <40hex>" header rct_leak_check keys commit-message
-        # scanning on (REFUTE 2026-11-13, C9). Same content for the terms/credential scans.
-        p = subprocess.run(["git", "log", "-p", "--cc", "--no-color", "--no-abbrev-commit",
-                            "--pretty=medium", rng],
-                           capture_output=True)
+        # ONE pinned `git log` pass feeds every scanner below (terms, credentials, RCT,
+        # exposure) -- audit 2026-11-23 HIGH #2. exposure_leak_check.GIT_LOG_ARGS pins:
+        #   --text           a text file with one NUL byte, or a path marked `-diff` in
+        #                    .gitattributes, would otherwise print "Binary files differ" and
+        #                    hide a term or key;
+        #   --no-textconv / --no-ext-diff   a local diff driver cannot rewrite what is shown;
+        #   --root           log.showRoot=false cannot hide a root commit's diff;
+        #   --no-renames     a renamed/copied file shows as a full add, not unchanged context;
+        #   --cc             a merge's conflict-resolution content is scanned;
+        #   --no-abbrev-commit --pretty=medium   the "commit <40hex>" header rct_leak_check
+        #                    keys commit-message scanning on (REFUTE 2026-11-13, C9);
+        #   fixed a/ b/ prefixes + core.quotePath=false   per-path rules see real paths.
+        # It also replaces three separate full-range passes with one.
+        p = subprocess.run(["git"] + _exp.GIT_LOG_ARGS + [rng], capture_output=True)
         if p.returncode != 0:
             sys.stderr.write("pre-push BLOCKED (fail-closed): `git log -p %s` failed "
-                             "for %s (unknown remote sha? run `git fetch` first).\n"
-                             % (rng, local_ref))
+                             "for %s (unknown remote sha? run `git fetch` first) -- cannot "
+                             "check for pipeline, PII or debt data, confidential terms, "
+                             "credentials or RCT figures.\n" % (rng, local_ref))
             bad = True
             continue
         body = p.stdout.decode("utf-8", "ignore")
@@ -658,19 +665,8 @@ def main():
                              % (local_ref, rng, detail))
             bad = True
         if rct_needles:
-            # Its OWN `git log --text` pass (REFUTE round 2, N1): the shared body renders a file
-            # marked `-diff` in .gitattributes, or any text file with one NUL byte, as "Binary
-            # files differ", so an RCT figure added there was never seen. --text forces the
-            # content out. Kept separate so the terms / credential scans above are unchanged.
-            pt = subprocess.run(["git", "log", "-p", "--cc", "--text", "--no-color",
-                                 "--no-abbrev-commit", "--pretty=medium", rng],
-                                capture_output=True)
-            if pt.returncode != 0:
-                sys.stderr.write("pre-push BLOCKED (fail-closed): `git log --text %s` failed for "
-                                 "%s -- cannot check for RCT figures.\n" % (rng, local_ref))
-                bad = True
-                continue
-            rct_paths = _rct.scan_diff(pt.stdout.decode("utf-8", "ignore"), rct_needles)
+            # Same pinned body (it carries --text: REFUTE round 2, N1).
+            rct_paths = _rct.scan_diff(body, rct_needles)
             if rct_paths:
                 sys.stderr.write("pre-push BLOCKED: ratified RCT replacement-cost figure(s) from "
                                  "the private table ADDED on %s (range %s): %s. Figures are not "
@@ -679,17 +675,9 @@ def main():
                                  "message if it is listed.\n"
                                  % (local_ref, rng, "; ".join(rct_paths)))
                 bad = True
-        # Exposure rules: own --text pass, for the same reason as the RCT pass above, with the
-        # diff prefixes, path quoting and textconv pinned (exposure_leak_check.GIT_LOG_ARGS)
-        # so a host's diff.noprefix / textconv config cannot blind the path rules.
-        pe = subprocess.run(["git"] + _exp.GIT_LOG_ARGS + [rng], capture_output=True)
-        if pe.returncode != 0:
-            sys.stderr.write("pre-push BLOCKED (fail-closed): `git log --text %s` failed for "
-                             "%s -- cannot check for pipeline, PII or debt data.\n"
-                             % (rng, local_ref))
-            bad = True
-            continue
-        e_hits = _exp.scan_diff(pe.stdout.decode("utf-8", "ignore"), exp_needles)
+        # Exposure rules over the same pinned body (prefixes, path quoting and textconv are
+        # pinned so a host's diff.noprefix / textconv config cannot blind the path rules).
+        e_hits = _exp.scan_diff(body, exp_needles)
         # Rule 3 reads file CONTENTS at every pushed commit (exposure_leak_check.shape_hits).
         try:
             e_hits = sorted(set(e_hits) | set(_exp.shape_hits(rng)))
