@@ -446,3 +446,11 @@ deal-figures.local.md
 /maintenance/_archive/**/projects/*/memory/**
 # Memory folder: local-only from 2026-11-20 (PR 476, Gabriel: "Memory local-only"); private backup in ZeOoba/ora-memory-private.
 /projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/**
+# (2026-11-23) Archived task-spec copies carrying ORA walk/clear/LOI figures, a named broker
+# and private loan counterparties, untracked from this PUBLIC repo (cross-repo audit, Gabriel
+# approved scrub in-turn). History NOT rewritten. Files kept on disk; originals + blob shas in
+# C:/Users/Owner/.ora-private/ora-claude-config-archive/2026-11-23_deal-figures-scrub/MANIFEST.txt.
+/scheduled-tasks/_archive_2026-08-26_completed-onetime/ora-511-industrial-fallout-check/SKILL.md
+/_scheduled_tasks_backup/ora-511-industrial-fallout-check/SKILL.md
+/maintenance/_archive/2026-09-29_pr285-unblock/scheduled-tasks/ora-loan-balance-check/SKILL.md
+/maintenance/_archive/2026-10-13_dirty-tree-triage/ora-passed-deal-tracker/SKILL.md
