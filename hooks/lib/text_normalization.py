@@ -91,7 +91,7 @@ separately and unconditionally match the realpath of the RAW path.
 
 BOTH CONSUMERS hold a hardcoded fallback copy of STRIP_CATEGORIES, because neither can
 afford to die on a missing shared module, and each is pinned to this tuple by test:
-  ora-autonomy-gate.py   -> test-ora-autonomy-gate.py::
+  ora-autonomy-gate.py   -> test-ora-autonomy-gate-core.py::
                             test_strip_categories_fallback_matches_shared_module
   tool_call_paths.py     -> test-tool-call-paths.py::
                             test_strip_categories_fallbacks_match_shared_module
