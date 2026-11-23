@@ -29,8 +29,12 @@ scan exits 2 if tip_ref does not exist or a literal contains a line break.
 scan   - writes one rule per form ACTUALLY present, drops any rule that matches a blob in
          tip_ref's tree (a purge must leave the tip unchanged; scrub it with a reviewed PR
          first) and writes <rules-out>.paths.txt (affected paths).
-verify - exit 1 if any removed path is still reachable, or any rule still matches a blob,
-         a commit message or a tag message. Run it on the rewrite and on a fresh clone.
+verify - exit 1 if any removed path is still reachable, any rule still matches a blob, a
+         commit message or a tag message, OR the independent search finds a configured
+         value or literal anywhere in the object store (every blob, commit and tag object,
+         not walked by ref or path; values present in the tip's files are accepted and
+         counted separately). Run it on the rewrite and on a fresh `git clone --bare`
+         (a --mirror clone also fetches GitHub's refs/pull/*, which still hold old history).
 """
 import json
 import re
@@ -41,8 +45,7 @@ from collections import defaultdict
 PH = b"[figure: private]"
 PH_PHONE = b"[phone: private]"
 PHONE_RE = re.compile(rb"(?<![\dA-Za-z])(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d)")
-NUM_PRE = rb"(?<![0-9A-Fa-f])(?<![0-9][.,])\$?"
-NUM_POST = rb"(?:\.0+)?(?![0-9A-Fa-f])(?![.,][0-9])"
+HEX = rb"0-9A-Fa-f"
 
 
 def git(repo, *a, inp=None):
@@ -55,11 +58,13 @@ def refs_of(repo):
 
 
 def blob_paths(repo, refs):
-    """sha -> set of every path that blob was ever stored at, across all refs."""
+    """sha -> set of every path that blob was ever stored at, across all branches and tags."""
     out = defaultdict(set)
     if not refs:
         return out
-    raw = git(repo, "log", "-z", "--raw", "--no-abbrev", "--no-renames", "--root", "-m", "--format=", *refs)
+    # --branches --tags instead of listing refs: hundreds of ref names exceed the Windows command line.
+    raw = git(repo, "log", "-z", "--raw", "--no-abbrev", "--no-renames", "--root", "-m", "--format=",
+              "--branches", "--tags")
     toks = raw.split(b"\0")
     i = 0
     while i < len(toks):
@@ -101,7 +106,7 @@ def messages(repo, refs):
     """Commit messages plus annotated-tag messages, as one bytes blob."""
     if not refs:
         return b""
-    msgs = git(repo, "log", "--format=%B%x00", *refs)
+    msgs = git(repo, "log", "--format=%B%x00", "--branches", "--tags")
     tags = git(repo, "for-each-ref", "--format=%(objecttype)%00%(contents)%00", "refs/tags").split(b"\0")
     for kind, body in zip(tags[0::2], tags[1::2]):
         if kind.strip() == b"tag":
@@ -131,8 +136,25 @@ def figure_forms(v, min_integer):
     return {"{:,.2f}".format(v), "{:.2f}".format(v), short, "{:,}".format(int(whole)) + "." + frac}
 
 
+def num_pattern(form):
+    """Anchored pattern for one written form of a figure.
+
+    Always: no hex/digit glued on either side (hashes, longer numbers), no decimal point
+    before it (0.123457) or decimal digits after it (123457.12). Only for comma-grouped
+    forms: no thousands group before or after (1,123,457 / 123,457,000). A plain form next
+    to a comma is a CSV or JSON neighbour (BldgA,123457,2450000), so it still matches.
+    """
+    pre = b"(?<![" + HEX + b"])(?<![0-9]\\.)"
+    post = b"(?:\\.0+)?(?![" + HEX + b"])(?!\\.[0-9])"
+    if "," in form:
+        if len(form.split(",")[0].lstrip("-")) == 3:
+            pre += b"(?<![0-9],)"
+        post += b"(?!,[0-9]{3}(?![0-9]))"
+    return pre + b"\\$?" + re.escape(form.encode()) + post
+
+
 def num_rule(form):
-    return b"regex:" + NUM_PRE + re.escape(form.encode()) + NUM_POST + b"==>" + PH
+    return b"regex:" + num_pattern(form) + b"==>" + PH
 
 
 def phone_rule(p):
@@ -203,16 +225,68 @@ def scan(repo, cfg, out):
     return 0
 
 
+def all_objects(repo):
+    """Yield (sha, type, data) for EVERY object in the repo's store (no ref or path walk)."""
+    lst = git(repo, "cat-file", "--batch-all-objects", "--batch-check=%(objectname) %(objecttype)").decode().split("\n")
+    shas = [l.split()[0] for l in lst if l and l.split()[1] in ("blob", "commit", "tag")]
+    kinds = {l.split()[0]: l.split()[1] for l in lst if l}
+    for sha, data in text_blobs(repo, shas):
+        yield sha, kinds[sha], data
+
+
+def residual(repo, cfg, tip_ref):
+    """Independent of the scan's rules: search every object for every configured value.
+
+    Loose patterns (only hex/digit neighbours excluded), so a value the rules missed -
+    wrong form, odd context, unusual file - still shows up. Values present in the tip's
+    files are reported as kept at the tip (accepted) and not counted as residual.
+    Returns (values with a residual, occurrences, values kept at tip).
+    """
+    min_int = int(cfg.get("min_integer", 10000))
+    pats = []
+    for v in cfg.get("values", []):
+        forms = figure_forms(v, min_int)
+        if forms:
+            alt = b"|".join(re.escape(f.encode()) for f in sorted(forms, key=len, reverse=True))
+            pats.append(re.compile(b"(?<![" + HEX + b"])(?:" + alt + b")(?![" + HEX + b"])"))
+    pats += [re.compile(re.escape(s.encode("utf-8"))) for s in cfg.get("literals", [])]
+    tip_blobs = set()
+    if tip_ref:
+        tip_blobs = {l.split()[2] for l in git(repo, "ls-tree", "-r", tip_ref).decode().splitlines()
+                     if l.split()[1] == "blob"}
+    objs = list(all_objects(repo))
+    at_tip = {i for i, rx in enumerate(pats) if any(rx.search(d) for s, _, d in objs if s in tip_blobs)}
+    left, count = set(), 0
+    for sha, _, data in objs:
+        if sha in tip_blobs:
+            continue
+        for i, rx in enumerate(pats):
+            if i in at_tip:
+                continue
+            n = len(rx.findall(data))
+            if n:
+                left.add(i)
+                count += n
+    return len(left), count, len(at_tip)
+
+
 def verify(repo, cfg, rules_path):
     remove_rx = re.compile(cfg["remove_path_regex"]) if cfg.get("remove_path_regex") else None
     with open(rules_path, "rb") as fh:
         rxs = [rule_regex(r) for r in fh.read().splitlines() if r]
-    _, kept, removed, msgs = history(repo, remove_rx)
+    refs, kept, removed, msgs = history(repo, remove_rx)
+    tip_ref = cfg.get("tip_ref", "refs/heads/main")
+    if tip_ref not in refs:
+        print("tip_ref %s not found" % tip_ref)
+        return 2
     hit_blobs = sum(1 for _, d in text_blobs(repo, list(kept)) if any(x.search(d) for x in rxs))
     msg_hits = sum(len(x.findall(msgs)) for x in rxs)
+    left, occ, at_tip = residual(repo, cfg, tip_ref)
     print("removed paths still reachable: %d" % len(removed))
     print("blobs checked: %d; blobs matching a rule: %d; message hits: %d" % (len(kept), hit_blobs, msg_hits))
-    return 1 if (removed or hit_blobs or msg_hits) else 0
+    print("independent search of every object: values still present: %d (%d occurrences); "
+          "kept at tip (accepted): %d" % (left, occ, at_tip))
+    return 1 if (removed or hit_blobs or msg_hits or left) else 0
 
 
 def main(argv):

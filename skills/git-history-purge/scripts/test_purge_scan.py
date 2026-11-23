@@ -180,10 +180,60 @@ class PurgeScanTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self.rules))
 
     def test_literal_with_line_break_is_an_error(self):
-        self.config(literals=["Acme Tower\nSuite 9"])
+        for lit in ("Acme Tower\nSuite 9", "Acme Tower\rSuite 9"):
+            self.config(literals=[lit])
+            self.r.commit({"a.md": "x\n"})
+            r = run("scan", self.r.path, self.cfg_path, self.rules)
+            self.assertEqual(r.returncode, 2, r.stdout)
+
+    def test_figure_in_csv_row_and_json_array_is_found_and_purged(self):
+        self.r.commit({"rentroll.csv": "BldgA,123457,2450001\n98001,123457\n", "arr.json": "[123457,98001]\n"})
+        self.r.commit(delete=["rentroll.csv", "arr.json"])
+        self.scan()
+        self.assertTrue(rules_match(self.rules, "A,123457,2"))
+        self.r.filter(self.rules)
+        self.assertNotIn("123457", self.r.history_text())
+        self.assertEqual(self.verify().returncode, 0)
+
+    def test_verify_catches_a_value_the_rules_missed(self):
+        self.r.commit({"a.md": "noi %s\n" % FIG}, msg="note about %s" % LIT)
         self.r.commit({"a.md": "x\n"})
-        r = run("scan", self.r.path, self.cfg_path, self.rules)
-        self.assertEqual(r.returncode, 2, r.stdout)
+        self._empty_rules()                       # as if the scan had missed everything
+        v = self.verify()
+        self.assertEqual(v.returncode, 1, v.stdout)
+        self.assertIn("values still present: 2", v.stdout)
+        self.assertNotIn(FIG, v.stdout + v.stderr)
+        self.assertNotIn(LIT, v.stdout + v.stderr)
+
+    def test_value_after_byte_8192_with_a_late_nul_is_still_text(self):
+        self.r.commit({"big.txt": "noi %s\n" % FIG + "y" * 9000 + "\0\n"})
+        self.r.commit({"big.txt": "x\n"})
+        self.scan()
+        self.assertTrue(rules_match(self.rules, FIG))
+
+    def test_configured_min_integer_is_honoured(self):
+        self.config(values=[5250], min_integer=1000)
+        self.r.commit({"a.md": "fee 5,250\n"})
+        self.r.commit({"a.md": "x\n"})
+        self.scan()
+        self.assertTrue(rules_match(self.rules, " 5,250 "))
+
+    def test_phone_after_a_country_code_glued_to_text_is_found(self):
+        self.r.commit({"a.md": "cell x1-614-555-0177 only\n"})
+        self.r.commit({"a.md": "x\n"})
+        r = self.scan()
+        self.assertIn("phones 1", r.stdout)
+        self.assertTrue(rules_match(self.rules, "x1-614-555-0177"))
+
+    def test_many_refs_do_not_exceed_the_command_line(self):
+        self.r.commit({"a.md": "noi %s\n" % FIG})
+        self.r.commit({"a.md": "x\n"})
+        head = git(self.r.path, "rev-parse", "HEAD").strip()
+        lines = "".join("create refs/heads/branch-with-a-fairly-long-name-%04d %s\n" % (i, head) for i in range(800))
+        subprocess.run(["git", "-C", self.r.path, "update-ref", "--stdin"], input=lines.encode(), check=True, env=ENV)
+        self.scan()
+        self.assertTrue(rules_match(self.rules, FIG))
+        self.assertEqual(self.verify().returncode, 1)
 
     def test_annotated_tag_message_is_scanned_and_rewritten(self):
         self.r.commit({"a.md": "x\n"})

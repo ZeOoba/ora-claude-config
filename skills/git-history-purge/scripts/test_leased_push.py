@@ -28,13 +28,20 @@ def write(path, text):
 
 
 class Base(unittest.TestCase):
+    CLEAN_ROOT = False      # True: the first commit holds nothing private, so the purge keeps its SHA
+    BRANCH = "main"
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         t = self.tmp.name
         self.remote = os.path.join(t, "remote.git")
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", self.remote], check=True, env=ENV)
+        subprocess.run(["git", "init", "-q", "--bare", "-b", self.BRANCH, self.remote], check=True, env=ENV)
         src = self.src = os.path.join(t, "src")
-        subprocess.run(["git", "init", "-q", "-b", "main", src], check=True, env=ENV)
+        subprocess.run(["git", "init", "-q", "-b", self.BRANCH, src], check=True, env=ENV)
+        if self.CLEAN_ROOT:
+            write(os.path.join(src, "README.md"), "readme\n")
+            git(src, "add", "README.md")
+            git(src, "commit", "-q", "-m", "init")
         for i in range(5):
             write(os.path.join(src, "f.txt"), "secret v%d\n" % i)
             git(src, "add", "f.txt")
@@ -81,7 +88,7 @@ class Base(unittest.TestCase):
     def hook_cmd(self, code):
         path = os.path.join(self.tmp.name, "hook.py")
         write(path, code)
-        return "%s -I %s" % (sys.executable, path)
+        return path
 
     def reject_on_remote(self, ref):
         mark = os.path.join(self.tmp.name, "reject")
@@ -199,6 +206,15 @@ class LeasedPushTest(Base):
         self.assertEqual(git(self.remote, "for-each-ref", "--format=%(refname)", "refs/heads/notesonly"), "")
         self.assert_remote_matches_work()
 
+    def test_branch_created_after_backup_stops_everything(self):
+        other = os.path.join(self.tmp.name, "other-new")
+        subprocess.run(["git", "clone", "-q", self.remote, other], check=True, env=ENV)
+        git(other, "push", "-q", "origin", "HEAD~1:refs/heads/late-new")      # old history, new name
+        r = self.run_push()
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("MOVED refs/heads/late-new", r.stdout)
+        self.assertEqual(git(self.remote, "rev-parse", "refs/heads/main"), git(self.mirror, "rev-parse", "refs/heads/main"))
+
     def test_batch_failing_without_porcelain_is_a_failure(self):
         code = "import os\nos.rename(%r, %r)\n" % (self.remote, self.remote + ".gone")
         r = self.run_push(env={"LEASED_PUSH_TEST_BEFORE_PUSH": self.hook_cmd(code)})
@@ -218,29 +234,94 @@ class LeasedPushTest(Base):
         self.assertEqual(self.before, git(self.remote, "for-each-ref"))
 
 
+class MasterBranchTest(Base):
+    BRANCH = "master"
+
+    def test_main_ref_option_holds_the_default_branch(self):
+        self.reject_on_remote("refs/heads/b2")
+        r = self.run_push("--main-ref", "refs/heads/master")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("HELD refs/heads/master", r.stdout)
+        self.assertEqual(git(self.remote, "rev-parse", "refs/heads/master"),
+                         git(self.mirror, "rev-parse", "refs/heads/master"))
+
+
 class OldHistoryGuardTest(Base):
-    def test_guard_blocks_old_history_and_allows_purged(self):
+    CLEAN_ROOT = True       # the hard case: the purge keeps the first commit, every old branch shares it
+
+    def setUp(self):
+        super().setUp()
+        # an orphan branch in the backup whose own history also gets purged
+        git(self.src, "checkout", "-q", "--orphan", "side")
+        write(os.path.join(self.src, "side.txt"), "secret side\n")
+        git(self.src, "add", "side.txt")
+        git(self.src, "commit", "-q", "-m", "side")
+        git(self.src, "push", "-q", self.remote, "side")
+        git(self.mirror, "fetch", "-q", self.remote, "+refs/heads/*:refs/heads/*")
+        self.rewrite()
         self.assertEqual(self.run_push().returncode, 0)
-        roots = os.path.join(self.tmp.name, "old-roots.txt")
-        g = subprocess.run([sys.executable, "-I", GUARD, "roots", self.mirror, self.remote, roots],
+        self.purged = os.path.join(self.tmp.name, "verify.git")
+        subprocess.run(["git", "clone", "-q", "--bare", self.remote, self.purged], check=True, env=ENV)
+        self.listfile = os.path.join(self.tmp.name, "old-commits.txt")
+        g = subprocess.run([sys.executable, "-I", GUARD, "commits", self.mirror, self.purged, self.listfile],
                            capture_output=True, text=True, env=ENV)
         self.assertEqual(g.returncode, 0, g.stdout + g.stderr)
-        old_sha = git(self.mirror, "rev-parse", "refs/heads/b1")
-        new_sha = git(self.remote, "rev-parse", "refs/heads/b1")
-        zero = "0" * 40
+        self.zero = "0" * 40
 
-        def check(line):
-            return subprocess.run([sys.executable, "-I", GUARD, "check", roots], input=line, capture_output=True,
-                                  text=True, env=ENV, cwd=self.mirror)
+    def check(self, line, *nxt, listfile=None):
+        args = [sys.executable, "-I", GUARD, "check", listfile or self.listfile]
+        if nxt:
+            args += ["--"] + list(nxt)
+        return subprocess.run(args, input=line, capture_output=True, text=True, env=ENV, cwd=self.mirror)
 
-        bad = check("refs/heads/feat %s refs/heads/feat %s\n" % (old_sha, zero))
-        self.assertEqual(bad.returncode, 1, bad.stdout + bad.stderr)
-        self.assertIn("refs/heads/feat", bad.stderr)
+    def test_root_commit_survives_the_purge(self):
+        self.assertEqual(git(self.mirror, "rev-list", "--max-parents=0", "refs/heads/main"),
+                         git(self.purged, "rev-list", "--max-parents=0", "refs/heads/main"))
+
+    def test_old_branches_are_refused_even_with_a_shared_root(self):
+        for ref in ("refs/heads/b1", "refs/heads/side"):
+            old = git(self.mirror, "rev-parse", ref)
+            bad = self.check("refs/heads/feat %s refs/heads/feat %s\n" % (old, self.zero))
+            self.assertEqual(bad.returncode, 1, "%s: %s" % (ref, bad.stdout + bad.stderr))
+            self.assertIn("refusing to push refs/heads/feat", bad.stderr)
+
+    def test_purged_history_and_deletions_are_allowed(self):
         git(self.mirror, "fetch", "-q", self.remote, "refs/heads/b1:refs/purged/b1")
-        good = check("refs/heads/b1 %s refs/heads/b1 %s\n" % (new_sha, zero))
-        self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
-        delete = check("(delete) %s refs/heads/x %s\n" % (zero, new_sha))
-        self.assertEqual(delete.returncode, 0, delete.stdout + delete.stderr)
+        new = git(self.mirror, "rev-parse", "refs/purged/b1")
+        self.assertEqual(self.check("refs/heads/b1 %s refs/heads/b1 %s\n" % (new, self.zero)).returncode, 0)
+        self.assertEqual(self.check("(delete) %s refs/heads/x %s\n" % (self.zero, new)).returncode, 0)
+
+    def test_empty_commit_list_refuses(self):
+        empty = os.path.join(self.tmp.name, "empty.txt")
+        write(empty, "\n")
+        git(self.mirror, "fetch", "-q", self.remote, "refs/heads/b1:refs/purged/b1")
+        new = git(self.mirror, "rev-parse", "refs/purged/b1")
+        r = self.check("refs/heads/b1 %s refs/heads/b1 %s\n" % (new, self.zero), listfile=empty)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+
+    def test_commits_mode_fails_when_nothing_changed(self):
+        out = os.path.join(self.tmp.name, "none.txt")
+        g = subprocess.run([sys.executable, "-I", GUARD, "commits", self.purged, self.purged, out],
+                           capture_output=True, text=True, env=ENV)
+        self.assertEqual(g.returncode, 1, g.stdout + g.stderr)
+
+    def test_chained_next_hook_gets_the_same_stdin_and_its_exit_code(self):
+        echo = os.path.join(self.tmp.name, "next.py")
+        seen = os.path.join(self.tmp.name, "seen.txt")
+        write(echo, "import sys\ndata = sys.stdin.read()\nopen(%r, 'w').write(data)\nsys.exit(int(sys.argv[1]))\n" % seen)
+        git(self.mirror, "fetch", "-q", self.remote, "refs/heads/b1:refs/purged/b1")
+        new = git(self.mirror, "rev-parse", "refs/purged/b1")
+        line = "refs/heads/b1 %s refs/heads/b1 %s\n" % (new, self.zero)
+        ok = self.check(line, sys.executable, "-I", echo, "0")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        with open(seen, encoding="utf-8") as fh:
+            self.assertEqual(fh.read().replace("\r\n", "\n"), line)
+        self.assertEqual(self.check(line, sys.executable, "-I", echo, "7").returncode, 7)
+        os.remove(seen)
+        old = git(self.mirror, "rev-parse", "refs/heads/b1")
+        bad = self.check("refs/heads/f %s refs/heads/f %s\n" % (old, self.zero), sys.executable, "-I", echo, "0")
+        self.assertEqual(bad.returncode, 1)
+        self.assertFalse(os.path.exists(seen))    # refused before the next hook runs
 
 
 if __name__ == "__main__":
