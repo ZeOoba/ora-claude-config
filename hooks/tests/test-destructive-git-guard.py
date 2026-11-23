@@ -166,7 +166,9 @@ def memory_checkout_checks():
     # Pin pull.rebase in the repo: the system gitconfig still applies to these fixtures, and
     # a Git for Windows install can set pull.rebase=true there (round 3c R3c-01 / R3d-01).
     git(ch, "config", "pull.rebase", "false")
-    env = dict(os.environ, USERPROFILE=home, HOME=home)
+    # GIT_CONFIG_NOSYSTEM: the system gitconfig (pull.rebase, branch.<b>.rebase, ...) must not
+    # change these verdicts (merge gate R3c-01, R3d-01). Only the fixture repo config counts.
+    env = dict(os.environ, USERPROFILE=home, HOME=home, GIT_CONFIG_NOSYSTEM="1")
     try:
         both = ("script", "dispatcher")
         # Round-6 findings: every command that writes an old tree, path or diff into the
@@ -336,6 +338,8 @@ def oi409_checks(ch, home, env):
           "git pull --refm=x --rebase . side", ch, True, env=env)
     check("oi409: pull --reb . side (abbreviated --rebase, pull.rebase=false)",
           "git pull --reb . side", ch, True, env=env)
+    check("oi409: pull --reb --no-rebase . side (abbreviation recognised; last flag: merge)",
+          "git pull --reb --no-rebase . side", ch, False, env=env)
     check("oi409: -c pull.rebase=true pull --negotiation-include --no-rebase . side",
           "git -c pull.rebase=true pull --negotiation-include --no-rebase . side", ch, True,
           env=env)
