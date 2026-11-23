@@ -1074,6 +1074,211 @@ with tempfile.TemporaryDirectory() as td:
           sorted(cmf.parse_porcelain_v2_z(out)) == ["a b.txt", "base_commit.txt", "nd/deep.txt"],
           repr(out))
 
+# --- OI-409: ignored incoming paths, displaced parent files, dedupe, failure branches ---
+def _merge_spy(record):
+    real = cmf._git
+
+    def spy(args, repo):
+        if args[:1] == ["merge"]:
+            record.append(args)
+        return real(args, repo)
+    return real, spy
+
+
+# An incoming path under the local-only MEMORY folder, ABSENT locally: the merge would
+# re-track memory in the public repo. Block before merging, ignored or not.
+MEM_NEW = cmf.MEMORY_REL + "/new.md"
+for label, ignore in (("ignored", True), ("not ignored", False)):
+    with tempfile.TemporaryDirectory() as td:
+        local, origin = make_pair(td)
+        if ignore:
+            write(local, ".gitignore", "/projects/\n")
+            run(local, "add", ".gitignore")
+            run(local, "commit", "-q", "-m", "ignore projects", "--no-verify")
+        os.makedirs(os.path.join(origin, *cmf.MEMORY_REL.split("/")))
+        commit(origin, "origin adds memory", fname=MEM_NEW)
+        merges = []
+        real, spy = _merge_spy(merges)
+        cmf._git = spy
+        try:
+            r = cmf.sync(local, "main")
+        finally:
+            cmf._git = real
+        check("memory absent incoming (%s): BLOCKED naming it" % label,
+              r["status"] == "BLOCKED_DIRTY_OVERLAP" and r.get("blocked_paths") == [MEM_NEW],
+              repr(r))
+        check("memory absent incoming (%s): git merge never invoked" % label, merges == [],
+              repr(merges))
+        check("memory absent incoming (%s): nothing written locally" % label,
+              not os.path.lexists(os.path.join(local, *MEM_NEW.split("/"))))
+
+# Case variants of the memory path land in the same local folder on Windows
+# (core.ignorecase): blocked too (merge gate R2-04).
+for variant in ("PROJECTS/" + cmf.MEMORY_REL.split("/", 1)[1],
+                cmf.MEMORY_REL[: -len("memory")] + "Memory"):
+    with tempfile.TemporaryDirectory() as td:
+        local, origin = make_pair(td)
+        os.makedirs(os.path.join(origin, *variant.split("/")))
+        commit(origin, "origin adds case-variant memory", fname=variant + "/new.md")
+        r = cmf.sync(local, "main")
+        check("memory case variant %s: BLOCKED" % variant.split("/")[0][:8],
+              r["status"] == "BLOCKED_DIRTY_OVERLAP"
+              and r.get("blocked_paths") == [variant + "/new.md"], repr(r))
+
+# Routine history: a new file inside an EXISTING tracked directory must merge. (The parent
+# walk must skip parents that are directories, or every such commit would pin the
+# corrector -- merge gate R2-08.)
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    os.makedirs(os.path.join(origin, "hooks"))
+    commit(origin, "origin adds hooks/a.py", fname="hooks/a.py")
+    run(local, "pull", "-q", "--no-rebase", "origin", "main")
+    commit(origin, "origin adds hooks/b.py", fname="hooks/b.py")
+    r = cmf.sync(local, "main")
+    check("new file in existing tracked dir: MERGED", r["status"] == "MERGED", repr(r))
+
+# A local-only-NAMED incoming path the local rules ignore, absent locally: blocked.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(local, ".gitignore", "contacts.local.md\n")
+    run(local, "add", ".gitignore")
+    run(local, "commit", "-q", "-m", "ignore local contacts", "--no-verify")
+    os.makedirs(os.path.join(origin, "notes"))
+    write(origin, os.path.join("notes", "contacts.local.md"), "x\n")
+    run(origin, "add", "-f", "notes/contacts.local.md")
+    run(origin, "commit", "-q", "-m", "origin force-adds local file", "--no-verify")
+    r = cmf.sync(local, "main")
+    check("local-only-named ignored absent incoming: BLOCKED",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP"
+          and r.get("blocked_paths") == ["notes/contacts.local.md"], repr(r))
+
+# Default-deny repo (like ~/.claude): ordinary history adds a file the LOCAL rules still
+# ignore -- a new file plus its own `!` rule, or a force-added archive copy. Nothing local
+# is at stake, so the merge must land (merge gate R1-05: blocking these pinned the
+# corrector permanently on 11 of 300 real origin/main commits).
+for label, files, gi in (
+        ("new file + its own ! rule", ["newdir/x.py"], "/*\n!/.gitignore\n!/*.txt\n!/newdir/\n"),
+        ("force-added archive", ["_archive/2026-11-21_x/old.md"], None)):
+    with tempfile.TemporaryDirectory() as td:
+        local, origin = make_pair(td)
+        write(origin, ".gitignore", "/*\n!/.gitignore\n!/*.txt\n")
+        run(origin, "add", ".gitignore")
+        run(origin, "commit", "-q", "-m", "default deny", "--no-verify")
+        run(local, "pull", "-q", "--no-rebase", "origin", "main")
+        for f in files:
+            os.makedirs(os.path.join(origin, os.path.dirname(f)), exist_ok=True)
+            write(origin, f, "content\n")
+            run(origin, "add", "-f", f)
+        if gi:
+            write(origin, ".gitignore", gi)
+            run(origin, "add", ".gitignore")
+        run(origin, "commit", "-q", "-m", "origin adds " + label, "--no-verify")
+        r = cmf.sync(local, "main")
+        check("default-deny %s: MERGED" % label, r["status"] == "MERGED", repr(r))
+        check("default-deny %s: file landed" % label,
+              all(os.path.isfile(os.path.join(local, *f.split("/"))) for f in files))
+
+# An untracked local FILE where origin brings a DIRECTORY. (git status already lists the
+# untracked file, so overlapping_paths blocks this before the parent walk runs.)
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(local, "blob", "local untracked file\n")
+    os.makedirs(os.path.join(origin, "blob"))
+    commit(origin, "origin adds dir", fname="blob/x.txt")
+    r = cmf.sync(local, "main")
+    check("displaced parent file: BLOCKED naming the parent",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP" and r.get("blocked_paths") == ["blob"], repr(r))
+    check("displaced parent file: kept verbatim",
+          open(os.path.join(local, "blob")).read() == "local untracked file\n")
+
+# An ignored local FILE displaced the same way: invisible to git status, and `cache/y.txt`
+# is neither memory nor local-only-named, so ONLY the parent walk can block it.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(local, ".gitignore", "/cache\n")
+    run(local, "add", ".gitignore")
+    run(local, "commit", "-q", "-m", "ignore cache", "--no-verify")
+    write(local, "cache", "ignored local file\n")
+    os.makedirs(os.path.join(origin, "cache"))
+    commit(origin, "origin adds cache dir", fname="cache/y.txt")
+    r = cmf.sync(local, "main")
+    check("displaced ignored file: BLOCKED naming exactly the parent",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP" and r.get("blocked_paths") == ["cache"],
+          repr(r))
+    check("displaced ignored file: kept verbatim",
+          open(os.path.join(local, "cache")).read() == "ignored local file\n")
+
+# Unit: duplicates in the incoming list (a conflicted path is also a diff name) -> once.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    write(local, "dup.txt", "untracked\n")
+    check("untracked_incoming: de-duplicated",
+          cmf.untracked_incoming(local, ["dup.txt", "dup.txt", "base_commit.txt"]) == ["dup.txt"],
+          repr(cmf.untracked_incoming(local, ["dup.txt", "dup.txt", "base_commit.txt"])))
+    check("untracked_incoming: tracked incoming path is not a hit",
+          cmf.untracked_incoming(local, ["base_commit.txt"]) == [])
+    # A TRACKED file where an incoming directory goes is git's own, visible conflict --
+    # the parent walk must not report it.
+    check("untracked_incoming: tracked parent file is not a hit",
+          cmf.untracked_incoming(local, ["base_commit.txt/inner.txt"]) == [],
+          repr(cmf.untracked_incoming(local, ["base_commit.txt/inner.txt"])))
+
+# sync() reports each blocked path once even when incoming lists it twice (a conflicted
+# path is also a diff name). End-to-end only: this case is stopped by the git-status
+# overlap check; untracked_incoming's own dedupe is covered by the unit test above.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    commit(origin, "origin adds twice", fname="twice.txt")
+    write(local, "twice.txt", "local untracked\n")
+    real_inc = cmf.incoming_paths
+    cmf.incoming_paths = lambda repo, sha: ["twice.txt", "twice.txt"]
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf.incoming_paths = real_inc
+    check("sync: blocked_paths de-duplicated",
+          r["status"] == "BLOCKED_DIRTY_OVERLAP" and r.get("blocked_paths") == ["twice.txt"],
+          repr(r))
+
+# untracked_incoming's OWN ls-files failing (status + hidden-dirty probe succeed): ERROR,
+# never a merge. The earlier ls-files test fails hidden_dirty_paths first.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    commit(origin, "origin clean drift", fname="drift.txt")
+    merges = []
+    real = cmf._git
+
+    def broken_full_name(args, repo):
+        if args[:1] == ["merge"]:
+            merges.append(args)
+        if args[:1] == ["ls-files"] and "--full-name" in args:
+            return 128, "", "fatal: simulated"
+        return real(args, repo)
+    cmf._git = broken_full_name
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf._git = real
+    check("untracked_incoming ls-files fails: ERROR naming ls-files",
+          r["status"] == "ERROR" and "ls-files" in (r["detail"] or ""), repr(r))
+    check("untracked_incoming ls-files fails: git merge never invoked", merges == [], repr(merges))
+
+# check-ignore failing: ERROR, never a merge.
+with tempfile.TemporaryDirectory() as td:
+    local, origin = make_pair(td)
+    commit(origin, "origin clean drift 2", fname="drift2.txt")
+    real_ip = cmf.ignored_paths
+    cmf.ignored_paths = lambda repo, paths: None
+    try:
+        r = cmf.sync(local, "main")
+    finally:
+        cmf.ignored_paths = real_ip
+    check("check-ignore fails: ERROR naming check-ignore",
+          r["status"] == "ERROR" and "check-ignore" in (r["detail"] or ""), repr(r))
+    check("check-ignore fails: HEAD unchanged",
+          run(local, "rev-parse", "HEAD").stdout.strip()
+          != run(local, "rev-parse", "origin/main").stdout.strip())
+
 passed = sum(1 for ok, _ in _results if ok)
 print("\ncheckout-merge-forward tests: %d/%d passed" % (passed, len(_results)))
 sys.exit(0 if passed == len(_results) else 1)

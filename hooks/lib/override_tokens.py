@@ -79,6 +79,12 @@ import time
 
 DEFAULT_SESSIONS_DIR = r"C:\Users\Owner\.claude\hooks\sessions"
 OVERRIDE_SUBDIR = "overrides"
+# Per-session dir holding the O_EXCL claim files that serialize single-use consumption.
+# Deliberately NOT under overrides/ (see _claim_path).
+CLAIM_SUBDIR = "override-claims"
+# A claim older than this is reported as stuck in block messages (see stuck_claim_note). A
+# live spend holds its claim for milliseconds; this only gates a DISPLAY note, never a grant.
+STUCK_CLAIM_MIN_AGE_SECONDS = 5
 
 # A token may not be older than its TTL. Small negative ages (filesystem timestamp
 # granularity / clock skew) are tolerated; a genuinely future-dated token is refused, since
@@ -194,6 +200,64 @@ def consume_token(path):
         return False
 
 
+def _token_identity(st):
+    """One token INSTANCE: file id + mtime (ns) + size. A re-minted token (new file, or an
+    overwrite) gets a new identity, so a claim left behind by a dead caller blocks only the
+    exact instance it was claiming, never Gabriel's next approval.
+
+    Limit (adversarial review, 2026-11-21): a same-size IN-PLACE overwrite within one
+    timestamp tick keeps the identity (measured 128/200 on NTFS); delete+recreate and
+    temp-file-replace did not collide (0/200). A collision can only REFUSE (a leftover claim
+    keeps blocking the rewritten token until it is rewritten again) -- it can never let two
+    callers hold claims on one instance, so it fails closed."""
+    return "%d-%d-%d" % (st.st_ino, st.st_mtime_ns, st.st_size)
+
+
+def _claim_path(token_file, name, identity):
+    """Sibling of the token's overrides/ dir, NOT inside it: tools that enumerate overrides/
+    (maintenance/override-token-frequency-probe.py, the sweep) must never see a claim file
+    as a token."""
+    session_dir = os.path.dirname(os.path.dirname(token_file))
+    return os.path.join(session_dir, CLAIM_SUBDIR, "%s.%s.lock" % (name, identity))
+
+
+def _acquire_claim(claim):
+    """Atomic exclusive claim: O_CREAT|O_EXCL (CreateFile CREATE_NEW on Windows) lets exactly
+    one creator win. Any failure -- already held, delete-pending, unwritable -- is a refusal."""
+    try:
+        os.makedirs(os.path.dirname(claim), exist_ok=True)
+        os.close(os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+        return True
+    except OSError:
+        return False
+
+
+def _release_claim(claim):
+    try:
+        os.remove(claim)
+    except OSError:
+        pass  # a leftover claim only blocks this (already consumed or still-valid) instance
+
+
+def _validate(path, session_id, tier, extra_check):
+    if not os.path.isfile(path):
+        return None
+    if not fresh(path, tier.ttl):
+        return None
+    fields = parse_token(path)
+    if not fields:
+        return None
+    if fields.get("scope") != tier.scope:
+        return None
+    if fields.get("session") != session_id:
+        return None
+    # BEFORE consuming: a token that fails the caller's binding must not be burned -- it may
+    # be a legitimate token being tested against the wrong action.
+    if extra_check is not None and not extra_check(fields):
+        return None
+    return fields
+
+
 def token_grants(session_id, tier, extra_check=None, consume=True):
     """The validated token's fields when a valid, fresh, correctly-scoped, session-matched
     token authorizes `tier` for `session_id` -- otherwise None. Consumes the token first
@@ -242,27 +306,80 @@ def token_grants(session_id, tier, extra_check=None, consume=True):
     if tier.requires_extra_check and extra_check is None:
         return None
     path = token_path(session_id, tier.name)
-    if not path or not os.path.isfile(path):
+    if not path:
         return None
-    if not fresh(path, tier.ttl):
+    if not (consume and tier.single_use):
+        # Peek, or a multi-use tier: nothing is spent, so no claim is needed.
+        return _validate(path, session_id, tier, extra_check)
+
+    # SINGLE-USE SPEND (2026-11-21, concurrent double-spend fix). The old check-then-consume
+    # trusted os.remove() succeeding as proof this caller won -- but on Windows overlapping
+    # DeleteFile calls on one file ALL return success (measured: 8 processes racing os.remove
+    # -> >1 success in 40/40 trials; os.rename the same; O_CREAT|O_EXCL 0/40). One session
+    # firing N identical gated calls in parallel therefore spent one token up to N times.
+    # Now: take an O_EXCL claim on this token INSTANCE first; only the holder validates and
+    # consumes. Losers refuse (fail closed -- a false refusal costs a retry). Everything is
+    # re-validated UNDER the claim, so a caller that stat'ed before the winner finished sees
+    # the token gone and refuses.
+    try:
+        st = os.stat(path)
+    except OSError:
         return None
-    fields = parse_token(path)
-    if not fields:
+    identity = _token_identity(st)
+    claim = _claim_path(path, tier.name, identity)
+    if not _acquire_claim(claim):
         return None
-    if fields.get("scope") != tier.scope:
-        return None
-    if fields.get("session") != session_id:
-        return None
-    # BEFORE consuming: a token that fails the caller's binding must not be burned -- it may
-    # be a legitimate token being tested against the wrong action.
-    if extra_check is not None and not extra_check(fields):
-        return None
-    # Consume BEFORE granting: if we granted first and the delete then failed, the token
-    # would silently become multi-use. Skipped entirely for a peek (consume=False) -- see
-    # the `consume` param doc above for why a caller would ask for that.
-    if consume and tier.single_use and not consume_token(path):
-        return None
-    return fields
+    try:
+        fields = _validate(path, session_id, tier, extra_check)
+        if fields is None:
+            return None
+        # The token validated must be the instance claimed: an overwrite/re-mint between the
+        # stat and here changes the identity -> refuse rather than spend the wrong instance.
+        try:
+            if _token_identity(os.stat(path)) != identity:
+                return None
+        except OSError:
+            return None
+        # Consume BEFORE granting: if we granted first and the delete then failed, the token
+        # would silently become multi-use.
+        if not consume_token(path):
+            return None
+        return fields
+    finally:
+        # Safe to release: the token is gone (or was refused unburned). A later caller that
+        # wins this same claim re-validates and finds no token, or a new instance whose
+        # identity differs.
+        _release_claim(claim)
+
+
+def stuck_claim_note(session_id, tier):
+    """A block-message note when the CURRENT single-use token is held by a stuck claim, else "".
+
+    A caller killed between taking its claim and releasing it (token_grants' finally) leaves
+    the claim file behind, and that token instance is then refused on every retry while
+    looking perfectly valid. A live spend holds its claim for milliseconds, so only a claim
+    older than STUCK_CLAIM_MIN_AGE_SECONDS is reported; a fresher one is a concurrent spend in
+    progress, not a fault. Rewriting the token gives it a new identity, which the stale claim
+    no longer matches -- that is the fix the note tells the operator to apply (the claim file
+    itself is left alone). Display only: never grants, never raises.
+    """
+    try:
+        if not tier.single_use:
+            return ""
+        path = token_path(session_id, tier.name)
+        if not path:
+            return ""
+        st = os.stat(path)
+        claim = _claim_path(path, tier.name, _token_identity(st))
+        age = time.time() - os.path.getmtime(claim)
+        if age < STUCK_CLAIM_MIN_AGE_SECONDS:
+            return ""
+        return ("\n  STUCK CLAIM: the token at that path exists but is held by a claim left by an "
+                "interrupted gate-pass (%s, %ds old), so it is refused on every retry. "
+                "Rewrite the token file (same content is fine) and retry.\n"
+                % (claim, int(age)))
+    except Exception:
+        return ""
 
 
 def describe_token(session_id, tier):
@@ -280,4 +397,4 @@ def describe_token(session_id, tier):
         % (where, tier.ttl // 60,
            ", SINGLE-USE (consumed by one gate-pass)" if tier.single_use else ", multi-use",
            tier.scope, session_id or "<none>")
-    )
+    ) + stuck_claim_note(session_id, tier)

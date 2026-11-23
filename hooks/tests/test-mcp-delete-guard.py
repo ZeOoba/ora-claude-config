@@ -470,8 +470,29 @@ def test_hardening():
     check("G38 exit codes are only 0 or 2", rcs <= {0, 2}, str(rcs))
 
 
+def test_stuck_claim_note():
+    """PR #481 follow-up: a claim left by a caller killed mid-spend keeps refusing a valid
+    token; the deny message must name it."""
+    _, env = make_env()
+    tok = mint(env, SESSION_A, [label(SCHED_DEL, TI_SCHED)])
+    st = os.stat(tok)
+    d = os.path.join(env["ORA_OVERRIDE_SESSIONS_DIR"], SESSION_A, "override-claims")
+    os.makedirs(d, exist_ok=True)
+    claim = os.path.join(d, "allow-mcp-delete.%d-%d-%d.lock" % (st.st_ino, st.st_mtime_ns,
+                                                                st.st_size))
+    open(claim, "w").close()
+    old = time.time() - 60
+    os.utime(claim, (old, old))
+    rc, out, err = run(env, SCHED_DEL, TI_SCHED)
+    check("SC1 a stuck-claimed token is still refused", rc == 2, "rc=%d" % rc)
+    check("SC2 the deny message names the stuck claim", "STUCK CLAIM" in (out + err),
+          (out + err)[-400:])
+    check("SC3 the refused token is not burned", os.path.exists(tok))
+
+
 if __name__ == "__main__":
     test_irreversible()
+    test_stuck_claim_note()
     test_recoverable_and_unknown()
     test_exempt()
     test_untrash_by_input()
