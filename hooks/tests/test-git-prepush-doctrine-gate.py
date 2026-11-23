@@ -10,7 +10,7 @@ Run: python test-git-prepush-doctrine-gate.py  (exit 0 = pass)
 
 TOKEN HARDENING (2026-07-16) — this suite locks the session-scoped, content-bound token
 contract that replaced the flat mtime-only sentinel. It mirrors, deliberately, the
-adversarial cases in test-ora-autonomy-gate.py: both gates share one contract via
+adversarial cases in test-ora-autonomy-gate-core.py: both gates share one contract via
 hooks/lib/override_tokens.py, so both must refuse the same malformed tokens.
 """
 import importlib.util

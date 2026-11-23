@@ -212,7 +212,7 @@ no override was ever even needed: exit 0, no block, nothing to log.
 
 All five were personally reproduced against the live gate with a passing control before the
 fix (the equivalent already-blocked form) and locked in as regression tests in
-hooks/tests/test-ora-autonomy-gate.py. Survived a 3-round independent adversarial gauntlet
+hooks/tests/test-ora-autonomy-gate-core.py. Survived a 3-round independent adversarial gauntlet
 (each round explicitly tasked with trying to break the PRIOR round's fix) before landing --
 
 HONEST LIMIT (found by Round 1 of that gauntlet, Gabriel-acknowledged, follow-up scoped
@@ -375,7 +375,7 @@ except BaseException:
     # module, but the cost of the wider catch is nil and the failure is silent.
     #
     # This copy is pinned to the canonical tuple by
-    # test-ora-autonomy-gate.py::test_strip_categories_fallback_matches_shared_module,
+    # test-ora-autonomy-gate-core.py::test_strip_categories_fallback_matches_shared_module,
     # which reads this literal out of the source and compares it to the shared module.
     # A fallback nothing pins is just the pre-2026-09-18 duplicate under another name.
     STRIP_CATEGORIES = ("Cf", "Mn")
