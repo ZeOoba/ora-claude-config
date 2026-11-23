@@ -22,15 +22,22 @@ Pinned behaviour:
   3. Retention (Invariant 6): every earlier archive is kept. Rotation never
      deletes, and _log_archive/ is never pruned.
   4. Fail-open: a held handle without FILE_SHARE_DELETE (the Windows lock that
-     blocks a rename) leaves the log in place, and the caller keeps running under
-     both ErrorActionPreference=Stop and the scripts' default Continue. A missing
-     log is a no-op.
+     blocks a rename) leaves the log in place, and the caller keeps running. The
+     Stop run is the one that proves the try/catch: under the scripts' real
+     default (Continue, which neither script overrides) a Move-Item failure is
+     non-terminating anyway. A missing log is a no-op.
+  5. Archive stamps are the real UTC second, so an earlier archive is never
+     overwritten by a same-name -Force move.
 
-Each writer's own copy of the function is extracted from its .ps1 and executed,
-so the tests run the shipped code, not a re-implementation.
+Wiring (1) is judged on the PowerShell parser's AST, not line regexes, so a
+block-commented, if/function-wrapped, early-returned or shadowed (defined twice)
+rotation fails. The single definition's own text is then executed against temp
+fixtures, so the tests run the shipped code, not a re-implementation.
 
-Run: python test-log-rotation.py   (exit 0 = all pass; Windows PowerShell required)
+Run: python test-log-rotation.py   (exit 0 = all pass; prints CANNOT RUN and exits
+1 without Windows PowerShell, the gate's ENV-SKIP contract)
 """
+import datetime
 import json
 import os
 import re
@@ -49,68 +56,121 @@ ARCHIVE_NAME = re.compile(r"^(?P<base>.+)-\d{8}-\d{6}\.log$")
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
 
 
-def _read(path):
-    with open(path, encoding="utf-8-sig") as f:
-        return f.read()
-
-
-def extract_function(src, name="Invoke-LogRotation"):
-    """Return the full `function <name>(...) { ... }` text, brace-matched."""
-    m = re.search(r"^function\s+" + re.escape(name) + r"\b", src, re.M)
-    if not m:
-        return None
-    i = src.index("{", m.end())
-    depth = 0
-    for j in range(i, len(src)):
-        if src[j] == "{":
-            depth += 1
-        elif src[j] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[m.start(): j + 1]
-    return None
-
-
 # --------------------------------------------------------------------------- #
-# 1. Static wiring: defined, 1 MiB default, called on $log before first write
+# 1. Static wiring, judged on the PowerShell parser's AST (not line regexes), so
+#    a block-commented, if-wrapped, function-wrapped or shadowed rotation fails.
+#    (REFUTE pass 2026-11-23: the first, regex-based version passed all four.)
 # --------------------------------------------------------------------------- #
+ANALYZER = r"""
+param([string]$Path)
+$ErrorActionPreference = 'Stop'
+$L = [System.Management.Automation.Language.FunctionDefinitionAst]
+$tok = $null; $perr = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tok, [ref]$perr)
+function InFunction($n) { $p = $n.Parent; while ($p) { if ($p -is $L) { return $true }; $p = $p.Parent }; $false }
+function IsLogVar($n) { $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -eq 'log' }
+function IsLogAssign($n) {
+    if ($n -isnot [System.Management.Automation.Language.AssignmentStatementAst]) { return $false }
+    $l = $n.Left; if ($l -is [System.Management.Automation.Language.ConvertExpressionAst]) { $l = $l.Child }
+    IsLogVar $l
+}
+$defs = @($ast.FindAll({ param($n) $n -is $L -and $n.Name -eq 'Invoke-LogRotation' }, $true))
+$top = @($ast.EndBlock.Statements)
+$callIdx = -1
+for ($i = 0; $i -lt $top.Count; $i++) {
+    $s = $top[$i]
+    if ($s -is [System.Management.Automation.Language.PipelineAst] -and $s.PipelineElements.Count -eq 1) {
+        $c = $s.PipelineElements[0]
+        if ($c -is [System.Management.Automation.Language.CommandAst] -and $c.GetCommandName() -eq 'Invoke-LogRotation' `
+            -and $c.CommandElements.Count -eq 2 -and (IsLogVar $c.CommandElements[1])) { $callIdx = $i; break }
+    }
+}
+# every assignment to $log outside function bodies, as top-level statement indexes (-1 = nested)
+$assigns = @($ast.FindAll({ param($n) (IsLogAssign $n) -and -not (InFunction $n) }, $true) | ForEach-Object {
+    $a = $_; $idx = -1; for ($i = 0; $i -lt $top.Count; $i++) { if ([object]::ReferenceEquals($top[$i], $a)) { $idx = $i } }; $idx })
+$earlyExit = @(); $earlyWrite = @()
+if ($callIdx -ge 0) {
+    for ($i = 0; $i -lt $callIdx; $i++) {
+        $s = $top[$i]
+        if ($s -is $L) { continue }
+        foreach ($n in $s.FindAll({ param($n) -not (InFunction $n) }, $true)) {
+            if ($n -is [System.Management.Automation.Language.ReturnStatementAst] -or
+                $n -is [System.Management.Automation.Language.ExitStatementAst] -or
+                $n -is [System.Management.Automation.Language.ThrowStatementAst]) { $earlyExit += $n.Extent.StartLineNumber }
+            if ($n -is [System.Management.Automation.Language.CommandAst]) {
+                $nm = $n.GetCommandName()
+                if ($nm -eq 'Log' -or (@('Out-File','Add-Content','Set-Content','Tee-Object') -contains $nm -and
+                    @($n.CommandElements | Where-Object { IsLogVar $_ }).Count -gt 0)) { $earlyWrite += $n.Extent.StartLineNumber }
+            }
+            if ($n -is [System.Management.Automation.Language.FileRedirectionAst] -and (IsLogVar $n.Location)) { $earlyWrite += $n.Extent.StartLineNumber }
+        }
+    }
+}
+[ordered]@{
+    parse_errors = @($perr | ForEach-Object { $_.Message })
+    def_count    = $defs.Count
+    def_toplevel = ($defs.Count -eq 1 -and [object]::ReferenceEquals($defs[0].Parent, $ast.EndBlock))
+    def_text     = $(if ($defs.Count -ge 1) { $defs[0].Extent.Text } else { $null })
+    call_line    = $(if ($callIdx -ge 0) { $top[$callIdx].Extent.StartLineNumber } else { $null })
+    call_idx     = $callIdx
+    assign_idxs  = @($assigns)
+    early_exit   = @($earlyExit)
+    early_write  = @($earlyWrite)
+} | ConvertTo-Json -Compress -Depth 3
+"""
+
+
+def analyze(path, workdir):
+    script = os.path.join(workdir, "analyze.ps1")
+    with open(script, "w", encoding="utf-8-sig") as f:
+        f.write(ANALYZER)
+    proc = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, "-Path", path],
+        capture_output=True, text=True, timeout=180)
+    out = proc.stdout.strip().splitlines()
+    if proc.returncode != 0 or not out:
+        raise RuntimeError("AST analyzer failed rc=%s: %s" % (proc.returncode, proc.stderr[-600:]))
+    return json.loads(out[-1])
+
+
 def check_wiring(label, path):
+    """Returns (errors, function_text_or_None)."""
+    workdir = tempfile.mkdtemp(prefix="logrot-ast-")
+    try:
+        a = analyze(path, workdir)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
     errs = []
-    src = _read(path)
-    lines = src.splitlines()
-    fn = extract_function(src)
-    if fn is None:
-        return ["%s: Invoke-LogRotation is not defined (rotation lost again, see R25-3)" % label]
+    if a["parse_errors"]:
+        errs.append("%s: script does not parse: %s" % (label, a["parse_errors"][:3]))
+    if a["def_count"] == 0:
+        return errs + ["%s: Invoke-LogRotation is not defined (rotation lost again, see R25-3)" % label], None
+    if a["def_count"] > 1:
+        errs.append("%s: Invoke-LogRotation is defined %d times; a later definition would shadow the "
+                    "tested one" % (label, a["def_count"]))
+    if not a["def_toplevel"]:
+        errs.append("%s: Invoke-LogRotation is not a single top-level function definition" % label)
+    fn = a["def_text"]
     if not re.search(r"\$maxBytes\s*=\s*1048576\b", fn):
         errs.append("%s: Invoke-LogRotation default threshold is not 1048576 (1 MiB)" % label)
-    if "Remove-Item" in fn or "Clear-Content" in fn:
+    if re.search(r"Remove-Item|Clear-Content|\]::Delete\(", fn):
         errs.append("%s: Invoke-LogRotation deletes or truncates; it must only move (Invariant 6)" % label)
-
-    def first(pattern):
-        for n, line in enumerate(lines):
-            if re.match(pattern, line):
-                return n
-        return None
-
-    assign = first(r"^\$log\s*=")
-    call = first(r"^Invoke-LogRotation\s+\$log\s*$")
-    # first top-level or indented *call* of Log (not its definition)
-    first_write = None
-    for n, line in enumerate(lines):
-        if re.match(r"^\s*Log\s+[\"'(\$]", line):
-            first_write = n
-            break
-    if assign is None:
-        errs.append("%s: no top-level `$log = ...` assignment found" % label)
-    if call is None:
-        errs.append("%s: no top-level `Invoke-LogRotation $log` call (defined but not wired)" % label)
-    if assign is not None and call is not None and call < assign:
-        errs.append("%s: Invoke-LogRotation is called before $log is assigned" % label)
-    # Defining Log before the rotation call is harmless; *calling* it first is the bug.
-    if call is not None and first_write is not None and first_write < call:
-        errs.append("%s: first Log write (line %d) precedes rotation (line %d)"
-                    % (label, first_write + 1, call + 1))
-    return errs
+    call = a["call_idx"]
+    if call < 0:
+        errs.append("%s: no top-level `Invoke-LogRotation $log` statement (defined but not wired, or "
+                    "wrapped in a block that may never run)" % label)
+        return errs, fn
+    assigns = a["assign_idxs"]
+    if assigns != [i for i in assigns if 0 <= i < call] or len(assigns) != 1:
+        errs.append("%s: $log must be assigned exactly once, at top level, before rotation "
+                    "(top-level statement indexes %r, rotation at %d; -1 = nested)" % (label, assigns, call))
+    if a["early_exit"]:
+        errs.append("%s: return/exit/throw before rotation (line %s) can skip it"
+                    % (label, a["early_exit"]))
+    if a["early_write"]:
+        errs.append("%s: log written (line %s) before rotation (line %s)"
+                    % (label, a["early_write"], a["call_line"]))
+    return errs, fn
 
 
 # --------------------------------------------------------------------------- #
@@ -173,11 +233,9 @@ def _archives(d):
     return sorted(os.listdir(a)) if os.path.isdir(a) else []
 
 
-def check_behaviour(label, path, pref):
+def check_behaviour(label, fn, pref):
     errs = []
-    fn = extract_function(_read(path))
-    if fn is None:
-        return ["%s: cannot run behaviour checks, function missing" % label]
+    started = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None, microsecond=0)
     root = tempfile.mkdtemp(prefix="logrot-")
     try:
         build_fixtures(root)
@@ -221,6 +279,15 @@ def check_behaviour(label, path, pref):
             if not mm or mm.group("base") != "x":
                 errs.append("%s: %s archive name %r does not match <base>-yyyyMMdd-HHmmss.log"
                             % (tag, n, arch[0]))
+            else:
+                # The stamp must be the real UTC second of rotation. A coarser stamp
+                # (date-only, fixed) makes -Force overwrite an earlier same-stamp
+                # archive, which is a deletion (Invariant 6).
+                stamp = datetime.datetime.strptime(arch[0][len("x-"):-len(".log")], "%Y%m%d-%H%M%S")
+                finished = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                if not (started - datetime.timedelta(seconds=2) <= stamp <= finished):
+                    errs.append("%s: %s archive stamp %s is not the UTC time of rotation (%s..%s)"
+                                % (tag, n, stamp, started, finished))
             with open(os.path.join(d(n), "_log_archive", arch[0]), "rb") as f:
                 if f.read() != _payload(size):
                     errs.append("%s: %s archive content differs from the rotated log" % (tag, n))
@@ -253,13 +320,17 @@ def check_behaviour(label, path, pref):
 
 def main():
     if os.name != "nt" or not POWERSHELL:
-        print("SKIP: needs Windows PowerShell (the writers are Windows Task Scheduler scripts)")
-        return 0
+        # Repo ENV-SKIP contract (hooks/git-prepush-hook-tests-gate.py): CANNOT RUN + nonzero.
+        print("CANNOT RUN: needs Windows PowerShell (the writers are Windows Task Scheduler scripts)")
+        return 1
     errs = []
     for label, path in WRITERS.items():
-        errs += check_wiring(label, path)
+        werrs, fn = check_wiring(label, path)
+        errs += werrs
+        if fn is None:
+            continue
         for pref in ("Stop", "Continue"):
-            errs += check_behaviour(label, path, pref)
+            errs += check_behaviour(label, fn, pref)
     if errs:
         print("FAIL (%d):" % len(errs))
         for e in errs:
