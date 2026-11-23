@@ -47,8 +47,10 @@ files ENV-SKIP in CI exactly as in any worktree — notably test-confidentiality
 (no hooks/confidential-terms.json). Their real coverage is a FULL run in the main
 checkout (main-target pushes, the weekly sweep) plus FULL-tier escalation: any pushed
 path containing "confidential" forces FULL locally (prepush_test_selection.py).
-MERGE ENFORCEMENT: "green CI before merge" is enforced by the merge procedure, not by
-GitHub — main carries no required status check (tech.md §3j).
+MERGE ENFORCEMENT: "green CI before merge" is GitHub-enforced since 2026-11-23 —
+`full-test-suite` is a required check on main, with enforce_admins off so direct pushes
+to main from the admin identity bypass it (those keep the FULL local tier here;
+tech.md §3j).
 
 WHY (found 2026-07-24): commit 7d01eff rewrote shared-checkout-guard.py's WIP
 attribution logic (evidence-based naming, replacing an arbitrary others[0] guess) but

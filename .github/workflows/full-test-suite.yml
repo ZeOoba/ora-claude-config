@@ -6,9 +6,11 @@
 # plus a small always-run set -- because under multi-session load the full ~170-file
 # suite blew its timeouts and blocked unrelated one-file pushes (two
 # allow-hook-test-failure overrides on 2026-11-06 alone). The FULL suite moved here so it
-# still runs on every change before merge. A PR merges only when this job is green -- a
-# merge-procedure rule, NOT GitHub-enforced (main has no required status check; see
-# tech.md 3j). Selection rules and their limits: hooks/lib/prepush_test_selection.py.
+# still runs on every change before merge. A PR merges only when this job is green --
+# GitHub-enforced since 2026-11-23: `full-test-suite` (GitHub Actions, app 15368) is a
+# required check on main, with enforce_admins OFF so the admin-identity direct pushes
+# (auto-reconcile, heartbeat backup leg) still land as bypasses -- keep it off (tech.md 3j).
+# Selection rules and their limits: hooks/lib/prepush_test_selection.py.
 #
 # NOT A BACKSTOP for tests that ENV-SKIP without gitignored live files (notably
 # test-confidentiality-guard.py): they skip here. Their coverage is FULL runs in the main
