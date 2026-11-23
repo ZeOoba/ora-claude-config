@@ -1,30 +1,42 @@
-"""Force-push every rewritten branch and tag, each leased against the PRE-REWRITE backup.
+"""Force-push a history rewrite, checking the whole chain backup -> rewrite -> remote first.
 
   python -I leased_push.py <mirror.git> <work.git> <remote-url> [--batch N] [--dry-run]
+                          [--delete-removed]
 
-<mirror.git> is the untouched backup the rewrite was made from; <work.git> is the rewrite.
-Every ref is leased against the SHA it had in <mirror.git>, never against what the remote
-shows at push time: a commit pushed after the backup is not in the rewrite, and a lease
-taken from the remote would silently overwrite it.
+<mirror.git> is the untouched backup; <work.git> is filter-repo run on a fresh clone of it
+(filter-repo leaves <work.git>/filter-repo/ref-map: old SHA, new SHA, ref; a second
+filter-repo pass on the same copy keeps the original "old" SHAs).
 
-Before pushing, each ref of <work.git> is classified against `git ls-remote`:
-  done   - remote already has the rewritten SHA (an earlier run pushed it): skipped
-  push   - remote still has the backup's SHA (or neither has the ref): pushed
-  moved  - remote has anything else: someone pushed after the backup
-If ANY ref is "moved", nothing is pushed (exit 3): re-fetch that ref into the backup,
-re-run the rewrite for it, then run this again.
-Refs are pushed in batches of --batch (default 40; hundreds of lease arguments in one push
-exceed the Windows command-line limit), refs/heads/main last, and main is held back if any
-earlier ref was rejected. Refspecs carry NO "+": a "+" forces past its own lease.
+Before anything is pushed, all three links are checked:
+  rewrite  - every ref in ref-map must have been rewritten FROM the backup's SHA. A stale
+             work.git (made from a backup that has since been re-fetched) -> exit 2.
+  remote   - each ref is classified against `git ls-remote`:
+               done   remote already has the rewritten SHA (an earlier run pushed it): skipped
+               push   remote still has the backup's SHA (or neither has the ref)
+               moved  anything else: someone pushed after the backup
+             Any moved ref -> nothing pushed, exit 3. Fetch it into the backup, move work.git
+             aside, re-clone and re-run filter-repo, then run this again.
+  deleted  - refs in the backup that the rewrite removed (every commit on them was purged)
+             still hold the old data on the remote. Without --delete-removed: exit 4,
+             nothing pushed. With it: each is deleted, leased against the backup's SHA.
 
-Exit: 0 all pushed or already done; 1 a rejection or held main (partial: fix the cause,
-run again - finished refs are skipped); 2 bad arguments or repo; 3 remote moved since backup.
+Every lease is against the BACKUP's SHA, never against what the remote shows at push time.
+Refspecs carry NO "+": a "+" forces past its own lease. All refs except refs/heads/main go
+in batches of --batch (default 40; hundreds of lease arguments exceed the Windows
+command-line limit); refs/heads/main is pushed ALONE, last, and only if nothing else was
+rejected.
+
+Exit: 0 everything pushed or already done; 1 a rejection or main held (rerun after fixing:
+finished refs are skipped); 2 bad arguments, unreadable repo, failed ls-remote, missing or
+stale ref-map; 3 remote moved since backup; 4 refs deleted by the rewrite (see above).
 """
 import argparse
 import os
 import shlex
 import subprocess
 import sys
+
+ZERO = "0" * 40
 
 
 def sh(args):
@@ -38,6 +50,38 @@ def local_refs(repo):
     return {ref: sha for sha, ref in (l.split(" ", 1) for l in r.stdout.splitlines() if l)}
 
 
+def read_ref_map(work):
+    path = os.path.join(work, "filter-repo", "ref-map")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = [l.split() for l in fh.read().splitlines()[1:] if l.strip()]
+    except OSError:
+        return None
+    return {ref: (old, new) for old, new, ref in rows}
+
+
+def push(work, url, refs, leases, dry_run, flags, rejected, label):
+    """One `git push` of refs (each "src:dst" with a lease); tallies porcelain flags."""
+    print("%s: %s" % (label, " ".join(dst for _, dst in refs)))
+    args = ["git", "-C", work, "push", "--porcelain", "--no-verify"]
+    if dry_run:
+        args.append("--dry-run")
+    args.append(url)
+    args += ["--force-with-lease=%s:%s" % (dst, leases[dst]) for _, dst in refs]
+    args += ["%s:%s" % (src, dst) for src, dst in refs]
+    p = sh(args)
+    seen = False
+    for l in p.stdout.splitlines():
+        if "\t" in l and l[:1] in "+-*= !":
+            seen = True
+            f = l.split("\t")[0].strip() or " "
+            flags[f] = flags.get(f, 0) + 1
+            if f == "!":
+                rejected.append(l)
+    if p.returncode and not seen:
+        rejected.append("%s failed: %s" % (label, p.stderr.strip()[-300:]))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("mirror")
@@ -45,12 +89,24 @@ def main():
     ap.add_argument("url")
     ap.add_argument("--batch", type=int, default=40)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--delete-removed", action="store_true")
     a = ap.parse_args()
 
     backup, work = local_refs(a.mirror), local_refs(a.work)
-    if not backup or not work:
+    if not backup or work is None:
         print("cannot read refs from %s" % (a.mirror if not backup else a.work))
         return 2
+    ref_map = read_ref_map(a.work)
+    if ref_map is None:
+        print("no filter-repo/ref-map in %s: it must be a filter-repo run on a fresh clone of the backup" % a.work)
+        return 2
+    stale = sorted(ref for ref, (old, _) in ref_map.items() if ref in backup and old != backup[ref])
+    if stale:
+        for ref in stale:
+            print("STALE " + ref)
+        print("the rewrite was not made from this backup: move work.git aside, re-clone the backup, re-run filter-repo")
+        return 2
+
     r = sh(["git", "ls-remote", a.url, "refs/heads/*", "refs/tags/*"])
     if r.returncode:
         print("ls-remote failed: %s" % r.stderr.strip()[-300:])
@@ -67,52 +123,45 @@ def main():
             todo.append(ref)
         else:
             moved.append(ref)
-    untouched = sorted(set(remote) - set(work))
-    print("refs: %d to push, %d already done, %d moved since backup, %d remote-only left untouched"
-          % (len(todo), len(done), len(moved), len(untouched)))
+    removed = sorted(ref for ref in backup if ref not in work)
+    to_delete = [ref for ref in removed if remote.get(ref) == backup[ref]]
+    moved += [ref for ref in removed if remote.get(ref) not in (None, backup[ref])]
+    untouched = sorted(set(remote) - set(work) - set(backup))
+    print("refs: %d to push, %d already done, %d moved since backup, %d deleted by the rewrite "
+          "(%d still on remote), %d remote-only left untouched"
+          % (len(todo), len(done), len(moved), len(removed), len(to_delete), len(untouched)))
     if moved:
         for ref in sorted(moved):
             print("MOVED " + ref)
-        print("nothing pushed: re-fetch the moved refs into the backup and re-run the rewrite for them")
+        print("nothing pushed: fetch the moved refs into the backup, redo the rewrite, run again")
         return 3
+    if to_delete and not a.delete_removed:
+        for ref in to_delete:
+            print("DELETED-BY-REWRITE " + ref)
+        print("nothing pushed: these remote refs still hold purged data; re-run with --delete-removed")
+        return 4
 
     hook = os.environ.get("LEASED_PUSH_TEST_BEFORE_PUSH")   # test seam: runs between check and push
     if hook:
         subprocess.run(shlex.split(hook, posix=False), check=True)
 
-    todo.sort(key=lambda ref: ref == "refs/heads/main")
+    leases = {ref: backup.get(ref, "") for ref in todo}
+    leases.update({ref: backup[ref] for ref in to_delete})
+    others = [(ref, ref) for ref in todo if ref != "refs/heads/main"] + [("", ref) for ref in to_delete]
     flags, rejected, held = {}, [], []
-    for i in range(0, len(todo), a.batch):
-        chunk = todo[i:i + a.batch]
-        if "refs/heads/main" in chunk and rejected:
+    for i in range(0, len(others), a.batch):
+        push(a.work, a.url, others[i:i + a.batch], leases, a.dry_run, flags, rejected, "batch %d" % (i // a.batch + 1))
+    if "refs/heads/main" in todo:
+        if rejected:
             held.append("refs/heads/main")
-            chunk = [ref for ref in chunk if ref != "refs/heads/main"]
-            if not chunk:
-                break
-        print("batch %d: %s" % (i // a.batch + 1, " ".join(chunk)))
-        args = ["git", "-C", a.work, "push", "--porcelain", "--no-verify"]
-        if a.dry_run:
-            args.append("--dry-run")
-        args.append(a.url)
-        args += ["--force-with-lease=%s:%s" % (ref, backup.get(ref, "")) for ref in chunk]
-        args += ["%s:%s" % (ref, ref) for ref in chunk]
-        p = sh(args)
-        seen = False
-        for l in p.stdout.splitlines():
-            if "\t" in l and l[:1] in "+-*= !":
-                seen = True
-                f = l.split("\t")[0].strip() or " "
-                flags[f] = flags.get(f, 0) + 1
-                if f == "!":
-                    rejected.append(l)
-        if p.returncode and not seen:
-            rejected.append("batch %d failed: %s" % (i // a.batch + 1, p.stderr.strip()[-300:]))
+        else:
+            push(a.work, a.url, [("refs/heads/main", "refs/heads/main")], leases, a.dry_run, flags, rejected, "main")
     print("flags: %s" % " ".join("%s=%d" % kv for kv in sorted(flags.items())))
     for l in rejected:
         print("REJECTED " + l)
     for ref in held:
         print("HELD %s (pushed only when every other ref succeeded)" % ref)
-    print("rejected: %d; held: %d" % (len(rejected), len(held)))
+    print("rejected: %d; held: %d; deleted: %d" % (len(rejected), len(held), flags.get("-", 0)))
     return 1 if (rejected or held) else 0
 
 

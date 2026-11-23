@@ -16,8 +16,8 @@ FIG = "123,457"
 LIT = "Project Blue Heron"
 PHONE = "614-555-0199"
 TIP_FIG = "987,651"
-ENV = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
-           GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
+ENV = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_AUTHOR_NAME="t",
+           GIT_AUTHOR_EMAIL="t@example.com", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.com")
 
 
 def git(repo, *args):
@@ -115,18 +115,22 @@ class PurgeScanTest(unittest.TestCase):
         self.assertTrue(rules_match(self.rules, FIG))
         self.assertIn("dropped (present at tip): 1", r.stdout)
 
-    def test_round_figure_present_in_history_gets_no_rule(self):
-        self.r.commit({"docs/a.md": "budget 50,000 and 50000\n"})
+    def test_round_and_below_threshold_figures_get_no_rule_and_are_counted(self):
+        self.config(values=[50000, 5250, 12.5, 123457])
+        self.r.commit({"docs/a.md": "budget 50,000 and 50000; fee 5,250; rate 12.50; noi 123,457\n"})
         self.r.commit({"docs/a.md": "x\n"})
-        self.scan()
-        self.assertFalse(rules_match(self.rules, "50,000"))
-        self.assertFalse(rules_match(self.rules, " 50000 "))
+        r = self.scan()
+        for decoy in ("50,000", " 50000 ", "5,250", "12.50"):
+            self.assertFalse(rules_match(self.rules, decoy), decoy)
+        self.assertTrue(rules_match(self.rules, FIG))
+        self.assertIn("NOT searched): 3", r.stdout)
 
     def test_all_figure_forms_found(self):
-        self.r.commit({"data/m.json": '{"noi": 123457}\n', "docs/b.md": "psf 9,876.54 cam 123,456.5 raw 9876.54\n"})
+        self.r.commit({"data/m.json": '{"noi": 123457}\n',
+                       "docs/b.md": "psf 9,876.54 raw 9876.54 cam 123,456.5 / 123456.5 / 123456.50 / 123,456.50\n"})
         self.r.commit({"data/m.json": "{}\n", "docs/b.md": "x\n"})
         self.scan()
-        for form in ("123457", "9,876.54", "123,456.5", "9876.54"):
+        for form in ("123457", "9,876.54", "9876.54", "123,456.5", "123456.5", "123456.50", "123,456.50"):
             self.assertTrue(rules_match(self.rules, " %s " % form), form)
 
     def test_non_listed_extensions_are_scanned_by_content(self):
@@ -148,9 +152,38 @@ class PurgeScanTest(unittest.TestCase):
 
     def test_phone_only_in_commit_message_gets_rule_public_phone_does_not(self):
         self.r.commit({"a.md": "office 614-555-0100\n"}, msg="owner cell 614-555-0177")
+        self.r.commit(delete=["a.md"])     # public phone now only in history, not at the tip
         self.scan()
         self.assertTrue(rules_match(self.rules, "614-555-0177"))
         self.assertFalse(rules_match(self.rules, "614-555-0100"))
+
+    def test_figure_at_start_of_a_hash_at_tip_does_not_drop_the_rule(self):
+        self.r.commit({"deal.txt": "price 123457\n"})
+        self.r.commit({"deal.txt": "see commit 123457ab9f0e1d2c3b4a5f6e\n"})
+        r = self.scan()
+        self.assertIn("dropped (present at tip): 0", r.stdout)
+        self.r.filter(self.rules)
+        self.assertEqual("price [figure: private]\n", git(self.r.path, "show", "main~1:deal.txt"))
+        self.assertEqual("see commit 123457ab9f0e1d2c3b4a5f6e\n", git(self.r.path, "show", "main:deal.txt"))
+
+    def test_paths_file_lists_affected_paths(self):
+        self.r.commit({"docs/d.md": "%s\n" % FIG, "docs/clean.md": "nothing\n"})
+        self.r.commit({"docs/d.md": "x\n"})
+        self.scan()
+        self.assertEqual(read_bytes(self.rules + ".paths.txt").decode().split(), ["docs/d.md"])
+
+    def test_missing_tip_ref_is_an_error(self):
+        self.config(tip_ref="refs/heads/nope")
+        self.r.commit({"a.md": "%s\n" % FIG})
+        r = run("scan", self.r.path, self.cfg_path, self.rules)
+        self.assertEqual(r.returncode, 2, r.stdout)
+        self.assertFalse(os.path.exists(self.rules))
+
+    def test_literal_with_line_break_is_an_error(self):
+        self.config(literals=["Acme Tower\nSuite 9"])
+        self.r.commit({"a.md": "x\n"})
+        r = run("scan", self.r.path, self.cfg_path, self.rules)
+        self.assertEqual(r.returncode, 2, r.stdout)
 
     def test_annotated_tag_message_is_scanned_and_rewritten(self):
         self.r.commit({"a.md": "x\n"})
@@ -161,7 +194,9 @@ class PurgeScanTest(unittest.TestCase):
         self.assertNotIn(LIT, self.r.history_text())
 
     def test_boundaries_hashes_and_longer_numbers_untouched(self):
-        decoys = "sha deadbeef123,457 x; n 123,4579 x; m 1123,457 x; order 9614-555-01991 x\n"
+        decoys = ("sha deadbeef123,457 x; n 123,4579 x; m 1123,457 x; order 9614-555-01991 x; "
+                  "id 614-555-01991 x; p 9614-555-0199 x; a 1,123,457 x; b 0.123457 x; c 123,457,000 x; "
+                  "d 123457.12 x; h 123457ab9f x\n")
         self.r.commit({"docs/d.md": decoys + "real %s and %s\n" % (FIG, PHONE)})
         self.r.commit({"docs/d.md": "x\n"})
         self.scan()
@@ -190,6 +225,7 @@ class PurgeScanTest(unittest.TestCase):
         self.assertEqual(v.returncode, 1, v.stdout)
         self.assertIn("blobs matching a rule: 1", v.stdout)
         self.assertIn("message hits: 0", v.stdout)
+        self.assertNotIn(FIG, v.stdout + v.stderr)
 
     def test_verify_fails_on_message_match_alone(self):
         self.r.commit({"a.md": "x\n"}, msg="about %s" % LIT)
@@ -198,6 +234,7 @@ class PurgeScanTest(unittest.TestCase):
         self.assertEqual(v.returncode, 1, v.stdout)
         self.assertIn("blobs matching a rule: 0", v.stdout)
         self.assertIn("message hits: 1", v.stdout)
+        self.assertNotIn(LIT, v.stdout + v.stderr)
 
     def test_full_purge_verifies_clean_and_keeps_tip_tree(self):
         self.r.commit({"docs/deal.md": "Price %s; call %s re %s\n" % (FIG, PHONE, LIT),

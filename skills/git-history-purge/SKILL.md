@@ -10,51 +10,58 @@ Proven 2026-11-20 on a public config repo: 313 branches + 1 tag rewritten, 3,889
 
 **Principle: the purge changes history, never main's current tree.** Scrub the tip first with a normal reviewed PR; the purge then only rewrites what is no longer visible.
 
-**Gates (Hard Invariant 1 class, irreversible):** Gabriel's in-turn yes before the force-push, before any repo-setting change, and before filing the Support request. Never change repo visibility or delete/recreate the repo to "fix" a purge; on ORA's six public repos visibility is ruled ("keep public, do not re-ask").
+**Principle: nothing else may write to the remote between the backup and the push.** The freeze (Step 0) makes that true; `leased_push.py` (Step 4) proves it before pushing and refuses otherwise. Neither is enough alone.
 
-Scripts live in this skill's `scripts/` folder (stdlib Python). Set `S=~/.claude/skills/git-history-purge/scripts` once and call them as `python -I "$S/<script>"` from any directory.
+**Gates (Hard Invariant 1 class, irreversible):** Gabriel's in-turn yes before the force-push, before any repo-setting change (rulesets, branch protection), and before filing the Support request. Never change repo visibility or delete/recreate the repo to "fix" a purge; on ORA's six public repos visibility is ruled ("keep public, do not re-ask").
 
-## Step 0 - inventory and freeze (before the backup, so nothing moves after it)
+Scripts are stdlib Python in this skill's `scripts/` folder. Set `S` once to that folder: `~/.claude/skills/git-history-purge/scripts` when the skill is installed there, otherwise `<ora-skills checkout>/git-history-purge/scripts`. Call them as `python -I "$S/<script>"` from any directory.
+
+## Step 0 - inventory and freeze (before the backup)
 - Remote: branch/tag count, fork count (`gh api repos/O/R --jq .forks_count`), PR count, branch protection and rulesets. Forks keep the data; say so.
-- Every pusher: scheduled tasks (both fleets), CI that pushes, the live checkout. Pause each via its supervised tool (`update_scheduled_task enabled:false`, never delete). Block the live checkout: `git config remote.origin.pushurl DISABLED-history-purge-<date>`.
+- Local pushers: scheduled tasks (both fleets), CI that pushes, the live checkout and other sessions on it. Pause each via its supervised tool (`update_scheduled_task enabled:false`, never delete). Block the live checkout: `git config remote.origin.pushurl DISABLED-history-purge-<date>`.
+- Remote lock (repo-setting change, its own yes): a temporary ruleset on all branches and tags restricting creation, update and deletion, with bypass for the repository admin role only. It stops every other account, app and bot. It does NOT stop pushes made with the owner's own credentials (scheduled tasks, other sessions on this machine): those stay covered by the local freeze above and by the Step 4 check. Remove the ruleset after Step 5.
 
 ## Step 1 - backup outside every repo
 `git clone --mirror <url> <B>/mirror.git`, `git bundle create <B>/all.bundle --all`, `git bundle verify`. `<B>` = `C:/Users/Owner/_archive/<repo>-prepurge-<date>/`. The backup holds the private data: local only, never pushed.
 
 ## Step 2 - build rules from what is actually present
-- Private values go in a config file OUTSIDE every repo (`~/.ora-private/purge/`). Never type them into a command, commit message, PR, chat or log.
-- Run `python -I "$S/purge_scan.py" scan <B>/mirror.git <config.json> <rules.txt>`. It checks every path a file was ever stored at, plus commit and tag messages, and writes a rule only for values present (every written form of each figure: `123,457`, `123457`, `9,876.54`). Rules are anchored so hashes, longer numbers and longer digit runs are untouched. Any rule that matches main's tip is dropped (it would change main's tree). It prints counts only. Report counts, never values or "masked samples".
+- Private values go in a config file OUTSIDE every repo (`~/.ora-private/purge/`). Never type them into a command, commit message, PR, chat or log. Set `"tip_ref"` if the default branch is not `refs/heads/main` (the scan refuses a missing one).
+- Run `python -I "$S/purge_scan.py" scan <B>/mirror.git <config.json> <rules.txt>`. It checks every path a file was ever stored at, plus commit and tag messages, and writes a rule only for values present, in each written form (`123,457`, `123457`, `9,876.54`, `123,456.5`). Rules are anchored so hashes, longer numbers and longer digit runs are untouched. Any rule that matches the tip is dropped (it would change the tip's tree). It prints counts only. Report counts, never values or "masked samples".
+- Read the `values skipped ... NOT searched` count: round thousands, whole numbers below `min_integer` (default 10000) and non-whole values below 1,000 are not searched, because replacing them would hit unrelated text. If one of them must go, remove its file by path or add an exact literal.
 - A dropped rule means the value is still live at the tip: scrub it by PR first, or accept it stays.
 - Work email in authors: GitHub REJECTS pushes of commits carrying a private email ("push declined due to email privacy restrictions"). Plan the mailmap now (`Name <ID+login@users.noreply.github.com> <work@email>`; ID = `gh api user --jq .id`), not after a failed push.
 - The scan reads text only (by content, as filter-repo decides). Binary files that hold the data (PDF, XLSX, images) must be removed by path in Step 3; find them with `git filter-repo --analyze` on a scratch copy.
 
-## Step 3 - rewrite a copy, then prove it
+## Step 3 - rewrite a fresh copy, then prove it
 ```bash
-git clone -q --mirror --no-local <B>/mirror.git <B>/work.git && cd <B>/work.git
-git filter-repo --force --invert-paths --path-regex '<removed-paths>' \
+cd <B> && git clone -q --mirror --no-local mirror.git work.git
+git -C work.git filter-repo --force --invert-paths --path-regex '<removed-paths>' \
   --replace-text <rules.txt> --replace-message <rules.txt> --mailmap <mailmap.txt>
 ```
-filter-repo drops the `origin` remote; push by URL. Then all must hold, else stop:
-- `git rev-parse main^{tree}` equals the mirror's.
+Always a FRESH clone of the backup: if `work.git` exists, move it aside first (`mv work.git work-<n>.git`). A further filter-repo pass on the same copy is fine (its `filter-repo/ref-map` keeps the backup as the starting point); reusing a copy after the backup changed is not, and Step 4 refuses it. filter-repo drops the `origin` remote; push by URL. Then all must hold, else stop:
+- `git -C work.git rev-parse main^{tree}` equals the backup's.
 - `python -I "$S/purge_scan.py" verify <B>/work.git <config> <rules.txt>` exits 0.
-- `git log --branches --tags --format='%ae%n%ce' | grep -ci <work-domain>` is 0.
-- Ref count equals the snapshot's.
+- `git -C work.git log --branches --tags --format='%ae%n%ce' | grep -ci <work-domain>` is 0.
+- Ref count equals the backup's, minus refs the rewrite deleted (Step 4 lists them).
 
-## Step 4 - leased push, in batches, main last (after Gabriel's yes)
+## Step 4 - checked, leased push (after Gabriel's yes)
 - Protected `main` or a ruleset that blocks force-push: loosening it is a repo-setting change (its own yes); restore it right after.
-- Run `python -I "$S/leased_push.py" <B>/mirror.git <B>/work.git <url> --dry-run`, then without `--dry-run`. Every ref is leased against its SHA in the BACKUP (`mirror.git`), never against what the remote shows at push time: a commit pushed after the backup is not in the rewrite, and a lease read from the remote would overwrite it. Batches of 40 (hundreds of lease arguments exceed the Windows command-line limit), `refs/heads/main` last and held back if anything earlier was rejected.
-- Exit 3: a ref moved since the backup; nothing was pushed. Fetch it into `mirror.git`, redo Step 3 for it, run again.
-- Exit 1: a PARTIAL push. Read each `REJECTED` / `HELD` line, fix the cause, run again; refs already pushed are skipped, and a ref that moved meanwhile now stops the run (exit 3) instead of being overwritten.
+- Run `python -I "$S/leased_push.py" <B>/mirror.git <B>/work.git <url> --dry-run`, then without `--dry-run`. Before pushing anything it checks the chain: every ref was rewritten from the backup's SHA (from `work.git/filter-repo/ref-map`), and the remote still has the backup's SHA. Every lease is against the backup, never against what the remote shows at push time. Batches of 40 (hundreds of lease arguments exceed the Windows command-line limit); `refs/heads/main` is pushed alone, last, and only if nothing else was rejected.
+- Exit 2: bad path or URL, or `STALE` refs (the copy was not made from this backup). Redo Step 3 from a fresh clone.
+- Exit 3: `MOVED` refs (someone pushed after the backup); nothing was pushed. Find who (the freeze leaked), fetch the ref into `mirror.git`, redo Step 3 from a fresh clone, run again.
+- Exit 4: `DELETED-BY-REWRITE` refs (every commit on them was purged) still hold the data on the remote; nothing was pushed. Confirm the list, then run again with `--delete-removed`.
+- Exit 1: a partial push. Read each `REJECTED` / `HELD` line, fix the cause, run again as-is: refs already pushed are skipped, and anything that moved meanwhile stops the run (exit 3) instead of being overwritten. Never re-clone the backup to "refresh" it after a partial push.
 - Hand-rolling it: `--force-with-lease=<ref>:<backup-sha>` and a refspec WITHOUT `+`. A `+<ref>:<ref>` refspec forces past its own lease. Never bare `--force`, `--prune` or `--mirror` (it hits `refs/pull/*`).
 
 ## Step 5 - verify from a fresh clone
-Clone the remote again into `<B>/verify.git` and re-run Step 3's checks there. A local check of `work.git` proves nothing about GitHub.
+Clone the remote again into `<B>/verify.git` and re-run Step 3's checks there. A local check of `work.git` proves nothing about GitHub. Then remove the Step 0 ruleset.
 
-## Step 6 - the live checkout: re-point, do not rebuild
+## Step 6 - the live checkout: re-point, guard, then re-enable
 - Archive old tips: `git update-ref refs/archive/pre-purge/<name> <old-sha>`.
 - Re-point the live branch onto purged main with the SAME files. Pin the old tip as a SHA first, so the compare-and-swap can fail: `OLD=$(git rev-parse refs/heads/<branch>)`, `N=$(git commit-tree "$OLD^{tree}" -p <new-main> -m ...)`, `git update-ref refs/heads/<branch> "$N" "$OLD"`. A branch NAME as the old value resolves at swap time and always passes. Working files are untouched. In `~/.claude` this is a governance write: config-write token with Gabriel's quoted words.
-- List local branches whose root commit is not on purged main to `<B>/old-history-local-branches.txt`. They must NEVER be pushed. Do not migrate worktrees or delete branches; deleting them is a separate decision.
-- Restore `pushurl`, re-enable paused tasks (re-date their `[MODEL:]` tag), confirm the first scheduled push lands.
+- List local branches whose root commit is not on purged main to `<B>/old-history-local-branches.txt`. Do not migrate worktrees or delete branches; deleting them is a separate decision.
+- BEFORE restoring `pushurl`, install the old-history guard, because `git push origin <old-branch>` from any worktree would re-publish the purged data and `pushurl`/`pushRemote` do not stop an explicit remote: `python -I "$S/old_history_guard.py" roots <B>/mirror.git <B>/verify.git <B>/old-roots.txt`, then call `python -I "$S/old_history_guard.py" check <B>/old-roots.txt` from the repo's pre-push hook (chain it into an existing hook). In `~/.claude` hooks are a governance write: Gabriel's yes.
+- Restore `pushurl`, re-enable paused tasks (re-date their `[MODEL:]` tag), confirm the first scheduled push lands, then re-run the Step 5 verify once more.
 
 ## Step 7 - what a force-push cannot reach
 `refs/pull/*`, cached commit/diff views and direct SHA URLs still serve old content. Only GitHub Support can purge them (support.github.com, logged in as the owner). Use category Repositories > Repository features (NOT "Deletes", which is the delete-a-repository flow). Include: the repo URL, the PR count, the "First Changed Commit" from `<B>/work.git/filter-repo/first-changed-commits`, orphaned LFS objects (or "none"), and that no secrets are among the removed data (or which were rotated). Never paste removed data. After Support confirms, open one old PR's "Files changed" and check a removed path is gone. Mirrors, forks and past clones cannot be recalled.
@@ -68,12 +75,14 @@ Event-log entry via `append-event-log.py` (counts, SHAs, backup path, residuals,
 | `git push --force --prune` or `--mirror` | `leased_push.py`; `--mirror` touches `refs/pull/*`, `--prune` deletes refs |
 | `--force-with-lease=<ref>:<sha> +<ref>:<ref>` | The `+` overrides the lease; drop it |
 | Lease read from `git ls-remote` at push time | Lease against the backup; a post-backup push otherwise vanishes |
+| Reusing `work.git` after fetching a moved ref into the backup | Move it aside and re-clone; `leased_push.py` refuses a `STALE` copy |
+| Re-cloning the backup after a partial push | Rerun as-is; the backup is the baseline the leases depend on |
 | Rules built from a guessed value list | `purge_scan.py scan` writes only rules for values present |
-| A rule that matches main's tip | Dropped by the scan; scrub the tip by PR first |
-| Retrying a partial push with the first snapshot | Re-snapshot, then push |
+| A rule that matches the tip | Dropped by the scan; scrub the tip by PR first |
+| Re-enabling pushes with old-history branches around | Install `old_history_guard.py` as pre-push first |
 | Rebuilding the live checkout and its worktrees | Re-point one branch with `commit-tree`; list old-history branches |
 | `rm -rf` of a work or verify clone | Move it into `<B>/`; never delete |
 | Calling it done after the push | Fresh-clone verify, Support ticket, old-PR spot check |
 
 ## Changelog
-- v1.0 (2026-11-23): first version, from the ora-claude-config purge of 2026-11-20. Bundles `scripts/purge_scan.py` and `scripts/leased_push.py` with tests. The leased-push test showed the 2026-11-20 push form (`+` refspec plus lease) did not honor its leases; it was safe only because every pusher was paused. Merge-gate round 1 fixes: leases come from the backup (not the remote at push time), main is held after a rejection, the scan covers every path a blob was stored at, all figure forms, text by content, commit and tag messages, and anchors phone rules. No governor constants touched.
+- v1.0 (2026-11-23): first version, from the ora-claude-config purge of 2026-11-20. Bundles `scripts/purge_scan.py`, `scripts/leased_push.py` and `scripts/old_history_guard.py` with tests. The leased-push test showed the 2026-11-20 push form (`+` refspec plus lease) did not honor its leases; it was safe only because every pusher was paused. Merge-gate rounds 1-2 (redesign chosen by Gabriel after round 2): the push checks the whole chain backup -> rewrite -> remote before pushing (stale copy, moved ref and deleted-ref refusals), leases come from the backup, main is pushed alone and last; Step 0 adds a temporary remote ruleset; Step 6 installs a pre-push guard before re-enabling pushes; the scan covers every path a blob was stored at, all figure forms, text by content, commit and tag messages, anchors hashes on both sides, refuses a missing tip branch and counts skipped values. No governor constants touched.

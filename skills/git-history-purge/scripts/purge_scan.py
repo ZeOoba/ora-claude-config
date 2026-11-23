@@ -21,8 +21,10 @@ Figure forms: a whole number gives "123,457", "123457", "123,457.00" and "123457
 (round thousands and values below min_integer are skipped: too common to replace safely);
 a non-whole value of 1,000 or more gives "9,876.54", "9876.54" and its shortest form
 ("123,456.5"). Every
-rule is a boundary-anchored regex: digits inside a longer number or a hex hash, and a
-phone number inside a longer digit run, are never touched.
+rule is a boundary-anchored regex: digits inside a longer number or a hex hash (before or
+after), and a phone number inside a longer digit run, are never touched. Skipped values are
+counted in the output: they are NOT searched, so purge them another way if they matter.
+scan exits 2 if tip_ref does not exist or a literal contains a line break.
 
 scan   - writes one rule per form ACTUALLY present, drops any rule that matches a blob in
          tip_ref's tree (a purge must leave the tip unchanged; scrub it with a reviewed PR
@@ -40,7 +42,7 @@ PH = b"[figure: private]"
 PH_PHONE = b"[phone: private]"
 PHONE_RE = re.compile(rb"(?<![\dA-Za-z])(?:\+?1[-. ]?)?\(?\d{3}\)?[-. ]\d{3}[-. ]\d{4}(?!\d)")
 NUM_PRE = rb"(?<![0-9A-Fa-f])(?<![0-9][.,])\$?"
-NUM_POST = rb"(?:\.0+)?(?![0-9])(?![.,][0-9])"
+NUM_POST = rb"(?:\.0+)?(?![0-9A-Fa-f])(?![.,][0-9])"
 
 
 def git(repo, *a, inp=None):
@@ -150,13 +152,23 @@ def scan(repo, cfg, out):
     remove_rx = re.compile(cfg["remove_path_regex"]) if cfg.get("remove_path_regex") else None
     min_int = int(cfg.get("min_integer", 10000))
     public = set(cfg.get("public_phones", []))
+    if any("\n" in s or "\r" in s for s in cfg.get("literals", [])):
+        print("a literal contains a line break: filter-repo rules are one per line; split it into one literal per line")
+        return 2
     refs, kept, _, msgs = history(repo, remove_rx)
+    tip_ref = cfg.get("tip_ref", "refs/heads/main")
+    if tip_ref not in refs:
+        print("tip_ref %s not found: set \"tip_ref\" in the config to the branch whose tree must not change" % tip_ref)
+        return 2
     texts = dict(text_blobs(repo, list(kept)))
     corpus = list(texts.values()) + [msgs]
 
     candidates = []   # (kind, rule)
+    skipped = 0
     for v in cfg.get("values", []):
-        candidates += [("number", num_rule(f)) for f in sorted(figure_forms(v, min_int), key=len, reverse=True)]
+        forms = figure_forms(v, min_int)
+        skipped += 0 if forms else 1
+        candidates += [("number", num_rule(f)) for f in sorted(forms, key=len, reverse=True)]
     candidates += [("literal", lit_rule(s)) for s in cfg.get("literals", [])]
     if cfg.get("phones"):
         phones = set()
@@ -172,11 +184,8 @@ def scan(repo, cfg, out):
         if any(rx.search(d) for d in corpus):
             present.append((kind, rule))
 
-    tip = []
-    tip_ref = cfg.get("tip_ref", "refs/heads/main")
-    if tip_ref in refs:
-        ls = git(repo, "ls-tree", "-r", tip_ref).decode().splitlines()
-        tip = [d for _, d in text_blobs(repo, [l.split()[2] for l in ls if l.split()[1] == "blob"])]
+    ls = git(repo, "ls-tree", "-r", tip_ref).decode().splitlines()
+    tip = [d for _, d in text_blobs(repo, [l.split()[2] for l in ls if l.split()[1] == "blob"])]
     keep = [(k, r) for k, r in present if not any(rule_regex(r).search(d) for d in tip)]
 
     rxs = [rule_regex(r) for _, r in keep]
@@ -190,6 +199,7 @@ def scan(repo, cfg, out):
     print("found: numbers %d, literals %d, phones %d"
           % (count(present, "number"), count(present, "literal"), count(present, "phone")))
     print("rules written: %d; dropped (present at tip): %d" % (len(keep), len(present) - len(keep)))
+    print("values skipped (round thousands or below threshold, NOT searched): %d" % skipped)
     return 0
 
 
