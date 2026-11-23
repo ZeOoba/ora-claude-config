@@ -266,3 +266,5 @@ maintenance/_state/task-progress/
 # cross-fleet consumer reads the Connector Pre-Flight beacon's log_liveness line,
 # not this file.
 maintenance/_state/log-liveness.json
+# (2026-11-23) Untracked from the PUBLIC repo (deal figures); see root .gitignore 2026-11-23 block.
+/scheduled-tasks/ora-passed-deal-tracker/SKILL.md

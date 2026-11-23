@@ -491,8 +491,8 @@ def selftest():
     # ---- core diff engine ----
     prev = {"as_of": "2026-08-15", "count": 3, "rows": {
         "A": {"title": "4484 Robertson Road — Madison, WI",
-              "hash": fingerprint({"Stage": "Candidate", "Purchase Price": "2750000.0"}),
-              "fields": {"Stage": "Candidate", "Purchase Price": "2750000.0"}},
+              "hash": fingerprint({"Stage": "Candidate", "Purchase Price": "1234567.0"}),
+              "fields": {"Stage": "Candidate", "Purchase Price": "1234567.0"}},
         "B": {"title": "511 Industrial Mile Road — Columbus, OH",
               "hash": fingerprint({"Stage": "Candidate"}),
               "fields": {"Stage": "Candidate"}},
@@ -502,8 +502,8 @@ def selftest():
     }}
     curr = {"as_of": "2026-08-16", "count": 3, "rows": {
         "A": {"title": "4484 Robertson Road — Madison, WI",
-              "hash": fingerprint({"Stage": "Under Contract", "Purchase Price": "2750000.0"}),
-              "fields": {"Stage": "Under Contract", "Purchase Price": "2750000.0"}},   # stage move
+              "hash": fingerprint({"Stage": "Under Contract", "Purchase Price": "1234567.0"}),
+              "fields": {"Stage": "Under Contract", "Purchase Price": "1234567.0"}},   # stage move
         "B": {"title": "511 Industrial Mile Road — Columbus, OH",
               "hash": fingerprint({"Stage": "Candidate"}),
               "fields": {"Stage": "Candidate"}},                                       # unchanged
@@ -693,7 +693,7 @@ def selftest():
     # ---- normalization spot-checks ----
     check(norm_prop({"type": "title", "title": [{"plain_text": "511 Industrial Mile Road"}]})
           == "511 Industrial Mile Road", "norm_prop: title normalizes")
-    check(norm_prop({"type": "number", "number": 2750000.0}) == repr(2750000.0),
+    check(norm_prop({"type": "number", "number": 1234567.0}) == repr(1234567.0),
           "norm_prop: number normalizes stably")
     check(norm_prop({"type": "number", "number": None}) == "",
           "norm_prop: empty number is '' (not the string 'None')")

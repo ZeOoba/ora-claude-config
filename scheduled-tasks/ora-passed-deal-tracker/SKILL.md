@@ -211,7 +211,7 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    - Read-only: no Notion writes, no outreach drafts. A row with no walk
      threshold can be PRICE-CUT or RE-MARKETED, never INSIDE-WALK.
    - Dry run 2026-09-22 (validation): 8720 Robbins Rd (PASS 2026-07-14,
-     Walk $1,054,066) → Crexi alerts 2026-08-30 and 2026-09-16, no price →
+     walk threshold on the row) → Crexi alerts 2026-08-30 and 2026-09-16, no price →
      RE-MARKETED. 808 Rhoads / 6150 Avery / 1255 N Winchester → only ORA
      self-mail or >35 days → no hit.
 4. On a detected trade, log to the deal's Notion row ("Exception Outcome" if an
@@ -263,8 +263,8 @@ Write it on ONE line — `^` is a cmd.exe continuation and hard-fails in both sh
    it neither Q1 nor the R3/R4 split can be evaluated, and a label asserted without it
    is fabricated. Say so in `Loss Evidence` and put the row in QUESTIONS FOR GABRIEL.
    The same applies where `Walk Price` and `ORA Offer Price` contradict each other
-   (live example: `511 Industrial Mile Road` carries Walk $930,000 against a
-   $1,450,000 LOI — those cannot both be right, so that row is held UNCLASSIFIED).
+   (live example: `511 Industrial Mile Road` carries a Walk Price well below its
+   LOI figure — those cannot both be right, so that row is held UNCLASSIFIED).
 
    **4b EXCLUSION — diligence exits never run through this classifier (added
    2026-09-19).** A row with `LOI Outcome = TERMINATED-DILIGENCE` is out of scope for

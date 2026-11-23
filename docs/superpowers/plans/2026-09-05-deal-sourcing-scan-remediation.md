@@ -60,11 +60,12 @@ Recap of the tradeoff that drove the decision:
 ## Action items (one-off / recurring manual follow-ups — not skill edits)
 
 **§1 — Soft price-test the 5 near-line T2 WATCH deals, in order:**
-1. 722 Ketcham St, Indianapolis IN — fails basis by <1% (~$5,500). Test whether the seller would take ~$989,500.
-2. 1945 Jackson Road, Columbus OH — fails by 2.9%; clears at ≤~$1,453,800.
-3. 8301 Cane Run Rd, Louisville KY — fails by 9.4%; clears at ≤~$4,095,800.
-4. 15665 S Keeler St, Olathe KS — fails by ~10%, mezzanine SF unverified; clears at ≤~$1,955,000 on current assumptions.
-5. 2201 Advance Ave, Columbus OH — fails by 10.6%; clears at ≤~$4,475,400. Land-value allocation (income trailer yard) may be the lever.
+Basis gaps and clearing prices are ORA negotiating figures and are kept out of this public repo (see deal-figures.local.md beside this file (local-only)).
+1. 722 Ketcham St, Indianapolis IN — narrowest basis miss.
+2. 1945 Jackson Road, Columbus OH.
+3. 8301 Cane Run Rd, Louisville KY.
+4. 15665 S Keeler St, Olathe KS — mezzanine SF unverified.
+5. 2201 Advance Ave, Columbus OH — land-value allocation (income trailer yard) may be the lever.
 
 **§2 — 1809 & 1815 Commerce Rd, Louisville KY:** get a GC/roofer quote for replacing both roofs (54,152 SF combined) before treating the nominal $20.15/SF basis as clean. Re-test basis net of that CapEx once quoted; do not advance to OM on the headline number alone (Notion Next Action already says this).
 
