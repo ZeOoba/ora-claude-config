@@ -89,7 +89,11 @@ try:
 
     # ---- B. drift is caught (the failing-first cases) -----------------------------------
     pre = lambda o: o["hooks"]["PreToolUse"]
-    bad = mutated(lambda o: pre(o)[2]["hooks"][0].__setitem__("timeout", 99))
+    # By NAME, not position (2026-11-23: the pre.dispatcher-shell row shifted index 2).
+    def _autonomy_entry(o):
+        return next(e for e in pre(o) if "ora-autonomy-gate.py" in e["hooks"][0].get("command", "")
+                    and e["matcher"].startswith("NotebookEdit"))
+    bad = mutated(lambda o: _autonomy_entry(o)["hooks"][0].__setitem__("timeout", 99))
     f = run(bad)
     check("B1 changed timeout -> one CHANGED", kinds(f) == ["CHANGED"], repr(kinds(f)))
     check("B1b CHANGED names the table row", f and f[0]["id"] == "pre.ora-autonomy-gate")
@@ -113,7 +117,12 @@ try:
     f = run(bad)
     check("B5 hand-added onFailure key -> CHANGED (R-09 must come through the table)",
           kinds(f) == ["CHANGED"], repr(kinds(f)))
-    bad = mutated(lambda o: pre(o)[3].__setitem__("matcher", "Edit|Write|NotebookEdit"))
+    # By NAME, not position (2026-11-23 review: the pre.dispatcher-shell row moved index 3 off the
+    # inline blocker, so this test silently mutated the autonomy entry instead).
+    def _inline_blocker(o):
+        return next(e for e in pre(o) if e["matcher"] == "Edit|Write"
+                    and "bash -c" in e["hooks"][0].get("command", ""))
+    bad = mutated(lambda o: _inline_blocker(o).__setitem__("matcher", "Edit|Write|NotebookEdit"))
     check("B6 changed matcher on the inline blocker -> CHANGED", kinds(run(bad)) == ["CHANGED"])
     reindented = json.dumps(OBJ, indent=4) + "\n"
     f = run(reindented)

@@ -141,6 +141,20 @@ def is_shell_tool(tool_name):
         or _mcp_family(tool_name, "run_in_terminal")
 
 
+WINDOWS_MCP_POWERSHELL = re.compile(r"^mcp__.*Windows-MCP__PowerShell$")
+
+
+def is_git_shell_tool(tool_name):
+    """Every tool that can run git: is_shell_tool PLUS Windows-MCP PowerShell, which runs a real
+    command line in `command` (as ora-autonomy-gate / confidentiality-guard already treat it).
+
+    Used by the git-discipline guards (dispatcher chain "shell", cross-repo audit 2026-11-23).
+    Kept SEPARATE from is_shell_tool on purpose: the egress guards rely on that function's exact
+    scope (they remap Windows-MCP PowerShell themselves), so it is not widened here."""
+    return is_shell_tool(tool_name) or (
+        isinstance(tool_name, str) and WINDOWS_MCP_POWERSHELL.match(tool_name) is not None)
+
+
 def is_file_tool(tool_name):
     return tool_name in NATIVE_FILE_TOOLS or tool_name in NOTEBOOK_TOOLS \
         or is_dc_write_file(tool_name) or is_dc_edit_block(tool_name) \

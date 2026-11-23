@@ -1200,7 +1200,7 @@ def _degraded(stdin_text):
     except Exception:
         payload = {}
     tool_input = payload.get("tool_input") if isinstance(payload, dict) else None
-    cmd = tool_input.get("command") if isinstance(tool_input, dict) else None
+    cmd = _shell_text(payload.get("tool_name"), tool_input) if isinstance(tool_input, dict) else None
     kind = _degraded_commit_kind(cmd)
     if kind is None:
         sys.stderr.write("WARNING (eos-review-gate, DEGRADED): " + _DEGRADED_CAUSE
@@ -1276,6 +1276,26 @@ def _degraded(stdin_text):
     sys.exit(2)
 
 
+# SHELL-TOOL SCOPE (cross-repo audit 2026-11-23, HIGH): PowerShell, Desktop Commander
+# start_process / interact_with_process, the terminal panel's run_in_terminal and Windows-MCP
+# PowerShell run git just
+# like Bash, so this guard judges all of them (dispatcher chain "shell"). The command line is
+# read through tool_call_paths.shell_text (interact_with_process carries it in `input`). If that
+# lib cannot load, the scope degrades to the previous Bash-only behaviour, never wider.
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+    from tool_call_paths import is_git_shell_tool as _is_shell_tool, shell_text as _shell_text  # noqa: E402
+except Exception:  # noqa: BLE001
+    sys.stderr.write("WARNING (%s, DEGRADED): tool_call_paths did not load -- this guard is "
+                     "judging Bash ONLY; PowerShell / Desktop Commander / terminal git is "
+                     "UNGUARDED until the lib is fixed.\n" % os.path.basename(__file__))
+    def _is_shell_tool(tool_name):
+        return tool_name == "Bash"
+
+    def _shell_text(tool_name, tool_input):
+        return tool_input.get("command") if isinstance(tool_input, dict) else None
+
+
 def main():
     if not PARSE_CONTRACT_LOADED:
         return _degraded(sys.stdin.read())
@@ -1286,7 +1306,7 @@ def main():
     tool_input = payload.get("tool_input") or {}
     if not isinstance(tool_input, dict):
         return
-    cmd = tool_input.get("command")
+    cmd = _shell_text(payload.get("tool_name"), tool_input)
     if not is_git_commit(cmd):
         return  # fast path: not a commit -> no git calls at all
 
