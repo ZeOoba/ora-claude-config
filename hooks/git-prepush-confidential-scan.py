@@ -179,19 +179,28 @@ def _roster_entries(d):
     find_hit(): any blank anchor leaves the group unanchored. DELIBERATE DIVERGENCE from find_hit():
     a MISSING / empty / non-list / non-string `context_requires_any` is ALSO unanchored here
     (fail-closed), where find_hit() never matches those context terms at all. Same rule as the
-    ora-skills port (tools/prepush_confidential_scan.py)."""
+    ora-skills port (tools/prepush_confidential_scan.py).
+
+    SHAPE (#497 follow-up, 2026-11-23): a non-`_` entry that is NOT a dict (a list, a string, null)
+    is a deal we cannot read -- RosterShapeError, so the push blocks, instead of the old silent
+    skip. WHITESPACE: every term and anchor is stripped before matching -- a padded roster string
+    (" rent roll ") used to need the padding in the pushed text, which only narrowed matching."""
     out = []
     for key, deal in d.items():
-        if key.startswith("_") or not isinstance(deal, dict) or not deal.get("active", True):
+        if key.startswith("_"):
             continue
-        out.extend(t.lower() for t in _str_list(deal, "always") if t.strip())
-        ctx = [t.lower() for t in _str_list(deal, "context") if t.strip()]
+        if not isinstance(deal, dict):
+            raise RosterShapeError("deal entry is not an object")
+        if not deal.get("active", True):
+            continue
+        out.extend(t.strip().lower() for t in _str_list(deal, "always") if t.strip())
+        ctx = [t.strip().lower() for t in _str_list(deal, "context") if t.strip()]
         if not ctx:
             continue
         raw = deal.get("context_requires_any")
         if (isinstance(raw, list) and raw
                 and all(isinstance(a, str) and a.strip() for a in raw)):
-            anchors = tuple(a.lower() for a in raw)
+            anchors = tuple(a.strip().lower() for a in raw)
         else:
             anchors = ()  # anchorless or malformed anchors: fail closed
         out.extend((t, anchors) for t in ctx)
@@ -218,6 +227,16 @@ def load_terms():
 
 def _is_sha(s):
     return len(s) == 40 and all(c in "0123456789abcdef" for c in s.lower())
+
+
+def _read_stdin(stream):
+    """git writes the ref lines as UTF-8 bytes whatever the console code page; reading them
+    through a cp1252 text stream garbled a non-ASCII ref name past the name scan (REFUTE
+    2026-11-23 round 2, C1e). Falls back to text for a stream with no byte buffer (tests)."""
+    buf = getattr(stream, "buffer", None)
+    if buf is None:
+        return stream.read()
+    return buf.read().decode("utf-8", "replace")
 
 
 def parse_pushrefs(text):
@@ -332,30 +351,72 @@ URL_DECODE_MAX_ROUNDS = 4
 
 
 def _decoded_views(low):
-    """Distinct lowercase views of `low` (already lowercase): itself, then each round of the
-    unquote and unquote_plus chains. Decoding is skipped when there is nothing to decode."""
+    """YIELD lowercase views of `low` (already lowercase): itself, then each round of the unquote
+    and unquote_plus chains. Decoding is skipped when there is nothing to decode.
+
+    A GENERATOR (#497 follow-up, 2026-11-23): the old list held up to 9 full copies of the window
+    at once (~10x a large blob's size in memory, with no cap). Callers consume one view at a time,
+    so at most the source, the current view and the next one are alive (~3x)."""
     from urllib.parse import unquote, unquote_plus
-    views = [low]
+    yield low
     if "%" not in low and "+" not in low:
-        return views
+        return
     for fn in (unquote, unquote_plus):
         cur = low
         for _ in range(URL_DECODE_MAX_ROUNDS):
             nxt = fn(cur).lower()  # %4D -> "M": decoded bytes can carry uppercase
             if nxt == cur:
                 break
-            if nxt not in views:
-                views.append(nxt)
+            yield nxt
             cur = nxt
-    return views
+        cur = nxt = None
 
 
 def _entry_term(entry):
     return entry if isinstance(entry, str) else entry[0]
 
 
-def _in_any(needle, views):
-    return any(needle in v for v in views)
+# CHUNKED DECODING (#497 follow-up, 2026-11-23): unquote() allocates one string object per `%`
+# escape, so decoding a large escape-heavy blob in one call peaked near 10x its size, with no cap.
+# The window is therefore decoded in DECODE_CHUNK slices that OVERLAP by the longest preimage any
+# needle can have. One decoded char comes from at most 12 source chars in the round that produced
+# it (a 4-byte UTF-8 char is four %XX escapes; the Kelvin sign U+212A, `%E2%84%AA`, even lowercases
+# to ASCII 'k'), and every earlier round can triple an ASCII char (`%` -> `%25`, any char -> %XX).
+# So after URL_DECODE_MAX_ROUNDS rounds a needle of length L comes from at most
+# L * 12 * 3**(rounds - 1) contiguous source chars (REFUTE 2026-11-23 round 2: the first bound,
+# L * 3**rounds, missed non-ASCII preimages straddling a chunk edge). lower() never shrinks a
+# string, so it cannot lengthen a preimage. Every
+# occurrence (raw or decoded) therefore lies wholly inside some chunk and decodes there exactly as
+# in the whole text (an escape never spans more than its 3 chars). Results equal whole-window
+# decoding; memory per call is bounded by the chunk, not the window.
+DECODE_CHUNK = 1 << 20
+
+
+def _chunks(text, needles):
+    longest = max((len(n) for n in needles), default=0)
+    overlap = longest * 12 * 3 ** (URL_DECODE_MAX_ROUNDS - 1) + 8
+    if len(text) <= DECODE_CHUNK + overlap:
+        yield text
+        return
+    i = 0
+    while True:
+        yield text[i:i + DECODE_CHUNK + overlap]
+        if i + DECODE_CHUNK + overlap >= len(text):
+            return
+        i += DECODE_CHUNK
+
+
+def _found_needles(text, needles):
+    """The subset of `needles` present in ANY decoded view of `text` (see CHUNKED DECODING)."""
+    left, found = set(needles), set()
+    for chunk in _chunks(text, left):
+        for view in _decoded_views(chunk.lower()):
+            hit = set(n for n in left if n in view)
+            found |= hit
+            left -= hit
+            if not left:
+                return found
+    return found
 
 
 def scan_text(text, terms):
@@ -365,12 +426,17 @@ def scan_text(text, terms):
     decoded view of it (REFUTE E: an anchor holding a literal '+' or '%' and a '+'-encoded term
     never share one view). anchors == () is ANCHORLESS: the term counts on its own (fail-closed,
     see _roster_entries)."""
-    views = _decoded_views(text.lower())
+    needles = set()
+    for e in terms:
+        needles.add(_entry_term(e))
+        if not isinstance(e, str):
+            needles.update(e[1])
+    found = _found_needles(text, needles)
     hits = []
     for i, e in enumerate(terms):
-        if not _in_any(_entry_term(e), views):
+        if _entry_term(e) not in found:
             continue
-        if isinstance(e, str) or not e[1] or any(_in_any(a, views) for a in e[1]):
+        if isinstance(e, str) or not e[1] or any(a in found for a in e[1]):
             hits.append(i)
     return hits
 
@@ -379,8 +445,7 @@ def mentions_term(text, terms):
     """True when `text` contains ANY roster term string in any decoded view, IGNORING anchors.
     Used to withhold a reported path: printing a path that carries a context term next to
     "confidential term(s)" discloses the term even when the path alone is not a hit (REFUTE C5b)."""
-    views = _decoded_views(text.lower())
-    return any(_in_any(_entry_term(e), views) for e in terms)
+    return bool(_found_needles(text, set(_entry_term(e) for e in terms)))
 
 
 # WINDOWS (Defect 2a, 2026-11-12): a context term's anchor must co-occur in the same window, and
@@ -405,6 +470,138 @@ def _log_windows(body):
 
 
 _WITHHELD = "<path withheld: contains a confidential term>"
+
+# REF NAMES AND TAG OBJECTS (#497 follow-up, 2026-11-23): both are published by a push, and
+# `git log` shows neither -- a branch named after a deal (`refs/heads/quiet-marsh-park`) and an
+# annotated tag whose message names one both reached the remote unscanned.
+#   * NAMES (a pushed ref name, and the `tag <name>` line inside every tag object) are matched raw,
+#     with every non-alphanumeric run folded to a space (git allows , = ! and more in ref names),
+#     and SQUASHED (all non-alphanumerics removed, so `QuietMarshPark` matches "Quiet Marsh Park";
+#     squashed terms under 4 alphanumerics are not used). `refs/heads/` etc. is dropped first.
+#   * OBJECTS: a pushed ref is peeled through every nested annotated tag; each tag object is
+#     scanned through _text_views (a UTF-16 tag message is legal and git does not reject it). A tag
+#     -- annotated or lightweight -- may point at a BLOB or a TREE rather than a commit; `git log`
+#     shows nothing for those, so the blob (decompressed when compressed) or every blob in the
+#     tree, plus the tree's paths, is scanned too (REFUTE round 2, C1a-c).
+# Any git failure, or a chain deeper than TAG_MAX_DEPTH, blocks (fail-closed).
+_NAME_FOLD = re.compile(r"[\W_]+", re.UNICODE)
+_REF_PREFIX = re.compile(r"^refs/(?:heads|tags|remotes/[^/]+)/")
+_SQUASH_MIN_ALNUM = 4
+TAG_MAX_DEPTH = 16
+
+
+class TagScanError(Exception):
+    pass
+
+
+def _squash(text):
+    return _NAME_FOLD.sub("", text.lower())
+
+
+def _squashed_terms(terms):
+    """`terms` with every term / anchor squashed, index for index. A term that squashes to fewer
+    than _SQUASH_MIN_ALNUM chars is replaced by a needle that cannot occur (it would match
+    everywhere); an anchor that squashes to nothing keeps its original form."""
+    never = "\x00\x00never\x00\x00"
+    out = []
+    for e in terms:
+        t = _squash(_entry_term(e))
+        t = t if len(t) >= _SQUASH_MIN_ALNUM else never
+        out.append(t if isinstance(e, str) else (t, tuple(_squash(a) or a for a in e[1])))
+    return out
+
+
+def _name_parts(name):
+    bare = _REF_PREFIX.sub("", name)
+    return [name, _NAME_FOLD.sub(" ", bare)], _squash(bare)
+
+
+def name_hits(name, terms):
+    """Roster-entry indices a published NAME (ref or tag name) carries, in any form above."""
+    views, squashed = _name_parts(name)
+    hits = set(scan_text(squashed, _squashed_terms(terms)))
+    for v in views:
+        hits.update(scan_text(v, terms))
+    return sorted(hits)
+
+
+def _ref_shown(ref, terms):
+    """`ref` for a block message, or a placeholder when any form of it carries a term."""
+    if terms:
+        views, squashed = _name_parts(ref)
+        if any(mentions_term(v, terms) for v in views) \
+                or mentions_term(squashed, _squashed_terms(terms)):
+            return "<ref withheld: contains a confidential term>"
+    return ref
+
+
+def _git_out(args, cwd=None):
+    p = subprocess.run(["git"] + args, capture_output=True, cwd=cwd)
+    if p.returncode != 0:
+        raise TagScanError("`git %s` failed" % " ".join(args[:2]))
+    return p.stdout
+
+
+def _blob_texts(data):
+    if _is_compressed(data):
+        try:
+            return _decompress_texts(data, [COMPRESSED_MAX_BYTES])
+        except UnscannableBlob as e:
+            raise TagScanError("a tagged compressed blob could not be read (%s)" % e)
+    return _text_views(data)
+
+
+def pushed_object_texts(sha, cwd=None):
+    """(texts, names) for what pushing `sha` publishes beyond `git log`: every annotated tag
+    object on the peel chain (each _text_views view), and -- when the chain ends at a blob or a
+    tree -- that content and the tree's paths. `names` are the `tag <name>` lines. Both empty for
+    a plain commit. RAISES TagScanError on any git failure or an over-deep chain."""
+    texts, names = [], []
+    for _ in range(TAG_MAX_DEPTH):
+        kind = _git_out(["cat-file", "-t", sha], cwd).decode("ascii", "replace").strip()
+        if kind == "commit":
+            return texts, names
+        if kind == "blob":
+            texts.extend(_blob_texts(_git_out(["cat-file", "blob", sha], cwd)))
+            return texts, names
+        if kind == "tree":
+            out = _git_out(["ls-tree", "-r", "-z", "--full-tree", sha], cwd)
+            entries, paths = [], []
+            for rec in out.decode("utf-8", "surrogateescape").split("\0"):
+                if not rec:
+                    continue
+                meta, _, path = rec.partition("\t")
+                parts = meta.split()
+                paths.append(path)
+                if len(parts) == 3 and parts[1] == "blob":
+                    entries.append(parts[2])
+            texts.append("\n".join(paths))
+            names.extend(paths)  # path names are folded / squashed like ref names (round 3)
+            try:
+                for _sha, data in _iter_blobs(sorted(set(entries)), cwd):
+                    texts.extend(_blob_texts(data))
+            except UnscannableBlob as e:
+                raise TagScanError("a tagged tree could not be read (%s)" % e)
+            return texts, names
+        if kind != "tag":
+            raise TagScanError("unexpected object type %r" % kind)
+        raw = _git_out(["cat-file", "tag", sha], cwd)
+        texts.extend(_text_views(raw))
+        # The ASCII header dilutes a UTF-16 message below _text_views' NUL threshold (and moves
+        # its BOM off byte 0), so the message body after the header is viewed on its own too.
+        body = raw.split(b"\n\n", 1)[1] if b"\n\n" in raw else b""
+        texts.extend(_text_views(body)[1:])
+        # A signature block after the message dilutes a BOM-less UTF-16 message the same way
+        # (REFUTE round 3), so the part before the first armor line is viewed on its own as well.
+        if b"-----BEGIN " in body:
+            texts.extend(_text_views(body.split(b"-----BEGIN ", 1)[0])[1:])
+        head = raw.decode("utf-8", "ignore").split("\n\n", 1)[0].split("\n")
+        first = head[0].split()
+        if len(first) != 2 or first[0] != "object" or not _is_sha(first[1]):
+            raise TagScanError("unparseable tag object %s" % sha[:12])
+        names.extend(line[4:] for line in head if line.startswith("tag "))
+        sha = first[1]
+    raise TagScanError("tag chain deeper than %d" % TAG_MAX_DEPTH)
 
 
 def _withhold(path, terms):
@@ -657,7 +854,8 @@ def scan_compressed(rng, terms, cwd=None):
     # touching commit is still in the range): remove the term or anchor in a commit of its own
     # first, or rewrite the history. The combination is already public in that case, so blocking
     # is the right direction. Not covered (residual): submodule gitlinks and Git LFS pointers
-    # (no content in git), and no size cap -- a multi-hundred-MB plain blob is decoded in memory.
+    # (no content in git). Decoding memory is bounded per chunk (see CHUNKED DECODING); the blob
+    # itself is still read whole, as every scan here always has.
     anchored = set(i for i, e in enumerate(terms or ()) if not isinstance(e, str) and e[1])
 
     try:
@@ -764,7 +962,7 @@ def main():
     # bounded against origin/main rather than that remote's own trunk.
     baseline = _resolve_default_baseline()
     bad = False
-    pushrefs = parse_pushrefs(sys.stdin.read())
+    pushrefs = parse_pushrefs(_read_stdin(sys.stdin))
     # ZERO ref lines (2026-11-09, push-live-backup REFUTE round 3): a stray \r or Unicode
     # space in a shim can starve this scan's stdin, and with no ref lines it scans nothing
     # and allows. git itself runs pre-push with EMPTY stdin on an up-to-date push (verified,
@@ -779,6 +977,35 @@ def main():
     for local_ref, local_sha, remote_ref, remote_sha in pushrefs:
         if set(local_sha) == {ZERO_RE}:
             continue  # ref deletion — nothing new is pushed
+        if terms:
+            # Ref names, tag objects and tagged blobs / trees are published but never in
+            # `git log` (see REF NAMES AND TAG OBJECTS). The LOCAL name is checked too, fail-safe:
+            # it usually becomes a remote name, and it is printed in every message below (and
+            # withheld there when it carries a term).
+            n_hits = set(name_hits(remote_ref, terms)) | set(name_hits(local_ref, terms))
+            if n_hits:
+                sys.stderr.write("pre-push BLOCKED: the pushed REF NAME carries %d confidential "
+                                 "term(s); ref names are published. Rename the branch or tag "
+                                 "first. Terms are not echoed.\n" % len(n_hits))
+                bad = True
+            local_ref = _ref_shown(local_ref, terms)
+            try:
+                o_texts, o_names = pushed_object_texts(local_sha)
+                t_hits = set(i for text in o_texts for i in scan_text(text, terms))
+                t_hits.update(i for name in o_names for i in name_hits(name, terms))
+                t_hits = sorted(t_hits)
+            except TagScanError as e:
+                sys.stderr.write("pre-push BLOCKED (fail-closed): the tag / tagged object pushed "
+                                 "on %s could not be read (%s), so it cannot be proven free of "
+                                 "confidential terms.\n" % (local_ref, e))
+                bad = True
+                t_hits = []
+            if t_hits:
+                sys.stderr.write("pre-push BLOCKED: %d confidential term(s) (indices %s) in an "
+                                 "ANNOTATED TAG (message or name) or the blob / tree a tag points "
+                                 "at, pushed on %s. These are published; re-create the tag "
+                                 "cleanly.\n" % (len(t_hits), t_hits, local_ref))
+                bad = True
         rng = rev_range(local_sha, remote_sha, baseline)
         if rng is None:
             sys.stderr.write("pre-push BLOCKED (fail-closed): %s is a brand-new remote "
