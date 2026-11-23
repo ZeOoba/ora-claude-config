@@ -318,6 +318,206 @@ expect("e2e: RCT report on a term-bearing path -> BLOCK with the path withheld",
        rc == 1 and "RCT" in err and "withheld" in err and _no_echo(err),
        "rc=%s err=%s" % (rc, err[:400]))
 
+# --- #497 follow-ups (2026-11-23) ---------------------------------------------------------
+ALWAYS_DEAL = _deal(always=["Quiet Marsh Park"])
+
+
+def _tag_push(message, nested=False):
+    """Repo whose origin/main is the base commit, plus an annotated tag (optionally a tag OF a
+    tag) carrying `message`. Returns (repo, stdin) pushing the tag as a NEW remote ref."""
+    repo, _ = _repo_with_commits([({"t.md": "clean\n"}, "tagged commit")])
+    base = _git(repo, "rev-parse", "HEAD~1").stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base)
+    _git(repo, "tag", "-a", "v1", "-m", message if not nested else "inner clean")
+    name = "v1"
+    if nested:
+        _git(repo, "tag", "-a", "v1-outer", "v1", "-m", message)
+        name = "v1-outer"
+    sha = _git(repo, "rev-parse", "refs/tags/%s" % name).stdout.strip()
+    return repo, "refs/tags/%s %s refs/tags/%s %s\n" % (name, sha, name, "0" * 40)
+
+
+# F1: annotated-tag messages are published with the tag but `git log` never shows them.
+for lbl, msg, nested, want in (("annotated tag message carries the term", "release for Quiet Marsh Park", False, 1),
+                               ("tag OF a tag: outer message carries the term", "Quiet+Marsh+Park notes", True, 1),
+                               ("clean annotated tag message", "release 1.0", False, 0)):
+    repo, stdin = _tag_push(msg, nested)
+    rc, err = _main_inproc(repo, stdin, ALWAYS_DEAL)
+    expect("e2e F1: %s -> %s" % (lbl, "BLOCK" if want else "allow"),
+           rc == want and _no_echo(err), "rc=%s err=%s" % (rc, err[:300]))
+
+# F1: the pushed REF NAME is published too; ref names join words with - _ . /
+for lbl, ref, want in (("branch named after the deal (hyphens)", "refs/heads/quiet-marsh-park", 1),
+                       ("branch named with underscores / dots", "refs/heads/wip/quiet_marsh.park", 1),
+                       ("ordinary branch name", "refs/heads/feature/rent-escalator", 0)):
+    repo, stdin = _repo_with_commits([({"r.md": "clean\n"}, "r")])
+    tip, base = stdin.split()[1], stdin.split()[3]
+    rc, err = _main_inproc(repo, "%s %s %s %s\n" % (ref, tip, ref, base), ALWAYS_DEAL)
+    expect("e2e F1: ref name: %s -> %s" % (lbl, "BLOCK" if want else "allow"),
+           rc == want and _no_echo(err), "rc=%s err=%s" % (rc, err[:300]))
+
+# F1 round 2 (REFUTE 2026-11-23): tags that peel to a BLOB or TREE, UTF-16 tag messages, the
+# tag NAME inside the tag object, more ref-name separators, run-together names.
+def _blob_tag_push(annotated, tree):
+    repo, _ = _repo_with_commits([({"t.md": "clean\n"}, "c")])
+    base = _git(repo, "rev-parse", "HEAD~1").stdout.strip()
+    _git(repo, "update-ref", "refs/remotes/origin/main", base)
+    blob = subprocess.run(["git", "-C", repo, "hash-object", "-w", "--stdin"],
+                          input=b"notes on Quiet Marsh Park\n", capture_output=True
+                          ).stdout.decode().strip()
+    obj = blob
+    if tree:
+        obj = subprocess.run(["git", "-C", repo, "mktree"],
+                             input=("100644 blob %s\tn.txt\n" % blob).encode(),
+                             capture_output=True).stdout.decode().strip()
+    if annotated:
+        _git(repo, "tag", "-a", "t1", obj, "-m", "clean message")
+    else:
+        _git(repo, "tag", "t1", obj)
+    sha = _git(repo, "rev-parse", "refs/tags/t1").stdout.strip()
+    return repo, "refs/tags/t1 %s refs/tags/t1 %s\n" % (sha, "0" * 40)
+
+
+for lbl, annotated, tree in (("annotated tag on a BLOB holding the term", True, False),
+                             ("lightweight tag on a BLOB holding the term", False, False),
+                             ("annotated tag on a TREE holding the term", True, True)):
+    repo, stdin = _blob_tag_push(annotated, tree)
+    rc, err = _main_inproc(repo, stdin, ALWAYS_DEAL)
+    expect("e2e F1b: %s -> BLOCK" % lbl, rc == 1 and _no_echo(err),
+           "rc=%s err=%s" % (rc, err[:300]))
+
+repo, _ = _repo_with_commits([({"t.md": "clean\n"}, "c")])
+_git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD~1").stdout.strip())
+_u16 = os.path.join(repo, "..", "msg16-%s.txt" % os.path.basename(repo))
+with open(_u16, "wb") as fh:
+    fh.write("release notes: Quiet Marsh Park\n".encode("utf-16"))
+_git(repo, "tag", "-a", "u16", "-F", _u16)
+_sha = _git(repo, "rev-parse", "refs/tags/u16").stdout.strip()
+rc, err = _main_inproc(repo, "refs/tags/u16 %s refs/tags/u16 %s\n" % (_sha, "0" * 40), ALWAYS_DEAL)
+expect("e2e F1b: UTF-16 annotated tag message -> BLOCK", rc == 1 and _no_echo(err),
+       "rc=%s err=%s" % (rc, err[:300]))
+
+repo, _ = _repo_with_commits([({"t.md": "clean\n"}, "c")])
+_git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD~1").stdout.strip())
+_git(repo, "tag", "-a", "quiet-marsh-park", "-m", "clean")
+_obj = _git(repo, "rev-parse", "refs/tags/quiet-marsh-park").stdout.strip()
+_git(repo, "update-ref", "refs/tags/v2", _obj)
+_git(repo, "tag", "-d", "quiet-marsh-park")
+rc, err = _main_inproc(repo, "refs/tags/v2 %s refs/tags/v2 %s\n" % (_obj, "0" * 40), ALWAYS_DEAL)
+expect("e2e F1b: tag NAME inside the tag object carries the term (pushed as v2) -> BLOCK",
+       rc == 1 and _no_echo(err), "rc=%s err=%s" % (rc, err[:300]))
+
+# Round 3: a hyphenated PATH inside a tagged tree; a BOM-less UTF-16 tag message followed by a
+# signature-shaped block (git stores the tag message verbatim).
+repo, _ = _repo_with_commits([({"t.md": "clean\n"}, "c")])
+_git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD~1").stdout.strip())
+_bl = subprocess.run(["git", "-C", repo, "hash-object", "-w", "--stdin"], input=b"clean\n",
+                     capture_output=True).stdout.decode().strip()
+_tr = subprocess.run(["git", "-C", repo, "mktree"],
+                     input=("100644 blob %s\tquiet-marsh-park.txt\n" % _bl).encode(),
+                     capture_output=True).stdout.decode().strip()
+_git(repo, "tag", "-a", "tp", _tr, "-m", "clean")
+_sha = _git(repo, "rev-parse", "refs/tags/tp").stdout.strip()
+rc, err = _main_inproc(repo, "refs/tags/tp %s refs/tags/tp %s\n" % (_sha, "0" * 40), ALWAYS_DEAL)
+expect("e2e F1c: hyphenated term in a PATH inside a tagged tree -> BLOCK",
+       rc == 1 and _no_echo(err), "rc=%s err=%s" % (rc, err[:300]))
+
+repo, _ = _repo_with_commits([({"t.md": "clean\n"}, "c")])
+_git(repo, "update-ref", "refs/remotes/origin/main", _git(repo, "rev-parse", "HEAD~1").stdout.strip())
+_msgf = os.path.join(repo, "..", "msg16s-%s.txt" % os.path.basename(repo))
+with open(_msgf, "wb") as fh:
+    fh.write("notes: Quiet Marsh Park\n".encode("utf-16-le")
+             + b"-----BEGIN PGP SIGNATURE-----\n" + b"A" * 800 + b"\n-----END PGP SIGNATURE-----\n")
+_git(repo, "tag", "-a", "u16s", "-F", _msgf)
+_sha = _git(repo, "rev-parse", "refs/tags/u16s").stdout.strip()
+rc, err = _main_inproc(repo, "refs/tags/u16s %s refs/tags/u16s %s\n" % (_sha, "0" * 40),
+                       ALWAYS_DEAL)
+expect("e2e F1c: BOM-less UTF-16 tag message followed by a signature block -> BLOCK",
+       rc == 1 and _no_echo(err), "rc=%s err=%s" % (rc, err[:300]))
+
+for lbl, ref, want in (("commas", "refs/heads/quiet,marsh,park", 1),
+                       ("= and !", "refs/heads/quiet=marsh!park", 1),
+                       ("run together, CamelCase", "refs/heads/QuietMarshPark", 1),
+                       ("ordinary name with commas", "refs/heads/fix,lint,docs", 0)):
+    repo, stdin = _repo_with_commits([({"r.md": "clean\n"}, "r")])
+    tip, base = stdin.split()[1], stdin.split()[3]
+    rc, err = _main_inproc(repo, "%s %s %s %s\n" % (ref, tip, ref, base), ALWAYS_DEAL)
+    expect("e2e F1b: ref name with %s -> %s" % (lbl, "BLOCK" if want else "allow"),
+           rc == want and _no_echo(err), "rc=%s err=%s" % (rc, err[:300]))
+
+# Non-ASCII ref names: git writes the ref lines as UTF-8, whatever the console code page.
+_line = ("refs/heads/café-row %s refs/heads/café-row %s\n" % ("a" * 40, "b" * 40))
+_stream = io.TextIOWrapper(io.BytesIO(_line.encode("utf-8")), encoding="cp1252")
+expect("stdin F1b: ref lines are decoded as UTF-8 even under a cp1252 console",
+       "café-row" in pps._read_stdin(_stream) if hasattr(pps, "_read_stdin") else False)
+
+# F2: a deal entry that is not a dict cannot be read -> roster malformed -> fail closed.
+for lbl, bad in (("a list", ["Quiet Marsh Park"]), ("a string", "Quiet Marsh Park"),
+                 ("null", None)):
+    expect("load F2: non-dict deal entry (%s) -> None (fail-closed)" % lbl,
+           _with_roster({"_meta": {}, "deal": bad}, pps.load_terms) is None)
+expect("load F2: `_`-prefixed non-dict keys stay ignored",
+       _with_roster({"_meta": "notes", "_v": 2, "d": {"active": True, "always": ["x y z"]}},
+                    pps.load_terms) == ["x y z"])
+
+# F3: surrounding whitespace in a roster string must not narrow matching.
+padded = _deal(always=["  Quiet Marsh Park "], context=[" kestrel"],
+               context_requires_any=[" rent roll  "])
+tp = _with_roster(padded, pps.load_terms) or []
+expect("load F3: terms and anchors are stripped",
+       ALWAYS in tp and ("kestrel", ("rent roll",)) in tp, repr(tp)[:0])
+expect("scan F3: padded anchor still gates its term ('kestrel ... rent roll,')",
+       pps.scan_text("kestrel notes, see rent roll, attached", tp) != [])
+
+# F4: decoded views are bounded in MEMORY, not just rounds -- views are produced one at a time.
+import tracemalloc
+_big = ("kestrel%20x+y " * 400000)  # ~5.6 MB, decodes on every round of both chains
+tracemalloc.start()
+pps.scan_text(_big, terms_ctx)
+_peak = tracemalloc.get_traced_memory()[1]
+tracemalloc.stop()
+expect("scan F4: peak memory of one decoded scan < 5x the window (was ~9 copies): %.1fx"
+       % (_peak / float(len(_big))), _peak < 5 * len(_big))
+expect("scan F4: streaming still finds a term only present in a later decoded view",
+       pps.scan_text("q=Quiet%252520Marsh%252520Park", [ALWAYS]) == [0])
+# Chunked decoding: a (double-)encoded term STRADDLING every chunk boundary is still found, and so
+# is a context term whose anchor sits in a far-away chunk of the same window.
+_C = getattr(pps, "DECODE_CHUNK", 1 << 20)
+_enc = "Quiet%2520Marsh%2520Park"
+for _off in range(1, len(_enc)):
+    _s = "x" * (_C - _off) + _enc + "y" * 64
+    if pps.scan_text(_s, [ALWAYS]) != [0]:
+        expect("scan F4: encoded term straddling the chunk boundary (offset %d) found" % _off,
+               False)
+        break
+else:
+    expect("scan F4: encoded term straddling the chunk boundary found at every offset", True)
+# REFUTE round 2: the overlap must cover NON-ASCII preimages -- a 4-byte UTF-8 char is 12 chars
+# per round, and the Kelvin sign (U+212A, `%E2%84%AA`) lowercases to ASCII 'k'. The window must be
+# LONGER than one chunk plus overlap, or a too-small overlap is never exercised.
+def _enc4(s):
+    """Worst-case preimage: EVERY byte percent-encoded, four rounds deep (quote() would leave
+    ASCII letters alone and never reach the bound)."""
+    for _ in range(4):
+        s = "".join("%%%02X" % b for b in s.encode("utf-8"))
+    return s
+
+
+for _lbl, _plain, _roster in (("Kelvin-sign 'k' in an ASCII term", "Kestrel", ["kestrel"]),
+                              ("accented term", "café row", ["café row"]),
+                              ("4-byte UTF-8 term", "\U0001F3E0 lot", ["\U0001F3E0 lot"])):
+    _e = _enc4(_plain)
+    _miss = None
+    for _off in range(1, len(_e)):  # every offset: a too-small overlap misses only a few
+        _s = "x" * (_C - _off) + _e + "y" * (2 * _C)
+        if pps.scan_text(_s, _roster) != [0]:
+            _miss = _off
+            break
+    expect("scan F4b: 4-round-encoded %s straddling a chunk boundary of a multi-chunk window "
+           "is found (first miss at offset %s)" % (_lbl, _miss), _miss is None)
+expect("scan F4: context term and its anchor in different chunks of one window -> hit",
+       pps.scan_text("kestrel " + "z" * (3 * _C) + " rent%20roll", terms_ctx) != [])
+
 # A malformed roster blocks the push outright, with the fail-closed message.
 repo, stdin = _repo_with_commits([({"j.md": "nothing\n"}, "j")])
 rc, err = _main_inproc(repo, stdin, _deal(always=[], context="kestrel"))
