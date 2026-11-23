@@ -26,8 +26,9 @@ Pinned behaviour:
      Stop run is the one that proves the try/catch: under the scripts' real
      default (Continue, which neither script overrides) a Move-Item failure is
      non-terminating anyway. A missing log is a no-op.
-  5. Archive stamps are the real UTC second, so an earlier archive is never
-     overwritten by a same-name -Force move.
+  5. Archive stamps are the real UTC second, and the move never uses -Force: on
+     a name collision the existing archive survives and the log stays for the
+     next run (Move-Item -Force deletes the destination before moving).
 
 Wiring (1) is judged on the PowerShell parser's AST, not line regexes, so a
 block-commented, if/function-wrapped, early-returned or shadowed (defined twice)
@@ -161,6 +162,9 @@ def check_wiring(label, path):
         errs.append("%s: Invoke-LogRotation default threshold is not 1048576 (1 MiB)" % label)
     if re.search(r"Remove-Item|Clear-Content|\]::Delete\(", fn):
         errs.append("%s: Invoke-LogRotation deletes or truncates; it must only move (Invariant 6)" % label)
+    if re.search(r"(?im)^\s*Move-Item\b[^\r\n#]*-Force\b", fn):
+        errs.append("%s: Move-Item -Force deletes an existing archive before moving onto its name "
+                    "(Invariant 6)" % label)
     call = a["call_idx"]
     if call < 0:
         errs.append("%s: no top-level `Invoke-LogRotation $log` statement (defined but not wired, or "
@@ -195,6 +199,14 @@ Invoke-LogRotation (Join-Path $Root 'default_below\x.log')
 Invoke-LogRotation (Join-Path $Root 'default_at\x.log')
 Invoke-LogRotation (Join-Path $Root 'missing\x.log') 100
 Invoke-LogRotation (Join-Path $Root 'prior\x.log') 100
+# collision: an archive already exists under every stamp this rotation could pick
+$cArch = Join-Path $Root 'collide\_log_archive'
+$t0 = [DateTime]::UtcNow
+for ($s = -2; $s -le 20; $s++) {
+    $n = 'x-{0}.log' -f $t0.AddSeconds($s).ToString('yyyyMMdd-HHmmss')
+    [IO.File]::WriteAllText((Join-Path $cArch $n), "existing archive $n")
+}
+Invoke-LogRotation (Join-Path $Root 'collide\x.log') 100
 $held = [IO.File]::Open((Join-Path $Root 'locked\x.log'), 'Open', 'Read', 'ReadWrite')
 try { Invoke-LogRotation (Join-Path $Root 'locked\x.log') 100 } finally { $held.Close() }
 $r['continued'] = $true
@@ -211,6 +223,7 @@ FIXTURES = {
     "missing": (None, False),
     "prior": (300, True),
     "locked": (300, True),
+    "collide": (300, True),
 }
 PRIOR_ARCHIVE = "x-20200101-000000.log"
 PRIOR_BYTES = b"older generation - must survive\n"
@@ -320,6 +333,23 @@ def check_behaviour(label, fn, pref):
             errs.append("%s: locked log was lost or altered when the move failed" % tag)
         if _archives(d("locked")) != [PRIOR_ARCHIVE]:
             errs.append("%s: locked case archive dir changed: %r" % (tag, _archives(d("locked"))))
+
+        # name collision: the existing archive must survive (no -Force overwrite) and
+        # the log must stay put for the next run to rotate under a fresh stamp
+        cp = os.path.join(d("collide"), "x.log")
+        if not os.path.isfile(cp) or os.path.getsize(cp) != 300:
+            errs.append("%s: collide log was lost or altered" % tag)
+        ca = os.path.join(d("collide"), "_log_archive")
+        for name in _archives(d("collide")):
+            with open(os.path.join(ca, name), "rb") as f:
+                body = f.read()
+            want = PRIOR_BYTES if name == PRIOR_ARCHIVE else ("existing archive " + name).encode()
+            if body != want:
+                errs.append("%s: existing archive %s was overwritten on a name collision "
+                            "(Move-Item -Force; Invariant 6)" % (tag, name))
+        if len(_archives(d("collide"))) != 24:
+            errs.append("%s: collide archive count changed: %d (expected 24)"
+                        % (tag, len(_archives(d("collide")))))
         return errs
     finally:
         shutil.rmtree(root, ignore_errors=True)

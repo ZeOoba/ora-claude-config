@@ -95,7 +95,12 @@ function Invoke-LogRotation($path, $maxBytes = 1048576) {
                 }
                 $base = [IO.Path]::GetFileNameWithoutExtension($path)
                 $dest = Join-Path $archDir ("{0}-{1}.log" -f $base, [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))
-                Move-Item -LiteralPath $path -Destination $dest -Force
+                # No -Force (2026-11-23, R34-8 REFUTE): -Force deletes an existing $dest
+                # BEFORE moving, so an overlapping same-second run (or a move that then
+                # fails on a held handle) destroyed the earlier archive. Without it, a name
+                # collision just fails the move, the log stays in place, and the next run
+                # rotates under a fresh stamp. Retention: every archive is kept, forever.
+                Move-Item -LiteralPath $path -Destination $dest
             }
         }
     } catch { }
