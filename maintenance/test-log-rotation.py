@@ -127,6 +127,11 @@ if ($callIdx -ge 0) {
 """
 
 
+def _text(path):
+    with open(path, encoding="utf-8-sig") as f:
+        return f.read()
+
+
 def analyze(path, workdir):
     script = os.path.join(workdir, "analyze.ps1")
     with open(script, "w", encoding="utf-8-sig") as f:
@@ -165,6 +170,14 @@ def check_wiring(label, path):
     if re.search(r"(?im)^\s*Move-Item\b[^\r\n#]*-Force\b", fn):
         errs.append("%s: Move-Item -Force deletes an existing archive before moving onto its name "
                     "(Invariant 6)" % label)
+    # A script-scope default reaches the function's Move-Item unseen by the extracted-text
+    # behaviour run (REFUTE 2026-11-23, m4): check the whole script and its dot-sourced libs.
+    for src_path in [path] + [os.path.join(os.path.dirname(path), m) for m in re.findall(
+            r"(?m)^\s*\.\s+\(\s*Join-Path\s+\$PSScriptRoot\s+'([^']+\.ps1)'\s*\)", _text(path))]:
+        if os.path.isfile(src_path) and re.search(
+                r"(?i)PSDefaultParameterValues[^\r\n]*(Move-Item|\*)\s*:\s*Force", _text(src_path)):
+            errs.append("%s: %s sets a $PSDefaultParameterValues Force default that reaches "
+                        "the rotation's Move-Item (Invariant 6)" % (label, os.path.basename(src_path)))
     call = a["call_idx"]
     if call < 0:
         errs.append("%s: no top-level `Invoke-LogRotation $log` statement (defined but not wired, or "
