@@ -27,7 +27,7 @@ hooks/lib/prepush_test_selection.py, tests in hooks/tests/test-prepush-test-sele
           `python hooks/git-prepush-hook-tests-gate.py --full` on every non-draft PR, on
           every PR merge commit pushed to main, and weekly (direct `git push`es to main
           skip it: they ran FULL here; see the workflow header). The PR's CI run is the authoritative gate: a PR merges only when it is green
-          (a merge-procedure rule; see MERGE ENFORCEMENT below). CI carries no
+          (GitHub-enforced required check; see MERGE ENFORCEMENT below). CI carries no
           CLAUDE_CODE_SESSION_ID, so no override token can ever pass a red CI run.
 
 WHAT THE LIGHT TIER GIVES UP, stated so nobody mistakes it for the full gate: a test
@@ -47,8 +47,10 @@ files ENV-SKIP in CI exactly as in any worktree — notably test-confidentiality
 (no hooks/confidential-terms.json). Their real coverage is a FULL run in the main
 checkout (main-target pushes, the weekly sweep) plus FULL-tier escalation: any pushed
 path containing "confidential" forces FULL locally (prepush_test_selection.py).
-MERGE ENFORCEMENT: "green CI before merge" is enforced by the merge procedure, not by
-GitHub — main carries no required status check (tech.md §3j).
+MERGE ENFORCEMENT: "green CI before merge" is GitHub-enforced since 2026-11-23 —
+`full-test-suite` is a required check on main, with enforce_admins off so direct pushes
+to main from the admin identity bypass it (those keep the FULL local tier here;
+tech.md §3j).
 
 WHY (found 2026-07-24): commit 7d01eff rewrote shared-checkout-guard.py's WIP
 attribution logic (evidence-based naming, replacing an arbitrary others[0] guess) but
