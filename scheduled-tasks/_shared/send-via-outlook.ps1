@@ -976,11 +976,50 @@ if ($externalRecipients.Count -gt 0) {
     # -WhatIf testing before this ever reached production. Toggling ErrorActionPreference
     # to Continue for just this call fixes it: stderr text flows into $checkOutput as plain
     # strings, and $LASTEXITCODE (not an exception) is what actually decides allow/deny.
+    # PINNED INTERPRETER + ENVIRONMENT ALLOWLIST (cross-repo audit 2026-11-23, HIGH). This was
+    # `& python` from PATH with the caller's whole environment, so a fake python earlier on PATH,
+    # or ORA_OVERRIDE_SESSIONS_DIR (override_tokens.py's test seam) pointed at a forged token
+    # directory, authorized an external send. Same fix as hooks/bin/netlify-guard-global.js:
+    # a fixed absolute interpreter (fails CLOSED if Python moves -- update the constant, never
+    # reintroduce a PATH lookup), Python isolated mode (-I: ignores PYTHON* variables and the
+    # user site), and a child environment built from an allowlist only. The session id now goes
+    # into a process argument string, so it must be a plain token (no quote can split it).
+    if ($sessionId -notmatch '\A[A-Za-z0-9][A-Za-z0-9_-]{0,127}\z') {
+        Write-Log "ERROR" "OUTBOUND-CHECK: CLAUDE_CODE_SESSION_ID is not a plain session token -- refusing to send (fail-closed)"
+        exit 5
+    }
+    $checkPython = "C:\Users\Owner\AppData\Local\Programs\Python\Python313\python.exe"
+    $checkEnvAllow = @("SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "PATH", "PATHEXT", "COMSPEC",
+                       "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "HOME", "APPDATA", "LOCALAPPDATA",
+                       "TEMP", "TMP")
     $prevEAP = $ErrorActionPreference
     try {
         $ErrorActionPreference = "Continue"
-        $checkOutput = $recipientsStdin | & python $checkScript --session $sessionId 2>&1
-        $checkExitCode = $LASTEXITCODE
+        if (-not (Test-Path -LiteralPath $checkPython -PathType Leaf)) {
+            throw "pinned interpreter not found at $checkPython"
+        }
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $checkPython
+        $psi.Arguments = "-I `"$checkScript`" --session $sessionId"
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.EnvironmentVariables.Clear()
+        foreach ($name in $checkEnvAllow) {
+            $val = [System.Environment]::GetEnvironmentVariable($name)
+            if ($null -ne $val) { $psi.EnvironmentVariables[$name] = $val }
+        }
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.StandardInput.Write($recipientsStdin)
+        $proc.StandardInput.Close()
+        # Read stdout asynchronously while draining stderr, so neither pipe can fill and deadlock.
+        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+        $stderrText = $proc.StandardError.ReadToEnd()
+        $proc.WaitForExit()
+        $checkOutput = @(($stdoutTask.Result + "`n" + $stderrText) -split "`r?`n" | Where-Object { $_ -ne "" })
+        $checkExitCode = $proc.ExitCode
     } catch {
         # A validator we cannot run cannot authorize anything -- fail closed exactly like
         # ora-autonomy-gate.py's own broken-module handling (TOKEN_CONTRACT_LOADED=$false).

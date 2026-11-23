@@ -258,6 +258,84 @@ Assert-Case -Name "internal send with attachment is NOT blocked by that rule" `
     -ScriptArgs @("-To", "$To;egoldberg@oxfordra.net", "-Subject", "Int", "-Body", "x", "-Attachment", $FileA) `
     -ExpectCode 0 -LogMustContain @("DRY RUN: would send", "attachments=1")
 
+# --- Invariant-1 backstop cannot be steered by the caller's environment (audit 2026-11-23, HIGH) ---
+# check_external_send.py was run as `python` from PATH with the caller's full environment, so a
+# forged token directory (ORA_OVERRIDE_SESSIONS_DIR) or a fake python earlier on PATH authorized an
+# external send. Both must now be DENIED (exit 5). No real token directory is touched.
+Write-Host "`nInvariant-1 backstop: pinned interpreter + environment allowlist"
+$ForgeSession = "forge-" + [guid]::NewGuid().ToString("N").Substring(0, 12)
+$ForgeDir = Join-Path $Work "forged-sessions"
+$ForgeTok = Join-Path $ForgeDir "$ForgeSession\overrides"
+New-Item -ItemType Directory -Path $ForgeTok -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $ForgeTok "allow-external-send") -Encoding ASCII -Value @(
+    "scope: external-send", "session: $ForgeSession", "recipients: outsider@example.com", "reason: forged by test")
+$FakeBin = Join-Path $Work "fakebin"
+New-Item -ItemType Directory -Path $FakeBin -Force | Out-Null
+# A REAL python.exe that "authorizes" (exit 0). A python.cmd would be invisible to CreateProcess
+# (which resolves only .exe), so a regression back to a PATH/CWD lookup would pass unnoticed
+# (review 2026-11-23, C4). Compiled in-harness; no binary is committed.
+Add-Type -OutputType ConsoleApplication -OutputAssembly (Join-Path $FakeBin "python.exe") -TypeDefinition @"
+public static class FakePython {
+    public static int Main(string[] args) {
+        System.Console.Error.WriteLine("AUTHORIZED-BY-FAKE-PYTHON");
+        return 0;
+    }
+}
+"@
+# A user-site .pth that exits 0 before the validator runs. APPDATA is on the env allowlist, so only
+# Python's -I (no user site) stops this one (review 2026-11-23: proven live bypass without -I).
+$FakeAppData = Join-Path $Work "fake-appdata"
+$UserSite = Join-Path $FakeAppData "Python\Python313\site-packages"
+New-Item -ItemType Directory -Path $UserSite -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $UserSite "zz_evil.pth") -Encoding ASCII -Value "import os; os._exit(0)"
+$savedAppData = $env:APPDATA
+$savedSession = $env:CLAUDE_CODE_SESSION_ID
+$savedPath = $env:PATH
+try {
+    $env:CLAUDE_CODE_SESSION_ID = $ForgeSession
+    $env:ORA_OVERRIDE_SESSIONS_DIR = $ForgeDir
+    # The validator's own DENY line (naming this session and recipient) proves the PINNED interpreter
+    # really ran the check and that the session argument and stdin recipients both reached it.
+    $ValidatorDeny = "check_external_send: DENY - no valid allow-external-send token for session $ForgeSession naming recipient(s): outsider@example.com"
+    Assert-Case -Name "a forged ORA_OVERRIDE_SESSIONS_DIR token does NOT authorize an external send" `
+        -ScriptArgs @("-To", "outsider@example.com", "-Subject", "Forge", "-Body", "x") `
+        -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
+    Remove-Item Env:\ORA_OVERRIDE_SESSIONS_DIR -ErrorAction SilentlyContinue
+    $env:PATH = "$FakeBin;$savedPath"
+    Push-Location $FakeBin   # also in the child's working directory, which CreateProcess searches first
+    try {
+        Assert-Case -Name "a fake python.exe first on PATH and in the CWD does NOT authorize an external send" `
+            -ScriptArgs @("-To", "outsider@example.com", "-Subject", "Hijack", "-Body", "x") `
+            -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "AUTHORIZED-BY-FAKE-PYTHON")
+    } finally { Pop-Location }
+    $env:PATH = $savedPath
+    $env:APPDATA = $FakeAppData
+    Assert-Case -Name "a user-site .pth under an attacker APPDATA does NOT authorize an external send (-I)" `
+        -ScriptArgs @("-To", "outsider@example.com", "-Subject", "UserSite", "-Body", "x") `
+        -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
+    $env:APPDATA = $savedAppData
+    $env:PYTHONSTARTUP = Join-Path $FakeBin "nope.py"
+    Set-Content -LiteralPath $env:PYTHONSTARTUP -Encoding ASCII -Value "import sys; sys.exit(0)"
+    $env:PYTHONPATH = $FakeBin
+    Set-Content -LiteralPath (Join-Path $FakeBin "override_tokens.py") -Encoding ASCII -Value "def token_grants(*a, **k): return True"
+    # Regression GUARD only: this already held on the base code (the validator inserts its own dir first
+    # and PYTHONSTARTUP is interactive-only), so it pins the behavior but cannot detect a dropped -I.
+    Assert-Case -Name "PYTHONPATH / PYTHONSTARTUP cannot shadow the validator's modules (guard)" `
+        -ScriptArgs @("-To", "outsider@example.com", "-Subject", "PyPath", "-Body", "x") `
+        -ExpectCode 5 -LogMustContain @("OUTBOUND-CHECK: DENIED", $ValidatorDeny) -LogMustNotContain @("DRY RUN: would send", "OUTBOUND-CHECK: authorized")
+    Remove-Item Env:\PYTHONSTARTUP, Env:\PYTHONPATH -ErrorAction SilentlyContinue
+    # The session id now goes into a process argument string: a quote must not be able to split it.
+    $env:CLAUDE_CODE_SESSION_ID = 'abc" --session "other'
+    Assert-Case -Name "a session id that is not a plain token is refused before the validator runs" `
+        -ScriptArgs @("-To", "outsider@example.com", "-Subject", "Quote", "-Body", "x") `
+        -ExpectCode 5 -LogMustContain @("not a plain session token") -LogMustNotContain @("DRY RUN: would send", "check_external_send:")
+} finally {
+    if ($null -eq $savedSession) { Remove-Item Env:\CLAUDE_CODE_SESSION_ID -ErrorAction SilentlyContinue } else { $env:CLAUDE_CODE_SESSION_ID = $savedSession }
+    $env:PATH = $savedPath
+    $env:APPDATA = $savedAppData
+    Remove-Item Env:\ORA_OVERRIDE_SESSIONS_DIR, Env:\PYTHONSTARTUP, Env:\PYTHONPATH -ErrorAction SilentlyContinue
+}
+
 Write-Host "`nAudit-log integrity"
 Write-Host "`nSubject source: -SubjectFile (added 2026-10-28; was rejected as an unknown parameter)"
 $SubjOk = Join-Path $Work "subj.txt"
