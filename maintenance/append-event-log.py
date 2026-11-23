@@ -79,6 +79,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 
 try:
@@ -744,6 +745,107 @@ def warn_if_uncommitted_backlog(log, threshold=UNCOMMITTED_BACKLOG_WARN_AT,
         pass  # best-effort only -- must never affect the append's own success
 
 
+AUTO_ROLLOVER_OFF_ENV = "ORA_EVENT_LOG_NO_AUTO_ROLLOVER"
+# Rollover takes ~1s on a 400KB log plus up to ROLLOVER_LOCK_TIMEOUT_S (5s) waiting for
+# the lock. Both pre-push gates call this appender with no timeout of their own, so this
+# bound is also the worst-case delay an oversized append can add to a push.
+AUTO_ROLLOVER_TIMEOUT_S = 20
+ROLLOVER_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "rollover-event-log.py")
+
+
+def auto_rollover_if_oversized(log, size_threshold=None, script=None,
+                               timeout=AUTO_ROLLOVER_TIMEOUT_S):
+    """Roll `log` over when it has reached `size_threshold` bytes (2026-11-23).
+
+    Automation Audit R34-8: the size WARN above only ever printed, so rollover ran
+    only when someone remembered it -- the live log reached 375,496B, 46 days after
+    the previous rollover, before an audit noticed. This runs the EXISTING
+    maintenance/rollover-event-log.py instead of re-implementing it, so that script's
+    own guards stay the only authority on whether a rollover is safe: it takes this
+    module's _log_lock and refuses if another holder has it, refuses if the log moved
+    since its read ((mtime, size) stamp), refuses to overwrite a same-day archive, and
+    unwinds its own damage on a failed swap.
+
+    Contract:
+      - Call it OUTSIDE _log_lock. The rollover takes that lock itself; a caller
+        holding it would make every auto-rollover refuse.
+      - A subprocess, not an import: rollover keeps process-global truncation state
+        (_OWN_TRUNCATION) and its CLI path ends in sys.exit; isolating it keeps both
+        out of the appender's process.
+      - `size_threshold` defaults to LOG_SIZE_WARN_AT read at CALL time.
+      - Off entirely with ORA_EVENT_LOG_NO_AUTO_ROLLOVER=1.
+      - FAIL-OPEN, like every other post-append step here: a missing script, a refusal
+        (non-zero exit), a timeout or any exception prints one 'auto-rollover' note to
+        stderr and returns False. It never raises and never changes the append's exit
+        code; the next oversized append retries. Returns True only when the rollover
+        script exited 0 AND reported "rollover complete" (it also exits 0 for a log
+        at or under its --keep-min lines, which is no cut)."""
+    try:
+        if os.environ.get(AUTO_ROLLOVER_OFF_ENV) == "1":
+            return False
+        threshold = LOG_SIZE_WARN_AT if size_threshold is None else size_threshold
+        try:
+            size = os.path.getsize(log)
+        except OSError:
+            return False
+        if size < threshold:
+            return False
+        script = script or ROLLOVER_SCRIPT
+        if not os.path.isfile(script):
+            sys.stderr.write("auto-rollover skipped: %s not found; run the rollover by "
+                             "hand.\n" % script)
+            return False
+        # A timed-out rollover is LEFT RUNNING, never killed: killing it mid-swap would
+        # skip its own unwind, the one failure its guards cannot recover from. Output
+        # goes to a temp file, not a pipe, so a child that outlives this process can
+        # never die on a broken pipe part-way through its writes.
+        out = tempfile.TemporaryFile(mode="w+", encoding="utf-8", errors="replace")
+        try:
+            # Own process group: a console Ctrl-C aimed at the appender must not reach the
+            # rollover, whose write path catches Exception only, so a KeyboardInterrupt
+            # after its in-place truncate would skip its unwind (REFUTE C4, 2026-11-23).
+            child = subprocess.Popen([sys.executable, script, "--log", os.path.abspath(log)],
+                                     stdout=out, stderr=subprocess.STDOUT,
+                                     creationflags=getattr(subprocess,
+                                                           "CREATE_NEW_PROCESS_GROUP", 0))
+            try:
+                rc = child.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                sys.stderr.write("auto-rollover still running after %ss (pid %d); left to "
+                                 "finish on its own -- check for %s.rollover-backup if the "
+                                 "log looks wrong.\n" % (timeout, child.pid,
+                                                         os.path.basename(log)))
+                return False
+            out.seek(0)
+            text = out.read()
+        finally:
+            out.close()
+        if rc != 0:
+            why = text.strip().splitlines()
+            sys.stderr.write("auto-rollover did not run (exit %d): %s\n"
+                             % (rc, why[-1] if why else "no output"))
+            return False
+        # Exit 0 is NOT proof of a cut: the script also exits 0 when the log is at or
+        # under --keep-min lines ("nothing to roll over"). Success means its own
+        # "rollover complete" line (REFUTE C1, 2026-11-23).
+        done = [ln for ln in text.splitlines() if ln.startswith("rollover complete")]
+        if not done:
+            last = text.strip().splitlines()
+            sys.stderr.write("auto-rollover made no cut: %s\n"
+                             % (last[-1] if last else "no output"))
+            return False
+        print("auto-rollover: %s was %d bytes (threshold %d); %s"
+              % (os.path.basename(log), size, threshold, done[-1]))
+        return True
+    except Exception as e:  # best-effort only -- must never affect the append's own success
+        try:
+            sys.stderr.write("auto-rollover skipped: %s\n" % e)
+        except Exception:
+            pass
+        return False
+
+
 AUTOCOMMIT_BRANCHES_ENV = "ORA_EVENT_LOG_COMMIT_BRANCHES"
 AUTOCOMMIT_BRANCHES_DEFAULT = ("live/primary-checkout", "main")
 AUTOCOMMIT_OFF_ENV = "ORA_EVENT_LOG_NO_AUTOCOMMIT"
@@ -934,6 +1036,12 @@ def main(argv=None):
                 # Outside the log lock: the commit reads the file and can take seconds.
                 if not (a.no_commit or os.environ.get(AUTOCOMMIT_OFF_ENV) == "1"):
                     autocommit_log(a.log, header)
+                # Outside the log lock too: the rollover takes _log_lock itself. After
+                # the commit, so where the log is git-tracked the append lands before the
+                # structural cut (the canonical memory log is gitignored, so there the
+                # archive file is the only record of the cut). Before the WARN, so the
+                # WARN only prints when the log is STILL oversized.
+                auto_rollover_if_oversized(a.log)
                 warn_if_uncommitted_backlog(a.log)
                 return 0
         except MalformedEntryError:

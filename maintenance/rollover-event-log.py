@@ -3,7 +3,22 @@
 a dated archive file, keeping the live log under memory-policy.md's ~1000-line
 soft cap. This is a STRUCTURAL edit (single-writer doctrine, 2026-06-11):
 unlike append-event-log.py, which any session may run concurrently, this
-script should run alone -- check for other active sessions before running it.
+script should run alone -- check for other active sessions before running it
+BY HAND.
+
+UNATTENDED RUNS (2026-11-23, Automation Audit R34-8): append-event-log.py now
+runs this script itself, as a subprocess, after any append that leaves the log
+at or above its LOG_SIZE_WARN_AT (400,000B). The single-writer check is then
+carried by this script's own guards instead of a person: it holds the
+appender's _log_lock from read to swap (so lock-honouring appends and the spool
+drain queue behind it), aborts on a moved (mtime, size) stamp, refuses a second
+same-day archive, and unwinds its own damage. Residual, accepted: an appender
+whose lock wait timed out and fell open can still race the swap -- landing
+inside the guard-to-replace window loses its entry, and landing just after the
+swap from a pre-swap read puts the archived tail back (duplicated across live
+and archive). Both need another lock holder for more than 5s, both existed for
+manual runs too, and auto-triggering makes neither window wider or longer.
+Off with ORA_EVENT_LOG_NO_AUTO_ROLLOVER=1.
 
 WHY (2026-07-16): the live log crossed 3000 lines (3x the ~1000 soft cap)
 with no dedicated rollover tool -- the 2026-07-09 rollover was done by hand.
