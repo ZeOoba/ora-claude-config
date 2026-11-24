@@ -233,11 +233,32 @@ BASH_GUARD_CHAIN = [
 # it bricks every call on its chain -- add only guards whose doctrine already accepts that.
 FAIL_CLOSED = frozenset(("confidentiality-guard", "ora-autonomy-gate"))
 
+# THIRD CHAIN (cross-repo audit 2026-11-23, HIGH): the non-Bash shells -- PowerShell,
+# Desktop Commander start_process / interact_with_process, the terminal panel's
+# run_in_terminal -- run git exactly like Bash, but reached only the egress guards wired
+# as their own *-egress-tools rows (autonomy, confidentiality, config-write, lint-config,
+# workbook-write, override-mint). So `git reset --hard`, an unreviewed commit or a push
+# from the shared checkout skipped the git-discipline guards by choosing another tool.
+# This chain carries exactly those shell-syntax-agnostic git guards, in bash-chain order;
+# each reads its command via tool_call_paths.shell_text. NOT here: the guards already
+# wired per-tool above (they would run twice) and the bash-syntax-only ones (winpath,
+# rewrite-advisory, pipe-mask -- the last emits a bash command rewrite).
+SHELL_GUARD_CHAIN = [
+    "eos-evidence-gate",
+    "eos-review-gate",
+    "commit-provenance-guard",
+    "worktree-isolation-guard",
+    "destructive-git-guard",
+    "memory-orphan-link-guard",
+    "commit-hygiene-guard",
+]
+
 # --chain <name> selects which chain to run. Default stays the Edit/Write chain
 # so the existing settings.json entry (which passes no argument) is unaffected.
 CHAINS = {
     "editwrite": GUARD_CHAIN,
     "bash": BASH_GUARD_CHAIN,
+    "shell": SHELL_GUARD_CHAIN,
 }
 DEFAULT_CHAIN = "editwrite"
 

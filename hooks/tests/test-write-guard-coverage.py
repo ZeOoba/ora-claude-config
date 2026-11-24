@@ -67,6 +67,18 @@ def _dispatcher_guard_chain():
     return mod.GUARD_CHAIN
 
 
+def _dispatcher_chains():
+    """(CHAINS, DEFAULT_CHAIN) from pretooluse-dispatcher.py. Each dispatcher settings entry
+    runs ONE chain, selected by its `--chain <name>` argument (2026-11-23: a third chain,
+    "shell", runs only the git-discipline guards -- so 'any dispatcher entry runs GUARD_CHAIN'
+    no longer holds)."""
+    path = os.path.join(HOOKS_DIR, DISPATCHER)
+    spec = importlib.util.spec_from_file_location("_dispatcher_under_test_chains", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.CHAINS, mod.DEFAULT_CHAIN
+
+
 def blocked_exit2(rc, out, err):
     return rc == 2
 
@@ -273,6 +285,16 @@ def _route_checks(view, settings, specs, guard_chain):
     dispatcher_matchers = [e.get("matcher", "") for e in entries
                             if any(DISPATCHER in (h.get("command") or "")
                                    for h in e.get("hooks", []))]
+    # Chain-aware dispatcher routing: (matcher, members of THAT entry's --chain).
+    chains, default_chain = _dispatcher_chains()
+    dispatcher_routes = []
+    for e in entries:
+        for h in e.get("hooks", []):
+            cmd = h.get("command") or ""
+            if DISPATCHER in cmd:
+                m_chain = re.search(r"--chain\s+(\S+)", cmd)
+                name = m_chain.group(1).strip("\"'") if m_chain else default_chain
+                dispatcher_routes.append((e.get("matcher", ""), set(chains.get(name, ()))))
     for spec in specs:
         matchers = [e.get("matcher", "") for e in entries
                     if any(spec.matcher_key in (h.get("command") or "")
@@ -284,8 +306,10 @@ def _route_checks(view, settings, specs, guard_chain):
             if not spec.shape_filter(shape):
                 continue
             direct = any(re.fullmatch(m, shape.tool_name) for m in matchers if m)
-            via_dispatcher = in_chain and any(
-                re.fullmatch(m, shape.tool_name) for m in dispatcher_matchers if m)
+            guard_name = spec.hook[:-len(".py")]
+            via_dispatcher = any(
+                m and re.fullmatch(m, shape.tool_name) and guard_name in members
+                for m, members in dispatcher_routes)
             check("[%s] settings.json routes %s to %s" % (view, shape.tool_name, spec.hook),
                   direct or via_dispatcher,
                   "matchers=%r dispatcher_matchers=%r in_chain=%s" %

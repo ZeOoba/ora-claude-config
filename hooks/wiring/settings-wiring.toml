@@ -24,6 +24,10 @@ guards = ["ora-autonomy-gate", "confidentiality-guard", "eos-plan-gate", "shared
 name = "bash"
 guards = ["ora-autonomy-gate", "confidentiality-guard", "config-write-guard", "lint-config-guard", "workbook-write-guard", "eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard", "override-mint-guard", "winpath-guard", "rewrite-advisory-guard", "pipe-mask-guard"]
 
+[[chain]]
+name = "shell"
+guards = ["eos-evidence-gate", "eos-review-gate", "commit-provenance-guard", "worktree-isolation-guard", "destructive-git-guard", "memory-orphan-link-guard", "commit-hygiene-guard"]
+
 [[row]]
 id = 'ups.engineering-router'
 event = 'UserPromptSubmit'
@@ -88,6 +92,15 @@ matcher = 'Bash'
 kind = "py"
 script = 'pretooluse-dispatcher.py'
 args = '--chain bash'
+
+[[row]]
+id = 'pre.dispatcher-shell'
+note = 'cross-repo audit 2026-11-23 HIGH: the git-discipline guards (review/provenance/hygiene/evidence gates, worktree-isolation, destructive-git, memory-orphan-link) for the NON-Bash shells; the egress guards reach these tools through their own *-egress-tools rows'
+event = 'PreToolUse'
+matcher = 'PowerShell|mcp__.*__(start_process|interact_with_process|run_in_terminal)|mcp__.*Windows-MCP__PowerShell'
+kind = "py"
+script = 'pretooluse-dispatcher.py'
+args = '--chain shell'
 
 [[row]]
 id = 'pre.ora-autonomy-gate'
