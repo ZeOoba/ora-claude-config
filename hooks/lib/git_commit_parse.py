@@ -52,8 +52,9 @@ The accumulated fixes now shared by both gates:
 ACCEPTED GAPS (unchanged from the origin file, documented there in full): git
 aliases are invisible; subshells and command substitution OTHER than a recognized
 heredoc are not parsed (e.g. arbitrary `$(...)` content can still affect quote
-parity outside a heredoc); operators glued to a token without surrounding
-whitespace are not parsed. Threat model throughout is a single-operator
+parity outside a heredoc, and a commit inside a substitution stays hidden).
+Operators glued to a token ARE split since 2026-11-24 (_split_shell_operators).
+Threat model throughout is a single-operator
 cooperative fleet, not an adversarial boundary.
 
 DIRECTIONAL SAFETY. Every degradation here biases toward FEWER candidates on any
@@ -85,6 +86,12 @@ SHELL_SEGMENT_OPERATORS = {"&&", "||", ";", "|"}
 # `GIT_AUTHOR_NAME=x git add foo`) must not stop `git` from being recognized
 # as the segment's actual command.
 _ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+# Tokens that may precede the real command word in a segment without changing
+# which command runs (grouping, negation, compound-command keywords, `time`,
+# `command`/`exec` wrappers).
+_LEADING_SHELL_WORDS = {"{", "(", "!", "if", "then", "else", "elif", "do", "while",
+                        "until", "time", "command", "exec"}
 
 
 def _first_group(m):
@@ -358,6 +365,173 @@ def _in_open_subshell_or_backtick(text):
     return depth > 0 or (backticks % 2 == 1)
 
 
+def _word_at(text, i, word):
+    """True iff the shell word `word` starts at text[i] (preceded by start,
+    whitespace or `;&|(`, followed by end, whitespace or `;&|)`)."""
+    if not text.startswith(word, i):
+        return False
+    before = text[i - 1] if i > 0 else " "
+    after = text[i + len(word)] if i + len(word) < len(text) else " "
+    return (before.isspace() or before in ";&|(") and (after.isspace() or after in ";&|)")
+
+
+def _split_shell_operators(text):
+    """Split `text` at every UNQUOTED shell control operator -- `;` `&&` `||`
+    `|` `|&` `&` and newline -- and return the non-blank pieces between them.
+
+    shlex.split() has no operator syntax: an operator GLUED to a word
+    (`git add -A;git commit`, `x&&git commit`, `echo hi|git commit`) came
+    through inside that word, so _split_segments never saw a boundary and the
+    commit was invisible to every gate built on this module (2026-11-24, audit
+    follow-up HIGH: eos-review-gate and worktree-isolation-guard both allowed
+    `git add -A; git commit -m x`).
+
+    Quote handling mirrors _scan_quote_state (single, double, backslash), so an
+    operator inside a quoted -m message is text, not syntax. A `&` or `|` that
+    is part of a redirection is NOT a separator: `>&` / `<&` (`2>&1`), `&>` /
+    `&>>`, and `>|`. Each piece is then tokenized by shlex.split() exactly as a
+    whole line was before, so a redirect like `2>&1` stays one token. An
+    unterminated quote runs to the end of the text; that last piece then takes
+    the caller's existing ValueError path.
+
+    NEVER splits inside a construct the old whole-line shlex.split() kept in
+    one segment (review round 1, reproduced false-ALLOWs: a `;` inside an
+    unquoted `$(...)` cut a following `-a` / `-- path` off the commit's args and
+    emptied candidate_paths): command substitution `$(...)` / `$((...))` and
+    backticks (also when opened inside double quotes), `${...}`, ANSI-C `$'...'`
+    quoting, and a `#` comment (from a word-initial `#` to end of line). Inside
+    those the text stays in the current piece, exactly as before; a commit
+    INSIDE a substitution therefore stays hidden -- the module's existing,
+    documented gap -- rather than this function inventing a new one."""
+    pieces = []
+    start = 0
+    i = 0
+    n = len(text)
+    state = None   # None, "'", '"', or "$'" (ANSI-C quoting)
+    nest = []      # open substitutions: (closing char, quote state to resume)
+    while i < n:
+        c = text[i]
+        nxt = text[i + 1] if i + 1 < n else ""
+        if state == "'":
+            if c == "'":
+                state = None
+            i += 1
+            continue
+        if state == "$'":
+            if c == "\\":
+                i += 2
+                continue
+            if c == "'":
+                state = None
+            i += 1
+            continue
+        if state == '"':
+            if c == "\\" and nxt in ("$", "`", '"', "\\"):
+                i += 2
+                continue
+            if c == "$" and nxt == "(":
+                nest.append((")", '"'))
+                state = None
+                i += 2
+                continue
+            if c == "`":
+                nest.append(("`", '"'))
+                state = None
+                i += 1
+                continue
+            if c == '"':
+                state = None
+            i += 1
+            continue
+        # unquoted (possibly inside a substitution)
+        if c == "\\":
+            i += 2  # unquoted backslash escapes the next character (`\;` is text)
+            continue
+        if nest and c == nest[-1][0]:
+            state = nest.pop()[1]
+            i += 1
+            continue
+        if c == "$" and nxt == "'":
+            state = "$'"
+            i += 2
+            continue
+        if c == "$" and nxt in ("(", "{"):
+            nest.append((")" if nxt == "(" else "}", None))
+            i += 2
+            continue
+        if c == "`":
+            nest.append(("`", None))
+            i += 1
+            continue
+        if c == "(" and i > 0 and text[i - 1] in ("<", ">"):
+            nest.append((")", None))  # process substitution `<(...)` / `>(...)`
+            i += 1
+            continue
+        if c == "(" and nest and nest[-1][0] == ")":
+            nest.append((")", None))  # keep `$( ... ( ... ) ... )` balanced
+            i += 1
+            continue
+        if nest and _word_at(text, i, "case"):
+            nest.append(("esac", None))  # a case pattern's `)` must not close `$(`
+            i += 4
+            continue
+        if nest and nest[-1][0] == "esac" and _word_at(text, i, "esac"):
+            state = nest.pop()[1]
+            i += 4
+            continue
+        if c in ("'", '"'):
+            state = c
+            i += 1
+            continue
+        prev = text[i - 1] if i > 0 else ""
+        if c == "#" and (i == 0 or prev.isspace() or prev in ";&|("):
+            j = text.find("\n", i)
+            i = n if j == -1 else j  # comment: no separator before end of line
+            continue
+        if nest:
+            i += 1
+            continue
+        width = 0
+        if c in (";", "\n"):
+            width = 1
+        elif c == "&":
+            if nxt == "&":
+                width = 2
+            elif prev not in ("<", ">") and nxt != ">":
+                width = 1  # background `&` is a command separator too
+        elif c == "|":
+            if nxt == "|":
+                width = 2
+            elif prev != ">":
+                width = 2 if nxt == "&" else 1  # `|&` pipes stderr as well
+        if width:
+            pieces.append(text[start:i])
+            i += width
+            start = i
+            continue
+        i += 1
+    pieces.append(text[start:])
+    return [p for p in pieces if p.strip()]
+
+
+def _tokenize_pieces(text, strict):
+    """Segments of `text`: split at unquoted control operators, then
+    shlex.split() each piece. strict=True re-raises a piece's ValueError (the
+    heredoc path's `closed` contract in tokenize_cmd_segments); strict=False
+    falls back to a naive whitespace split of just that piece (the original
+    per-line behaviour)."""
+    segs = []
+    for piece in _split_shell_operators(text):
+        try:
+            tokens = shlex.split(piece)
+        except ValueError:
+            if strict:
+                raise
+            tokens = piece.split()
+        segs.extend(_split_segments(tokens))
+    return segs
+
+
 def _fallback_tokenize_lines(lines, lo, hi, segs):
     """The ORIGINAL (pre-2026-07-26) per-line-independent tokenization,
     applied to lines[lo:hi]: each line tried through shlex.split() alone,
@@ -368,11 +542,7 @@ def _fallback_tokenize_lines(lines, lo, hi, segs):
         line = lines[k]
         if not line.strip():
             continue
-        try:
-            tokens = shlex.split(line)
-        except ValueError:
-            tokens = line.split()
-        segs.extend(_split_segments(tokens))
+        segs.extend(_tokenize_pieces(line, strict=False))
 
 
 def tokenize_cmd_segments(cmd):
@@ -657,8 +827,7 @@ def tokenize_cmd_segments(cmd):
         closed = False
         if state is None:
             try:
-                tokens = shlex.split("\n".join(shell_lines))
-                segs.extend(_split_segments(tokens))
+                segs.extend(_tokenize_pieces("\n".join(shell_lines), strict=True))
                 closed = True
             except ValueError:
                 pass
@@ -698,9 +867,12 @@ def _segment_git_subcommand_and_args(seg):
         return None
     i = 0
     n = len(seg)
-    while i < n and _ENV_ASSIGN_RE.match(seg[i]):
+    # Leading env assignments and shell grouping/keyword tokens do not change
+    # which command runs: `{ git add -A; ...}`, `(git commit ...)`, `! git
+    # commit`, `then git commit` (2026-11-24 review round 1, C1).
+    while i < n and (_ENV_ASSIGN_RE.match(seg[i]) or seg[i] in _LEADING_SHELL_WORDS):
         i += 1
-    if i >= n or seg[i] != "git":
+    if i >= n or seg[i].lstrip("({") != "git":
         return None
     j = i + 1
     while j < n:
