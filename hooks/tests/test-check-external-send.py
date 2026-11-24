@@ -179,6 +179,35 @@ def test_deny_case_insensitive_still_matches():
     print("PASS test_deny_case_insensitive_still_matches")
 
 
+def _run_bytes(session, stdin_bytes, sessions_dir):
+    env = dict(os.environ)
+    env["ORA_OVERRIDE_SESSIONS_DIR"] = sessions_dir
+    proc = subprocess.run([sys.executable, SCRIPT, "--session", session], input=stdin_bytes,
+                          capture_output=True, env=env)
+    return proc.returncode, proc.stderr.decode("utf-8", "replace")
+
+
+def test_allow_survives_a_utf8_bom_on_stdin():
+    """send-via-outlook.ps1 writes recipients through Process.StandardInput; on Windows PowerShell 5.1
+    that writer uses [Console]::InputEncoding and, when it is UTF-8, emits a BOM first. The first
+    recipient then arrived as BOM+address and never matched its token, so EVERY authorized external
+    send was denied (review 2026-11-23, PR #492; the CI failure). A leading BOM must be ignored."""
+    d = fresh_sessions_dir()
+    path = mint(d, recipients=["broker@example.com"])
+    rc, err = _run_bytes(SESSION_A, b"\xef\xbb\xbfbroker@example.com\r\n", d)
+    assert rc == 0, "a BOM-prefixed recipient with a valid token must allow, got %s (%s)" % (rc, err)
+    assert not os.path.exists(path), "single-use token must be consumed on ALLOW"
+    print("PASS test_allow_survives_a_utf8_bom_on_stdin")
+
+
+def test_deny_line_names_the_clean_recipient_after_a_bom():
+    d = fresh_sessions_dir()
+    rc, err = _run_bytes(SESSION_A, b"\xef\xbb\xbfbroker@example.com\n", d)
+    assert rc == 1, "no token must still deny, got %s (%s)" % (rc, err)
+    assert "naming recipient(s): broker@example.com" in err, "BOM leaked into the recipient: %r" % err
+    print("PASS test_deny_line_names_the_clean_recipient_after_a_bom")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:
