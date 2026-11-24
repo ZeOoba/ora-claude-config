@@ -5,6 +5,7 @@ The scanner is the 2026-06-11 incident lesson made executable: a pre-push gate m
 scan the FULL HISTORY being pushed (git log -p over each pushed range), not the tree.
 Run: python test-git-prepush-scan.py   (exit 0 = all pass)
 """
+import atexit
 import importlib.util
 import json
 import os
@@ -117,21 +118,56 @@ def expect(label, cond, detail=""):
         print("  FAIL: %s %s" % (label, detail))
 
 
-# END-TO-END cases spawn the real git-prepush-confidential-scan.py, which reads the
-# LIVE, gitignored hooks/confidential-terms.json (falling back to the main worktree's
-# copy) and fails CLOSED when neither is readable. Without the roster every such case
-# is meaningless: "expect allowed" cases fail, and "expect blocked" cases pass for the
-# WRONG reason (blocked by the fail-closed branch, not by the credential scan). So when
-# the roster is unreadable -- a clean CI checkout by design (2026-11-06, PR #423) --
-# those cases are SKIPPED, not counted; every pure/fixture assertion still runs and
-# still fails the file. Resolved with the module's OWN load_terms(), the exact
-# resolution the subprocess uses, BEFORE any test below monkeypatches pps.TERMS_FILE.
-LIVE_ROSTER = pps.load_terms() is not None
+# END-TO-END cases spawn the real git-prepush-confidential-scan.py, which reads
+# confidential-terms.json from its OWN directory (TERMS_FILE = HOOK_DIR/...) and fails CLOSED
+# when it is unreadable. They used to run the script in place, against the LIVE gitignored
+# roster, so in a clean CI checkout (no roster, by design -- PR #423) all of them SKIPPED and
+# CI went green with the Invariant 3 e2e path unverified (audit 2026-11-23 #9,
+# prepush-scan-e2e-skipped-ci). They now run a byte-identical COPY of the script (plus lib/)
+# from a temp hooks directory holding a SYNTHETIC roster -- no override seam is added to the
+# production gate (an env/path override on a confidentiality gate would itself be a bypass).
+# The default synthetic roster mirrors today's live state: one deal, inactive. Never a real
+# deal term here.
+SYNTH_ROSTER_INACTIVE = {
+    "_comment": "synthetic test roster -- never real deal data",
+    "synthetic_deal": {"active": False, "always": ["zephyr corp"]},
+}
+SYNTH_ROSTER_ACTIVE = {
+    "_comment": "synthetic test roster -- never real deal data",
+    "synthetic_deal": {"active": True, "always": ["zephyr corp"]},
+}
+_e2e_dirs = []
+
+
+def _cleanup_e2e_dirs():
+    for _d in _e2e_dirs:
+        shutil.rmtree(_d, ignore_errors=True)
+
+
+atexit.register(_cleanup_e2e_dirs)  # also on an exception or sys.exit mid-run
+
+
+def _build_e2e_hooks(roster):
+    """A temp hooks dir: a copy of the real scan script and lib/, plus `roster` as
+    confidential-terms.json beside it -- exactly where the script's TERMS_FILE resolves."""
+    d = tempfile.mkdtemp(prefix="prepush-e2e-hooks-")
+    _e2e_dirs.append(d)
+    shutil.copy2(os.path.join(HOOKS, "git-prepush-confidential-scan.py"), d)
+    shutil.copytree(os.path.join(HOOKS, "lib"), os.path.join(d, "lib"),
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    with open(os.path.join(d, "confidential-terms.json"), "w", encoding="utf-8") as fh:
+        json.dump(roster, fh)
+    return d
+
+
+E2E_HOOKS = _build_e2e_hooks(SYNTH_ROSTER_INACTIVE)
+E2E_HOOKS_ACTIVE = _build_e2e_hooks(SYNTH_ROSTER_ACTIVE)
+LIVE_ROSTER = True  # the e2e roster is synthetic now, so it is always readable
 gate_skipped = []
 
 
 def expect_gate(label, cond, detail=""):
-    """expect() for an end-to-end assertion that needs the live roster (see above)."""
+    """expect() for an end-to-end assertion (kept as a seam; never skips now -- see above)."""
     if not LIVE_ROSTER:
         gate_skipped.append(label)
         return
@@ -338,9 +374,9 @@ expect("the scanner's OWN test fixture does not trip the gate (else every push b
 # main() used to `return 0` immediately when no deal was active, which is the state TODAY,
 # so a credential scan placed after that early exit would have been DEAD ON ARRIVAL. Prove
 # the gate actually blocks against a real repo rather than asserting on source text.
-def _run_gate_on(repo, stdin_text):
+def _run_gate_on(repo, stdin_text, hooks_dir=None):
     return subprocess.run(
-        [sys.executable, os.path.join(HOOKS, "git-prepush-confidential-scan.py"),
+        [sys.executable, os.path.join(hooks_dir or E2E_HOOKS, "git-prepush-confidential-scan.py"),
          "origin", "https://example.invalid/x.git"],
         input=stdin_text, capture_output=True, text=True, cwd=repo)
 
@@ -419,6 +455,29 @@ repo3, stdin3 = _mk_repo("test-thing.py", '("AWS", "AKIAIOSFODNN7EXAMPLE")\n')
 r3 = _run_gate_on(repo3, stdin3)
 expect_gate("a test fixture with fake keys does NOT block the push", r3.returncode == 0,
        "exit=%s err=%s" % (r3.returncode, r3.stderr[:200]))
+
+# Deal-term path, end to end (audit 2026-11-23 #9: never exercised in CI before). The same text
+# blocks under an ACTIVE synthetic deal and passes under the inactive one; the term is never echoed.
+repo4, stdin4 = _mk_repo("memo.md", "Call with Zephyr Corp about the offer.\n")
+r4 = _run_gate_on(repo4, stdin4, E2E_HOOKS_ACTIVE)
+expect("e2e: an ACTIVE deal term in the pushed text blocks the push", r4.returncode == 1,
+       "exit=%s err=%s" % (r4.returncode, r4.stderr[:200]))
+# A deal-term block reports term INDICES and the range, by design (never the term, nor a file
+# listing that could hint at it).
+expect("e2e: the block is a confidential-term block", "confidential term" in r4.stderr, r4.stderr[:200])
+expect("e2e: the block never echoes the deal term", "zephyr" not in r4.stderr.lower(), r4.stderr[:200])
+r5 = _run_gate_on(repo4, stdin4)
+expect("e2e: the same text passes when the deal is inactive", r5.returncode == 0,
+       "exit=%s err=%s" % (r5.returncode, r5.stderr[:200]))
+_broken = _build_e2e_hooks({})
+os.remove(os.path.join(_broken, "confidential-terms.json"))
+with open(os.path.join(_broken, "confidential-terms.json"), "w", encoding="utf-8") as _fh:
+    _fh.write("{not json")
+repo6, stdin6 = _mk_repo("notes.md", "nothing secret\n")
+r6 = _run_gate_on(repo6, stdin6, _broken)
+expect("e2e: an unreadable roster fails CLOSED (blocks, for that reason -- not a crash)",
+       r6.returncode != 0 and "fail-closed" in r6.stderr and "confidential-terms.json" in r6.stderr,
+       "exit=%s err=%s" % (r6.returncode, r6.stderr[:200]))
 
 # Values must never be echoed -- a gate that prints the secret has leaked it into the
 # terminal transcript and any CI log capturing stderr.
@@ -648,7 +707,7 @@ else:
         # is already an ancestor of origin/main -- so nothing is scanned and it's allowed.
         _stdin = "refs/heads/x %s refs/heads/x %s\n" % (A6F0689, ZERO)
         _r = subprocess.run(
-            [sys.executable, os.path.join(HOOKS, "git-prepush-confidential-scan.py"),
+            [sys.executable, os.path.join(E2E_HOOKS, "git-prepush-confidential-scan.py"),
              "origin", "https://example.invalid/x.git"],
             input=_stdin, capture_output=True, text=True, cwd=REPO_ROOT)
         expect_gate("real repo: fixed gate allows a brand-new ref pointing at an "
