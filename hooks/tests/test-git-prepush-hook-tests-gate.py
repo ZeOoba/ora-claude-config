@@ -1131,7 +1131,7 @@ with tempfile.TemporaryDirectory() as _td:
 # --- override_active(): smoke-test the shared contract is wired with the RIGHT tier ---
 # (token_grants()/parse_token()'s own exhaustive adversarial matrix — duplicate keys,
 # oversized, future-dated, path-traversal session ids, etc — is already covered by
-# test-git-prepush-doctrine-gate.py and test-ora-autonomy-gate.py against the SAME
+# test-git-prepush-doctrine-gate.py and test-ora-autonomy-gate-core.py against the SAME
 # shared hooks/lib/override_tokens.py module. Re-asserting all 13 cases a third time
 # here would be redundant padding, not added protection; this section proves only that
 # THIS gate's Tier name/scope is wired correctly.)

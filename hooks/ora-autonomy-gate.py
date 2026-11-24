@@ -121,9 +121,12 @@ here instead (hooks run in every mode, including scheduled/headless sessions):
      set_vacation / create_filter. create_event: external attendee needs an external-send token
      naming it. update/delete/respond: always (existing attendees are invisible to the hook);
      token names event-<update|delete|respond>:<eventId>:<sha256[:16] of the whole input>, so an
-     approval for one action cannot be spent on another. set_vacation: unless externalAudience is
+     approval for one action cannot be spent on another. An eventId outside printable ASCII,
+     or with a space (leading/trailing included), ',' or ';', fails closed. set_vacation: unless externalAudience is
      exactly "none" (or the call disables auto-replies); token names
-     vacation:<audience>:<sha256[:16] of the whole input>. create_filter: always (standing rule);
+     vacation:<audience>:<sha256[:16] of the whole input>; an empty or omitted externalAudience is
+     named "unspecified", and any other audience must pass the same rule as an eventId or the call
+     fails closed. create_filter: always (standing rule);
      token names filter:<sha256[:16] of the whole input>. Input keys VERIFIED 2026-10-01 against the live
      connector schemas (all additionalProperties:false); unknown keys fail closed. Live-schema
      fixtures are pinned in the test suite (test_live_schema_*).
@@ -209,7 +212,7 @@ no override was ever even needed: exit 0, no block, nothing to log.
 
 All five were personally reproduced against the live gate with a passing control before the
 fix (the equivalent already-blocked form) and locked in as regression tests in
-hooks/tests/test-ora-autonomy-gate.py. Survived a 3-round independent adversarial gauntlet
+hooks/tests/test-ora-autonomy-gate-core.py. Survived a 3-round independent adversarial gauntlet
 (each round explicitly tasked with trying to break the PRIOR round's fix) before landing --
 
 HONEST LIMIT (found by Round 1 of that gauntlet, Gabriel-acknowledged, follow-up scoped
@@ -372,7 +375,7 @@ except BaseException:
     # module, but the cost of the wider catch is nil and the failure is silent.
     #
     # This copy is pinned to the canonical tuple by
-    # test-ora-autonomy-gate.py::test_strip_categories_fallback_matches_shared_module,
+    # test-ora-autonomy-gate-core.py::test_strip_categories_fallback_matches_shared_module,
     # which reads this literal out of the source and compares it to the shared module.
     # A fallback nothing pins is just the pre-2026-09-18 duplicate under another name.
     STRIP_CATEGORIES = ("Cf", "Mn")
@@ -1355,6 +1358,14 @@ def _vacation_is_disabled(tool_input):
 
 _EVENT_TOKEN_OPS = {"outlook_update_event": "event-update", "outlook_delete_event": "event-delete",
                     "outlook_respond_to_event": "event-respond"}
+# Any call-supplied value spliced into a token (Gate 1d Outlook eventId and set_vacation
+# externalAudience, Gate 1g Notion eventId) is printed in the BLOCKED line and the hint line,
+# ahead of the real token: a newline in it could start a forged "exactly: x@evil.com" line, and a
+# comma or semicolon would read as a token separator. Printable ASCII without space, ',' or ';'
+# only, checked on the RAW id (no strip, so leading/trailing whitespace or control characters
+# fail closed too, and the id the approver reads is byte-identical to the id the call targets --
+# REFUTE 2026-11-21, C7). Graph ids are base64 (letters, digits, '=', '+', '/', '-', '_'): allowed.
+_TOKEN_FIELD_CHARS = re.compile(r"[!-+\--:<-~]+")
 
 
 def _input_digest(tool_input):
@@ -1406,9 +1417,9 @@ def _check_calendar(short, tool_name, tool_input, session_id):
                        "outlook_delete_event": _EVENT_DELETE_KEYS,
                        "outlook_respond_to_event": _EVENT_RESPOND_KEYS}[short]
             event_id = tool_input.get("eventId")
-            if keys - allowed or not _nonblank(event_id):
+            if keys - allowed or not _nonblank(event_id) or not _TOKEN_FIELD_CHARS.fullmatch(event_id):
                 block_shape(tool_name, session_id)
-            external = ["%s:%s:%s" % (_EVENT_TOKEN_OPS[short], event_id.strip(),
+            external = ["%s:%s:%s" % (_EVENT_TOKEN_OPS[short], event_id,
                                       _input_digest(tool_input))]
             if short == "outlook_update_event" and _attendee_addresses(tool_input) is None:
                 # Shape check only. The attendees and every other field are already named by the
@@ -1442,7 +1453,13 @@ def _check_calendar(short, tool_name, tool_input, session_id):
                 return  # exact-case: Graph's own "no external replies" value
             if not isinstance(audience, str):
                 block_shape(tool_name, session_id)
-            external = ["vacation:%s:%s" % ((audience.strip() or "unspecified"),
+            if audience and not _TOKEN_FIELD_CHARS.fullmatch(audience):
+                # Raw audience, same rule as an eventId: "all,x@evil.com,z" printed a hint whose
+                # verbatim token held a bare x@evil.com recipient token, which then authorized an
+                # outlook_send_mail to it; a newline could forge an "exactly:" line (REFUTE
+                # 2026-11-21, new finding on main).
+                block_shape(tool_name, session_id)
+            external = ["vacation:%s:%s" % ((audience or "unspecified"),
                                             _input_digest(tool_input))]
             reason = "Outlook auto-reply to external senders (externalAudience=%r)" % audience
             hint = ("An omitted externalAudience is not \"none\"; name this exact call in "
@@ -1463,12 +1480,7 @@ _NCAL_UPDATE_FIELDS = frozenset(("summary", "description", "location", "period",
                                  "resources", "addConferencing", "recurrenceRules"))
 _NCAL_PERSON_KEYS = frozenset(("email", "displayName", "isOptional"))
 _NCAL_PROSE = frozenset(("summary", "description", "displayName", "eventSummary", "comment"))
-# An eventId is printed in the BLOCKED line and the hint line, ahead of the real token: a newline
-# in it could start a forged "exactly: x@evil.com" line, and a comma or semicolon would read as a
-# token separator. Printable ASCII without space, ',' or ';' only, checked on the RAW id (no
-# strip, so leading/trailing whitespace or control characters fail closed too, and the id the
-# approver reads is byte-identical to the id the call targets -- REFUTE 2026-11-21, C7).
-_NCAL_EVENT_ID = re.compile(r"[!-+\--:<-~]+")
+_NCAL_EVENT_ID = _TOKEN_FIELD_CHARS  # same rule as Gate 1d; rationale at _TOKEN_FIELD_CHARS
 
 
 def _ncal_people(event):

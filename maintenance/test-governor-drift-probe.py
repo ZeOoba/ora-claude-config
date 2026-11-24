@@ -3930,6 +3930,187 @@ def test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e():
     print("  PASS test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e")
 
 
+# --- R34-7 (2026-11-23): the 8 standing false positives ---------------------------------------
+# Audit R34-7 found the daily probe reporting 8 hits, all false, on a clean tree:
+#   * 4 in memory/deal-figures.local.md -- the local, untracked sidecar that holds PRE-REDACTION
+#     copies of lines scrubbed out of the public repo, each under a "### <label> -- <source>:<n>"
+#     heading. The 4 hits sit under open-items-tracker.md and disposition-ledger.md headings: files
+#     the probe already exempts by exact name. Fix: each sidecar section inherits the exemption of
+#     the source file its heading names; sections from any other source (SKILL.md, standards.md,
+#     ...), the preamble, and sections under unparseable headings stay scanned.
+#   * 4 on ora-skills origin/main -- the ratified 65% per-property refi ceiling. Two lines were
+#     already on the exact-line allowlist but were edited since (USD rewrite ora-skills#272, AU v4.57
+#     #283), which re-arms them BY DESIGN; two are new. Fix: exact-line allowlist entries (Gabriel's
+#     2026-11-09 mechanism), NOT a phrasing rule -- phrasing suppressors were REFUTED twice (#439).
+# The real deal-figures lines are NOT reproduced here: this repo is PUBLIC and the sidecar exists
+# to keep those figures out of it. The fixtures below copy their SHAPE with synthetic figures.
+
+_SIDECAR_OI_ROW = ("| [OI-999](#OI-999) | 2026-09-21 | balance check against the loans register -- "
+                   "**Governor flag (no constant changed):** Loan A at 61.2% LTV, Loan B 9.4% LTV, "
+                   "Loan C 33.1% LTV |")
+_SIDECAR_LEDGER_ROW = ("| UNKNOWN (pre-2026-07-28) | 1 Example Way, Anytown OH | REFI (cash-out, "
+                       "INFERRED) | equity shows negative | LTV 52.6% exceeds 40% governor -- ACCEPTED |")
+_SIDECAR_PREAMBLE = ("# Deal figures moved out of the public repo (local, untracked)\n\n"
+                     "| ID | Value | File | Line key |\n|---|---|---|---|\n"
+                     "| F01 | $1 | disposition-ledger.md | example |\n\n"
+                     "## Lines redacted from tracked memory, 2026-11-18 (public-repo exposure scrub)\n\n")
+_SIDECAR_EXEMPT_SECTIONS = (
+    "### OI-999 -- open-items-tracker.md:79\n\n" + _SIDECAR_OI_ROW + "\n\n"
+    "### line -- open-items-tracker-history.md:3331\n\n" + _SIDECAR_OI_ROW + "\n\n"
+    "### projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory/disposition-ledger.md:38\n\n"
+    + _SIDECAR_LEDGER_ROW + "\n\n"
+    # a copied line that itself starts with '#' (12 live sections do) is still the covered line
+    "### line -- _archive/event_log_2026-08-22.md:2859\n\n#   " + _SIDECAR_LEDGER_ROW + "\n\n")
+
+# Real drift, in every shape the brief named. Each must flag on its own (scan_line) AND when it sits
+# in the sidecar under a non-exempt heading.
+_R34_7_MUST_FLAG = (
+    "Acquisition governor: aggregate LTV ceiling now 45%.",
+    "Acquisition governor: DSCR floor 1.20x.",
+    "Governor: per-property LTV ceiling raised to 70%.",
+    "Portfolio LTV governor: LTV 65% aggregate ceiling.",
+    "Acquisition governor (non-negotiable): DSCR >= 1.25x, LTV <= 45%.",
+)
+
+
+def _sidecar_path(home):
+    return os.path.join(home, *(_MEM_REL + ("deal-figures.local.md",)))
+
+
+def test_r34_7_real_drift_fixtures_flag_unit():
+    m = _load_probe_module()
+    for line in _R34_7_MUST_FLAG + (_SIDECAR_OI_ROW, _SIDECAR_LEDGER_ROW):
+        assert m.scan_line(line), "must flag on its own (detection intact): %r" % line
+    print("  PASS test_r34_7_real_drift_fixtures_flag_unit")
+
+
+def test_deal_figures_sidecar_inherits_source_exemption_e2e():
+    """Sidecar sections copied from exempt narrative files are not scanned; the same probe run
+    still flags a drift copied from a non-exempt source in the same file."""
+    with _fixture_home() as home:
+        _write(_sidecar_path(home), _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS)
+        r = run_probe(home=home)
+        assert r.returncode == 0, (
+            "exempt-source sidecar sections must not flag; got %d\n%s\n%s"
+            % (r.returncode, r.stdout, r.stderr))
+        _write(_sidecar_path(home), _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS
+               + "### line -- standards.md:12\n\n" + _R34_7_MUST_FLAG[0] + "\n")
+        r = run_probe(home=home)
+        assert r.returncode == 1 and "deal-figures.local.md" in r.stdout, (
+            "non-exempt-source section must flag; got %d\n%s" % (r.returncode, r.stdout))
+        assert "61.2%" not in r.stdout and "52.6%" not in r.stdout, (
+            "exempt-source rows leaked into findings:\n%s" % r.stdout)
+    print("  PASS test_deal_figures_sidecar_inherits_source_exemption_e2e")
+
+
+def test_deal_figures_sidecar_unexempted_positions_still_flag_e2e():
+    """Every position that does NOT carry an exempt-source heading stays armed, for every
+    must-flag drift shape: the preamble, a non-exempt source (SKILL.md with a redaction note),
+    a '##' heading after an exempt section (resets provenance), an unparseable '###' heading after
+    an exempt section, and a heading whose path is not parseable (Windows drive colon)."""
+    positions = (
+        ("preamble", lambda d: _SIDECAR_PREAMBLE.replace("## Lines", d + "\n\n## Lines")),
+        ("non-exempt source", lambda d: _SIDECAR_PREAMBLE
+         + "### line -- SKILL.md:15 (round-6 redaction, 2026-11-20)\n\n" + d + "\n"),
+        ("## resets", lambda d: _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS
+         + "## Later section\n\n" + d + "\n"),
+        ("unparseable ###", lambda d: _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS
+         + "### notes on the scrub\n\n" + d + "\n"),
+        ("drive-letter path", lambda d: _SIDECAR_PREAMBLE
+         + "### line -- C:/Users/x/memory/event_log.md:4\n\n" + d + "\n"),
+        # REFUTE round 1 (2026-11-23) breaking inputs -- each rode an exempt section's scope:
+        ("indented ## heading", lambda d: _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS
+         + "  ## Later section\n" + d + "\n"),
+        ("bare ## heading", lambda d: _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS
+         + "##\n" + d + "\n"),
+        ("setext heading", lambda d: _SIDECAR_PREAMBLE + _SIDECAR_EXEMPT_SECTIONS
+         + "Later section\n-------------\n" + d + "\n"),
+        ("two-source heading", lambda d: _SIDECAR_PREAMBLE
+         + "### standards.md:12 -- event_log.md:4\n" + d + "\n"),
+        ("two-source heading w/ label", lambda d: _SIDECAR_PREAMBLE
+         + "### line -- SKILL.md:15 -- event_log.md:3\n" + d + "\n"),
+        ("heading in a fence", lambda d: _SIDECAR_PREAMBLE
+         + "```\n### x -- event_log.md:1\n```\n" + d + "\n"),
+        ("heading in a comment", lambda d: _SIDECAR_PREAMBLE
+         + "<!--\n### x -- event_log.md:1\n-->\n" + d + "\n"),
+        ("second line of a section", lambda d: _SIDECAR_PREAMBLE
+         + "### OI-999 -- open-items-tracker.md:79\n\n" + _SIDECAR_OI_ROW + "\n" + d + "\n"),
+        ("stacked headings", lambda d: _SIDECAR_PREAMBLE
+         + "### a -- event_log.md:1\n### b -- event_log.md:2\n" + d + "\n"),
+    )
+    with _fixture_home() as home:
+        for label, build in positions:
+            for drift in _R34_7_MUST_FLAG:
+                _write(_sidecar_path(home), build(drift))
+                r = run_probe(home=home)
+                assert r.returncode == 1 and "deal-figures.local.md" in r.stdout, (
+                    "%s: drift must flag; got %d\n%s\nline=%r"
+                    % (label, r.returncode, r.stdout, drift))
+    print("  PASS test_deal_figures_sidecar_unexempted_positions_still_flag_e2e")
+
+
+def test_section_provenance_honoured_only_in_the_memory_sidecar_e2e():
+    """An exempt-source heading means nothing outside memory/deal-figures.local.md: the same text in
+    standards.md, in an agents/ file named deal-figures.local.md, in a differently named memory file,
+    or in a deal-figures.local.md in a memory SUBdirectory still flags."""
+    body = "### OI-999 -- open-items-tracker.md:79\n\n" + _R34_7_MUST_FLAG[0] + "\n"
+    with _fixture_home() as home:
+        for where in ((".claude", "agents", "deal-figures.local.md"),
+                      _MEM_REL + ("standards.md",),
+                      _MEM_REL + ("deal-figures.md",),
+                      _MEM_REL + ("sub", "deal-figures.local.md")):
+            p = os.path.join(home, *where)
+            _write(p, _FIXTURE_CANON_LINE + body)
+            r = run_probe(home=home)
+            assert r.returncode == 1 and os.path.basename(p) in r.stdout, (
+                "%s: provenance heading must not exempt outside the sidecar; got %d\n%s"
+                % ("/".join(where), r.returncode, r.stdout))
+            os.remove(p)
+            _write(os.path.join(home, *(_MEM_REL + ("standards.md",))), _FIXTURE_CANON_LINE)
+    print("  PASS test_section_provenance_honoured_only_in_the_memory_sidecar_e2e")
+
+
+# The ora-skills lines (origin/main @ 2026-11-23), verbatim: public repo, no deal terms.
+# (ic-memo-structure.md:21 is a ~2,000-char line; its entry is pinned by path below.)
+_R34_7_SKILLS_LINES = (
+    ("acquisition-underwriting/SKILL.md",
+     "- **Madison DSCR caution:** owner-user pricing USD 148\u2013USD 176/SF makes DSCR \u22651.25x "
+     "extremely difficult on most sub-USD 10M Class B/C assets \u2014 verify deal-level DSCR before LOI "
+     "on every Madison screen; do not rely on metro-level rent stats (anchored to the 1.25x DSCR floor "
+     "tested at a 65%-LTV loan, STAGE 1 v4.44; both constants unchanged)."),
+    ("acquisition-underwriting/scripts/WALK_SOLVER.md",
+     "- The DSCR floor test: DSCR at a 65%-LTV loan on stabilized NOI must be at least 1.25x."),
+    ("underwrite-research-ingest/SKILL.md",
+     "2. Never edit governor constants (DSCR 1.25x, per-property LTV 65%, portfolio LTV 40%) or the "
+     "doctrine base case. A source can recommend a new base; add it as a named case and put the "
+     "decision in QUESTIONS FOR GABRIEL."),
+)
+_R34_7_REASON = "LTV governor 65% != canonical 40%"
+
+
+def test_shipped_allowlist_covers_r34_7_skills_lines_unit():
+    """Each R34-7 ora-skills line still FLAGS under scan_line (no phrasing rule was added) and is
+    exempt only via its exact-line allowlist entry at its own path; an edited copy re-arms."""
+    m = _load_probe_module()
+    shipped = m.load_ratified_lines(os.path.join(HERE, "_shared", "governor-drift-ratified-lines.json"))
+    for rel, line in _R34_7_SKILLS_LINES:
+        assert _R34_7_REASON in m.scan_line(line), (
+            "line must still flag on its own (exemption is the allowlist, not phrasing): %r" % line)
+        assert m._ratified_line(shipped, "/h/ora-skills/" + rel, _R34_7_REASON, line), (
+            "shipped allowlist must exempt the exact line at %s" % rel)
+        assert not m._ratified_line(shipped, "/h/ora-skills/other/" + rel, _R34_7_REASON, line), rel
+        for edited in (line.replace("65%", "70%"), line.replace("1.25x", "1.20x"),
+                       line.replace("per-property", "aggregate"), line + " ok"):
+            if edited.strip() == line.strip():
+                continue
+            assert not m._ratified_line(shipped, "/h/ora-skills/" + rel, _R34_7_REASON, edited), (
+                "an edited line must re-arm: %r" % edited)
+    ic = [rel for rel, _r, _s in shipped
+          if rel == "ora-skills/acquisition-underwriting/references/ic-memo-structure.md"]
+    assert len(ic) >= 2, "ic-memo-structure.md v4.57 line needs its own entry: %r" % ic
+    print("  PASS test_shipped_allowlist_covers_r34_7_skills_lines_unit")
+
+
 def main():
     assert os.path.isfile(PROBE), "probe not found: %s" % PROBE
     test_fleet_roots_are_scanned_unit()
@@ -4087,6 +4268,11 @@ def main():
     test_ratified_line_allowlist_missing_and_malformed_e2e()
     test_shipped_ratified_allowlist_is_well_formed_unit()
     test_shipped_allowlist_does_not_trip_probe_in_deployed_layout_e2e()
+    test_r34_7_real_drift_fixtures_flag_unit()
+    test_deal_figures_sidecar_inherits_source_exemption_e2e()
+    test_deal_figures_sidecar_unexempted_positions_still_flag_e2e()
+    test_section_provenance_honoured_only_in_the_memory_sidecar_e2e()
+    test_shipped_allowlist_covers_r34_7_skills_lines_unit()
     print("ALL GOVERNOR-PROBE TESTS PASS")
 
 

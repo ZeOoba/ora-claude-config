@@ -223,7 +223,7 @@ ALLOWLIST = {
         "LIVE HARNESS TOOL THIS USER HAS NEVER INVOKED (0 occurrences; it is "
         "in the current roster). The write/confidentiality guards must cover "
         "it BEFORE the first notebook edit, not after, so its defensive branch "
-        "and the fixtures in test-ora-autonomy-gate.py are correct. This is "
+        "and the fixtures in test-ora-autonomy-gate-core.py are correct. This is "
         "the textbook legitimate zero-occurrence literal."),
 }
 

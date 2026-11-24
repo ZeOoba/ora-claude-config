@@ -299,3 +299,6 @@ maintenance/_state/ground-truth/run-index-*.json
 # claim touched one; must never be one `git add -A` away from landing in a
 # git-tracked, off-machine-pushed repo. Never tracked.
 maintenance/_state/ground-truth-pending-approval/
+# (2026-11-23) Untracked from the PUBLIC repo (deal figures); see root .gitignore 2026-11-23 block.
+/scheduled-tasks/ora-passed-deal-tracker/SKILL.md
+/scheduled-tasks/ora-deal-aging-sla/SKILL.md

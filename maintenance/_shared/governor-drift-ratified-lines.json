@@ -280,6 +280,38 @@
       "sha256": "b47933753f70b0baadcb7743c9043cc258d93ecd69a8a6bbbe9442bbbb4d99e3",
       "ratified": "Gabriel in-turn ruling 2026-11-08 (AU v4.45 stabilized-NOI floor; ora-claude-config#433); exact-line allowlist chosen 2026-11-09",
       "excerpt": "- **DSCR (per-property governor; floor basis per acquisition-underwriting v4.44, Gabriel in-turn rat"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "d151e623ae602f02d22240e76f43409879a7bf426875631674b53738a4826c6c",
+      "ratified": "65% per-property refi LTV ceiling: Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); line text as of ora-skills origin/main 2026-11-23 added under audit R34-7 -- effective only on Gabriel's approval of the ora-claude-config PR that adds it",
+      "excerpt": "- **Madison DSCR caution:** owner-user pricing USD 148–USD 176/SF makes DSCR ≥1.25x extremely diffic"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/references/ic-memo-structure.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "bd613af09bc221510419e42a0f450752455eba569636910883712b6a44a29513",
+      "ratified": "65% per-property refi LTV ceiling: Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); line text as of ora-skills origin/main 2026-11-23 added under audit R34-7 -- effective only on Gabriel's approval of the ora-claude-config PR that adds it",
+      "excerpt": "7. **Debt & Capital Structure** — all-cash close + per-property refi terms (per UNDERWRITING CONVENT"
+    },
+    {
+      "repo": "ora-skills",
+      "path": "acquisition-underwriting/scripts/WALK_SOLVER.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "0c66666d3913d64c1c70aa1e55b61cbabaa8fda28d3f2f850d74c8826b91e3e3",
+      "ratified": "65% per-property refi LTV ceiling: Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); line text as of ora-skills origin/main 2026-11-23 added under audit R34-7 -- effective only on Gabriel's approval of the ora-claude-config PR that adds it",
+      "excerpt": "- The DSCR floor test: DSCR at a 65%-LTV loan on stabilized NOI must be at least 1.25x."
+    },
+    {
+      "repo": "ora-skills",
+      "path": "underwrite-research-ingest/SKILL.md",
+      "reason": "LTV governor 65% != canonical 40%",
+      "sha256": "3a20dc2b9530daf86b1d4096b4819b1c4350067a5097fe3fe568b4fa61603ce1",
+      "ratified": "65% per-property refi LTV ceiling: Gabriel in-turn rulings 2026-11-08 (AU v4.44/v4.45, ora-skills#228); line text as of ora-skills origin/main 2026-11-23 added under audit R34-7 -- effective only on Gabriel's approval of the ora-claude-config PR that adds it",
+      "excerpt": "2. Never edit governor constants (DSCR 1.25x, per-property LTV 65%, portfolio LTV 40%) or the doctri"
     }
   ]
 }

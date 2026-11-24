@@ -2287,7 +2287,54 @@ def _is_skill_version_changelog(path):
     standards.md / rules.md / firm.md / CLAUDE.md / capital-config.ts would go unseen."""
     return bool(SKILL_CHANGELOG_RE.search(path.replace("\\", "/").lower()))
 
-# --- Exact-text RATIFIED-LINE allowlist (2026-11-09) -----------------------------------------
+# --- deal-figures.local.md: per-section source provenance (2026-11-23, audit R34-7) -----------
+# memory/deal-figures.local.md is the local, untracked sidecar that the 2026-11-18/-19/-20 public-repo
+# scrubs wrote: it holds the PRE-REDACTION copy of each line they removed from a tracked file, one
+# section per line, under a heading that names the source -- "### OI-338 -- open-items-tracker.md:79",
+# "### line -- SKILL.md:15 (round-6 redaction, 2026-11-20)", "### projects/.../memory/
+# disposition-ledger.md:38". Scanning it as one file re-imported, verbatim, lines whose SOURCE the
+# probe already exempts by name (the OI-338 per-loan LTV row that led to exempting the open-items
+# tracker on 2026-09-21; a disposition-ledger REFI row) -> 4 standing false positives on a clean tree.
+#
+# Rule: a sidecar line inherits the exemption of the source its section heading names, judged by the
+# SAME _exempt() that judges that file at its own location. Nothing new is tolerated -- a line is
+# skipped here only if the probe would already skip it at home. Everything else stays armed: the
+# preamble before the first source heading, sections from a non-exempt source (SKILL.md, standards.md,
+# reference_*.md ...), and every line a source heading does not directly cover.
+# SCOPE IS ONE LINE (REFUTE round 1, 2026-11-23): the scrub writes exactly one copied line per
+# section, so a well-formed source heading covers ONLY the next non-blank line -- whatever it is,
+# including a copied line that itself starts with '#' (12 live sections do) -- and then provenance
+# ends. An earlier "until the next heading" scope let a drift ride an exempt section past an
+# indented/empty/setext heading, a code fence or an HTML comment; with a one-line scope none of
+# those shapes can extend it. A heading naming more than one "<path>:<n>" is unparseable (scan).
+# Honoured ONLY for the file at exactly <memory dir>/deal-figures.local.md -- the same heading
+# anywhere else means nothing. Accepted blind spot, identical in kind to the source exemptions it
+# inherits: a drift copied from an exempt narrative file is unseen here exactly as it is unseen there.
+DEAL_FIGURES_SIDECAR = "deal-figures.local.md"
+RE_SIDECAR_SOURCE_HEADING = re.compile(
+    r"^###[ \t]+(?:[^\n]*?[ \t]--[ \t]+)?([^\s:]+):\d+(?:[ \t]+\([^)\n]*\))?[ \t]*$")
+RE_PATH_LINE_REF = re.compile(r"[^\s:]+:\d+")
+
+
+def sidecar_line_sources(lines):
+    """For each line, the source path whose exemption it may inherit, or None (= scan as usual).
+    Only the first non-blank line after a well-formed source heading gets a source; heading lines
+    themselves, and every other line, are None."""
+    out, pending = [], None
+    for raw in lines:
+        stripped = raw.rstrip("\r\n")
+        if pending is not None and stripped.strip():
+            out.append(pending)            # the one copied line this heading covers
+            pending = None
+            continue
+        out.append(None)
+        if pending is None:
+            mm = RE_SIDECAR_SOURCE_HEADING.match(stripped)
+            if mm and len(RE_PATH_LINE_REF.findall(stripped)) == 1:
+                pending = mm.group(1)
+    return out
+
+# --- Exact-text RATIFIED-LINE allowlist (2026-11-09)-----------------------------------------
 # Gabriel's in-turn rulings of 2026-11-08 (AU v4.44/v4.45, ora-skills#228) restated the per-property
 # DSCR floor as DSCR at "a loan sized to 65% LTV" / "a 65%-LTV loan". The ratified 65 sits in the same
 # words a real governor drift would use ("going forward the governor is a 65%-LTV loan"), so a
@@ -2471,7 +2518,14 @@ def main():
             read()
         else:
             occ = {}
-            for i, raw in enumerate(_lines(read()), 1):
+            lines = list(_lines(read()))
+            # deal-figures sidecar: a section inherits its named source's exemption (see
+            # DEAL_FIGURES_SIDECAR) -- only at exactly <memory dir>/deal-figures.local.md.
+            sources = (sidecar_line_sources(lines)
+                       if _norm(path) == _norm(os.path.join(MEM, DEAL_FIGURES_SIDECAR)) else None)
+            for i, raw in enumerate(lines, 1):
+                if sources is not None and sources[i - 1] is not None and _exempt(sources[i - 1]):
+                    continue
                 for reason in scan_line(raw):
                     # Exact-text ratified-line allowlist (see RATIFIED_LINES_PATH): only this
                     # (path, reason, exact line text) triple is exempt -- any edit to the line

@@ -29,7 +29,7 @@ DIFFERENCE IS THE POINT. Repaired (prose that merely LOOKED typographic):
 hooks/eos-review-gate.py and hooks/lib/scheduled_task_frontmatter.py each held a
 literal U+FEFF inside a comment ABOUT BOM handling; maintenance/eos-telemetry-
 rollup.py held three em dashes. The other three -- hooks/tests/test-config-write-
-guard.py, hooks/tests/test-ora-autonomy-gate.py, hooks/tests/test-tool-call-
+guard.py, hooks/tests/test-ora-autonomy-gate-*.py, hooks/tests/test-tool-call-
 paths.py -- carry U+200B, U+FF20, U+202E, U+0332 and U+00AD as ADVERSARIAL
 FIXTURES: the homoglyph, zero-width, combining, soft-hyphen and
 right-to-left-override strings those very tests feed to

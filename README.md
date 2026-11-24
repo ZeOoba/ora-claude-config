@@ -405,8 +405,9 @@ flowchart LR
 **CI.** [`full-test-suite.yml`](.github/workflows/full-test-suite.yml) runs
 `python hooks/git-prepush-hook-tests-gate.py --full` on `windows-latest` for every non-draft
 PR, for every PR merge commit on `main`, weekly, and on demand. It is the authoritative test
-gate: a PR merges only when it is green (a merge-procedure rule; `main` has no required status
-check). CI sets no session id, so no override token can pass a red run. Tests that need
+gate: a PR merges only when it is green (GitHub-enforced since 2026-11-23: `full-test-suite` is
+a required check on `main`, with admins exempt so the admin-identity direct pushes to `main`
+still land; see tech.md §3j). CI sets no session id, so no override token can pass a red run. Tests that need
 gitignored live files (notably the confidential-terms roster) declare `CANNOT RUN:` and skip.
 
 The other workflows: [`fleet-deadman.yml`](.github/workflows/fleet-deadman.yml) (daily
