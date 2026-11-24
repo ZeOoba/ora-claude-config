@@ -1427,6 +1427,114 @@ def test_degraded_detector_stays_in_step_with_the_review_gate():
     assert guard._looks_like_commit(None) is False
 
 
+
+# ---------------------------------------------------------------------------
+# Attached shell control operators (2026-11-24, audit follow-up HIGH): shlex.split()
+# glues an unspaced operator to its neighbour (`-A;`, `.&&git`, `x|git`), so the
+# segment splitter never saw it and the commit was invisible -- review-gate and
+# worktree-isolation silently allowed `git add -A; git commit -m x`.
+
+_ATTACHED_OPERATOR_COMMITS = [
+    'git add -A; git commit -m x',
+    'git add -A;git commit -m x',
+    'git add .&&git commit -m x',
+    'git status||git commit -m x',
+    'echo hi|git commit -F -',
+    'sleep 1&git commit -m x',
+    'git add -A |& git commit -m x',
+    'true;git commit -m "a; b"',
+]
+
+
+def test_attached_operator_commit_is_detected():
+    for cmd in _ATTACHED_OPERATOR_COMMITS:
+        assert is_git_commit(cmd), "commit hidden behind an attached operator: %r" % cmd
+        assert find_commit_segment(cmd) is not None, cmd
+    print("PASS test_attached_operator_commit_is_detected")
+
+
+def test_attached_operator_does_not_leak_into_commit_args():
+    assert find_commit_segment('git add -A;git commit -m x -- a.txt') == ["-m", "x", "--", "a.txt"]
+    assert find_commit_segment('git commit -m x -- a.txt&&git log -1 -- hooks/') == ["-m", "x", "--", "a.txt"]
+    print("PASS test_attached_operator_does_not_leak_into_commit_args")
+
+
+def test_quoted_and_redirect_operators_are_not_split():
+    # Operators inside quotes are message text; redirects (2>&1, &>, >|) are not separators.
+    assert find_commit_segment('git commit -m "x; git add -A && y"') == ["-m", "x; git add -A && y"]
+    assert find_commit_segment("git commit -m 'a|b&c'") == ["-m", "a|b&c"]
+    assert find_commit_segment('git commit -m x 2>&1 | tail -3') == ["-m", "x", "2>&1"]
+    assert find_commit_segment('git commit &>/dev/null -a -m x') == ["&>/dev/null", "-a", "-m", "x"]
+    assert find_commit_segment('git commit -m x >|out.txt') == ["-m", "x", ">|out.txt"]
+    assert not is_git_commit('echo "git add -A; git commit -m x"')
+    print("PASS test_quoted_and_redirect_operators_are_not_split")
+
+
+def test_attached_semicolon_add_then_commit_collects_untracked():
+    """End to end at candidate_paths: the `git add -A;` segment must be seen."""
+    repo = make_repo()
+    untracked = os.path.join(repo, "new.txt")
+    with open(untracked, "w", encoding="utf-8") as fh:
+        fh.write("brand new")
+    result = candidate_paths(repo, 'git add -A;git commit -m "x"')
+    assert result is not None, "the commit must be recognised at all"
+    assert os.path.normcase(os.path.abspath(untracked)) in result, (
+        "untracked file must be a candidate under an attached `-A;`, got %r" % result)
+    print("PASS test_attached_semicolon_add_then_commit_collects_untracked")
+
+
+def test_no_split_inside_substitution_or_comment():
+    """Review round 1 (C2) false-ALLOWs: a `;` inside an unquoted `$(...)`, backticks,
+    `$'...'` or a `#` comment must not cut later flags/pathspec off the commit."""
+    assert find_commit_segment('git commit -m $(printf x; echo y) -a')[-1] == "-a"
+    assert find_commit_segment('git commit -m $(printf x; echo y) -- hooks/a.py')[-2:] == ["--", "hooks/a.py"]
+    assert find_commit_segment('git commit -m `printf x;echo y` -a')[-1] == "-a"
+    bs = chr(92)  # one literal backslash: `$'x\'; ... \''` is ONE ANSI-C-quoted word to bash
+    assert is_git_commit("git commit -a -m $'x" + bs + "'; git commit --dry-run; " + bs + "''")
+    assert "-a" in find_commit_segment('git commit -a -m x #;git commit -m y')
+    assert find_commit_segment('git commit -m "$(echo "a;b")" -- c.txt')[-2:] == ["--", "c.txt"]
+    assert find_commit_segment('git commit -m ${X:-a;b} -a')[-1] == "-a"
+    # Review round 2: process substitution, and a case pattern's `)` inside `$(...)`.
+    assert find_commit_segment('git commit -F <(echo x;echo y) -a')[-1] == "-a"
+    assert find_commit_segment('git commit -F <(echo x;echo y) -- hooks/a.py')[-2:] == ["--", "hooks/a.py"]
+    assert find_commit_segment('git commit -m $(case $x in a) echo y;; esac) -a')[-1] == "-a"
+    assert is_git_commit('diff <(ls; echo) x;git commit -m y')
+    print("PASS test_no_split_inside_substitution_or_comment")
+
+
+def test_substitution_cases_keep_their_candidates_end_to_end():
+    repo = make_repo()
+    tracked = os.path.join(repo, "a.py")
+    with open(tracked, "w", encoding="utf-8") as fh:
+        fh.write("v1")
+    _git(["add", "a.py"], repo)
+    _git(["commit", "-m", "base"], repo)
+    with open(tracked, "w", encoding="utf-8") as fh:
+        fh.write("v2 unstaged")
+    want = os.path.normcase(os.path.abspath(tracked))
+    for cmd in ('git commit -m $(printf x; echo y) -a', 'git commit -m `printf x;echo y` -a',
+                'git commit -m $(printf x; echo y) -- a.py'):
+        got = candidate_paths(repo, cmd)
+        assert got and want in got, "candidate set lost for %r: %r" % (cmd, got)
+    print("PASS test_substitution_cases_keep_their_candidates_end_to_end")
+
+
+def test_grouped_and_keyword_prefixed_commands_are_seen():
+    """Review round 1 (C1): `{ ...; }`, `( ... )`, `!`, `then` must not hide git."""
+    for cmd in ('{ git add -A; git commit -m x; }', '(git add -A; git commit -m x)',
+                '! git commit -m x', 'true;! git commit -m x',
+                'if true; then git commit -m x; fi', 'time git commit -m x'):
+        assert is_git_commit(cmd), cmd
+    repo = make_repo()
+    untracked = os.path.join(repo, "new.py")
+    with open(untracked, "w", encoding="utf-8") as fh:
+        fh.write("n")
+    want = os.path.normcase(os.path.abspath(untracked))
+    for cmd in ('{ git add -A; git commit -m x; }', '(git add -A; git commit -m x)'):
+        got = candidate_paths(repo, cmd)
+        assert got and want in got, "grouped add not collected for %r: %r" % (cmd, got)
+    print("PASS test_grouped_and_keyword_prefixed_commands_are_seen")
+
 if __name__ == "__main__":
     test_non_git_command_silent()
     test_git_commit_with_no_foreign_files_allows()
@@ -1496,4 +1604,11 @@ if __name__ == "__main__":
     test_degraded_oversize_without_git_is_not_worded_as_a_commit()
     test_degraded_wording_is_case_insensitive()
     test_degraded_detector_stays_in_step_with_the_review_gate()
+    test_attached_operator_commit_is_detected()
+    test_attached_operator_does_not_leak_into_commit_args()
+    test_quoted_and_redirect_operators_are_not_split()
+    test_attached_semicolon_add_then_commit_collects_untracked()
+    test_no_split_inside_substitution_or_comment()
+    test_substitution_cases_keep_their_candidates_end_to_end()
+    test_grouped_and_keyword_prefixed_commands_are_seen()
     print("ALL COMMIT-PROVENANCE-GUARD TESTS PASS")
