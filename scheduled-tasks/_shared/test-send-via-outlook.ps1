@@ -88,7 +88,11 @@ function Assert-Case {
         Write-Host ("  PASS  " + $Name)
         $script:Pass++
     } else {
-        Write-Host ("  FAIL  " + $Name + " -- " + ($problems -join "; "))
+        # The OUTBOUND-CHECK line rides ON the FAIL line: the CI bridge (test_send_contract_suite.py)
+        # relays only FAIL lines, so a separate "log:" line never reaches the CI log.
+        $outbound = @(($r.Log -split "`r?`n") | Where-Object { $_ -match 'OUTBOUND-CHECK' }) -join " || "
+        if ($outbound.Length -gt 600) { $outbound = $outbound.Substring(0, 600) + "..." }
+        Write-Host ("  FAIL  " + $Name + " -- " + ($problems -join "; ") + $(if ($outbound) { " [outbound: " + $outbound + "]" } else { "" }))
         $trimmed = ($r.Log -replace "`r?`n", " | ")
         if ($trimmed.Length -gt 300) { $trimmed = $trimmed.Substring(0, 300) + "..." }
         Write-Host ("        log: " + $trimmed)
