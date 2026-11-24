@@ -1,17 +1,17 @@
 ---
 name: ora-full-gate-weekly
-description: Weekly Monday 11:30 ET (OI-254) - runs the FULL `npm run gate` for oxford-command-center from a throwaway origin/main worktree on this machine (Master Workbook + Property Financials mounted), so reconcile:noi-crosscheck, warehouse:verify and warehouse:drift run on a schedule (they are absent from gate:ci). Silent when clean; emails ggoldberg only on a non-zero stage, stale or unreachable input. Pause-aware. Read-only. [MODEL: claude-sonnet-5-5 | checked 2026-11-15]
+description: Nightly 02:10 ET (OI-254; weekly Monday 11:30 until 2026-11-24, Gabriel moved it to nightly) - runs the FULL `npm run gate` for oxford-command-center from a throwaway origin/main worktree on this machine (Master Workbook + Property Financials mounted), so reconcile:noi-crosscheck, warehouse:verify and warehouse:drift run on a schedule (they are absent from gate:ci). Silent when clean; emails ggoldberg only on a non-zero stage, stale or unreachable input. Pause-aware. Read-only. [MODEL: claude-sonnet-5-5 | checked 2026-11-15]
 ---
 
-ORA weekly full-gate run (OI-254). CI's `gate:ci` omits reconcile:noi-crosscheck, warehouse:verify and warehouse:drift (they need the Master Workbook and the 32-file Property Financials set, which never leave Oxford machines); the self-hosted workflow has zero runs and no matching runner. This task is the watcher until PR-blocking CI is decided (Gabriel declined PR-blocking 2026-10-13: do NOT provision a runner or add a schedule: trigger).
+ORA nightly full-gate run (OI-254; weekly until 2026-11-24, when Gabriel moved it to nightly 02:10 off-hours). CI's `gate:ci` omits reconcile:noi-crosscheck, warehouse:verify and warehouse:drift (they need the Master Workbook and the 32-file Property Financials set, which never leave Oxford machines); the self-hosted workflow has zero runs and no matching runner. This task is the watcher until PR-blocking CI is decided (Gabriel declined PR-blocking 2026-10-13: do NOT provision a runner or add a schedule: trigger).
 
 READ-ONLY BY CONSTRUCTION. Never commit, push, stage, or edit any tracked file, the workbook, or the live warehouse DB. Work only in a throwaway detached worktree of origin/main under the temp dir; NEVER touch the shared checkout C:\Users\Owner\oxford-command-center (it carries other sessions' WIP). Remove the worktree on every exit path.
 
 Compute the run date once: `date '+%A %Y-%m-%d'`; reuse that value in every subject and body (date part in date slots, weekday only where one is named).
 
 STEP 0 - DOUBLE-FIRE ENTRY GUARD:
-  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-full-gate-weekly --block main --run-id <run_id> --ttl-min 60 --scheduled-et 11:30
-  The claim JSON carries lateStartMin (minutes after the 11:30 cron); quote it in the run log. It is observational only: a late start never changes the decision. Lateness is also appended to Claude_Workspace/_state/late-start-log.jsonl by the script.
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-full-gate-weekly --block main --run-id <run_id> --ttl-min 60 --scheduled-et 02:10
+  The claim JSON carries lateStartMin (minutes after the 02:10 cron); quote it in the run log. It is observational only: a late start never changes the decision. Lateness is also appended to Claude_Workspace/_state/late-start-log.jsonl by the script.
   Exit 10 -> already completed today: log BLOCK_MAIN_ALREADY_COMPLETE_TODAY, report a normal skip, stop. Exit 11 -> another fire is live: stand down identically. Exit 0 -> continue. Only the run holding the claim calls complete/fail. Contract: _shared\README-DOUBLE-FIRE-GUARD.md.
 
 STEP 1 - PAUSE-AWARE GUARD (before running anything):
