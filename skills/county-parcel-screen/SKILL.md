@@ -3,7 +3,7 @@ name: "county-parcel-screen"
 description: "Use when the user mentions: parcel screen, county screen, ring screen, off-market sourcing, owner outreach list, cold call list, delinquent tax leads, motivated sellers, estate owners, long-hold owners, assessor or auditor parcel data, or off-market industrial candidates in ANY target market or new county. Also \"next market\", \"run the screen on X\", or owner-level lead lists from public property records. Recorded-sales tracking routes to county-sales-monitor; a single already-identified target routes to verified-deal-recon (deal-recon agent for a first look only); an inbound broker batch routes to deal-flow-triage.\n"
 ---
 
-# county-parcel-screen (v1.7)
+# county-parcel-screen (v1.8)
 
 Generate off-market industrial acquisition leads for Oxford Realty Advisors from
 public county property data. The screen finds owners with the CAPACITY to sell at
@@ -14,11 +14,11 @@ and Cincinnati; per-county endpoints and quirks live in references/.
 ## Buy-box (apply unchanged unless user overrides)
 
 Class B/C industrial / shallow-bay / flex / office-warehouse only. 10,000-80,000
-SF building (sweet spot 15-50K). Deal $1-10M; equity sleeve $0.75-5M at 65% LTV.
-Hard floors: >=25% discount to replacement (~$150/SF benchmark) AND >8% stabilized
-YoC. (Legacy off-market screen frame; the $150 benchmark was retired 2026-07-14. Any deal
+SF building (sweet spot 15-50K). Deal USD 1-10M; equity sleeve USD 0.75-5M at 65% LTV.
+Hard floors: >=25% discount to replacement (~USD 150/SF benchmark) AND >8% stabilized
+YoC. (Legacy off-market screen frame; the USD 150 benchmark was retired 2026-07-14. Any deal
 that advances to SCREEN is tested on the acquisition-underwriting Stage 1 vintage-ramp
-floor against the construction-type-adjusted RCT LOW.) Instant disqualifiers: retail/office/multifamily, auto-use tenancy,
+floor against the construction-type-adjusted RCT LOW, with land credited only at market value from ≥3 executed land comps, capped at 60% of all-in, and the discount measured on the improvements only (acquisition-underwriting v4.53); assessor/auditor land fields are never a market land value, so the P1 basis band credits land at USD 0 and stays a ranking on total modeled value; the figures ship privately as `rct-table.local.json` in this skill's folder (public repo); missing or not `RCT v03` → report `RCT TABLE UNAVAILABLE` and skip the basis test, never substitute a figure.) Instant disqualifiers: retail/office/multifamily, auto-use tenancy,
 institutional Class A pricing, outside ORA's eleven clusters.
 
 ## Workflow
@@ -65,7 +65,7 @@ it saves main-context budget. Ohio counties all use DTE codes (industrial =
 ### 2. Pull the universe
 Industrial use codes, paged queries via sandbox python urllib (web_fetch is
 URL-length-capped - never rely on it for paged REST pulls). Building SF
-10-80K where the layer has SF; otherwise improvement-value band $150K-$7M as
+10-80K where the layer has SF; otherwise improvement-value band USD 150K-USD 7M as
 the size proxy and note the gap. Save raw JSON before processing.
 
 ### 3. Exclude
@@ -77,7 +77,7 @@ before outreach - never silently drop on a weak token (the DUKE COMBINED
 lesson), and never let fund-style names through (the G&I XI lesson; module
 catches fund morphology generically). Append newly caught aliases to the
 module's TIER1/TIER2 tables with a dated note. Also exclude: value band
-outside ~$250K-$8.5M; never-call counterparties (ora_never_call 'NEVER-CALL'
+outside ~USD 250K-USD 8.5M; never-call counterparties (ora_never_call 'NEVER-CALL'
 tier = live/former deal counterparties — drop); parcels already in the ORA
 pipeline (Notion Acquisition Pipeline bcfe4a03). ORA/affiliate matches
 (ora_never_call 'ORA-SELF': Oxford*, Goldberg, FJ&S incl. FJS) are KEPT and
@@ -87,15 +87,15 @@ to flagged rows without principal adjudication.
 
 ### 4. Calibrate empirically - never guess
 Auditor-to-market factor = median SALEPRICE / appraised-value of in-universe
-arm's-length sales (>=$100K, <=3yr, ratio 0.5-4). Ohio post-2023-reappraisal
+arm's-length sales (>=USD 100K, <=3yr, ratio 0.5-4). Ohio post-2023-reappraisal
 runs ~1.6x (Franklin 1.65 n=57; Hamilton 1.61 n=182). Derive basis-score
 thresholds FROM the factor: 20 pts = >=40% modeled discount to replacement;
 14 = >=25% (legacy P1 band, not the Stage 1 floor); 6 = 10-25%; 0 below. Use ZIP-level ratios where
 n>=3 per ZIP - they range 1.0-2.0 within one county.
 
 ### 5. Fix the hold score
-40%+ of recent sale dates are $0/nominal transfers (re-titling, estate,
-intra-family) - NOT purchases. A sub-$25K transfer never scores as a recent
+40%+ of recent sale dates are USD 0/nominal transfers (re-titling, estate,
+intra-family) - NOT purchases. A sub-USD 25K transfer never scores as a recent
 purchase: fall back to the PRIOR arms-length transfer and flag
 `HOLD-PRE-NOMINAL`; only if no prior arms-length transfer is published does the
 row become UNKNOWN-HOLD (§ "Hold / tenure scoring"). Owner name containing
@@ -118,7 +118,7 @@ MUST say so on the face of its summary and workbook README, with the reason** �
 otherwise successive runs stop being comparable. **Read references/run-history.md
 (Scoring sub-bands provenance) before amending any sub-band.**
 
-**SF gate:** building SF 10,000-80,000. **Value band:** calibrated value ~$250K-$8.5M
+**SF gate:** building SF 10,000-80,000. **Value band:** calibrated value ~USD 250K-USD 8.5M
 (applied AFTER the SF gate). **Tier cutoffs:** A >=90 call | B 85-89 mail | C 70-84
 watch | D archive.
 
@@ -132,7 +132,7 @@ watch | D archive.
 - **hold 20** — graduated curve, NOT a bucket. See § "Hold / tenure scoring"
   below, which supersedes v1.2's 20/18/14/10/5/0 buckets and retires the
   16-point UNKNOWN-HOLD default.
-- **basis 20** >=40% modeled discount to the $150/SF benchmark | **14** >=25% (the
+- **basis 20** >=40% modeled discount to the USD 150/SF benchmark | **14** >=25% (the
   ORA floor) | **6** 10-25% | **0** below. (Already skill-stated; restated here so
   the whole scale sits in one place.)
 - **entity 10** where the owner of record is an entity rather than a natural person.
@@ -173,7 +173,7 @@ its summary. Marginal-signal figures and the D&A Berwick worked example:
 references/scoring-rationale.md.
 
 **What `y` is measured from, in order:**
-1. The most recent **arms-length** transfer (price >= $25K, or the county's own
+1. The most recent **arms-length** transfer (price >= USD 25K, or the county's own
    validity code where one exists and is trustworthy — Polk IA `quality`,
    Richmond/Chesterfield VA `val_code_1`, Hamilton OH `SALETYPE`; NOT Franklin
    OH `IsValid`, which reads 'F' on real deeds).
@@ -315,7 +315,7 @@ row's score-breakdown cell and in the README sheet.
   Hamilton has DELQ_TAXES directly). Flag amount and vintage.
 - Owner-level clustering: owners delinquent on ANY parcel who also own
   industrial - distress before it reaches the subject property.
-- Sellers-in-motion: owners who sold industrial >=$100K within ~2 years AND
+- Sellers-in-motion: owners who sold industrial >=USD 100K within ~2 years AND
   still own - liquidation in progress; call before the next listing. Use
   grantor fields where published (Butler); otherwise infer prior owner from
   consecutive transfer records (Franklin pattern).
@@ -397,8 +397,10 @@ volume + quarterly re-runs + signal-led call order is the strategy.
 - versions/CHANGELOG-v1.0-v1.3.md - full changelog text.
 
 ## Changelog
+- **v1.8 (2026-11-14):** Consumer sweep for acquisition-underwriting v4.53 (Gabriel in-turn 2026-11-14; RE-4.53-1): the buy-box note states that a SCREEN credits land at market (≥3 land comps, capped at 60% of all-in, improvements-only discount) and that auditor land fields never count, so the P1 basis band credits USD 0 land. No score, band or weight changed.
+- **v1.7.1 (2026-11-14):** Wording only: dollar figures in the body now read "USD n" with no dollar sign before a digit, because a skill invoked with arguments has every dollar-digit sequence in its body replaced by an argument token (`tools/lint_skill_dollar_args.py`). No value, rule, threshold or constant changed.
 - **v1.7 (2026-11-05):** `references/hold-data-availability.md`'s Louisville row said the market was "not among the nine ratified clusters"; Louisville was ratified as an entry-phase cluster on 2026-08-05, before that table was written. The row now says so and that its county endpoints were never built. Found by `tools/doctrine_consistency.py`. Wording only; no scan cycle, scoring rule or market list changed.
-- **v1.6 (2026-10-27):** Added `lebanon_pa` (VERIFIED after a paged `where=1=1` pull the same day; non-canonical) to county-endpoints.v1.json and county-endpoints.md for single-target screens and the acquisition-underwriting v4.37 recent-acquisition check. No scan cycle, scoring rule or market list changed (the 25% / $150 text is annotated as a legacy frame, thresholds untouched).
+- **v1.6 (2026-10-27):** Added `lebanon_pa` (VERIFIED after a paged `where=1=1` pull the same day; non-canonical) to county-endpoints.v1.json and county-endpoints.md for single-target screens and the acquisition-underwriting v4.37 recent-acquisition check. No scan cycle, scoring rule or market list changed (the 25% / USD 150 text is annotated as a legacy frame, thresholds untouched).
 - **v1.5 (2026-10-18):** Step 8 adds a finalist-only loan-maturity check (recorded mortgage + assumed 5/7/10-yr term, `[est]`) producing `MATURITY-WINDOW` and `SALE-LEASEBACK` lead flags; call order inserts `MATURITY-WINDOW` after delinquent entity owners. `workflows/parcel-screen-fanout.js` implements it: the verify agent records `recordedMortgage` / `maturityWindow` / `saleLeasebackCandidate`, and ranking uses a `maturity-window` bucket. The 2026-09-18 bulk-mining ruling stands. Parity with acquisition-underwriting v4.33 Seller/Motivation signals. No scored constant changed.
 - **v1.4 (2026-10-02):** Added references/distress-feeds.md (foreclosure and tax-lien sources for Franklin OH, Maryland, Jackson MO) and a step 7 pointer; county-endpoints.md: Jackson DLT cancellation/petition source, Wyandotte count refresh, Maryland `CONVEY1=4` decoded, recording-lag re-check flagged. Docs only. No scored constant changed.
 - **v1.3 (2026-09-18):** Hold/tenure scoring becomes a graduated curve (tau 8 yrs, cap 20 at 38 yrs); 16-point UNKNOWN-HOLD default RETIRED (coverage test, `HOLD-UNKNOWN` / `Hold ceiling`, >20% drops the component); `HOLD-PRE-NOMINAL` fallback; sibling-parcel consolidation closes F6 (`Relationships` sheet, graduated `multi`); hold-data-availability table by market; Maryland hold gap closed (`TRADATE`); Franklin re-scored (mean delta -4.1). **MOVES SCORES.** Full text: versions/CHANGELOG-v1.0-v1.3.md

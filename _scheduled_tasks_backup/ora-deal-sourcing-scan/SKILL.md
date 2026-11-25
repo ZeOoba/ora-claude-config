@@ -1,9 +1,32 @@
 ---
 name: ora-deal-sourcing-scan
-description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn). [MODEL: UNVERIFIABLE | checked 2026-10-30]
+description: Weekly on-market deal-sourcing scan (Tuesdays) — searches new industrial/flex listings across ORA's established target markets, applies the basis/physical hard floors as a GATE, scores survivors, dedupes against the Notion Deal Sourcing Log, mechanically detects price cuts off the stored first-sighting ask, and emails a ranked digest. Restored 2026-07-07; re-enabled 2026-10-30 (Deal Sourcing Expansion Plan Phase 0, Gabriel in-turn); re-enabled 2026-11-14 on v2.18 (Gabriel in-turn). [MODEL: claude-sonnet-5 | checked 2026-11-14]
 ---
 
-ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.17, 2026-11-13).
+ORA ON-MARKET DEAL-SOURCING SCAN — weekly run (v2.18, 2026-11-14).
+
+v2.18 — CONFLICT CHECK + CHROME DETAIL PULL; v4.53 CONSUMER NOTES (2026-11-14, Gabriel in-turn
+ratification, Investment Candidates open-decisions batch; PATCH proposal
+`2026-11-14_PATCH_sourcing-scan_conflict-check-chrome-detail-land-credit_v01` §1-§2; ships as v2.18
+because v2.10 was already taken by SOURCE MAPPING). NO RCT VALUE, SCORE, WEIGHT, FLOOR %, TIER
+THRESHOLD OR GOVERNOR CHANGED. (1) CONFLICT CHECK (new STEP 3D-0): listing-enrichment-gate v1.5
+step 0 runs at row creation and on every re-sighting; its flags cap tiers as stated there and are
+written as append-only dated Notes / Flags lines plus the new `Conflict Flags` multi-select (STEP 5).
+(2) CHROME DETAIL PULL (STEP 3D-1): T1/T2 rows whose Crexi/LoopNet detail page failed through
+WebFetch are read in Claude in Chrome per listing-enrichment-gate v1.5 § Chrome detail pull;
+Chrome unavailable → `DETAIL: CHROME UNAVAILABLE`, row stays PROVISIONAL, the run never fails on it.
+(3) acquisition-underwriting v4.53: the basis test credits land at market (>=3 executed land comps,
+capped at 60% of all-in, discount on the improvements only); the scan has no land grid, so it
+credits $0 land, tags `[DATA-GAP: land comps]` on any row that would move, and its basis gate is
+numerically unchanged. Assessor land fields are never a market land value. The scan computes no
+IRR; a row that advances to SCREEN is tested on the v4.53 risk-tiered IRR floor there.
+(4) FEMA TRANSPORT: flood checks stay on county mirrors or `ora-flood-zoning-dd`; never call
+hazards.fema.gov directly (a 2026-11-14 direct call was an error and its results are unofficial).
+Rule Evidence: RE-SCAN-2.10-1 (id as ratified; ships in v2.18) — conflict check + Chrome detail.
+Incidents: 2026-11-14 rows whose portal pages disagreed on price, SF and contract status, and
+T1/T2 rows left index-only after WebFetch failed on Crexi/LoopNet detail pages. Class:
+RATIFIED-JUDGMENT. Testable: share of T1 rows later reclassed for a price, SF or under-contract
+conflict, before vs after. Sunset: December 2026 back-test.
 
 v2.17 — RCT TABLE READ FROM A PRIVATE FILE, NOT MIRRORED HERE (2026-11-13, Gabriel's
 2026-11-12 audit ruling: this repo stays PUBLIC, the ratified replacement-cost table moves out of
@@ -357,7 +380,7 @@ ORA BUY-BOX (screening filter — apply unchanged)
 RUN ORDER & BUDGET (v2.8 — the order IS the fix; do not re-sequence)
   STEP 0 pre-flight → STEP 1 text scouts (parallel) → STEP 1B browser pass (orchestrator,
   sequential) → STEP 2 / 2.0 / 2.5 / 3A / 3A-2 / 3B gate + score → STEP 3C construction
-  photos for T1-bound rows → STEP 3D T1 verify pass (v2.9) → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
+  photos for T1-bound rows → STEP 3D T1 verify pass (v2.9) + 3D-1 Chrome detail pull + 3D-0 conflict check (v2.18) → STEP 4 dedupe → STEP 5 / 5A / 5B Notion writes → handoff list for
   ora-sourcing-construction-verify → STEP 6 digest → DONE-MARKER (last action).
   BUDGET — HARD CAPS, NOT JUDGMENT (the 2026-09-23 run died on "if running long"):
     STEP 1B-A discovery: ≤ 30 page loads TOTAL across all eleven clusters (≈1 Crexi + ≤2
@@ -955,6 +978,13 @@ BASIS TEST (ratified by Gabriel 2026-07-14):
   DELIBERATELY GENEROUS PROXY — the true basis is always worse. Say so on any deal
   that clears by a thin margin. (The scan previously used bare price/SF, which
   flattered every candidate.)
+  LAND (v2.18, acquisition-underwriting v4.53): doctrine now credits land at MARKET against
+  all-in — `all-in − MIN(market land, 60% × all-in) ≤ (1 − floor) × adjusted LOW × SF` — but only
+  from >=3 executed land comps (same zoning class and submarket, <=36 months) and only once a flood
+  determination clears the land. The scan has no land grid, so it credits $0 land and the gate
+  above is unchanged; a land-heavy row (building coverage ≤25%) that fails basis gets
+  `[DATA-GAP: land comps]` in Notes / Flags so the SCREEN can re-test it. NEVER use an assessor or
+  auditor land field as the land value.
 
   ROW FLAGS (labels only; the figures are in the private RCT file):
     [PROXY]                   Madison, Grand Rapids (WEAKEST), Richmond, Des Moines
@@ -1176,6 +1206,26 @@ UNKNOWN, it then gets the STEP 3C photo check like any T1 row). Resolved and fai
 rule names. Still unknown → stays T1-PENDING-VERIFY with Next Action naming the missing
 fact(s) and the decision rule. A skipped row is a §7c coverage gap, named by address.
 
+STEP 3D-0 — CONFLICT CHECK (v2.18; every row, at creation AND on every re-sighting, before
+tiering is final). Run listing-enrichment-gate v1.5 step 0 over every source page captured for
+the address this run (aggregator, broker-direct, Crexi/LoopNet index or detail, OM). Flags and
+their effect here: `[PRICE-CONFLICT]` >2% → halt Economics (no Basis/Yield verdict), cap T2;
+`[SF-CONFLICT]` >5% → hard stop, cap T2, test at the lowest SF; `[UNDER-CONTRACT]` → exclude from
+T1 and from the handoff/target list; `[CAP-CONFLICT]` >50 bp; `[LAND-CONFLICT]` >10%;
+`[YEAR-CONFLICT]` >5 yr → test the ramp at the OLDER year; `[OCCUPANCY-CONFLICT]`. Write each as an
+append-only dated line in Notes / Flags (`YYYY-MM-DD [FLAG] field: A vs B`) and add the tag to
+`Conflict Flags` (STEP 5); never remove a tag or rewrite an earlier line. One source only →
+`CONFLICT CHECK: 1 source`, no flag.
+
+STEP 3D-1 — CHROME DETAIL PULL (v2.18). For each T1/T2 candidate whose Crexi or LoopNet DETAIL page
+failed through WebFetch, follow listing-enrichment-gate v1.5 § Chrome detail pull: find the listing
+ID by web search (never build a Crexi search URL — it does not resolve), then in Claude in Chrome
+`tabs_context_mcp` → `navigate` → `get_page_text`, batched per site, and close the tabs this pass
+opened. Read only: never click download, LOI, contact or sign-in buttons. Each page read feeds
+STEP 3D-0 as a new source. Budget: counts against the STEP 3D ≤ 4 loads per row. Chrome
+unavailable → write `DETAIL: CHROME UNAVAILABLE` in Notes / Flags, keep the row PROVISIONAL, name
+it in §7c, and continue — never fail the run.
+
 BENCHMARK HONESTY (mandatory in every digest): the denominator is RCT v03 — SOURCED
 from the C&W 2025 guide and ratified by Gabriel 2026-07-14. State in the digest which
 metro floor was applied, and state the discount as a share of TRUE replacement ("this
@@ -1324,7 +1374,9 @@ unresolved row MUST carry 'Unknown — CONFIRM' — that value plus `Listing URL
 handoff key ora-sourcing-construction-verify selects on, so a blank here silently drops
 the row from the backstop. TWO EXCEPTIONS stay BLANK on purpose: a PROVISIONAL-UNRESOLVED
 row (STEP 1B-B), and a T2 whose only working URL is crexi/loopnet (the verify task cannot
-load those domains; name it in §7c instead)); Broker / Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
+load those domains; name it in §7c instead)); **`Conflict Flags`** (v2.18 — multi-select, options
+exactly `PRICE-CONFLICT` · `SF-CONFLICT` · `UNDER-CONTRACT` · `CAP-CONFLICT` · `LAND-CONFLICT` ·
+`YEAR-CONFLICT` · `OCCUPANCY-CONFLICT`; set from STEP 3D-0, add-only, never cleared); Broker / Contact; Date Seen; Notes / Flags (gate outcome FIRST, then score breakdown, the
 pre-mortem, the benchmark used and whether the deal sits near the floor line, plus
 PRICE CUT / RE-LIST / REQUEST PRICE / PROVISIONAL / SUB-SCALE flags); Next Action
 (what to do, and the decision rule — e.g. "decline if the ask implies over $105/SF").

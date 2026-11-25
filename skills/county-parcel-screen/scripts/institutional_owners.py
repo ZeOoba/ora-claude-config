@@ -232,7 +232,7 @@ if __name__ == '__main__':
         ('FREDERICK WOLFGANG INDUS', 'VERIFY'),            # truncation
         ('SMP PARTNERSHIP LLP', None),
         ('TNT KALAMAZOO ENTERPRISES LLC', None),
-        ('INDUSTRIAL MILE PROPERTIES LLC', None),          # INDUSTR... must NOT hit INDUS token
+        ('INDUSTRIAL ROW PROPERTIES LLC', None),          # INDUSTR... must NOT hit INDUS token
         ('BROOKFIELD PROPERTIES LOGISTICS LP', 'EXCLUDE'),
         ('MAHOOZI VA PROPERTIES LLC', None),
     ]
