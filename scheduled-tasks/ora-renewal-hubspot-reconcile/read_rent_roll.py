@@ -29,9 +29,11 @@ import os
 import re
 import sys
 
-WORKBOOK = (r"C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets"
-            r"\Master Excel Template Company Wide -- Oxford.xlsx")
-WORKBOOK_NAME_PREFIX = "Master Excel Template Company Wide"
+# Moved 2026-11-25 (Gabriel): the eric spreadsheets "Template" copy is stale. The COM-fallback
+# prefix must NOT match "Master Excel Template…", or an open stale copy would be read instead.
+WORKBOOK = (r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\Property Financials"
+            r"\Master Excel Company Wide -- Oxford.xlsx")
+WORKBOOK_NAME_PREFIX = "Master Excel Company Wide"
 SHEET = "Master Tenant Rent Roll"
 HEADER_ROW_INDEX = 4  # row 5 in Excel
 DATE_FIELDS = ("Lease Start", "Lease End", "Escalation Date")
