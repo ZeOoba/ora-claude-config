@@ -228,9 +228,10 @@ ORDERING_VERIFIED_BY_HAND = {
     # Read by hand 2026-11-25 (guard added the same day, Gabriel in-turn "Apply it here"): the
     # sole claim is the Step 0 line at :9, the run's first action. Step 1 (:18) only READS the
     # GitHub Support ticket in Chrome and never types or clicks anything that changes it. Step 2
-    # (:20-23) only runs git ls-remote and cat-file into $TEMP. The one side effect is the
-    # Step 3 email at :27, after the claim.
-    "ora-ghsupport-5038931-check": "claim@9 (Step 0) precedes email@27 (Step 3); Steps 1-2 read-only",
+    # (:20-25) only runs git ls-remote, cat-file, awk and grep into $TEMP (line refs re-checked
+    # 2026-11-25 after the two-rewrite count fix). The one side effect is the Step 3 email at
+    # :29, after the claim.
+    "ora-ghsupport-5038931-check": "claim@9 (Step 0) precedes email@29 (Step 3); Steps 1-2 read-only",
     # Read by hand 2026-11-25 (guard added the same day): the sole claim is the step 0 line at
     # :14, the run's first action (--slot-times, one claim per cron slot). Step 1 only sets the
     # run date. The side effects are the sync-memory.py commit+push to the PRIVATE repo at :24
