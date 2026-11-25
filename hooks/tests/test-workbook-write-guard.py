@@ -82,10 +82,14 @@ def _sessions_dir():
     return _SESSIONS[0]
 
 
-def run(tool_name, tool_input, session_id=SID, raw=None, env_extra=None):
-    """Drive the hook; return (exit_code, stderr)."""
+def run(tool_name, tool_input, session_id=SID, raw=None, env_extra=None,
+        default_names=False):
+    """Drive the hook; return (exit_code, stderr). default_names=True drops the
+    ORA_WORKBOOK_GUARD_NAME seam so the hook's own built-in name list is exercised."""
     env = dict(os.environ)
     env["ORA_WORKBOOK_GUARD_NAME"] = WB_NAME
+    if default_names:
+        env.pop("ORA_WORKBOOK_GUARD_NAME")
     env["ORA_OVERRIDE_SESSIONS_DIR"] = _sessions_dir()
     if env_extra:
         env.update(env_extra)
@@ -104,6 +108,57 @@ def run(tool_name, tool_input, session_id=SID, raw=None, env_extra=None):
 
 def blocked(rc, err):
     return rc == 2 and bool(err.strip())
+
+
+# ------------------------------------------------------------------ built-in names
+# 2026-11-25: the maintained workbook moved to Business\Property Financials and
+# dropped "Template" from its name; the old eric spreadsheets copy still exists. With
+# no seam override the guard must cover BOTH basenames (the old guard matched only the
+# old one and failed open on the live file).
+MOVED_WB = ("C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\Business\\"
+            "Property Financials\\Master Excel Company Wide -- Oxford.xlsx")
+
+
+def test_default_names_cover_moved_workbook():
+    cmd = ('python -c "import openpyxl; wb=openpyxl.load_workbook(r\'%s\'); '
+           'wb.save(r\'%s\')"' % (MOVED_WB, MOVED_WB))
+    rc, err = run("Bash", {"command": cmd}, default_names=True)
+    check("default names: openpyxl save on MOVED workbook blocks",
+          blocked(rc, err), repr(err[:200]))
+    rc, err = run("Write", {"file_path": MOVED_WB, "content": "x"},
+                  default_names=True)
+    check("default names: Write tool on MOVED workbook blocks",
+          blocked(rc, err), repr(err[:200]))
+    rc, err = run("mcp__excel__write_data_to_excel",
+                  {"filepath": MOVED_WB, "sheet_name": "Cash Data", "data": [[1]]},
+                  default_names=True)
+    check("default names: excel MCP write on MOVED workbook blocks",
+          blocked(rc, err), repr(err[:200]))
+
+
+def test_default_names_still_cover_old_workbook():
+    cmd = ('python -c "import openpyxl; wb=openpyxl.load_workbook(r\'%s\'); '
+           'wb.save(r\'%s\')"' % (WB, WB))
+    rc, err = run("Bash", {"command": cmd}, default_names=True)
+    check("default names: openpyxl save on OLD workbook still blocks",
+          blocked(rc, err), repr(err[:200]))
+
+
+def test_default_names_leave_other_workbooks_alone():
+    cmd = ('python -c "import openpyxl; wb=openpyxl.Workbook(); '
+           'wb.save(r\'%s\')"' % OTHER)
+    rc, err = run("Bash", {"command": cmd}, default_names=True)
+    check("default names: save on an unrelated workbook allowed", rc == 0,
+          "rc=%r err=%r" % (rc, err[:200]))
+    # "Master Excel Company Wide" must not match an unrelated file that merely
+    # shares a prefix -- matching stays on the full basename.
+    near = OTHER.replace("2026-08-14_Scratch_v01.xlsx",
+                         "Master Excel Company Wide -- Notes.xlsx")
+    cmd = ('python -c "import openpyxl; wb=openpyxl.Workbook(); '
+           'wb.save(r\'%s\')"' % near)
+    rc, err = run("Bash", {"command": cmd}, default_names=True)
+    check("default names: near-miss basename allowed", rc == 0,
+          "rc=%r err=%r" % (rc, err[:200]))
 
 
 # ------------------------------------------------------------------ excel MCP
@@ -582,6 +637,9 @@ if __name__ == "__main__":
     test_fail_open_on_garbage_input()
     test_missing_tool_input_fails_open()
     test_exit_code_is_never_one()
+    test_default_names_cover_moved_workbook()
+    test_default_names_still_cover_old_workbook()
+    test_default_names_leave_other_workbooks_alone()
     if _failures:
         print("\n%d FAILURE(S): %s" % (len(_failures), ", ".join(_failures)))
         sys.exit(1)
