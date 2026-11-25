@@ -454,3 +454,16 @@ deal-figures.local.md
 /_scheduled_tasks_backup/ora-511-industrial-fallout-check/SKILL.md
 /maintenance/_archive/2026-09-29_pr285-unblock/scheduled-tasks/ora-loan-balance-check/SKILL.md
 /maintenance/_archive/2026-10-13_dirty-tree-triage/ora-passed-deal-tracker/SKILL.md
+
+# (2026-11-25) LAMS task-spec MIRRORS whose live canonical (OneDrive Documents\Claude\Scheduled\<id>\SKILL.md)
+# carries third-party contacts or policy numbers. ora-task-integrity-guard (guard.ps1 mirror sync)
+# copies canonical verbatim into _scheduled_tasks_backup/ -- it must, because that mirror is a
+# restore source for canonical, so it cannot be scrubbed. Tracking these in this PUBLIC repo meant
+# every guard run re-dirtied the #454-scrubbed copies with real values. Untracked, kept on disk;
+# durability is OneDrive (canonical + 00_Governance mirror). Backstop for any other spec:
+# hooks/lib/exposure_leak_check.py rule 5 (third-party email in a task spec blocks the push).
+/_scheduled_tasks_backup/ora-counsel-review-standard-positions-2027/SKILL.md
+/_scheduled_tasks_backup/ora-hubspot-notion-contact-sync/SKILL.md
+/_scheduled_tasks_backup/ora-insurance-renewal-monitor/SKILL.md
+/_scheduled_tasks_backup/ora-stale-pipeline-nudge/SKILL.md
+/_scheduled_tasks_backup/ora-tenant-contact-gap-sweep/SKILL.md
