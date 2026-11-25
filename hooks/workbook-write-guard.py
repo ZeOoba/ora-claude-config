@@ -182,7 +182,14 @@ HOOKS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HOOKS_DIR, "lib"))
 
 # The canonical master workbook basename. Lower-cased at use.
-DEFAULT_WORKBOOK_NAME = "Master Excel Template Company Wide -- Oxford.xlsx"
+# 2026-11-25: the maintained workbook moved to Business\Property Financials and dropped
+# "Template" from its name, while the old eric spreadsheets copy still exists. Guard BOTH:
+# a single-name guard failed open on the live file. Matching stays on the full basename,
+# so an unrelated "Master Excel Company Wide -- <other>.xlsx" is not caught.
+DEFAULT_WORKBOOK_NAMES = (
+    "Master Excel Company Wide -- Oxford.xlsx",
+    "Master Excel Template Company Wide -- Oxford.xlsx",
+)
 
 # Import posture mirrors config-write-guard.py exactly, and for the same reason
 # (reference_pretooluse_vs_git_hook_exit_codes.md): letting an ImportError propagate
@@ -400,9 +407,16 @@ SHELL_TOOL_MARKERS = ("bash", "start_process", "interact_with_process",
 SHELL_COMMAND_FIELDS = ("command", "cmd", "input", "script")
 
 
-def workbook_name():
-    return (os.environ.get("ORA_WORKBOOK_GUARD_NAME")
-            or DEFAULT_WORKBOOK_NAME).strip().lower()
+def workbook_names():
+    """Lower-cased basenames to guard. The ORA_WORKBOOK_GUARD_NAME test seam REPLACES
+    the built-in list with its single name (tests pin a stand-in name)."""
+    override = (os.environ.get("ORA_WORKBOOK_GUARD_NAME") or "").strip()
+    names = (override,) if override else DEFAULT_WORKBOOK_NAMES
+    return tuple(n.strip().lower() for n in names if n.strip())
+
+
+def _contains_workbook_name(text):
+    return any(name in text for name in workbook_names())
 
 
 # Drive-letter absolute path token, either slash style, stopping at whitespace or a
@@ -443,7 +457,6 @@ def _names_workbook(text):
     """
     if not text:
         return False
-    name = workbook_name()
     lowered = text.replace("\\", "/").lower()
     variants = (
         lowered,
@@ -451,11 +464,11 @@ def _names_workbook(text):
         re.sub(r"\^(.)", r"\1", lowered),
         re.sub(r"\^(.)", r"\1", lowered.replace('"', "").replace("'", "")),
     )
-    if any(name in v for v in variants):
+    if any(_contains_workbook_name(v) for v in variants):
         return True
     for token in _WIN_ABS_PATH_RE.findall(text):
         real_base = _short_name_basename(token)
-        if real_base and name in real_base:
+        if real_base and _contains_workbook_name(real_base):
             return True
     return False
 
@@ -765,8 +778,8 @@ def main():
             targets = []
         for target in targets:
             if _names_workbook(target.raw_path) or (
-                    target.path and workbook_name() in
-                    os.path.basename(target.path).lower()):
+                    target.path and _contains_workbook_name(
+                        os.path.basename(target.path).lower())):
                 hit = ("file-tool write aimed at the ORA Master Workbook",
                        "%s (%s via %s)" % (target.raw_path, target.operation,
                                            tool_name))
