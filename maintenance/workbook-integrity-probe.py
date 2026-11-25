@@ -51,8 +51,9 @@ import re
 import sys
 import zipfile
 
+# Moved 2026-11-25 (Gabriel): the eric spreadsheets "Template" copy is stale.
 DEFAULT_PATH = ("C:\\Users\\Owner\\OneDrive - Oxford Capital Partners\\"
-                "eric spreadsheets\\Master Excel Template Company Wide -- Oxford.xlsx")
+                "Business\\Property Financials\\Master Excel Company Wide -- Oxford.xlsx")
 
 TARGET_RE = re.compile(r'Target="([^"]+)"')
 APPLICATION_RE = re.compile(r"<Application>(.*?)</Application>", re.DOTALL)
