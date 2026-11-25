@@ -9,7 +9,16 @@ BACKGROUND (do not re-derive): on 2026-11-24 every ZeOoba repo's `main` was give
 
 RULES: never fabricate a run result — every claim comes from a `gh` command you ran this run. Never change any other repo, any other protection field (enforce_admins, allow_force_pushes, allow_deletions, reviews), or any workflow file. Never touch billing settings. Run every command unpiped into a file under $TEMP and read the file; cite exit codes only from unpiped runs.
 
-STEP 0 — run date: compute once with `date '+%A %Y-%m-%d'` and reuse that exact value everywhere below.
+STEP 0 — guard, then run date (double-fire guard added 2026-11-25; see scheduled-tasks/_shared/README-DOUBLE-FIRE-GUARD.md). Before anything else, compute RUN_ID once with `date +%s`, then claim today's run (one line, as written):
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-csm-ci-required-when-billing-fixed --block main --run-id <run_id> --ttl-min 30
+  - Exit 0 → proceed. Run date = the claim output's `etDate` (YYYY-MM-DD, ET), reused VERBATIM everywhere below as <run date>. Never do timezone math in the shell.
+  - Exit 10 → today's run already completed. End silently: no `gh` call, no email. This is a normal skip, not a miss.
+  - Exit 11 → another run holds today's claim. Stand down the same way.
+  - Any other exit code → tooling failure: fail open. Run the steps without a claim, use `date '+%Y-%m-%d'` as <run date>, call neither complete nor fail, and quote the code in the run summary.
+  CLOSING THE CLAIM (only a run that got exit 0; a run that stood down calls neither). Every way this run ends — each "exit", "exit silently" and "stop" below, and the normal end after STEP 6 — first runs:
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py complete --task ora-csm-ci-required-when-billing-fixed --block main --run-id <run_id>
+  Only if the run aborts on an unexpected error before reaching one of those ends, run instead:
+  python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py fail --task ora-csm-ci-required-when-billing-fixed --block main --run-id <run_id> --error "<what broke>"
 
 STEP 1 — already done? `gh api repos/ZeOoba/ora-county-sales-monitor/branches/main/protection` and read `.required_status_checks.checks[].context`. If `ci` is already present: the job is done (by this task earlier or by a human). Go to STEP 6 (self-disable) and send NO email. Exit.
 
