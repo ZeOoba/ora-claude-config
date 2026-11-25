@@ -1,0 +1,43 @@
+---
+name: ora-csm-ci-required-when-billing-fixed
+description: Daily 11:37 ET until done: when GitHub Actions billing for the private repo ZeOoba/ora-county-sales-monitor works again (a ci run that actually started and passed), re-add `ci` as a required status check on main, verify, mail ggoldberg once. Silent no-op otherwise. Gabriel in-turn 2026-11-24. [MODEL: UNVERIFIABLE | checked 2026-11-24]
+---
+
+You are running the ORA scheduled task `ora-csm-ci-required-when-billing-fixed` (CC/MCP fleet, registered 2026-11-24 on Gabriel's in-turn instruction: "do the same for ora-county-sales-monitor once billing is fixed").
+
+BACKGROUND (do not re-derive): on 2026-11-24 every ZeOoba repo's `main` was given required status checks. ZeOoba/ora-county-sales-monitor is PRIVATE, so its GitHub Actions minutes are billed, and every `ci` run since at least 2026-11-14 failed before starting with the annotation "The job was not started because recent account payments have failed or your spending limit needs to be increased." Requiring `ci` then would have frozen all merges, so Gabriel ruled: keep force-push/deletion blocking and admin enforcement, but do NOT require `ci` until billing works. This task makes that change once billing works. It changes ONE GitHub setting on ONE repo and nothing else.
+
+RULES: never fabricate a run result — every claim comes from a `gh` command you ran this run. Never change any other repo, any other protection field (enforce_admins, allow_force_pushes, allow_deletions, reviews), or any workflow file. Never touch billing settings. Run every command unpiped into a file under $TEMP and read the file; cite exit codes only from unpiped runs.
+
+STEP 0 — run date: compute once with `date '+%A %Y-%m-%d'` and reuse that exact value everywhere below.
+
+STEP 1 — already done? `gh api repos/ZeOoba/ora-county-sales-monitor/branches/main/protection` and read `.required_status_checks.checks[].context`. If `ci` is already present: the job is done (by this task earlier or by a human). Go to STEP 6 (self-disable) and send NO email. Exit.
+
+STEP 2 — has billing recovered? List recent runs of the `ci` workflow: `gh run list -R ZeOoba/ora-county-sales-monitor --workflow ci.yml --limit 20 --json databaseId,createdAt,headBranch,event,status,conclusion`. For each COMPLETED run created on/after 2026-11-24, read `gh run view <id> -R ZeOoba/ora-county-sales-monitor --json jobs` and classify:
+  - NOT STARTED (billing block): the `ci` job has an empty `steps` array (or the check-run annotation mentions payments / spending limit). This is NOT a code failure.
+  - STARTED-SUCCESS: the `ci` job has steps and conclusion `success`.
+  - STARTED-FAILURE: the `ci` job has steps and conclusion `failure`.
+  Ignore `cancelled` and in-progress/queued runs except as noted in STEP 3.
+
+STEP 3 — decide:
+  a) If at least one STARTED-SUCCESS run exists → billing works and ci can pass. Go to STEP 4.
+  b) Else if a STARTED-FAILURE run exists (billing works, but the code fails) → do NOT require ci (that would block merges on a real failure Gabriel has not seen). Read state file C:\Users\Owner\.claude\maintenance\_state\csm-ci-required-watch.json (create `{}` if absent). If its `notifiedFailureRunId` already equals the newest STARTED-FAILURE run id, exit silently. Otherwise send ONE email (STEP 5 send path) with subject `[ORA] ora-county-sales-monitor ci runs again but fails — <run date>` and a 3-line body: billing appears fixed (the run started), ci failed on branch <headBranch> (run URL https://github.com/ZeOoba/ora-county-sales-monitor/actions/runs/<id>), `ci` was NOT made required; reply/run a session to fix and the task will add the requirement on the first green run. Then write `{"notifiedFailureRunId": <id>, "at": "<run date>"}` to the state file. Exit.
+  c) Else (only NOT STARTED runs, or none since 2026-11-24) → billing still blocked or untested. Probe once: pick the newest `ci` run on branch `main` (any date) and run `gh run rerun <id> -R ZeOoba/ora-county-sales-monitor` (re-running a run is harmless; if billing is still blocked it fails immediately without starting). Do not wait for it — tomorrow's run reads its result. Exit silently. No email.
+
+STEP 4 — make the change. Write this JSON to $TEMP\csm-rsc.json:
+  {"strict": false, "checks": [{"context": "ci", "app_id": 15368}]}
+  then `gh api -X PATCH repos/ZeOoba/ora-county-sales-monitor/branches/main/protection/required_status_checks --input <that file>`. That PATCH is expected to return 404 "Required status checks not enabled" (the setting was removed outright on 2026-11-24). In that case re-apply the WHOLE branch protection with one PUT that keeps every other field as it was: write $TEMP\csm-prot.json as
+  {"required_status_checks": {"strict": false, "checks": [{"context": "ci", "app_id": 15368}]}, "enforce_admins": true, "required_pull_request_reviews": null, "restrictions": null, "allow_force_pushes": false, "allow_deletions": false}
+  and run `gh api -X PUT repos/ZeOoba/ora-county-sales-monitor/branches/main/protection --input <that file>`. Before the PUT, read the current protection and confirm it still matches those other fields (enforce_admins true, force-push and deletion blocked, no required reviews); if it does not (someone changed it since 2026-11-24), do not PUT — go to QUESTIONS FOR GABRIEL. Never use the `.../required_status_checks/contexts` endpoint (it drops the GitHub Actions app pin). If the PATCH or PUT fails for any other reason, stop and email the error text verbatim (STEP 5 send path, subject `[ORA] FAILED: could not re-require ci on ora-county-sales-monitor — <run date>`), then exit.
+  VERIFY by reading back `gh api repos/ZeOoba/ora-county-sales-monitor/branches/main/protection` and confirming: required checks = exactly [`ci`] with app_id 15368; enforce_admins.enabled = true; allow_force_pushes.enabled = false; allow_deletions.enabled = false. If any differs, email the read-back JSON as a failure (subject as above) and exit.
+
+STEP 5 — report success. Send via Outlook COM, the SOLE send path:
+  powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Owner\.claude\scheduled-tasks\_shared\send-via-outlook.ps1" -To "ggoldberg@oxfordra.net" -Subject "[ORA] ora-county-sales-monitor: ci is a required check again — <run date>" -Body "<body>" -DedupTaskId ora-csm-ci-required-when-billing-fixed -DedupPeriodKey <ET date from PowerShell `Get-Date -Format yyyy-MM-dd`>
+  This is contract mode (rules.md §2), and every email in this task (STEP 3b, STEP 5, QUESTIONS FOR GABRIEL) uses this same command with its own subject and body.
+  Body (plain, ≤4 lines): Actions billing works again (green run <run URL> on <headBranch>). `ci` is now a required status check on ZeOoba/ora-county-sales-monitor main (admins included; force-push and deletion still blocked), verified by read-back. This task (ora-csm-ci-required-when-billing-fixed) has tried to disable itself; if it is still enabled, it is a harmless daily no-op and can be retired.
+  TO ggoldberg@oxfordra.net ONLY, no cc. Run the send command once only, whatever its exit code: the script handles transient COM failures itself, and an exit 6 means the message MAY have gone out. On any non-zero exit, quote the script's output line in the run summary, write the failure to C:\Users\Owner\.claude\maintenance\_state\csm-ci-required-watch.json as `{"sendFailed": "<run date>", "change": "done"}` and continue (do not undo the change).
+  Then update the memory note C:\Users\Owner\.claude\projects\C--Users-Owner-oxford-command-center\memory\branch-protection-rollout-2026-11-24.md: in the ora-county-sales-monitor bullet, append " UPDATE <run date>: ci re-required by ora-csm-ci-required-when-billing-fixed after billing recovered (verified)." Edit only that bullet.
+
+STEP 6 — self-disable. Call `update_scheduled_task` with taskId `ora-csm-ci-required-when-billing-fixed` and `enabled: false`. In an unattended run this call may wait for approval that never comes; that is acceptable — STEP 1 makes every later run a silent no-op. Do not retry it and do not edit any registry file.
+
+QUESTIONS FOR GABRIEL: if anything above is ambiguous at run time (e.g. the workflow was renamed and no `ci` job exists, the repo was archived or made public, protection was removed entirely), change nothing, and email one short message describing exactly what you saw (subject `[ORA] ora-county-sales-monitor ci watch needs a decision — <run date>`), then exit.
