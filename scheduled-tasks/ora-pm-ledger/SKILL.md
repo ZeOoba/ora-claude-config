@@ -1189,12 +1189,12 @@ unreachable source is likewise recorded as a COVERAGE GAP, not dropped.
 the 2026-07-16 run declared the ORA Master Workbook "not locally resolvable
 from this surface" without trying either of two paths that do work from
 CC/MCP: (1) the workbook is OneDrive-synced locally at
-`C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets\Master Excel Template Company Wide -- Oxford.xlsx` (2026-07-17: `eric spreadsheets\` is in the OneDrive Business/Personal split's Ambiguous bucket — deliberately NOT moved, still at OneDrive root — do not prepend `Business\` to this path)
+`C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\Property Financials\Master Excel Company Wide -- Oxford.xlsx` (2026-11-25, Gabriel: the maintained workbook moved here and dropped "Template" from its name; the old `eric spreadsheets\Master Excel Template …` copy is stale — do NOT read it)
 (same path `ora-master-workbook-ingest` reads directly — verified present
 2026-07-16, `lastModifiedDateTime` 2026-07-15) — read it cell-accurately via
 `mcp__Desktop_Commander__read_file`, exactly as that task does; (2) failing
 that, `sharepoint_search`/`read_resource` also reaches it directly (confirmed
-2026-07-16) under `eric spreadsheets/` in egoldberg's SharePoint. Try both
+2026-07-16; since 2026-11-25 search the new filename `Master Excel Company Wide -- Oxford.xlsx` under `Business/Property Financials/`, never the stale `eric spreadsheets/` Template copy). Try both
 before recording the DSOR itself as a COVERAGE GAP. **The Monthly Checklist
 is NOT a separate file — corrected 2026-07-16 (Gabriel-confirmed):** it is a
 sheet (`Monthly Checklist`, plus a mirrored `EXPORT_MonthlyChecklist` tab)
