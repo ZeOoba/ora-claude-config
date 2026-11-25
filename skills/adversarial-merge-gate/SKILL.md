@@ -118,6 +118,11 @@ Scope and staging is substrate-independent, which is part of why it yields most.
 All five in **one message** so they run concurrently. Prompt templates:
 `agent-prompts.md` in this directory.
 
+Pin `model: "opus"` (Opus 5.5) on every mandate. Reviewer ≥ implementer, and never below
+Opus 5.5 for financial, governor, confidential or security-gate code. Never `sonnet`/`haiku`
+for a mandate: the read-only cost downshift covers search and lookup, not review. If Opus 5.5
+is unavailable, stop and ask the user. Do not swap the tier silently.
+
 Right before dispatch (after writing any override of your own), list
 `~/.claude/hooks/sessions/<your session>/` and `overrides/` with names, modification
 times and the contents of any `override`; list `reviews/` recursively; and record the
