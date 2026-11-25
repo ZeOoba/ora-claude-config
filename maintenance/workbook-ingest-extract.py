@@ -21,8 +21,9 @@ import json
 import os
 import sys
 
-DEFAULT_PATH = (r"C:\Users\Owner\OneDrive - Oxford Capital Partners\eric spreadsheets"
-                "\\Master Excel Template Company Wide -- Oxford.xlsx")
+# Moved 2026-11-25 (Gabriel): the eric spreadsheets "Template" copy is stale.
+DEFAULT_PATH = (r"C:\Users\Owner\OneDrive - Oxford Capital Partners\Business\Property Financials"
+                "\\Master Excel Company Wide -- Oxford.xlsx")
 TOL = 0.01  # dollars
 
 # Rent-roll "Property" label -> Property NOI line "#" (Sepich rolls five into line 7).
