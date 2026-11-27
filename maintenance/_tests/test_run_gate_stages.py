@@ -195,7 +195,7 @@ check("spec: gate is run through run-gate-stages.py", "maintenance/run-gate-stag
 check("spec: forbids piping the gate through tail/head", "tail" in spec_text and "NEVER with `npm run gate`" in spec_text)
 check("spec: the alert email is sent with -SubjectFile/-BodyFile from the runner",
       "-SubjectFile <log-dir>/email-subject.txt" in spec_text and "-BodyFile <log-dir>/email-body.txt" in spec_text)
-check("spec: claim line records the scheduled time", "claim --task ora-full-gate-weekly" in spec_text and "--scheduled-et 11:30" in spec_text)
+check("spec: claim line records the scheduled time", "claim --task ora-full-gate-weekly" in spec_text and "--scheduled-et 02:10" in spec_text)  # cron 10 2 * * * since 2026-11-24 (77e9a2b)
 check("spec: recipients unchanged (ggoldberg only, no cc)", "ggoldberg@oxfordra.net ONLY (no cc, never ze@)" in spec_text)
 
 n_fail = results.count(False)

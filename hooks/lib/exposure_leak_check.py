@@ -12,7 +12,7 @@ Gabriel's ruling the same day: untrack the files and guard the push now (history
 separate decision). The files are untracked and gitignored. This check stops them, or the same
 data in another file, from being pushed again.
 
-FOUR RULES, all over ADDED content only ('+' lines of the pinned `git log` the caller runs --
+FIVE RULES, all over ADDED content only ('+' lines of the pinned `git log` the caller runs --
 see GIT_LOG_ARGS -- plus rename / copy targets). Removed lines are the fix, not the leak, so
 the push that deletes data passes.
   1. EXPOSURE PATH   -- content added to, or a file renamed / copied onto, a path matching
@@ -34,13 +34,25 @@ the push that deletes data passes.
                         denylist ~/.ora-private/exposure-denylist.json {"strings": [...]}
                         (lender loan numbers and anything else worth guarding).
 
+  5. THIRD-PARTY EMAIL IN TASK SPEC (2026-11-25) -- an added line in a scheduled-task spec
+                        (scheduled-tasks/..., _scheduled_tasks_backup/..., archive copies at
+                        any depth) carrying an email address that is not ORA's own domain, a
+                        reserved test domain, or a listed automated sender (SERVICE_ADDRESSES).
+                        WHY: ora-task-integrity-guard (guard.ps1, mirror sync) copies each
+                        LAMS task's live SKILL.md -- which lives in OneDrive and still holds
+                        real third-party addresses -- verbatim into _scheduled_tasks_backup/.
+                        On 2026-11-25 that re-dirtied five tracked mirrors the #454 scrub had
+                        replaced with [contact Cnn] placeholders. Those five are now untracked
+                        (.gitignore); this rule stops the next such mirror reaching the remote.
+                        Needs no private input; always runs.
+
 PATH PARSING. The caller pins `--src-prefix=a/ --dst-prefix=b/ -c core.quotePath=false`, so a
 host's diff.noprefix / diff.srcPrefix cannot change the headers. The path is taken from the
 `+++ b/` (or, for a deletion, `--- a/`) line, C-unquoted when git quotes it, never from the
 `diff --git` line, whose split on " b/" is ambiguous for a directory ending in " b".
 `--no-textconv --no-ext-diff` stop a local textconv driver hiding content.
 
-FAIL MODES (same contract as rct_leak_check). Rules 1-3 need no private input and always run.
+FAIL MODES (same contract as rct_leak_check). Rules 1-3 and 5 need no private input and always run.
 Rule 4: no loan-terms file and no denylist on this machine (CI, fresh clone) -> its needles are
 None and the caller SKIPS rule 4, saying so. A source that EXISTS but cannot be read, parsed or
 yields nothing, a set-but-missing env path, or a repo root that cannot be resolved (so the
@@ -52,6 +64,10 @@ RESIDUAL (stated, not hidden): phone numbers outside memory paths and non-NANP f
 figures re-typed in another form ("$1.2M", words), compressed / UTF-16 blobs, annotated-tag
 messages, and history already on the remote are not caught. Editing a line that already holds
 a guarded figure counts as adding it, so such a push blocks until the figure is moved out.
+Rule 5 also misses deliberate obfuscation (%40, &#64;, "[at]", a backslash-escaped dot), IP-literal domains,
+an address chained after an allowed one, contacts in compressed blobs, and non-email PII
+(phones, policy numbers) in specs -- for those, keep the file untracked or put the literal in
+the rule-4 private denylist.
 Stdlib only. ASCII-only (non-ASCII dash code points are built with chr()).
 """
 import fnmatch
@@ -59,6 +75,7 @@ import json
 import os
 import re
 import subprocess
+import unicodedata
 
 # Arguments the caller MUST use for the `git log` whose output feeds scan_diff().
 GIT_LOG_ARGS = ["-c", "core.quotePath=false", "log", "-p", "--cc", "--text", "--no-color",
@@ -106,6 +123,44 @@ STAGE_KEY_RE = re.compile(r'"stage"\s*:', re.I)
 
 DEBT_FLOOR = 100000
 
+# Rule 5. Task-spec paths, lower-cased, at any depth (archive copies included). Any SKILL.md
+# counts: a task archived under a path without a scheduled-tasks segment (REFUTE round 1) and
+# the OneDrive "Scheduled" layout are both specs; skill sources carry no contacts either.
+TASK_SPEC_GLOBS = (
+    "*skill.md",
+    "_scheduled_tasks_backup/*", "*/_scheduled_tasks_backup/*",
+    "scheduled-tasks/*", "*/scheduled-tasks/*",
+    "scheduled_tasks/*", "*/scheduled_tasks/*",
+    "scheduled/*", "*/scheduled/*",
+)
+# Unicode-aware (REFUTE round 1: accented local parts, IDN domains and quoted local parts were
+# missed). Local part: a quoted string, or a run of anything that is not whitespace, '@' or a
+# delimiter, starting at a delimiter. Domain: letter/digit/hyphen labels ending in a LETTERS-only
+# TLD, so numeric version pins (pkg@1.2.3) and scoped packages / decorators (@scope/x, @media)
+# do not match. A tag pin ending in letters (pkg@next.canary) DOES match and blocks (fail-safe).
+_DELIM = r"\s<>()\[\]\"',;:=/`*|"  # backtick / * / | : markdown code, emphasis, tables
+EMAIL_RE = re.compile(
+    r"(?<![^" + _DELIM + r"])"
+    r"(\"[^\"\n]+\"|[^@" + _DELIM + r"]+)"
+    r"@((?:[^\W_]|-)+(?:\.(?:[^\W_]|-)+)*\.[^\W\d_]{2,})")
+# Stripped / folded before matching: NUL (UTF-16 text read as UTF-8 interleaves NULs),
+# zero-width characters, and the fullwidth / small commercial-at forms.
+_EMAIL_FOLD = {0x00: None, 0x200B: None, 0x200C: None, 0x200D: None, 0x2060: None,
+               0xFEFF: None, 0x00AD: None, 0xFF20: "@", 0xFE6B: "@"}
+# ORA's own domain (and subdomains), plus RFC 2606 / 6761 reserved names.
+ALLOWED_EMAIL_DOMAINS = ("oxfordra.net", "example.com", "example.org", "example.net",
+                         "localhost")
+ALLOWED_EMAIL_TLDS = (".example", ".test", ".invalid", ".localhost")
+# Automated / no-reply senders named in task specs as filters, not people. Add only a
+# role mailbox of a platform, never a person's address.
+SERVICE_ADDRESSES = frozenset({
+    "leads@loopnet.com",
+    "notifications@github.com",
+    "noreply@anthropic.com",
+    "git@github.com",  # SSH remote user, not a mailbox
+    "attacker@evilhost.com",  # prompt-injection example text, not a contact
+})
+
 
 class ExposureSourceError(Exception):
     """A private source exists but is unusable -- the caller must BLOCK."""
@@ -122,6 +177,26 @@ def is_exposure_path(path):
 
 def is_memory_path(path):
     return fnmatch.fnmatchcase(_norm(path), MEMORY_GLOB)
+
+
+def is_task_spec_path(path):
+    p = _norm(path)
+    return any(fnmatch.fnmatchcase(p, pat) for pat in TASK_SPEC_GLOBS)
+
+
+def _third_party_email(text):
+    # NFKC composes NFD marks (u + U+0308 -> one letter) and folds fullwidth forms.
+    for mt in EMAIL_RE.finditer(unicodedata.normalize("NFKC", text.translate(_EMAIL_FOLD))):
+        addr = (mt.group(1) + "@" + mt.group(2)).lower()
+        dom = mt.group(2).lower()
+        if addr in SERVICE_ADDRESSES:
+            continue
+        if any(dom == d or dom.endswith("." + d) for d in ALLOWED_EMAIL_DOMAINS):
+            continue
+        if dom.endswith(ALLOWED_EMAIL_TLDS):
+            continue
+        return True
+    return False
 
 
 def _private_phone(text):
@@ -319,6 +394,8 @@ def scan_diff(body, needles=None):
             hits.add((path, "exposure-path"))
         if is_memory_path(path) and _private_phone(text):
             hits.add((path, "phone-in-memory"))
+        if is_task_spec_path(path) and _third_party_email(text):
+            hits.add((path, "third-party-email-in-task-spec"))
         if m and m.search(text):
             hits.add((path, "debt-figure"))
     return sorted(hits)

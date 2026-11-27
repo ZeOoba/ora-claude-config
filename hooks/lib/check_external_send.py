@@ -56,7 +56,20 @@ def main():
     except SystemExit:
         return 3
 
-    external = [line.strip() for line in sys.stdin if line.strip()]
+    # A leading UTF-8 BOM is NOT part of a recipient (review 2026-11-23, PR #492): Windows PowerShell 5.1's
+    # Process.StandardInput writer uses [Console]::InputEncoding and, when that is UTF-8, emits a BOM first,
+    # so the first recipient arrived as U+FEFF+address and never matched its token -- every authorized
+    # external send was denied. Read raw bytes, drop the BOM, then decode exactly as sys.stdin would have
+    # (same encoding; undecodable input still fails closed below). U+FEFF is also stripped per line.
+    raw = sys.stdin.buffer.read()
+    if raw.startswith(b"\xef\xbb\xbf"):
+        raw = raw[3:]
+    try:
+        text = raw.decode(sys.stdin.encoding or "utf-8")
+    except (UnicodeDecodeError, LookupError):
+        sys.stderr.write("check_external_send: recipients on stdin are not decodable; refusing\n")
+        return 3
+    external = [s for s in (line.strip().lstrip("\ufeff").strip() for line in text.splitlines()) if s]
     if not external:
         # Caller invoked this with no recipients on stdin -- that's a caller bug (this
         # script is only meant to run when there IS at least one external recipient), not

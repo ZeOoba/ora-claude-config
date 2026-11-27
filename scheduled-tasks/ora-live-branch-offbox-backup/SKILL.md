@@ -1,6 +1,6 @@
 ---
 name: ora-live-branch-offbox-backup
-description: Daily off-box backup of the live ~/.claude branch: runs maintenance/push-live-backup.py, which pushes live/primary-checkout HEAD to origin backup/live-primary with an explicit --force-with-lease through the normal pre-push gates (shim allowlist + compressed-scan canary; never --no-verify). Emails ggoldberg@oxfordra.net ONLY on a non-success verdict; silent on PUSHED/UP_TO_DATE. Not claim-bearing. [MODEL: UNVERIFIABLE | checked 2026-11-09]
+description: Daily off-box backup of the live ~/.claude branch: runs maintenance/push-live-backup.py, which pushes live/primary-checkout HEAD to origin backup/live-primary with an explicit --force-with-lease through the normal pre-push gates (shim allowlist + compressed-scan canary; never --no-verify). Emails ggoldberg@oxfordra.net ONLY on a non-success verdict; silent on PUSHED/UP_TO_DATE. Not claim-bearing. [MODEL: UNVERIFIABLE | checked 2026-11-20]
 ---
 
 CONNECTOR SCOPE: none -- this task uses no connectors; it runs a local script and, on failure only, sends via the local Outlook COM script. Do not call Notion, Microsoft 365, HubSpot, Netlify, Context7, Claude Code Remote, or any other connector, even if they are available in this session. If the local shell or Outlook COM is unavailable, stop and report that in the run summary rather than reaching for a connector.

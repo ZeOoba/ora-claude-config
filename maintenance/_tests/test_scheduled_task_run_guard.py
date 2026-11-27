@@ -225,6 +225,19 @@ NO_SIDE_EFFECT_REVIEWED = {
 # Listing one is a claim that someone READ it and confirmed the claim precedes every
 # side effect. A NEW guarded task whose ordering is unverifiable FAILS until read.
 ORDERING_VERIFIED_BY_HAND = {
+    # Read by hand 2026-11-25 (guard added the same day, Gabriel in-turn "Apply it here"): the
+    # sole claim is the Step 0 line at :9, the run's first action. Step 1 (:18) only READS the
+    # GitHub Support ticket in Chrome and never types or clicks anything that changes it. Step 2
+    # (:20-25) only runs git ls-remote, cat-file, awk and grep into $TEMP (line refs re-checked
+    # 2026-11-25 after the two-rewrite count fix). The one side effect is the Step 3 email at
+    # :29, after the claim.
+    "ora-ghsupport-5038931-check": "claim@9 (Step 0) precedes email@29 (Step 3); Steps 1-2 read-only",
+    # Read by hand 2026-11-25 (guard added the same day): the sole claim is the step 0 line at
+    # :14, the run's first action (--slot-times, one claim per cron slot). Step 1 only sets the
+    # run date. The side effects are the sync-memory.py commit+push to the PRIVATE repo at :24
+    # (step 2, an inline code span the regex cannot place) and the failure email at :29
+    # (step 5); both come after the claim.
+    "ora-memory-private-backup": "claim@14 (step 0) precedes sync push@24 (step 2) and email@29 (step 5)",
     # Read by hand 2026-10-08 (v0.6 digest-reader rewrite): the sole claim is the unfenced
     # STEP -1 line at :9, the run's first action. Everything after only READS the Notion
     # worker DBs; the one side effect is the unfenced prose "Send via Outlook COM" at :35,

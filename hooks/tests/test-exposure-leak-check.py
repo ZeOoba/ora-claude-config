@@ -27,11 +27,28 @@ spec.loader.exec_module(elc)
 
 results = []
 
+# The pre-push scan imports this lib and BLOCKS every push if the import fails (fail-closed),
+# so the source must compile with warnings promoted to errors (gate review 2026-11-25: an
+# invalid escape in a docstring raised SyntaxWarning, an error under -W error).
+import warnings as _w  # noqa: E402
+with _w.catch_warnings():
+    _w.simplefilter("error")
+    try:
+        with open(LIB, encoding="utf-8") as _f:
+            compile(_f.read(), LIB, "exec")
+        _compiled = True
+    except (SyntaxError, SyntaxWarning) as _e:
+        _compiled = False
+        print("  compile error: %s" % _e)
+
 
 def expect(label, cond, detail=""):
     results.append((bool(cond), label))
     if not cond:
         print("  FAIL: %s %s" % (label, detail))
+
+
+expect("lib compiles with warnings as errors (fail-closed import)", _compiled)
 
 
 MEM = "projects/C--Users-Owner-OneDrive---Oxford-Capital-Partners/memory"
@@ -95,6 +112,71 @@ for label, txt in (("date", "2026-11-18"), ("bare 10 digits", "id 2025550143"),
     else:
         d = diff(MEM + "/x.md", [txt])
     expect("no phone false positive: %s" % label, elc.scan_diff(d) == [], elc.scan_diff(d))
+
+# --- rule 5: third-party email in a task spec (2026-11-25 mirror re-dirty) ----------------
+# Synthetic addresses only; the domain is deliberately not a reserved one, so it must block.
+R5 = "third-party-email-in-task-spec"
+for p in ("_scheduled_tasks_backup/ora-x/SKILL.md", "scheduled-tasks/ora-x/SKILL.md",
+          "maintenance/_archive/2026-09-22_checkout-sync/scheduled-tasks/ora-x/SKILL.md",
+          "maintenance/_archive/y/_scheduled_tasks_backup/ora-x/SKILL.md",
+          "_Scheduled_Tasks_Backup\\ora-x\\SKILL.md"):
+    expect("rule 5 blocks: %s" % p[-45:],
+           elc.scan_diff(diff(p, ["cc: jane.broker@acmebrokerage-synthetic.com"])) == [(p, R5)],
+           elc.scan_diff(diff(p, ["cc: jane.broker@acmebrokerage-synthetic.com"])))
+TS = "_scheduled_tasks_backup/ora-x/SKILL.md"
+for label, txt in (("ora domain", "to ggoldberg-synthetic@oxfordra.net"),
+                   ("ora subdomain", "x@mail.oxfordra.net"),
+                   ("example.com", "a@example.com"), ("reserved tld", "a@host.test"),
+                   ("service sender", "from:leads@loopnet.com"),
+                   ("service sender case", "Notifications@GitHub.com"),
+                   ("placeholder", "[contact C05: counsel, see contacts.local.md]"),
+                   ("no address", "email the broker"), ("removed", None)):
+    d = diff(TS, [], ["cc: jane.broker@acmebrokerage-synthetic.com"]) if txt is None \
+        else diff(TS, [txt])
+    expect("rule 5 no false positive: %s" % label, elc.scan_diff(d) == [], elc.scan_diff(d))
+# REFUTE round 1 (2026-11-25): path forms outside the first globs, address forms the first
+# regex missed, UTF-16 text, and the domain-boundary allowlist. Non-ASCII built with chr().
+for p in ("maintenance/_archive/2026-10-13_dirty-tree-triage/ora-x/SKILL.md",
+          "Scheduled/ora-x/SKILL.md", "Documents/Claude/Scheduled/ora-x/SKILL.md",
+          "scheduled_tasks/ora-x/SKILL.md", "skills/some-skill/SKILL.md",
+          "Scheduled/ora-x/notes.md", "scheduled_tasks/ora-x/README.md",
+          "maintenance/_archive/z/_scheduled_tasks_backup/ora-x/notes.md"):
+    got = elc.scan_diff(diff(p, ["cc: jane.broker@acmebrokerage-synthetic.com"]))
+    expect("rule 5 blocks (wider path): %s" % p[-45:], got == [(p, R5)], got)
+ZW, FW = chr(0x200B), chr(0xFF20)
+for label, txt in (("non-ascii local", "jos" + chr(0xE9) + "@acme-synth.com"),
+                   ("IDN domain", "jane@m" + chr(0xFC) + "nchen-synth.de"),
+                   ("quoted local", '"jane broker"@acme-synth.com'),
+                   ("zero-width before @", "jane" + ZW + "@acme-synth.com"),
+                   ("fullwidth at", "jane" + FW + "acme-synth.com"),
+                   ("utf-16le interleaved", "\x00".join("jane@acme-synth.com")),
+                   ("look-alike prefix domain", "x@evil-oxfordra.net"),
+                   ("allowlisted domain as prefix", "x@oxfordra.net.evil-synth.com"),
+                   ("look-alike service sender", "leads@loopnet.com.evil-synth.com"),
+                   ("uppercase + mailto", "MAILTO:JANE@ACME-SYNTH.COM"),
+                   ("address in code span", "cc `jane@acme-synth.com`"),
+                   ("address in table cell", "| jane@acme-synth.com |"),
+                   ("small commercial at", "jane" + chr(0xFE6B) + "acme-synth.com"),
+                   ("NFD IDN domain", "jane@mu" + chr(0x0308) + "nchen-synth.de"),
+                   ("soft hyphen in domain", "jane@acme" + chr(0x00AD) + "-synth.com")):
+    got = elc.scan_diff(diff(TS, [txt]))
+    expect("rule 5 blocks form: %s" % label, got == [(TS, R5)], got)
+for label, txt in (("version pin", "pip install pytest@9.1.1"),
+                   ("scoped npm package", "npm i @anthropic-ai/sdk"),
+                   ("ssh remote", "git@github.com:ZeOoba/ora-claude-config.git"),
+                   ("css at-rule", "@media (max-width: 600px)"),
+                   ("decorator", "    @pytest.fixture"),
+                   ("uppercase ora address", "X@OXFORDRA.NET"),
+                   ("version pin, digit tld", "pkg@1.2.33"),
+                   ("domain-only filter in code", "filter `from:@acme-synth.com` or `@acme-synth.com`"),
+                   ("service sender in code", "`notifications@github.com` and **leads@loopnet.com**")):
+    got = elc.scan_diff(diff(TS, [txt]))
+    expect("rule 5 no false positive: %s" % label, got == [], got)
+expect("rule 5 is scoped to task specs (README email not flagged)",
+       elc.scan_diff(diff("README.md", ["jane.broker@acmebrokerage-synthetic.com"])) == [])
+expect("rule 5 report never echoes the address",
+       all("acmebrokerage" not in h[0] + h[1]
+           for h in elc.scan_diff(diff(TS, ["jane.broker@acmebrokerage-synthetic.com"]))))
 # --- path parsing ---------------------------------------------------------------------------
 quoted = "\n".join([C1, "", "    msg", "", 'diff --git "a/%s/caf\\303\\251.md" "b/%s/caf\\303\\251.md"' % (MEM, MEM),
                     'new file mode 100644', '--- /dev/null', '+++ "b/%s/caf\\303\\251.md"' % MEM,
