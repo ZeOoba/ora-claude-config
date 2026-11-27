@@ -3,7 +3,7 @@ name: ora-ghsupport-5038931-check
 description: One-time 2026-11-27: check GitHub Support ticket #5038931 (refs/pull purge for ZeOoba/ora-claude-config) and count PR refs still on pre-purge commits; email ggoldberg@ only.
 ---
 
-CONNECTOR SCOPE: Claude in Chrome (read-only, support.github.com only) plus local shell and the Outlook COM send script. Do not call Notion, Microsoft 365, HubSpot, Netlify or any other connector.
+CONNECTOR SCOPE: Claude in Chrome (read-only, help.github.com only: the GitHub Support ticket pages are served there, and support.github.com links redirect to it, verified 2026-11-27) plus local shell and the Outlook COM send script. Do not call Notion, Microsoft 365, HubSpot, Netlify or any other connector.
 
 Step 0 - double-fire guard (added 2026-11-25; see scheduled-tasks/_shared/README-DOUBLE-FIRE-GUARD.md). Before anything else, compute RUN_ID once with `date +%s`, then claim (one line, as written):
   python C:/Users/Owner/.claude/scheduled-tasks/_shared/block-sentinel.py claim --task ora-ghsupport-5038931-check --block main --run-id <run_id> --ttl-min 30
