@@ -545,7 +545,343 @@ def _fallback_tokenize_lines(lines, lo, hi, segs):
         segs.extend(_tokenize_pieces(line, strict=False))
 
 
-def tokenize_cmd_segments(cmd):
+# ---------------------------------------------------------------- PowerShell dialect
+# Review 2026-11-27 (two Important findings on #500, which routed PowerShell, Desktop
+# Commander, terminal and Windows-MCP commands through the bash-rules tokenizer above):
+#   1. A PowerShell backtick is the ESCAPE character, not command substitution. The bash
+#      splitter opened a substitution at the backtick in `-m "a`nb"; git reset --hard` and
+#      never closed it, so the reset was swallowed into the commit's segment.
+#   2. POSIX shlex drops backslashes, so `git -C C:\Users\x reset --hard` reached the guard
+#      as `-C C:Usersx`, an unresolvable directory, and the guard allowed.
+# So a PowerShell-family tool gets its own scanner, and a tool whose shell is not known
+# (Desktop Commander, the terminal panel) is read BOTH ways by the caller.
+
+def shell_dialects(tool_name):
+    """Dialects to read `tool_name`'s command line in; a guard acts on EITHER reading.
+    Bash -> bash only (unchanged). EVERY other shell tool -> powershell AND bash.
+
+    WHY BOTH, even for the native PowerShell tool (REFUTE rounds 5-6): before this change
+    every tool's command was read with the bash rules alone. Each round that let a new
+    PowerShell reading REPLACE that one found another input it read less of than the bash
+    reading had (a lone CR, Unicode blanks, a `#` comment glued to a closing quote, control
+    characters ...) -- a false allow versus the old guard. Keeping the bash reading makes
+    the guard a superset of the old one BY CONSTRUCTION; the PowerShell reading only ADDS
+    what bash rules cannot see (backtick escapes, `git -C C:\\path`, Set-Location). Cost:
+    the bash reading's old false blocks on PowerShell syntax stay, exactly as before."""
+    if tool_name == "Bash":
+        return ("bash",)
+    return ("powershell", "bash")
+
+
+# PowerShell accepts the typographic quote characters as quotes too.
+_PS_SQ = "'\u2018\u2019\u201a\u201b"
+_PS_DQ = '"\u201c\u201d\u201e'
+_PS_DQ_ESCAPES = {"0": "\0", "a": "\a", "b": "\b", "e": "\x1b", "f": "\f", "n": "\n",
+                  "r": "\r", "t": "\t", "v": "\v"}
+_PS_BLANK = " \t\f\v\u00a0"  # kept for reference; _ps_is_blank() is what the scanner uses
+
+
+def _ps_is_blank(c):
+    """PowerShell whitespace that separates words but does not end a statement: every
+    Unicode space except CR/LF (REFUTE round 5: U+0085, U+2028, U+2029 are blanks to pwsh;
+    reading them as word characters hid `\u2028git reset --hard`)."""
+    return c.isspace() and c not in "\r\n\x1c\x1d\x1e\x1f"  # FS/GS/RS/US: not blanks to pwsh
+_PS_ASSIGN_OPS = {"=", "+=", "-=", "*=", "/=", "%=", "??="}
+_PS_GIT_NAMES = {"git", "git.exe", "git.cmd"}
+_PS_ASSIGN_TARGET_RE = re.compile(r"^(?:\[[^\]]*\])*\$")
+# Past this many nested groups an opener is read as plain text instead of recursing, so a
+# pathological `((((...` cannot raise RecursionError and make the whole line unreadable.
+_PS_MAX_DEPTH = 64
+
+
+def _ps_line_break(t, i):
+    """Index of the first CR or LF at or after i, or -1."""
+    for k in range(i, len(t)):
+        if t[k] in "\r\n":
+            return k
+    return -1
+
+
+class _PsScanner(object):
+    """Single pass over a PowerShell command line. Emits one token list per statement.
+
+    Rules (PowerShell, not bash):
+      - statement separators: newline, `;`, `|`, `||`, `&&`, and a bare `&` (the call
+        operator / background job: the command after it is a command of its own);
+        `&` right after `>` is a redirection (`2>&1`), not a separator
+      - backtick escapes the next character; backtick-newline is a line continuation;
+        inside "..." the escapes `n `t `0 ... decode, `"" and `"`" give a quote
+      - '...' is literal (backslashes kept), '' is an embedded quote
+      - @"<newline> ... <newline>"@ and the @' form are here-strings; the body is not
+        shell syntax (a `$(...)` inside the @" form still runs and is still read)
+      - `#` at the start of a word comments to end of line; <# ... #> is a block comment
+      - (...), $(...), @(...) and {...} keep their raw text as ONE token of the outer
+        statement, and every statement INSIDE them is emitted as a segment of its own,
+        before the outer one (it runs first) -- so `ForEach-Object { git reset --hard }`
+        and "$(git reset --hard)" are both visible
+      - `--%` (stop-parsing): the rest of the line is plain whitespace-split text
+    Never raises on unbalanced input: an unterminated quote/group runs to the end."""
+
+    def __init__(self, text):
+        self.t = text
+        self.n = len(text)
+        self.segs = []
+        self.depth = 0
+
+    def _emit(self, stmt):
+        toks = list(stmt)
+        # `$out = git reset --hard` / `[string]$out = ...` run git: drop the assignment.
+        while len(toks) >= 2 and _PS_ASSIGN_TARGET_RE.match(toks[0]) and toks[1] in _PS_ASSIGN_OPS:
+            toks = toks[2:]
+        # `. cmd` (dot-source) runs cmd; `&` is already a statement separator.
+        while toks and toks[0] == ".":
+            toks = toks[1:]
+        if toks:
+            head = toks[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+            if head in _PS_GIT_NAMES:
+                toks[0] = "git"
+            self.segs.append(toks)
+
+    def _single(self, i):
+        t, n = self.t, self.n
+        buf = []
+        while i < n:
+            c = t[i]
+            if c in _PS_SQ:
+                if i + 1 < n and t[i + 1] in _PS_SQ:
+                    buf.append("'")
+                    i += 2
+                    continue
+                return i + 1, "".join(buf)
+            buf.append(c)
+            i += 1
+        return n, "".join(buf)
+
+    def _double(self, i, end=None, closing=True):
+        """Body of a "..." string from i; returns (index after the close, value).
+        With closing=False (an @" here-string body) it runs to `end` instead."""
+        t = self.t
+        n = self.n if end is None else end
+        buf = []
+        while i < n:
+            c = t[i]
+            if c == "`":
+                if i + 1 < n:
+                    buf.append(_PS_DQ_ESCAPES.get(t[i + 1], t[i + 1]))
+                    i += 2
+                else:
+                    i += 1
+                continue
+            if closing and c in _PS_DQ:
+                if i + 1 < n and t[i + 1] in _PS_DQ:
+                    buf.append('"')
+                    i += 2
+                    continue
+                return i + 1, "".join(buf)
+            if c == "$" and i + 1 < n and t[i + 1] == "(" and self.depth < _PS_MAX_DEPTH:
+                j = self.parse(i + 2, ")")
+                buf.append(t[i:j])
+                i = j
+                continue
+            buf.append(c)
+            i += 1
+        return n, "".join(buf)
+
+    def _here_string(self, i):
+        """At `@"` / `@'` (i on the `@`). Returns (index after the terminator, value) or
+        None when this is not a here-string header (rest of the line must be blank)."""
+        t, n = self.t, self.n
+        if i + 1 >= n:
+            return None
+        q = t[i + 1]
+        j = i + 2
+        while j < n and _ps_is_blank(t[j]):
+            j += 1
+        # the header ends at a line break: CRLF, LF, or a lone CR (pwsh accepts all three)
+        if j < n and t[j] == "\r":
+            j += 2 if t[j + 1:j + 2] == "\n" else 1
+        elif j < n and t[j] == "\n":
+            j += 1
+        else:
+            return None
+        body_start = j
+        dq = q in _PS_DQ
+        closers = _PS_DQ if dq else _PS_SQ
+        k = body_start
+        while k < n:
+            # the terminator is `"@` / `'@` at the very start of a line
+            if t[k] in closers and k + 1 < n and t[k + 1] == "@" and (
+                    k == body_start or t[k - 1] in "\r\n"):
+                break
+            nl = _ps_line_break(t, k)
+            if nl == -1:
+                k = n
+                break
+            k = nl + 1
+        body_end = k
+        if body_end > body_start and t[body_end - 1] == "\n":
+            body_end -= 1
+        if body_end > body_start and t[body_end - 1] == "\r":
+            body_end -= 1
+        if dq:
+            _, val = self._double(body_start, end=body_end, closing=False)
+        else:
+            val = t[body_start:body_end]
+        return min(k + 2, n), val
+
+    def parse(self, i, closer=None):
+        """Statements from i until `closer` (")" or "}") or the end. Returns the index just
+        past the closer (or n)."""
+        self.depth += 1
+        try:
+            return self._parse(i, closer)
+        finally:
+            self.depth -= 1
+
+    def _parse(self, i, closer):
+        t, n = self.t, self.n
+        stmt = []
+        word = []
+        have_word = [False]
+
+        def end_word():
+            if have_word[0]:
+                stmt.append("".join(word))
+                del word[:]
+                have_word[0] = False
+
+        def add(s):
+            word.append(s)
+            have_word[0] = True
+
+        def end_stmt():
+            end_word()
+            if stmt:
+                self._emit(stmt)
+                del stmt[:]
+
+        while i < n:
+            c = t[i]
+            nxt = t[i + 1] if i + 1 < n else ""
+            if closer is not None and c == closer:
+                end_stmt()
+                return i + 1
+            if _ps_is_blank(c):
+                end_word()
+                i += 1
+                continue
+            if c == "`":
+                if nxt == "\n":
+                    end_word()
+                    i += 2
+                elif nxt == "\r":
+                    end_word()  # CRLF or a lone CR: both continue the line
+                    i += 3 if t[i + 2:i + 3] == "\n" else 2
+                elif nxt:
+                    add(nxt)
+                    i += 2
+                else:
+                    i += 1
+                continue
+            if c in ";\r\n":
+                end_stmt()
+                i += 1
+                continue
+            if c == "|":
+                end_stmt()
+                i += 2 if nxt == "|" else 1
+                continue
+            if c == "&":
+                if have_word[0] and word and word[-1].endswith(">"):
+                    add(c)  # 2>&1, *>&1
+                    i += 1
+                    continue
+                end_stmt()
+                i += 2 if nxt == "&" else 1
+                continue
+            # KNOWN GAP (REFUTE rounds 6-7, I1): pwsh also starts a comment at a `#` (or a
+            # `<#` block) glued to a closing quote/`)`/`}` or an expression-mode value
+            # (`"Done"# it's`, `$x<# it's #>`); this scanner reads it as a word character.
+            # shell_dialects() pairs this reading with the bash one, so the guard is never
+            # weaker than before -- but an apostrophe in such a comment also fools the bash
+            # reading, so `$x<# it's #>; git reset --hard` stays unguarded, as it was.
+            if not have_word[0] and c == "#":
+                j = _ps_line_break(t, i)  # a lone CR ends a comment too (REFUTE round 5)
+                i = n if j == -1 else j
+                continue
+            if not have_word[0] and c == "<" and nxt == "#":
+                j = t.find("#>", i + 2)
+                i = n if j == -1 else j + 2
+                continue
+            if not have_word[0] and t.startswith("--%", i) and (
+                    i + 3 >= n or _ps_is_blank(t[i + 3]) or t[i + 3] in "\r\n"):
+                # --% lasts to the next newline OR pipe (about_Parsing; REFUTE round 1:
+                # `echo --% x | git reset --hard` hid the piped command). The `|` / newline
+                # is left for the separator handling below.
+                j = i + 3
+                inq = False
+                while j < n and t[j] not in "\r\n" and (inq or t[j] != "|"):
+                    if t[j] == '"':
+                        inq = not inq  # REFUTE round 2, N3: `--% "a|b" | git ...`
+                    j += 1
+                end_word()
+                stmt.extend(t[i + 3:j].split())
+                i = j
+                continue
+            if c in _PS_SQ:
+                i, val = self._single(i + 1)
+                add(val)
+                continue
+            if c in _PS_DQ:
+                i, val = self._double(i + 1)
+                add(val)
+                continue
+            # `nxt and`: at end of input nxt == "" and `"" in <str>` is True (REFUTE round 1,
+            # Critical: a line ending in `@` raised IndexError and the guard allowed).
+            # a here-string opens only at the START of a word (REFUTE round 7, I-C:
+            # `echo a@'` is a plain word to pwsh, not a here-string header)
+            if c == "@" and nxt and not have_word[0] and (nxt in _PS_SQ or nxt in _PS_DQ):
+                hs = self._here_string(i)
+                if hs is not None:
+                    i, val = hs
+                    add(val)
+                    continue
+                add(c)
+                i += 1
+                continue
+            if c == "$" and nxt == "{":
+                j = t.find("}", i + 2)
+                j = n if j == -1 else j + 1
+                add(t[i:j])
+                i = j
+                continue
+            if ((c in "$@" and nxt == "(") or c in "({") and self.depth < _PS_MAX_DEPTH:
+                start = i
+                inner = i + 2 if c in "$@" else i + 1
+                j = self.parse(inner, "}" if c == "{" else ")")
+                add(t[start:j])
+                i = j
+                continue
+            if c in ")}":
+                end_word()  # a stray closer that is not ours: a word break, nothing more
+                i += 1
+                continue
+            add(c)
+            i += 1
+        end_stmt()
+        return n
+
+
+def tokenize_powershell_segments(cmd):
+    """Token lists, one per PowerShell statement in `cmd` (see _PsScanner for the rules).
+    Same output shape as the bash path, so _segment_git_subcommand_and_args and every
+    consumer work unchanged."""
+    sc = _PsScanner(cmd or "")
+    sc.parse(0, None)
+    return sc.segs
+
+
+def tokenize_cmd_segments(cmd, dialect="bash"):
     """Tokenize `cmd` LINE BY LINE, not as one whole-string shlex.split() call,
     so a bare newline (bash's statement separator, same semantics as `;`) acts
     as a segment boundary for ordinary lines. The ONE exception is a
@@ -724,7 +1060,14 @@ def tokenize_cmd_segments(cmd):
     still finds the real trailing commit via the per-line
     fallback), and every pre-existing regression test in this module's two
     consumer test suites (test-commit-provenance-guard.py,
-    test-eos-review-gate.py), all green."""
+    test-eos-review-gate.py), all green.
+
+    DIALECT (2026-11-27): `dialect="powershell"` routes to
+    tokenize_powershell_segments() instead -- PowerShell's quoting rules are not
+    bash's (see that function). The default stays "bash", so every existing
+    caller is byte-for-byte unchanged."""
+    if dialect == "powershell":
+        return tokenize_powershell_segments(cmd)
     segs = []
     lines = cmd.splitlines()
     i = 0
