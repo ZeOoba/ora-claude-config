@@ -872,18 +872,39 @@ def _protected_ignored(path):
     return bool(SENSITIVE_IGNORED_RE.search(os.path.basename(path.rstrip("/")) or path))
 
 
-def _resolve_dir(p, here):
+_PS_ENV_RE = re.compile(r"\$(?:\{env:([A-Za-z_][A-Za-z0-9_()]*)\}|env:([A-Za-z_][A-Za-z0-9_]*))", re.I)
+_PS_HOME_RE = re.compile(r"^\$home(?=$|[\\/])", re.I)
+
+
+def _ps_expand(p):
+    """PowerShell `$env:NAME` / `${env:NAME}` / a leading `$HOME` -> their values. An unset
+    variable is left as-is, so the path does not resolve (no information)."""
+    p = _PS_HOME_RE.sub(lambda m: os.path.expanduser("~").replace("\\", "/"), p)
+    return _PS_ENV_RE.sub(lambda m: os.environ.get(m.group(1) or m.group(2), m.group(0)), p)
+
+
+def _resolve_dir(p, here, dialect="bash"):
     """Real directory for a `cd`/`-C` argument, or None when it cannot be resolved.
-    Handles ~, $VARS and Git Bash /c/... paths. None means NO INFORMATION: callers
+    Handles ~, $VARS and Git Bash /c/... paths (PowerShell: also $env:NAME and $HOME).
+    None means NO INFORMATION: callers
     must stop probing rather than fall back to a stale directory (REFUTE HIGH: an
     unresolved `cd /c/...` used to probe the OLD cwd and block on ITS state)."""
-    if not p or here is None:
+    if not p:
         return None
-    p = os.path.expandvars(os.path.expanduser(p))
-    if len(p) >= 2 and p[0] == "/" and p[1].isalpha() and (len(p) == 2 or p[2] == "/"):
-        p = p[1].upper() + ":/" + p[3:]
+    if dialect == "powershell":
+        # PowerShell expands only $env:/$HOME/~ here; it reads `/c/x` as `C:\c\x` and
+        # leaves %VAR% alone (REFUTE round 3, M1).
+        p = os.path.expanduser(_ps_expand(p))
+    else:
+        p = os.path.expandvars(os.path.expanduser(p))
+        if len(p) >= 2 and p[0] == "/" and p[1].isalpha() and (len(p) == 2 or p[2] == "/"):
+            p = p[1].upper() + ":/" + p[3:]
     if not os.path.isabs(p):
+        if here is None:
+            return None  # relative to an unknown directory -> no information
         p = os.path.join(here, p)
+    # An ABSOLUTE target resolves even when `here` is unknown (REFUTE round 2, N1: after a
+    # popd the guard used to skip `git -C <abs dirty> reset --hard` entirely).
     return p if os.path.isdir(p) else None
 
 
@@ -897,19 +918,234 @@ def _git_c_dir(seg):
     return None
 
 
-def findings(cmd, cwd):
+# PowerShell location changers (names are case-insensitive): Set-Location and its aliases,
+# Push-Location and its alias. Pop-Location / popd return to a location this parser does
+# not track -> no information.
+_PS_CD_NAMES = {"cd", "chdir", "sl", "set-location", "pushd", "push-location"}
+_PS_POP_NAMES = {"popd", "pop-location"}
+_PS_CD_PATH_PARAMS = {"-path", "-literalpath", "-lp", "-pspath"}
+_PS_CD_VALUE_PARAMS = {"-stackname"}
+_PS_DASHES = "\u2013\u2014\u2015"  # en dash, em dash, horizontal bar: PowerShell parameter dashes
+_BASH_CD_BUILTINS = {"cd", "pushd", "popd"}
+
+
+# Set-/Push-/Pop-Location parameters: full name -> canonical, and the aliases PowerShell
+# matches EXACTLY (an alias is never prefix-matched). Includes the common parameters
+# (REFUTE round 3, I3: `Set-Location -ErrorAction Stop <dir>` is a real move).
+_PS_PARAM_NAMES = {
+    "path": "path", "literalpath": "literalpath", "pspath": "literalpath",
+    "passthru": "passthru", "stackname": "stackname",
+    "erroraction": "erroraction", "warningaction": "warningaction",
+    "informationaction": "informationaction", "progressaction": "progressaction",
+    "errorvariable": "errorvariable", "warningvariable": "warningvariable",
+    "informationvariable": "informationvariable", "outvariable": "outvariable",
+    "outbuffer": "outbuffer", "pipelinevariable": "pipelinevariable",
+    "verbose": "verbose", "debug": "debug", "whatif": "whatif", "confirm": "confirm",
+}
+_PS_PARAM_ALIASES = {
+    "lp": "literalpath", "ea": "erroraction", "wa": "warningaction",
+    "infa": "informationaction", "proga": "progressaction", "ev": "errorvariable",
+    "wv": "warningvariable", "iv": "informationvariable", "ov": "outvariable",
+    "ob": "outbuffer", "pv": "pipelinevariable", "vb": "verbose", "db": "debug",
+    "wi": "whatif", "cf": "confirm",
+}
+_PS_PATH_PARAMS = {"path", "literalpath"}
+_PS_SWITCH_PARAMS = {"passthru", "verbose", "debug", "whatif", "confirm"}
+
+
+def _ps_param(token):
+    """Canonical parameter for `-Tok` / `-Tok:value` (PowerShell accepts an unambiguous
+    prefix of a full name; aliases match exactly), "?" when unknown or ambiguous, None
+    when the token is not a parameter at all."""
+    if not token.startswith("-") or token in ("-", "+"):
+        return None
+    name = token[1:].split(":", 1)[0].lower()
+    if not name:
+        return None
+    if name in _PS_PARAM_ALIASES:
+        return _PS_PARAM_ALIASES[name]
+    if name in _PS_PARAM_NAMES:
+        return _PS_PARAM_NAMES[name]
+    hits = {canon for full, canon in _PS_PARAM_NAMES.items() if full.startswith(name)}
+    return hits.pop() if len(hits) == 1 else "?"
+
+
+def _cd_target(seg, dialect, mixed=False):
+    """Location effect of `seg`: (None, None) when it is not a location command, else:
+      ("cd", dir)    -- a move to `dir` (a str)
+      ("push", dir)  -- save the current location(s), then move to `dir`
+      ("pop", None)  -- return to the last saved location(s)
+      ("stay", None) -- a location command with no usable target (bare push, PS7 `cd -`,
+                        an unknown/ambiguous parameter ...): nothing to add
+
+    The caller decides what a move MEANS (see _findings_one): only a bash `cd` replaces
+    the probed directory; every other move only ADDS one. mixed=True (the tool's shell is
+    unknown, the command is also read as PowerShell): the bash reading follows pushd/popd,
+    which are real bash builtins, and ignores PowerShell-only names exactly as HEAD did."""
+    head = seg[0]
+    if dialect != "powershell":
+        if head == "cd":
+            return "cd", (seg[1] if len(seg) >= 2 else "~")
+        if mixed:
+            if head == "pushd":
+                rest = seg[1:]
+                # `pushd -n`, `pushd +N/-N` and a bare `pushd` do not change the directory.
+                if not rest or any(x == "-n" or x[:1] in "+-" for x in rest):
+                    return "stay", None
+                return "push", rest[0]
+            if head == "popd":
+                return "pop", None
+        return None, None
+    name = head.lower()
+    if name not in _PS_CD_NAMES and name not in _PS_POP_NAMES:
+        return None, None
+    args = [("-" + x[1:]) if x[:1] in _PS_DASHES else x for x in seg[1:]]
+    target = None
+    k = 0
+    while k < len(args):
+        x = args[k]
+        if x == "--":  # end of parameters: the next word is positional
+            if target is None and k + 1 < len(args):
+                target = args[k + 1]
+            break
+        pname = _ps_param(x)
+        if pname is None:
+            if x in ("-", "+"):
+                return "stay", None  # PS7 location history: not modelled
+            if target is None:
+                target = x
+            k += 1
+            continue
+        if pname == "?":
+            return "stay", None  # unknown/ambiguous parameter
+        inline = x.split(":", 1)[1] if ":" in x else None
+        if pname in _PS_SWITCH_PARAMS:
+            k += 1
+            continue
+        if pname in _PS_PATH_PARAMS:
+            if inline:
+                target = inline
+                k += 1
+            else:  # `-Path <dir>` and `-Path: <dir>`
+                if k + 1 < len(args):
+                    target = args[k + 1]
+                k += 2
+            continue
+        k += 1 if inline else 2  # a value-taking parameter (-StackName s, -ErrorAction Stop)
+    if name in _PS_POP_NAMES:
+        return "pop", None
+    if target is None:
+        return "stay", None  # bare Push-Location stays; bare Set-Location: PS5 stays, PS7 home
+    return ("push" if name in ("pushd", "push-location") else "cd"), target
+
+
+def findings(cmd, cwd, dialects=("bash",)):
+    """Hits from reading `cmd` in each dialect, de-duplicated. A non-Bash tool is read both
+    ways (git_commit_parse.shell_dialects) and EITHER reading's affirmative evidence counts;
+    each reading is still fail-open on its own.
+
+    ORDER (REFUTE rounds 7-9, timeout fail-open): the union-only location tracking costs
+    (#location changes x #git commands) probes; if a reading runs past the hook timeout
+    the guard fails OPEN. So PASS 0 is the EXACT old reading -- bash rules, mixed=False,
+    legacy=True: only `cd` moves, one directory, and once that directory is unknown it
+    STAYS unknown and the scan stops, as the old guard's did (round 9: resolving later
+    absolute targets there let 1500 `-C` probes after a bad `cd` take 70 s) -- so it finds
+    the old guard's hits at the old guard's cost, and a hit there returns at once.
+    Every block the old guard made is therefore made in the old time. Only when pass 0
+    finds nothing do the wider readings run (bash with pushd/popd, then PowerShell); a
+    timeout there can only lose NEW coverage, never an old block.
+    RESIDUAL: when pass 0 blocks, hits only a wider reading would add are not listed in
+    the block message (the decision is the same; the message is not exhaustive)."""
     out = []
+    seen = set()
+
+    def add(hits):
+        for hit in hits:
+            key = (hit[0], hit[1])
+            if key not in seen:
+                seen.add(key)
+                out.append(hit)
+
+    if "bash" in dialects:
+        add(_findings_one(cmd, cwd, "bash", mixed=False, legacy=True))
+        if out or len(dialects) == 1:
+            return out
+    for dialect in sorted(dialects, key=lambda d: d != "bash"):
+        if out:
+            break
+        for hit in _findings_one(cmd, cwd, dialect, mixed=len(dialects) > 1):
+            key = (hit[0], hit[1])
+            if key not in seen:
+                seen.add(key)
+                out.append(hit)
+    return out
+
+
+def _union(a, b):
+    return a + [x for x in b if x not in a]
+
+
+def _findings_one(cmd, cwd, dialect, mixed=False, legacy=False):
     try:
-        segs = _parse.tokenize_cmd_segments(cmd)
+        return _findings_one_unguarded(cmd, cwd, dialect, mixed, legacy)
     except Exception:
-        return out
-    here = cwd
+        return []  # fail open for THIS reading only; the other reading still counts
+
+
+def _findings_one_unguarded(cmd, cwd, dialect, mixed, legacy=False):
+    """Location tracking keeps a LIST of candidate directories; a git command is probed in
+    every one of them.
+
+    THE RULE (REFUTE round 4, after four rounds in which every case-by-case attempt to
+    FOLLOW a PowerShell location change produced new false allows -- conditional moves after
+    `&&`/`||`, parameter-binding errors, untracked pushes, `$` and wildcard targets, Win32
+    trailing-dot/space normalisation): only a bash `cd` REPLACES the candidates, exactly as
+    at HEAD. Every other location change -- every PowerShell one (Set-Location and aliases,
+    including `cd` in the PowerShell reading), push, pop, and the bash reading's pushd/popd --
+    only ADDS candidates. HEAD ignored all of those, so this reading's candidates are always
+    a superset of HEAD's single directory: it cannot probe less than HEAD did, by
+    construction rather than by enumeration.
+
+    COST (deliberate): `Set-Location <clean>; git reset --hard` from a DIRTY cwd still blocks,
+    exactly as at HEAD. `git -C <dir> ...` resolves to exactly one directory and is the way
+    through; the block message already says so.
+
+    legacy=True (findings() pass 0 only): once the candidate list is empty -- the old
+    guard's "directory unknown" -- stop, exactly as the old guard did; the absolute-target
+    resolution after an unknown directory (round 2, N1) is left to the wider readings. The
+    Bash tool runs only pass 0, so its decisions are the old guard's."""
+    out = []
+    if dialect == "powershell":
+        segs = _parse.tokenize_cmd_segments(cmd, dialect="powershell")
+    else:
+        segs = _parse.tokenize_cmd_segments(cmd, dialect=dialect)
+    heres = [cwd]
+    stack = []    # candidate lists saved by pushes; a pop adds the saved list back
     fetches = []  # (sub, args) of fetch/pull segments earlier in this command (OI-409)
+
+    def resolve_all(target, bases):
+        new = []
+        for base in bases or [None]:
+            r = _resolve_dir(target, base, dialect)
+            if r is not None and r not in new:
+                new.append(r)
+        return new
+
     for seg in segs:
+        if legacy and not heres:
+            break  # the old guard's unknown directory is sticky: nothing more is probed
         if not seg:
             continue
-        if seg[0] == "cd":
-            here = _resolve_dir(seg[1] if len(seg) >= 2 else "~", here)
+        kind, target = _cd_target(seg, dialect, mixed)
+        if kind:
+            if dialect != "powershell" and seg[0] == "cd":
+                heres = resolve_all(target, heres)  # HEAD semantics: unresolvable -> nothing
+            elif kind in ("cd", "push"):
+                if kind == "push":
+                    stack.append(list(heres))
+                heres = _union(heres, resolve_all(target, heres))
+            elif kind == "pop":
+                heres = _union(heres, stack.pop() if stack else [])
             continue
         sa = _parse._segment_git_subcommand_and_args(seg)
         if not sa:
@@ -926,27 +1162,33 @@ def findings(cmd, cwd):
             fetches.append(("fetch", ["--multiple"] + names if names else ["--all"]))
             continue
         cdir = _git_c_dir(seg)
-        where = _resolve_dir(cdir, here) if cdir else here
-        if where is None:
-            continue  # unresolvable directory -> no information -> allow
-        try:
-            mem = memory_hazard(where, sub, list(args), list(fetches),
-                                segment_config(seg))
-        except Exception:
-            mem = []
-        if mem:
-            out.append((" ".join(["git", sub] + list(args))[:200], where, mem))
-        if sub == "pull":
-            fetches.append((sub, list(args)))
+        wheres = []
+        for base in heres or [None]:
+            w = _resolve_dir(cdir, base, dialect) if cdir else base
+            if w is not None and w not in wheres:
+                wheres.append(w)  # unresolvable directory -> no information for that base
         c = classify(sub, list(args))
-        if not c:
-            continue
-        try:
-            lost = at_risk(where, c[0], c[1])
-        except Exception:
-            lost = None
-        if lost:
-            out.append((" ".join(["git", sub] + list(args))[:200], where, lost))
+        for where in wheres:
+            try:
+                mem = memory_hazard(where, sub, list(args), list(fetches),
+                                    segment_config(seg))
+            except Exception:
+                mem = []
+            if mem:
+                out.append((" ".join(["git", sub] + list(args))[:200], where, mem))
+            if not c:
+                continue
+            try:
+                lost = at_risk(where, c[0], c[1])
+            except Exception:
+                lost = None
+            if lost:
+                out.append((" ".join(["git", sub] + list(args))[:200], where, lost))
+        # The old guard skipped a segment whose directory did not resolve BEFORE recording
+        # its pull; pass 0 must too (REFUTE round 10: recording 600 unresolvable `-C x pull`s
+        # made every later claude-home probe replay them all -- 60 s, a fail-open).
+        if sub == "pull" and (wheres or not legacy):
+            fetches.append((sub, list(args)))
     return out
 
 
@@ -987,7 +1229,11 @@ def main():
                                    "read-tree")):
         return 0
     cwd = payload.get("cwd") or os.getcwd()
-    hits = findings(cmd, cwd)
+    try:
+        dialects = _parse.shell_dialects(payload.get("tool_name"))
+    except Exception:
+        dialects = ("bash",)  # an older parse lib: the previous behaviour, never narrower
+    hits = findings(cmd, cwd, dialects)
     if not hits:
         return 0
 
